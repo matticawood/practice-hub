@@ -430,7 +430,28 @@
       gap: 6px; color: var(--text-muted); font-size: 0.88rem;
       pointer-events: none;
     }
-    #cover-preview-wrap { width: 100%; height: 100%; }
+    #cover-preview-wrap { width: 100%; height: 100%; position: relative; }
+    #cover-position-bar {
+      display: none;
+      position: absolute; right: 8px; top: 8px; bottom: 8px;
+      width: 28px; flex-direction: column; align-items: center;
+      gap: 4px; z-index: 2;
+    }
+    #cover-preview-wrap.has-image #cover-position-bar { display: flex; }
+    #cover-position-bar label {
+      font-size: 0.62rem; color: rgba(255,255,255,.7);
+      writing-mode: vertical-rl; text-orientation: mixed;
+      transform: rotate(180deg); letter-spacing: .06em;
+      text-transform: uppercase; margin-bottom: 2px;
+    }
+    #cover-pos-slider {
+      -webkit-appearance: slider-vertical;
+      appearance: slider-vertical;
+      width: 20px; flex: 1; cursor: pointer;
+      accent-color: var(--accent);
+      writing-mode: vertical-lr;
+      direction: rtl;
+    }
     #cover-upload-progress {
       position: absolute; inset: 0;
       background: rgba(0,0,0,.7);
@@ -651,6 +672,11 @@
             <span style="font-size:0.75rem;color:var(--text-muted)">JPG, PNG, WebP — max 5MB</span>
           </div>
           <img id="cover-preview" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:8px;" />
+          <div id="cover-position-bar" onclick="event.stopPropagation()">
+            <label>Crop</label>
+            <input id="cover-pos-slider" type="range" min="0" max="100" value="50"
+              oninput="updateCoverPosition(this.value)" />
+          </div>
         </div>
         <div id="cover-upload-progress" style="display:none">
           <div class="upload-spinner"></div>
@@ -658,6 +684,7 @@
         </div>
       </div>
       <input id="f-cover" type="hidden" />
+      <input id="f-cover-pos" type="hidden" value="50" />
 
       <!-- Previous covers -->
       <div id="prev-covers-section" style="margin-top:10px;display:none">
@@ -727,21 +754,37 @@ async function handleCoverUpload(input) {
   loadPreviousCovers();
 }
 
-function setCoverPreview(url) {
+function setCoverPreview(url, position) {
   const area        = document.getElementById("cover-upload-area");
   const placeholder = document.getElementById("cover-placeholder");
   const preview     = document.getElementById("cover-preview");
+  const wrap        = document.getElementById("cover-preview-wrap");
+  const slider      = document.getElementById("cover-pos-slider");
+  const pos         = position !== undefined ? position : 50;
 
   if (url) {
     preview.src = url;
     preview.style.display = "block";
+    preview.style.objectPosition = `center ${pos}%`;
     placeholder.style.display = "none";
     area.classList.add("has-image");
+    wrap.classList.add("has-image");
+    slider.value = pos;
+    document.getElementById("f-cover-pos").value = pos;
   } else {
     preview.style.display = "none";
     placeholder.style.display = "flex";
     area.classList.remove("has-image");
+    wrap.classList.remove("has-image");
+    slider.value = 50;
+    document.getElementById("f-cover-pos").value = 50;
   }
+}
+
+function updateCoverPosition(val) {
+  const preview = document.getElementById("cover-preview");
+  if (preview) preview.style.objectPosition = `center ${val}%`;
+  document.getElementById("f-cover-pos").value = val;
 }
 
 async function loadPreviousCovers() {
@@ -928,9 +971,9 @@ async function loadEvents(tab) {
     card.className = "event-card";
     card.onclick = () => openEvent(ev);
 
-    const cover = ev.cover_url
-      ? `<img class="event-card-cover" src="${ev.cover_url}" alt="" loading="lazy">`
-      : `<img class="event-card-cover" src="/live-practice-clinic-default.jpg" alt="" loading="lazy">`;
+    const coverPos = ev.cover_position ?? 50;
+    const coverSrc = ev.cover_url || "/live-practice-clinic-default.jpg";
+    const cover = `<img class="event-card-cover" src="${coverSrc}" alt="" loading="lazy" style="object-position:center ${coverPos}%">`;
 
     const statusBadge = ev.status === "live"
       ? `<span class="event-card-status status-live"><span class="live-dot"></span> Live Now</span>`
@@ -977,9 +1020,9 @@ async function renderDetailView(ev) {
   const dateStr = formatEventDateWithLocal(ev.scheduled_at, ev.timezone);
   const endTime = new Date(new Date(ev.scheduled_at).getTime() + ev.duration_mins * 60000);
 
-  const cover = ev.cover_url
-    ? `<img class="event-detail-cover" src="${ev.cover_url}" alt="">`
-    : `<img class="event-detail-cover" src="/live-practice-clinic-default.jpg" alt="">`;
+  const detailCoverPos = ev.cover_position ?? 50;
+  const detailCoverSrc = ev.cover_url || "/live-practice-clinic-default.jpg";
+  const cover = `<img class="event-detail-cover" src="${detailCoverSrc}" alt="" style="object-position:center ${detailCoverPos}%">`;
 
   // RSVP status
   const { data: rsvpRow } = await db.from("event_rsvps")
@@ -1496,7 +1539,7 @@ function openCreateModal() {
   document.getElementById("f-cover").value    = "";
   document.getElementById("f-duration").value = "60";
   document.getElementById("date-trigger-text").innerHTML = `<span class="dt-placeholder">Pick a date and time</span>`;
-  setCoverPreview("/live-practice-clinic-default.jpg");
+  setCoverPreview("/live-practice-clinic-default.jpg", 50);
   populateTzSelect();
   if (!datePicker) initDatePicker(); else datePicker.clear();
   loadPreviousCovers();
@@ -1511,7 +1554,7 @@ function openEditModal() {
   document.getElementById("f-desc").value     = currentEvent.description || "";
   document.getElementById("f-cover").value    = currentEvent.cover_url || "";
   document.getElementById("f-duration").value = currentEvent.duration_mins || 60;
-  setCoverPreview(currentEvent.cover_url || null);
+  setCoverPreview(currentEvent.cover_url || null, currentEvent.cover_position ?? 50);
   loadPreviousCovers();
   populateTzSelect();
   // Set the saved timezone
@@ -1535,6 +1578,7 @@ async function saveEvent() {
   const title    = document.getElementById("f-title").value.trim();
   const desc     = document.getElementById("f-desc").value.trim();
   const cover    = document.getElementById("f-cover").value.trim();
+  const coverPos = parseInt(document.getElementById("f-cover-pos").value) || 50;
   const dateVal  = document.getElementById("f-date").value;
   const duration = parseInt(document.getElementById("f-duration").value) || 60;
 
@@ -1543,12 +1587,13 @@ async function saveEvent() {
   const timezone = document.getElementById("f-timezone").value || "Europe/London";
   const payload = {
     title,
-    description:   desc || null,
-    cover_url:     cover || null,
-    scheduled_at:  new Date(dateVal).toISOString(),
-    duration_mins: duration,
+    description:    desc || null,
+    cover_url:      cover || null,
+    cover_position: coverPos,
+    scheduled_at:   new Date(dateVal).toISOString(),
+    duration_mins:  duration,
     timezone,
-    created_by:    myEmail
+    created_by:     myEmail
   };
 
   if (editingEventId) {
