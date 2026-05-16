@@ -121,7 +121,7 @@ export default async (request) => {
           is_owner: isOwner || false,
           start_video_off: !isOwner,
           start_audio_off: !isOwner,
-          start_cloud_recording: false
+          start_cloud_recording: isOwner || false   // auto-start recording when host joins
         }
       })
     });
