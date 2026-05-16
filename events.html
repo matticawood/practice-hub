@@ -1047,8 +1047,14 @@ async function renderDetailView(ev) {
     <div class="mux-form">
       <h4>Add Recording</h4>
       <div class="mux-form-row">
-        <input id="mux-pid-input" placeholder="Mux Playback ID" />
-        <button class="btn btn-sm btn-primary" onclick="saveMuxPlaybackId('${ev.id}')">Save</button>
+        <button class="btn btn-sm btn-primary" id="fetch-rec-btn"
+          onclick="fetchRecordingFromDaily('${ev.id}', '${ev.daily_room_name || ""}')">
+          ⬇ Fetch from Daily.co
+        </button>
+      </div>
+      <div class="mux-form-row" style="margin-top:8px">
+        <input id="mux-pid-input" placeholder="Or paste Mux Playback ID manually" />
+        <button class="btn btn-sm btn-ghost" onclick="saveMuxPlaybackId('${ev.id}')">Save</button>
       </div>
     </div>` : "";
 
@@ -1710,6 +1716,40 @@ async function saveMuxPlaybackId(eventId) {
   await db.from("live_events").update({ mux_playback_id: pid }).eq("id", eventId);
   currentEvent = { ...currentEvent, mux_playback_id: pid };
   renderDetailView(currentEvent);
+}
+
+async function fetchRecordingFromDaily(eventId, roomName) {
+  if (!roomName) { alert("No Daily.co room found for this event."); return; }
+  const btn = document.getElementById("fetch-rec-btn");
+  btn.disabled = true;
+  btn.textContent = "Fetching…";
+
+  try {
+    const { data: { session } } = await db.auth.getSession();
+    if (session) authToken = session.access_token;
+
+    const res = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+      body: JSON.stringify({ action: "fetch-recording", roomName, eventId })
+    });
+    const result = await res.json();
+
+    if (result.error) {
+      alert("Could not fetch recording: " + result.error);
+      btn.disabled = false;
+      btn.textContent = "⬇ Fetch from Daily.co";
+      return;
+    }
+
+    // Update local state and re-render
+    currentEvent = { ...currentEvent, mux_asset_id: result.muxAssetId, mux_playback_id: result.muxPlaybackId };
+    renderDetailView(currentEvent);
+  } catch(e) {
+    alert("Error: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "⬇ Fetch from Daily.co";
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

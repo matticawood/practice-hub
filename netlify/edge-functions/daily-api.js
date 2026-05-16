@@ -149,6 +149,61 @@ export default async (request) => {
     return json({ token: data.token });
   }
 
+  // ── Action: fetch-recording ────────────────────────────────────────────────
+  // Admin only. Finds the most recent Daily.co recording for a room, creates
+  // a Mux asset from it, and updates the event. Manual fallback for when the
+  // webhook doesn't fire automatically.
+  if (action === "fetch-recording") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { roomName: rn, eventId: eid } = body;
+    if (!rn || !eid) return json({ error: "roomName and eventId required" }, 400);
+
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+    const SERVICE_KEY      = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
+    // List recordings for this room from Daily.co
+    const recRes = await fetch(
+      `https://api.daily.co/v1/recordings?room_name=${encodeURIComponent(rn)}`,
+      { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
+    );
+    const recData = await recRes.json();
+    const recordings = recData?.data;
+    if (!recordings?.length) return json({ error: "No recordings found for this room" }, 404);
+
+    // Most recent recording
+    const rec = recordings.sort((a, b) => b.start_ts - a.start_ts)[0];
+    const downloadLink = rec.download_link;
+    if (!downloadLink) return json({ error: "Recording has no download_link yet — try again in a minute" }, 404);
+
+    // Create Mux asset
+    const muxRes = await fetch("https://api.mux.com/video/v1/assets", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`)
+      },
+      body: JSON.stringify({ input: [{ url: downloadLink }], playback_policy: ["public"] })
+    });
+    const muxData = await muxRes.json();
+    const asset = muxData?.data;
+    if (!asset) return json({ error: "Mux asset creation failed", detail: muxData }, 500);
+
+    const muxAssetId    = asset.id;
+    const muxPlaybackId = asset.playback_ids?.[0]?.id || null;
+
+    // Update event in Supabase
+    const supaHeaders = {
+      "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json"
+    };
+    await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
+      method: "PATCH", headers: supaHeaders,
+      body: JSON.stringify({ mux_asset_id: muxAssetId, mux_playback_id: muxPlaybackId })
+    });
+
+    return json({ ok: true, muxAssetId, muxPlaybackId });
+  }
+
   // ── Action: setup-webhook ──────────────────────────────────────────────────
   // One-time call to register the Daily.co recording.ready webhook.
   if (action === "setup-webhook") {
