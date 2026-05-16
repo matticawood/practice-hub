@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Feedback & Roadmap — The Practice Room</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0a; --surface: #111; --surface2: #161616;
+      --border: #222; --accent: #f5c518; --text: #e5e5e5;
+      --muted: #666; --radius: 12px;
+    }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Header ── */
+    .page-header {
+      display: flex; align-items: center; gap: 14px;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      background: var(--surface); position: sticky; top: 0; z-index: 10;
+    }
+    .page-header a { color: var(--muted); text-decoration: none; font-size: 0.85rem; }
+    .page-header a:hover { color: var(--accent); }
+    .page-header h1 { font-size: 1.1rem; color: var(--accent); flex: 1; }
+    .submit-btn {
+      background: var(--accent); color: #000; border: none;
+      padding: 8px 18px; border-radius: 8px; font-weight: 700;
+      font-size: 0.88rem; cursor: pointer;
+    }
+    .submit-btn:hover { opacity: .88; }
+
+    /* ── Layout ── */
+    .page-body { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+
+    /* ── Filter tabs ── */
+    .filter-bar { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .filter-btn {
+      background: none; border: 1.5px solid var(--border); color: var(--muted);
+      padding: 6px 14px; border-radius: 99px; font-size: 0.82rem; cursor: pointer;
+      transition: all .15s; font-family: inherit;
+    }
+    .filter-btn:hover, .filter-btn.active {
+      border-color: var(--accent); color: var(--accent);
+    }
+    .filter-btn.active { background: rgba(245,197,24,.08); }
+
+    /* ── Feedback cards ── */
+    #feedback-list { display: flex; flex-direction: column; gap: 12px; }
+    .fb-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 18px;
+      display: flex; gap: 14px; align-items: flex-start;
+    }
+    .fb-card:hover { border-color: #333; }
+    .fb-vote {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      flex-shrink: 0; min-width: 36px;
+    }
+    .fb-vote-btn {
+      background: none; border: 1.5px solid var(--border); color: var(--muted);
+      width: 34px; height: 28px; border-radius: 6px; cursor: pointer;
+      font-size: 0.9rem; transition: all .15s; display: flex; align-items: center; justify-content: center;
+    }
+    .fb-vote-btn:hover, .fb-vote-btn.voted {
+      border-color: var(--accent); color: var(--accent); background: rgba(245,197,24,.07);
+    }
+    .fb-vote-count { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+    .fb-body { flex: 1; min-width: 0; }
+    .fb-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .fb-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+    .fb-desc { font-size: 0.83rem; color: var(--muted); line-height: 1.5; margin-top: 6px; }
+    .fb-admin-note {
+      margin-top: 8px; padding: 8px 12px;
+      background: #0d1a0d; border: 1px solid #1a3a1a; border-radius: 8px;
+      font-size: 0.8rem; color: #84cc16; line-height: 1.4;
+    }
+    .fb-footer { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .fb-author { font-size: 0.75rem; color: #444; }
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 9px; border-radius: 99px;
+      font-size: 0.72rem; font-weight: 700;
+    }
+    .badge-bug     { background: rgba(239,68,68,.15);   color: #f87171; }
+    .badge-feature { background: rgba(99,102,241,.15);  color: #818cf8; }
+    .badge-general { background: rgba(100,116,139,.15); color: #94a3b8; }
+    .badge-open    { background: rgba(100,116,139,.12); color: #64748b; }
+    .badge-planned { background: rgba(59,130,246,.12);  color: #60a5fa; }
+    .badge-added   { background: rgba(34,197,94,.12);   color: #4ade80; }
+    .badge-fixed   { background: rgba(34,197,94,.12);   color: #4ade80; }
+    .badge-declined{ background: rgba(100,116,139,.12); color: #64748b; }
+
+    /* ── Admin controls on card ── */
+    .fb-admin-controls { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .fb-admin-controls select, .fb-admin-controls input {
+      background: var(--surface2); border: 1px solid #333; color: var(--text);
+      padding: 5px 8px; border-radius: 6px; font-size: 0.78rem; font-family: inherit;
+    }
+    .fb-admin-controls button {
+      background: #1e1e1e; border: 1px solid #333; color: var(--muted);
+      padding: 5px 10px; border-radius: 6px; font-size: 0.78rem; cursor: pointer;
+    }
+    .fb-admin-controls button:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Empty state ── */
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200;
+      display: flex; align-items: flex-end; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity .2s;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px 16px 0 0; padding: 24px 20px 32px;
+      width: 100%; max-width: 520px;
+      transform: translateY(40px); transition: transform .25s ease;
+    }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal h2 { font-size: 1.1rem; color: var(--accent); margin-bottom: 18px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%; background: var(--surface2); border: 1.5px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 10px 12px;
+      font-size: 0.9rem; font-family: inherit; transition: border-color .15s;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus { outline: none; border-color: var(--accent); }
+    .form-group textarea { resize: none; height: 100px; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .btn-primary { background: var(--accent); color: #000; border: none; padding: 11px 24px; border-radius: 8px; font-weight: 700; font-size: 0.92rem; cursor: pointer; flex: 1; }
+    .btn-ghost { background: none; border: 1.5px solid var(--border); color: var(--muted); padding: 11px 20px; border-radius: 8px; font-size: 0.92rem; cursor: pointer; }
+    .btn-ghost:hover { border-color: #555; color: var(--text); }
+
+    /* ── Loading ── */
+    #page-loading { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 0.88rem; }
+    #login-notice { display: none; text-align: center; padding: 16px; background: #1a1200; border: 1px solid #3d3200; border-radius: 10px; margin-bottom: 20px; font-size: 0.87rem; color: #aaa; }
+    #login-notice a { color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<header class="page-header">
+  <a href="/practice-log.html">← Practice Hub</a>
+  <h1>💬 Feedback & Roadmap</h1>
+  <button class="submit-btn" id="open-modal-btn" onclick="openSubmitModal()">+ Submit</button>
+</header>
+
+<div class="page-body">
+  <div id="login-notice">
+    <a href="/practice-log.html">Sign in</a> to submit feedback or upvote.
+  </div>
+
+  <div class="filter-bar" id="filter-bar">
+    <button class="filter-btn active" data-filter="all"       onclick="setFilter('all')">All</button>
+    <button class="filter-btn"        data-filter="feature"   onclick="setFilter('feature')">✨ Feature Requests</button>
+    <button class="filter-btn"        data-filter="bug"       onclick="setFilter('bug')">🐛 Bug Reports</button>
+    <button class="filter-btn"        data-filter="general"   onclick="setFilter('general')">💬 General</button>
+    <button class="filter-btn"        data-filter="planned"   onclick="setFilter('planned')">📋 Planned</button>
+    <button class="filter-btn"        data-filter="added"     onclick="setFilter('added')">✅ Added</button>
+    <button class="filter-btn"        data-filter="fixed"     onclick="setFilter('fixed')">✅ Fixed</button>
+  </div>
+
+  <div id="page-loading">Loading feedback…</div>
+  <div id="feedback-list" style="display:none"></div>
+  <div id="feedback-empty" class="empty-state" style="display:none">
+    <div style="font-size:2rem;margin-bottom:12px">💬</div>
+    Nothing here yet — be the first to leave feedback!
+  </div>
+</div>
+
+<!-- Submit Modal -->
+<div class="modal-overlay" id="submit-modal-overlay" onclick="handleOverlayClick(event)">
+  <div class="modal" id="submit-modal">
+    <h2>Submit Feedback</h2>
+    <div class="form-group">
+      <label>Category</label>
+      <select id="fb-category">
+        <option value="feature">✨ Feature Request</option>
+        <option value="bug">🐛 Bug Report</option>
+        <option value="general">💬 General Feedback</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Title <span style="color:#ef4444">*</span></label>
+      <input id="fb-title" placeholder="Short summary…" maxlength="120" />
+    </div>
+    <div class="form-group">
+      <label>More detail (optional)</label>
+      <textarea id="fb-body" placeholder="Steps to reproduce, extra context, etc."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeSubmitModal()">Cancel</button>
+      <button class="btn-primary" id="fb-submit-btn" onclick="submitFeedback()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const OWNER_EMAIL   = "matthew@matthewcawood.com";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+let myEmail    = null;
+let allFeedback = [];
+let currentFilter = "all";
+
+// ── Session helpers (mirrors practice-log.html) ──────────────────
+function getSession() {
+  try { return JSON.parse(localStorage.getItem("ppd_session") || "null"); } catch { return null; }
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+(async () => {
+  const session = getSession();
+  if (session?.email) {
+    myEmail = session.email;
+    // Ensure Supabase auth session is alive
+    const { data: { session: supa } } = await db.auth.getSession();
+    if (!supa) await db.auth.refreshSession().catch(() => {});
+  } else {
+    document.getElementById("login-notice").style.display = "block";
+    document.getElementById("open-modal-btn").style.display = "none";
+  }
+  await loadFeedback();
+})();
+
+async function loadFeedback() {
+  const { data, error } = await db
+    .from("feedback")
+    .select("*")
+    .order("upvotes", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  document.getElementById("page-loading").style.display = "none";
+
+  if (error) {
+    document.getElementById("feedback-list").innerHTML =
+      `<div class="empty-state">Failed to load feedback. Please try again.</div>`;
+    document.getElementById("feedback-list").style.display = "block";
+    return;
+  }
+
+  allFeedback = data || [];
+  renderFeedback();
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll(".filter-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.filter === f)
+  );
+  renderFeedback();
+}
+
+function renderFeedback() {
+  const list = document.getElementById("feedback-list");
+  const emptyEl = document.getElementById("feedback-empty");
+
+  let items = allFeedback;
+  if (currentFilter !== "all") {
+    if (["planned","added","fixed","declined"].includes(currentFilter)) {
+      items = items.filter(f => f.status === currentFilter);
+    } else {
+      items = items.filter(f => f.category === currentFilter);
+    }
+  }
+
+  if (!items.length) {
+    list.style.display = "none";
+    emptyEl.style.display = "block";
+    return;
+  }
+
+  emptyEl.style.display = "none";
+  list.style.display = "flex";
+
+  const CAT_LABELS   = { bug: "🐛 Bug", feature: "✨ Feature", general: "💬 General" };
+  const STATUS_LABELS = { open: "Open", planned: "Planned", added: "✅ Added", fixed: "✅ Fixed", declined: "Declined" };
+  const isAdmin = myEmail === OWNER_EMAIL;
+
+  list.innerHTML = items.map(fb => {
+    const hasVoted = myEmail && Array.isArray(fb.upvoted_by)
+      ? fb.upvoted_by.includes(myEmail)
+      : (fb.upvoted_by && JSON.parse(typeof fb.upvoted_by === "string" ? fb.upvoted_by : "[]")).includes(myEmail);
+    const isOwn = myEmail === fb.email;
+    const displayName = fb.display_name || fb.email?.split("@")[0] || "Anonymous";
+    const dateStr = new Date(fb.created_at).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
+
+    const adminControls = isAdmin ? `
+      <div class="fb-admin-controls">
+        <select id="status-${fb.id}" onchange="">
+          ${["open","planned","added","fixed","declined"].map(s =>
+            `<option value="${s}" ${fb.status === s ? "selected" : ""}>${STATUS_LABELS[s]}</option>`
+          ).join("")}
+        </select>
+        <input id="note-${fb.id}" placeholder="Admin note…" value="${escHtml(fb.admin_note || "")}" style="flex:1;min-width:120px" />
+        <button onclick="saveAdminUpdate('${fb.id}')">Save</button>
+      </div>` : "";
+
+    return `
+      <div class="fb-card" id="card-${fb.id}">
+        <div class="fb-vote">
+          <button class="fb-vote-btn ${hasVoted ? "voted" : ""}" id="vote-btn-${fb.id}" onclick="toggleVote('${fb.id}')" title="${hasVoted ? "Remove vote" : "Upvote"}">▲</button>
+          <span class="fb-vote-count" id="vote-count-${fb.id}">${fb.upvotes}</span>
+        </div>
+        <div class="fb-body">
+          <div class="fb-meta">
+            <span class="fb-title">${escHtml(fb.title)}</span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+            <span class="badge badge-${fb.category}">${CAT_LABELS[fb.category] || fb.category}</span>
+            ${fb.status !== "open" ? `<span class="badge badge-${fb.status}">${STATUS_LABELS[fb.status] || fb.status}</span>` : ""}
+          </div>
+          ${fb.body ? `<div class="fb-desc">${escHtml(fb.body)}</div>` : ""}
+          ${fb.admin_note ? `<div class="fb-admin-note">💬 ${escHtml(fb.admin_note)}</div>` : ""}
+          <div class="fb-footer">
+            <span class="fb-author">by ${escHtml(displayName)} · ${dateStr}</span>
+          </div>
+          ${adminControls}
+        </div>
+      </div>`;
+  }).join("");
+}
+
+async function toggleVote(id) {
+  if (!myEmail) { showLoginPrompt(); return; }
+  const fb = allFeedback.find(f => f.id === id);
+  if (!fb) return;
+
+  const btn       = document.getElementById("vote-btn-" + id);
+  const countEl   = document.getElementById("vote-count-" + id);
+  if (btn) btn.disabled = true;
+
+  const { data, error } = await db.rpc("toggle_feedback_upvote", { p_id: id, p_email: myEmail });
+  if (error) { console.warn(error.message); if (btn) btn.disabled = false; return; }
+
+  const upvoted = data?.upvoted;
+  if (upvoted) {
+    fb.upvotes++;
+    if (!fb.upvoted_by) fb.upvoted_by = [];
+    if (!fb.upvoted_by.includes(myEmail)) fb.upvoted_by.push(myEmail);
+  } else {
+    fb.upvotes = Math.max(0, fb.upvotes - 1);
+    fb.upvoted_by = (fb.upvoted_by || []).filter(e => e !== myEmail);
+  }
+
+  if (btn) { btn.disabled = false; btn.classList.toggle("voted", !!upvoted); }
+  if (countEl) countEl.textContent = fb.upvotes;
+}
+
+async function saveAdminUpdate(id) {
+  const statusEl = document.getElementById("status-" + id);
+  const noteEl   = document.getElementById("note-"   + id);
+  const status   = statusEl?.value;
+  const note     = noteEl?.value?.trim() || null;
+  if (!status) return;
+
+  const { error } = await db.rpc("admin_update_feedback", { p_id: id, p_status: status, p_note: note });
+  if (error) { alert("Error: " + error.message); return; }
+
+  const fb = allFeedback.find(f => f.id === id);
+  if (fb) { fb.status = status; fb.admin_note = note; }
+  renderFeedback();
+}
+
+// ── Submit modal ──────────────────────────────────────────────────
+function openSubmitModal() {
+  if (!myEmail) { showLoginPrompt(); return; }
+  document.getElementById("submit-modal-overlay").classList.add("open");
+  document.getElementById("fb-title").focus();
+}
+function closeSubmitModal() {
+  document.getElementById("submit-modal-overlay").classList.remove("open");
+}
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById("submit-modal-overlay")) closeSubmitModal();
+}
+
+async function submitFeedback() {
+  const category = document.getElementById("fb-category").value;
+  const title    = document.getElementById("fb-title").value.trim();
+  const body     = document.getElementById("fb-body").value.trim();
+  if (!title) { document.getElementById("fb-title").focus(); return; }
+
+  const submitBtn = document.getElementById("fb-submit-btn");
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Submitting…";
+
+  const session = getSession();
+  const displayName = session?.email?.split("@")[0] || null;
+
+  const { data, error } = await db.from("feedback").insert({
+    email: myEmail, display_name: displayName,
+    category, title, body: body || null
+  }).select().single();
+
+  submitBtn.disabled = false;
+  submitBtn.textContent = "Submit";
+
+  if (error) { alert("Error submitting: " + error.message); return; }
+
+  allFeedback.unshift(data);
+  closeSubmitModal();
+  // Clear form
+  document.getElementById("fb-title").value = "";
+  document.getElementById("fb-body").value  = "";
+  setFilter("all");
+}
+
+function showLoginPrompt() {
+  alert("Please sign in via the Practice Hub to leave feedback.");
+}
+
+function escHtml(s) {
+  return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Link Populator — Admin Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; padding: 24px; }
+    h1 { font-size: 1.3rem; margin-bottom: 4px; color: #f8fafc; }
+    .subtitle { font-size: 0.85rem; color: #64748b; margin-bottom: 24px; }
+    .card { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    label { display: block; font-size: 0.82rem; color: #94a3b8; margin-bottom: 6px; }
+    input[type=text], input[type=password] {
+      width: 100%; padding: 9px 12px; border-radius: 8px;
+      border: 1px solid #2d3748; background: #0f1117; color: #e2e8f0;
+      font-size: 0.88rem; font-family: monospace; margin-bottom: 14px;
+    }
+    input:focus { outline: none; border-color: #3b82f6; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 9px 18px; border-radius: 8px; border: none;
+      font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-secondary { background: #1e293b; color: #94a3b8; border: 1px solid #2d3748; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-group { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+    .progress-bar-wrap { background: #0f1117; border-radius: 6px; height: 8px; margin: 14px 0 6px; overflow: hidden; }
+    .progress-bar { height: 8px; background: #3b82f6; border-radius: 6px; transition: width 0.3s; width: 0; }
+    .progress-label { font-size: 0.78rem; color: #64748b; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; padding: 8px 10px; color: #64748b; border-bottom: 1px solid #2d3748; font-weight: 600; }
+    td { padding: 8px 10px; border-bottom: 1px solid #1a1f2e; vertical-align: middle; }
+    tr:hover td { background: #1e2536; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+    .badge-ok   { background: #064e3b; color: #34d399; }
+    .badge-miss { background: #1e293b; color: #64748b; }
+    .badge-err  { background: #450a0a; color: #f87171; }
+    .badge-skip { background: #1a1a2e; color: #818cf8; }
+    .yt-link { color: #f87171; text-decoration: none; font-size: 0.78rem; }
+    .yt-link:hover { text-decoration: underline; }
+    .log { background: #0a0d14; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.76rem; color: #94a3b8; margin-top: 14px; }
+    .log .ok  { color: #34d399; }
+    .log .err { color: #f87171; }
+    .log .info{ color: #60a5fa; }
+    .log .warn{ color: #fbbf24; }
+    .stat-row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; }
+    .stat { text-align: center; }
+    .stat-num { font-size: 1.6rem; font-weight: 700; }
+    .stat-lbl { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+    .note { font-size: 0.78rem; color: #64748b; margin-top: 8px; line-height: 1.5; }
+    .note strong { color: #94a3b8; }
+    .section-title { font-size: 0.88rem; font-weight: 600; color: #94a3b8; margin-bottom: 12px; }
+    .quota-warn { background: #2d1a00; border: 1px solid #78350f; border-radius: 8px; padding: 10px 14px; font-size: 0.8rem; color: #fbbf24; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+
+<h1>▶ YouTube Link Populator</h1>
+<p class="subtitle">Admin tool — searches YouTube and stores the top video URL for each piece in the database.</p>
+
+<!-- Credentials -->
+<div class="card">
+  <div class="section-title">🔑 Credentials</div>
+  <label>YouTube Data API v3 Key
+    <span class="note" style="display:inline;margin-left:6px">
+      — get one free at <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" style="color:#60a5fa">Google Cloud Console</a> (enable YouTube Data API v3)
+    </span>
+  </label>
+  <input type="password" id="yt-key" placeholder="AIza..." autocomplete="off">
+
+  <label>Supabase Service Role Key
+    <span class="note" style="display:inline;margin-left:6px">— from your Supabase project Settings → API → service_role key</span>
+  </label>
+  <input type="password" id="sb-key" placeholder="eyJhbG..." autocomplete="off">
+
+  <div class="btn-group">
+    <button class="btn btn-primary" onclick="loadPieces()">🔍 Load Pieces</button>
+  </div>
+
+  <div class="note" style="margin-top:12px">
+    <strong>Quota:</strong> YouTube free tier = 10,000 units/day. Each search costs 100 units → 100 searches per day.
+    If you have more than 100 pieces, run this over multiple days or upgrade your quota.
+  </div>
+</div>
+
+<!-- Stats + Actions -->
+<div class="card" id="actions-card" style="display:none">
+  <div class="section-title">📊 Status</div>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-num" id="stat-total">—</div><div class="stat-lbl">Total Pieces</div></div>
+    <div class="stat"><div class="stat-num" style="color:#34d399" id="stat-linked">—</div><div class="stat-lbl">Have YouTube Link</div></div>
+    <div class="stat"><div class="stat-num" style="color:#64748b" id="stat-missing">—</div><div class="stat-lbl">Missing Link</div></div>
+    <div class="stat"><div class="stat-num" style="color:#f87171" id="stat-reported">—</div><div class="stat-lbl">Reported / Broken</div></div>
+  </div>
+
+  <div class="quota-warn" id="quota-warn" style="display:none"></div>
+
+  <div class="btn-group">
+    <button class="btn btn-primary" id="btn-populate-missing" onclick="startPopulate('missing')">
+      ▶ Populate Missing Links
+    </button>
+    <button class="btn btn-secondary" id="btn-populate-reported" onclick="startPopulate('reported')">
+      🔁 Re-populate Reported Links
+    </button>
+    <button class="btn btn-secondary" id="btn-populate-all" onclick="startPopulate('all')">
+      ↻ Re-populate All
+    </button>
+    <button class="btn btn-danger" id="btn-stop" onclick="stopPopulate()" style="display:none">
+      ■ Stop
+    </button>
+    <button class="btn btn-secondary" id="btn-copy-sql" onclick="copySql()" style="display:none">
+      📋 Copy SQL
+    </button>
+  </div>
+  <div id="sql-output-wrap" style="display:none;margin-top:14px">
+    <div class="note" style="margin-bottom:8px">Paste this into <strong>Supabase → SQL Editor</strong> and run it — bypasses all auth issues:</div>
+    <textarea id="sql-output" style="width:100%;height:180px;background:#0a0d14;border:1px solid #1e293b;border-radius:8px;color:#94a3b8;font-family:monospace;font-size:0.74rem;padding:10px;resize:vertical" readonly></textarea>
+  </div>
+
+  <div id="progress-wrap" style="display:none">
+    <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+    <div class="progress-label" id="progress-label">Starting…</div>
+  </div>
+
+  <div class="log" id="log" style="display:none"></div>
+</div>
+
+<!-- Pieces table -->
+<div class="card" id="table-card" style="display:none">
+  <div class="section-title">🎵 Pieces</div>
+  <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Title</th>
+          <th>Composer</th>
+          <th>YouTube</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="pieces-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://gyskfutmncprqxazgatv.supabase.co";
+let db = null;
+let allPieces = [];
+let stopping = false;
+
+function getSbKey() { return document.getElementById("sb-key").value.trim(); }
+function getYtKey() { return document.getElementById("yt-key").value.trim(); }
+
+function initDb() {
+  const key = getSbKey();
+  if (!key) { alert("Paste your Supabase service role key first."); return false; }
+  // auth options required when using service role key in browser —
+  // without these the client may use a stored user session instead
+  db = supabase.createClient(SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }
+  });
+  return true;
+}
+
+async function loadPieces() {
+  if (!initDb()) return;
+  const ytKey = getYtKey();
+  if (!ytKey) { alert("Paste your YouTube API key first."); return; }
+
+  logMsg("Loading pieces from Supabase…", "info");
+
+  const { data, error } = await db.from("pieces").select("id, title, composer, youtube_url, youtube_reported").order("title");
+  if (error) { logMsg("Error loading pieces: " + error.message, "err"); return; }
+
+  allPieces = data || [];
+  renderStats();
+  renderTable();
+  document.getElementById("actions-card").style.display = "block";
+  document.getElementById("table-card").style.display   = "block";
+  logMsg(`Loaded ${allPieces.length} pieces.`, "ok");
+}
+
+function renderStats() {
+  const total    = allPieces.length;
+  const linked   = allPieces.filter(p => p.youtube_url && !p.youtube_reported).length;
+  const missing  = allPieces.filter(p => !p.youtube_url).length;
+  const reported = allPieces.filter(p => p.youtube_reported).length;
+
+  document.getElementById("stat-total").textContent    = total;
+  document.getElementById("stat-linked").textContent   = linked;
+  document.getElementById("stat-missing").textContent  = missing;
+  document.getElementById("stat-reported").textContent = reported;
+
+  const toProcess = allPieces.filter(p => !p.youtube_url).length;
+  const warn = document.getElementById("quota-warn");
+  if (toProcess > 100) {
+    warn.style.display = "block";
+    warn.textContent = `⚠ ${toProcess} pieces need links — this exceeds the free daily quota of 100 searches. Run in batches across multiple days, or apply for a quota increase in Google Cloud Console.`;
+  } else {
+    warn.style.display = "none";
+  }
+
+  document.getElementById("btn-populate-reported").style.display =
+    reported > 0 ? "" : "none";
+}
+
+function renderTable() {
+  const tbody = document.getElementById("pieces-tbody");
+  tbody.innerHTML = allPieces.map((p, i) => {
+    let badge, link;
+    if (p.youtube_reported) {
+      badge = `<span class="badge badge-err">Reported</span>`;
+      link  = p.youtube_url ? `<a class="yt-link" href="${p.youtube_url}" target="_blank">${p.youtube_url.slice(0,40)}…</a>` : "—";
+    } else if (p.youtube_url) {
+      badge = `<span class="badge badge-ok">✓ Linked</span>`;
+      link  = `<a class="yt-link" href="${p.youtube_url}" target="_blank">${p.youtube_url.slice(0,40)}…</a>`;
+    } else {
+      badge = `<span class="badge badge-miss">Missing</span>`;
+      link  = "—";
+    }
+    return `<tr id="row-${p.id}">
+      <td style="color:#475569">${i+1}</td>
+      <td>${escHtml(p.title)}</td>
+      <td style="color:#94a3b8">${escHtml(p.composer || "—")}</td>
+      <td>${link}</td>
+      <td>${badge}</td>
+    </tr>`;
+  }).join("");
+}
+
+function escHtml(s) {
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+let logEl = null;
+function logMsg(msg, cls = "") {
+  if (!logEl) logEl = document.getElementById("log");
+  logEl.style.display = "block";
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function searchYouTube(query) {
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=1&key=${getYtKey()}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  if (!data.items || data.items.length === 0) return null;
+  return `https://www.youtube.com/watch?v=${data.items[0].id.videoId}`;
+}
+
+async function saveYoutubeUrl(pieceId, url) {
+  const { error } = await db.from("pieces").update({
+    youtube_url: url,
+    youtube_reported: false
+  }).eq("id", pieceId);
+  if (error) throw new Error(error.message);
+
+  // Verify the write actually landed (catches silent RLS blocks from wrong key)
+  const { data: check } = await db.from("pieces").select("youtube_url").eq("id", pieceId).maybeSingle();
+  if (!check?.youtube_url) throw new Error("Write silently failed — make sure you pasted the service_role key, not the anon key.");
+}
+
+async function verifyKey() {
+  // Quick write test before starting bulk run
+  if (allPieces.length === 0) return true;
+  const testPiece = allPieces[0];
+  try {
+    const { error } = await db.from("pieces").update({ youtube_url: testPiece.youtube_url ?? null }).eq("id", testPiece.id);
+    if (error) throw new Error(error.message);
+    const { data } = await db.from("pieces").select("id").eq("id", testPiece.id).maybeSingle();
+    return !!data;
+  } catch(e) {
+    return false;
+  }
+}
+
+function updateRow(piece) {
+  const row = document.getElementById(`row-${piece.id}`);
+  if (!row) return;
+  const tds = row.querySelectorAll("td");
+  if (piece.youtube_url) {
+    tds[3].innerHTML = `<a class="yt-link" href="${piece.youtube_url}" target="_blank">${piece.youtube_url.slice(0,40)}…</a>`;
+    tds[4].innerHTML = `<span class="badge badge-ok">✓ Linked</span>`;
+  } else {
+    tds[4].innerHTML = `<span class="badge badge-err">Not Found</span>`;
+  }
+}
+
+function stopPopulate() { stopping = true; }
+
+async function startPopulate(mode) {
+  if (!db) { alert("Load pieces first."); return; }
+  stopping = false;
+
+  // Verify the service role key has write access before wasting API quota
+  logMsg("Verifying database write access…", "info");
+  const canWrite = await verifyKey();
+  if (!canWrite) {
+    logMsg("✗ Write test failed — you may have pasted the anon key instead of the service_role key. Get it from Supabase → Settings → API → service_role.", "err");
+    alert("Database write test failed.\n\nMake sure you pasted the service_role key (not the anon key) from Supabase → Settings → API.");
+    return;
+  }
+  logMsg("✓ Write access confirmed.", "ok");
+
+  let targets;
+  if (mode === "missing")  targets = allPieces.filter(p => !p.youtube_url);
+  else if (mode === "reported") targets = allPieces.filter(p => p.youtube_reported);
+  else targets = [...allPieces];
+
+  if (targets.length === 0) { logMsg("Nothing to do.", "info"); return; }
+
+  document.getElementById("progress-wrap").style.display = "block";
+  document.getElementById("btn-stop").style.display      = "";
+  ["btn-populate-missing","btn-populate-reported","btn-populate-all"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  });
+
+  const bar   = document.getElementById("progress-bar");
+  const label = document.getElementById("progress-label");
+  let done = 0, found = 0, notFound = 0, errors = 0;
+
+  logMsg(`Starting — ${targets.length} piece(s) to process.`, "info");
+
+  for (const piece of targets) {
+    if (stopping) { logMsg("Stopped by user.", "warn"); break; }
+
+    const query = [piece.title, piece.composer, "piano"].filter(Boolean).join(" ");
+    label.textContent = `(${done+1}/${targets.length}) Searching: "${piece.title}"…`;
+    bar.style.width   = `${Math.round((done / targets.length) * 100)}%`;
+
+    try {
+      const url = await searchYouTube(query);
+      if (url) {
+        await saveYoutubeUrl(piece.id, url);
+        piece.youtube_url = url;
+        piece.youtube_reported = false;
+        updateRow(piece);
+        logMsg(`✓ ${piece.title} — ${url}`, "ok");
+        found++;
+      } else {
+        logMsg(`⚠ No results for "${piece.title}"`, "warn");
+        notFound++;
+      }
+    } catch (err) {
+      logMsg(`✗ Error for "${piece.title}": ${err.message}`, "err");
+      errors++;
+      if (err.message.includes("quota") || err.message.includes("403")) {
+        logMsg("Daily quota exceeded — stopping.", "err");
+        break;
+      }
+    }
+
+    done++;
+    // Respect YouTube rate limit: ~1 req/second
+    await new Promise(r => setTimeout(r, 1100));
+  }
+
+  bar.style.width = "100%";
+  label.textContent = `Done — ${found} linked, ${notFound} not found, ${errors} errors.`;
+  logMsg(`Finished. ${found} linked / ${notFound} not found / ${errors} errors.`, "info");
+
+  document.getElementById("btn-stop").style.display = "none";
+  ["btn-populate-missing","btn-populate-reported","btn-populate-all"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  });
+
+  renderStats();
+
+  // Show Copy SQL button if anything was found
+  const linked = allPieces.filter(p => p.youtube_url);
+  if (linked.length > 0) {
+    document.getElementById("btn-copy-sql").style.display = "";
+    generateSql();
+  }
+}
+
+function generateSql() {
+  const linked = allPieces.filter(p => p.youtube_url);
+  if (linked.length === 0) return;
+  const lines = linked.map(p =>
+    `UPDATE pieces SET youtube_url = '${p.youtube_url.replace(/'/g,"''")}', youtube_reported = false WHERE id = ${p.id};`
+  );
+  document.getElementById("sql-output").value = lines.join("\n");
+}
+
+function copySql() {
+  generateSql();
+  const ta = document.getElementById("sql-output");
+  const wrap = document.getElementById("sql-output-wrap");
+  wrap.style.display = "block";
+  ta.select();
+  document.execCommand("copy");
+  const btn = document.getElementById("btn-copy-sql");
+  btn.textContent = "✓ Copied!";
+  setTimeout(() => btn.textContent = "📋 Copy SQL", 2000);
+}
+</script>
+</body>
+</html>

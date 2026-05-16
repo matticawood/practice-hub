@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seed Absolute Beginner Pieces</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 24px; max-width: 960px; }
+    h1 { font-size: 1.2rem; margin-bottom: 4px; }
+    p.sub { font-size: 0.85rem; color: #888; margin-bottom: 24px; line-height: 1.6; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.9rem; font-family: monospace; outline: none; margin-bottom: 12px; }
+    button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+    .btn-primary { background: #2d6a2d; color: #9de89d; }
+    .btn-primary:hover { background: #3a8a3a; }
+    .btn-apply  { background: #1a3a6a; color: #7ab4ff; }
+    .btn-apply:hover { background: #1a4a8a; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .log { font-size: 0.82rem; color: #aaa; margin-top: 12px; line-height: 1.8; }
+    .log .ok  { color: #4ade80; }
+    .log .err { color: #f87171; }
+
+    /* Piece cards */
+    .piece-card { border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+    .piece-header { background: #1e1e1e; padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .piece-check { width: 16px; height: 16px; accent-color: #4ade80; cursor: pointer; flex-shrink: 0; }
+    .piece-title { font-size: 0.92rem; font-weight: 600; flex: 1; }
+    .piece-composer { font-size: 0.8rem; color: #888; }
+    .piece-diff { font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; background: #0f172a; color: #94a3b8; flex-shrink: 0; }
+    .piece-chevron { color: #555; font-size: 1rem; flex-shrink: 0; transition: transform 0.15s; }
+    .piece-body { display: none; padding: 16px; border-top: 1px solid #2a2a2a; }
+    .piece-body.open { display: block; }
+    .field-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin: 12px 0 4px; }
+    .field-label:first-child { margin-top: 0; }
+    .field-text { font-size: 0.84rem; color: #ccc; line-height: 1.7; white-space: pre-wrap; }
+    .tags-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .tag { background: #1e2a1e; border: 1px solid #2d4a2d; color: #7ec87e; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; }
+    .apply-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+    .apply-status { font-size: 0.82rem; color: #888; }
+    .results-section { display: none; }
+  </style>
+</head>
+<body>
+
+<h1>🎹 Seed Absolute Beginner Pieces</h1>
+<p class="sub">
+  Asks Claude to suggest and fully write up 10 genuine Absolute Beginner piano pieces (pre-Grade 1, not simplified arrangements).<br>
+  Review the results, untick any you don't want, then insert them into Supabase.
+</p>
+
+<div class="card">
+  <label for="api-key">Anthropic API Key</label>
+  <input type="password" id="api-key" placeholder="sk-ant-…" />
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn-primary" id="run-btn" onclick="runGeneration()">⚡ Generate 10 Pieces</button>
+    <span id="status" style="font-size:0.85rem;color:#888"></span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<div class="results-section" id="results-section">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <span style="font-size:0.9rem;color:#aaa" id="results-summary"></span>
+      <div style="display:flex;gap:8px">
+        <button onclick="toggleAll(true)"  style="padding:5px 12px;font-size:0.78rem;background:#1a2a1a;color:#4ade80;border:1px solid #2d4a2d;border-radius:6px;cursor:pointer">Select all</button>
+        <button onclick="toggleAll(false)" style="padding:5px 12px;font-size:0.78rem;background:#2a1a1a;color:#f87171;border:1px solid #4a2d2d;border-radius:6px;cursor:pointer">Deselect all</button>
+      </div>
+    </div>
+    <div id="pieces-list"></div>
+    <div class="apply-row">
+      <button class="btn-apply" id="apply-btn" onclick="applyChanges()">✓ Insert Selected Pieces</button>
+      <span class="apply-status" id="apply-status"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  let generatedPieces = [];
+
+  function log(msg, type = "") {
+    document.getElementById("log").innerHTML += `<div class="${type}">${msg}</div>`;
+  }
+
+  function togglePiece(el) {
+    const card = el.closest(".piece-card");
+    const body = card.querySelector(".piece-body");
+    const chevron = card.querySelector(".piece-chevron");
+    body.classList.toggle("open");
+    chevron.style.transform = body.classList.contains("open") ? "rotate(90deg)" : "";
+  }
+
+  function toggleAll(checked) {
+    document.querySelectorAll(".piece-check").forEach(cb => cb.checked = checked);
+  }
+
+  async function runGeneration() {
+    const apiKey = document.getElementById("api-key").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+    localStorage.setItem("anthropic_key", apiKey);
+
+    document.getElementById("log").innerHTML = "";
+    document.getElementById("results-section").style.display = "none";
+    document.getElementById("run-btn").disabled = true;
+    document.getElementById("status").textContent = "Asking Claude…";
+
+    const prompt = `You are building a piano repertoire database for adult piano students at The Practice Room. Use British English spelling.
+
+Generate exactly 10 genuine Absolute Beginner piano pieces. These must be:
+- Original pieces written at this level (NOT simplified/arranged versions of harder pieces)
+- Pre-Grade 1 ABRSM level — pieces a student could tackle in their first 1–3 months
+- Real, named pieces that exist in the repertoire (not invented)
+- A mix of classical, Romantic, and modern teaching repertoire
+- Examples of the kind of piece: Bartók Mikrokosmos Book 1, simple Bach minuets from the Notebook for Anna Magdalena, easy Diabelli sonatinas, simple Clementi pieces, Kabalevsky Op.39 pieces, simple folk-song settings by recognised composers
+
+For each piece return ALL of the following fields:
+
+{
+  "title": "Full piece title",
+  "composer": "Composer full name",
+  "year": 1820,
+  "background": "Two to three paragraphs: historical and compositional context, why the piece was written, the circumstances of its composition, relevant facts about the composer at the time, and its significance in teaching repertoire.",
+  "pianist_notes": "Two to three paragraphs: the structure of the piece, what it represents musically, specific techniques it introduces, how to approach learning it, and performance considerations.",
+  "challenges": "Two paragraphs. First: explain the key technical and musical challenges and why this is an Absolute Beginner piece — refer to the level by name, never by number. Second (headed 'Before You Begin'): list the very basic skills a student needs before attempting this piece.",
+  "difficulty": 0,
+  "tags": ["Tag1", "Tag2", "Tag3", "Tag4"]
+}
+
+Rules:
+- difficulty must always be 0
+- tags are specific piano technique concepts e.g. "Five-finger position", "Legato", "Simple rhythm", "Hand coordination", "Dynamics" — 3 to 6 tags
+- year is the approximate composition or publication year as an integer
+- Write with warmth and authority, aimed at a motivated adult learner
+
+Return ONLY a valid JSON array of 10 objects, no markdown, no explanation:
+[{...}, {...}, ...]`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-opus-4-5",
+          max_tokens: 8000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `API error ${res.status}`);
+      }
+
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      const start = text.indexOf("["), end = text.lastIndexOf("]");
+      if (start === -1) throw new Error("No JSON array in response — try again.");
+      generatedPieces = JSON.parse(text.slice(start, end + 1));
+
+      log(`✓ Generated ${generatedPieces.length} pieces`, "ok");
+      document.getElementById("status").textContent = "Done — review below";
+      renderResults();
+
+    } catch(err) {
+      log("Error: " + err.message, "err");
+      document.getElementById("status").textContent = "";
+    }
+
+    document.getElementById("run-btn").disabled = false;
+  }
+
+  function renderResults() {
+    const list = document.getElementById("pieces-list");
+    list.innerHTML = "";
+
+    generatedPieces.forEach((p, i) => {
+      const tagsHtml = (p.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
+      list.innerHTML += `
+        <div class="piece-card">
+          <div class="piece-header" onclick="togglePiece(this)">
+            <input type="checkbox" class="piece-check" data-index="${i}" checked onclick="event.stopPropagation()">
+            <div style="flex:1">
+              <div class="piece-title">${p.title}</div>
+              <div class="piece-composer">${p.composer || ""}${p.year ? " · " + p.year : ""}</div>
+            </div>
+            <span class="piece-diff">Absolute Beginner</span>
+            <span class="piece-chevron">›</span>
+          </div>
+          <div class="piece-body">
+            <div class="field-label">Background</div>
+            <div class="field-text">${p.background || "—"}</div>
+            <div class="field-label">Pianist Notes</div>
+            <div class="field-text">${p.pianist_notes || "—"}</div>
+            <div class="field-label">Challenges & Level Rationale</div>
+            <div class="field-text">${p.challenges || "—"}</div>
+            <div class="field-label">Tags</div>
+            <div class="tags-row">${tagsHtml}</div>
+          </div>
+        </div>`;
+    });
+
+    document.getElementById("results-summary").textContent = `${generatedPieces.length} pieces generated — review and select which to insert`;
+    document.getElementById("results-section").style.display = "block";
+  }
+
+  async function applyChanges() {
+    const selected = [...document.querySelectorAll(".piece-check:checked")]
+      .map(cb => generatedPieces[parseInt(cb.dataset.index)]);
+
+    if (!selected.length) { alert("No pieces selected."); return; }
+
+    const btn = document.getElementById("apply-btn");
+    btn.disabled = true;
+    document.getElementById("apply-status").textContent = `Inserting ${selected.length} pieces…`;
+
+    const payload = selected.map(p => ({
+      title: p.title,
+      composer: p.composer || null,
+      year: p.year || null,
+      background: p.background || null,
+      pianist_notes: p.pianist_notes || null,
+      challenges: p.challenges || null,
+      difficulty: 0,
+      tags: p.tags?.length ? p.tags : null,
+      sheet_music_url: null,
+    }));
+
+    const { error } = await db.from("pieces").insert(payload);
+
+    if (error) {
+      document.getElementById("apply-status").textContent = "Error: " + error.message;
+    } else {
+      document.getElementById("apply-status").textContent = `✓ ${selected.length} pieces inserted into Supabase`;
+    }
+
+    btn.disabled = false;
+  }
+
+  // Pre-fill saved key
+  const saved = localStorage.getItem("anthropic_key");
+  if (saved) document.getElementById("api-key").value = saved;
+</script>
+
+</body>
+</html>

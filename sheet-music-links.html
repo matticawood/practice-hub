@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Sheet Music Links</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 24px; max-width: 700px; }
+    h1 { font-size: 1.2rem; margin-bottom: 4px; }
+    p.sub { font-size: 0.85rem; color: #888; margin-bottom: 24px; line-height: 1.6; }
+
+    .progress { font-size: 0.85rem; color: #888; margin-bottom: 20px; }
+    .progress strong { color: #e0e0e0; }
+
+    .piece-card {
+      background: #1a1a1a; border: 1px solid #2a2a2a;
+      border-radius: 10px; padding: 22px; margin-bottom: 16px;
+    }
+    .piece-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
+    .piece-meta { font-size: 0.85rem; color: #888; margin-bottom: 16px; }
+
+    .search-links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .search-link {
+      display: inline-block; padding: 7px 14px;
+      border-radius: 6px; font-size: 0.82rem; text-decoration: none;
+      border: 1px solid #333; color: #aaa;
+    }
+    .search-link:hover { border-color: #555; color: #e0e0e0; }
+    .search-link.imslp { background: #1a2a1a; border-color: #2d5a2d; color: #7ec87e; }
+    .search-link.imslp:hover { background: #1e361e; }
+
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    .url-input {
+      width: 100%; padding: 10px 12px;
+      background: #111; border: 1.5px solid #333; border-radius: 7px;
+      color: #e0e0e0; font-size: 0.9rem; outline: none; margin-bottom: 12px;
+    }
+    .url-input:focus { border-color: #555; }
+    .url-input.valid { border-color: #2d6a2d; }
+
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+    .btn-save    { background: #2d6a2d; color: #9de89d; }
+    .btn-save:hover { background: #3a8a3a; }
+    .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-skip    { background: #222; color: #888; border: 1px solid #333; }
+    .btn-skip:hover { color: #ccc; border-color: #555; }
+    .btn-no-link { background: #222; color: #666; border: 1px solid #2a2a2a; font-size: 0.8rem; }
+    .btn-no-link:hover { color: #999; }
+
+    .feedback { font-size: 0.82rem; margin-top: 8px; min-height: 20px; }
+    .feedback.ok  { color: #4ade80; }
+    .feedback.err { color: #f87171; }
+
+    .existing-url {
+      font-size: 0.8rem; color: #4ade80; margin-bottom: 12px;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .existing-url a { color: #4ade80; }
+
+    .done-screen {
+      text-align: center; padding: 60px 20px;
+      font-size: 1rem; color: #888;
+    }
+    .done-screen .big { font-size: 2rem; margin-bottom: 12px; }
+
+    .nav-dots { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 20px; }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #2a2a2a; cursor: pointer; transition: background 0.2s;
+    }
+    .dot.current  { background: #4ade80; }
+    .dot.saved    { background: #2d6a2d; }
+    .dot.skipped  { background: #444; }
+  </style>
+</head>
+<body>
+
+<h1>🎼 Add Sheet Music Links</h1>
+<p class="sub">
+  Works through each piece one at a time. Click the IMSLP search link to find the sheet music,
+  copy the URL of the correct page, paste it in and save. Skip pieces you can't find or that aren't on IMSLP.
+</p>
+
+<div class="progress" id="progress"></div>
+<div class="nav-dots" id="nav-dots"></div>
+
+<div id="piece-area"></div>
+<div id="done-screen" class="done-screen" style="display:none">
+  <div class="big">🎉</div>
+  <p>All pieces reviewed.</p>
+  <p style="font-size:0.82rem;margin-top:8px">You can close this page or <a href="#" onclick="location.reload()" style="color:#4ade80">start again</a> to check any you skipped.</p>
+</div>
+
+<script>
+  const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  let pieces = [];
+  let current = 0;
+  const state = {}; // id → "saved" | "skipped"
+
+  function enc(str) { return encodeURIComponent(str || ""); }
+
+  function imslpUrl(piece) {
+    const q = [piece.title, piece.composer].filter(Boolean).join(" ");
+    return `https://imslp.org/wiki/Special:Search?search=${enc(q)}`;
+  }
+  function googleUrl(piece) {
+    const q = `${piece.title} ${piece.composer || ""} sheet music PDF IMSLP`;
+    return `https://www.google.com/search?q=${enc(q)}`;
+  }
+  function musescoreUrl(piece) {
+    const q = [piece.title, piece.composer].filter(Boolean).join(" ");
+    return `https://musescore.com/sheetmusic?text=${enc(q)}`;
+  }
+
+  function renderDots() {
+    const wrap = document.getElementById("nav-dots");
+    wrap.innerHTML = pieces.map((p, i) => {
+      const cls = i === current ? "dot current" : state[p.id] === "saved" ? "dot saved" : state[p.id] === "skipped" ? "dot skipped" : "dot";
+      return `<div class="${cls}" title="${p.title}" onclick="goTo(${i})"></div>`;
+    }).join("");
+  }
+
+  function renderProgress() {
+    const saved   = Object.values(state).filter(s => s === "saved").length;
+    const skipped = Object.values(state).filter(s => s === "skipped").length;
+    document.getElementById("progress").innerHTML =
+      `Piece <strong>${current + 1}</strong> of <strong>${pieces.length}</strong> &nbsp;·&nbsp;
+       <span style="color:#4ade80">${saved} saved</span> &nbsp;·&nbsp;
+       <span style="color:#666">${skipped} skipped</span>`;
+  }
+
+  function renderPiece() {
+    if (current >= pieces.length) {
+      document.getElementById("piece-area").style.display = "none";
+      document.getElementById("done-screen").style.display = "block";
+      document.getElementById("progress").textContent = "All done!";
+      return;
+    }
+
+    const piece = pieces[current];
+    renderProgress();
+    renderDots();
+
+    document.getElementById("piece-area").innerHTML = `
+      <div class="piece-card">
+        <div class="piece-title">${piece.title}</div>
+        <div class="piece-meta">${[piece.composer, piece.year].filter(Boolean).join(" · ")}</div>
+
+        ${piece.sheet_music_url ? `
+          <div class="existing-url">
+            ✓ Already has a link: <a href="${piece.sheet_music_url}" target="_blank">${piece.sheet_music_url}</a>
+            <button onclick="clearUrl()" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:0.8rem">× Clear</button>
+          </div>` : ""}
+
+        <div class="search-links">
+          <a class="search-link imslp" href="${imslpUrl(piece)}" target="_blank">🔍 Search IMSLP</a>
+          <a class="search-link" href="${musescoreUrl(piece)}" target="_blank">🎵 MuseScore</a>
+          <a class="search-link" href="${googleUrl(piece)}" target="_blank">🌐 Google</a>
+        </div>
+
+        <label for="url-input">Paste sheet music URL</label>
+        <input type="url" class="url-input" id="url-input"
+          placeholder="https://imslp.org/wiki/…"
+          value="${piece.sheet_music_url || ""}"
+          oninput="validateUrl(this)" />
+
+        <div class="actions">
+          <button class="btn-save" id="save-btn" onclick="saveUrl()">✓ Save &amp; Next</button>
+          <button class="btn-skip" onclick="skip()">→ Skip</button>
+          <button class="btn-no-link" onclick="markNoLink()">✗ Not available online</button>
+        </div>
+        <div class="feedback" id="feedback"></div>
+      </div>`;
+
+    document.getElementById("url-input").focus();
+  }
+
+  function validateUrl(input) {
+    const val = input.value.trim();
+    input.classList.toggle("valid", val.startsWith("http"));
+    document.getElementById("save-btn").disabled = !val.startsWith("http");
+  }
+
+  function setFeedback(msg, type) {
+    const el = document.getElementById("feedback");
+    if (el) { el.textContent = msg; el.className = `feedback ${type}`; }
+  }
+
+  async function saveUrl() {
+    const piece = pieces[current];
+    const url = document.getElementById("url-input").value.trim();
+    if (!url.startsWith("http")) return;
+
+    const btn = document.getElementById("save-btn");
+    btn.textContent = "Saving…"; btn.disabled = true;
+
+    const { error } = await db.from("pieces").update({ sheet_music_url: url }).eq("id", piece.id);
+    if (error) {
+      setFeedback("Failed to save: " + error.message, "err");
+      btn.textContent = "✓ Save & Next"; btn.disabled = false;
+      return;
+    }
+
+    pieces[current].sheet_music_url = url;
+    state[piece.id] = "saved";
+    current++;
+    renderPiece();
+  }
+
+  function skip() {
+    state[pieces[current].id] = "skipped";
+    current++;
+    renderPiece();
+  }
+
+  async function markNoLink() {
+    // Save empty string to signal "checked, not available" — or just skip
+    state[pieces[current].id] = "skipped";
+    current++;
+    renderPiece();
+  }
+
+  async function clearUrl() {
+    const piece = pieces[current];
+    await db.from("pieces").update({ sheet_music_url: null }).eq("id", piece.id);
+    pieces[current].sheet_music_url = null;
+    renderPiece();
+  }
+
+  function goTo(index) {
+    current = index;
+    renderPiece();
+  }
+
+  window.saveUrl = saveUrl;
+  window.skip = skip;
+  window.markNoLink = markNoLink;
+  window.clearUrl = clearUrl;
+  window.goTo = goTo;
+
+  // Keyboard shortcuts
+  document.addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveUrl();
+    if (e.key === "ArrowRight" && e.altKey) skip();
+  });
+
+  function updateUrl() {
+    history.replaceState(null, "", "?pos=" + current);
+  }
+
+  // Load pieces
+  (async () => {
+    const { data, error } = await db.from("pieces").select("id, title, composer, year, sheet_music_url").order("title");
+    if (error || !data) { document.getElementById("piece-area").innerHTML = `<p style="color:#f87171">Failed to load pieces.</p>`; return; }
+    pieces = data;
+    // Restore position from URL
+    const params = new URLSearchParams(window.location.search);
+    const pos = parseInt(params.get("pos") || "0");
+    current = Math.min(pos, pieces.length - 1);
+    renderPiece();
+  })();
+
+  // Wrap renderPiece to keep URL in sync
+  const _renderPiece = renderPiece;
+  renderPiece = function() {
+    updateUrl();
+    _renderPiece();
+  };
+</script>
+</body>
+</html>

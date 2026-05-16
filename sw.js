@@ -1,0 +1,72 @@
+// The Practice Room — Service Worker
+const CACHE = 'practice-room-v3';
+const PRECACHE = [
+  '/',
+  '/practice-log.html',
+  '/style.css',
+  '/data.js',
+  '/manifest.json',
+  '/icon-192.svg',
+  '/icon-512.svg',
+];
+
+// Install: pre-cache static shell
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE).then(cache => cache.addAll(PRECACHE))
+  );
+  self.skipWaiting();
+});
+
+// Activate: clear old caches
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+// Fetch strategy:
+//   • Supabase API / CDN calls  → always network (skip cache entirely)
+//   • HTML navigation           → network-first, fall back to cache
+//   • Everything else (CSS/JS)  → cache-first, update in background
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+
+  // Skip non-GET and Supabase/external API requests
+  if (event.request.method !== 'GET') return;
+  if (url.hostname.includes('supabase.co') ||
+      url.hostname.includes('supabase.io') ||
+      url.hostname.includes('jsdelivr.net') ||
+      url.hostname.includes('cdn.')) return;
+
+  if (event.request.mode === 'navigate') {
+    // HTML pages: try network, serve cached shell if offline
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const clone = response.clone();
+          caches.open(CACHE).then(c => c.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Static assets: cache-first
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      const networkFetch = fetch(event.request).then(response => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE).then(c => c.put(event.request, clone));
+        }
+        return response;
+      });
+      return cached || networkFetch;
+    })
+  );
+});

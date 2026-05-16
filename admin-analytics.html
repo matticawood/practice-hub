@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Analytics — The Practice Room</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <style>
+    /* ── Layout ── */
+    .analytics-wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* ── Overview stat cards ── */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 900px) { .overview-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 500px) { .overview-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat-card {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      text-align: center;
+    }
+    .stat-card .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .stat-card .stat-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Section headers ── */
+    .section-header {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0 0 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-header .section-meta {
+      font-size: 0.78rem;
+      font-weight: 400;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    /* ── Student cards grid ── */
+    .students-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+    .student-card {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .student-card::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+      border-radius: 12px 0 0 12px;
+      background: var(--activity-color, #444);
+    }
+    .student-card.active-green::before  { background: #22c55e; }
+    .student-card.active-amber::before  { background: #f59e0b; }
+    .student-card.active-red::before    { background: #ef4444; }
+    .student-card.active-none::before   { background: #555; }
+
+    .sc-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .sc-email { font-size: 0.9rem; font-weight: 600; color: var(--text); word-break: break-all; }
+    .sc-last-seen {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 20px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .sc-last-seen.green { background: #052b16; color: #22c55e; }
+    .sc-last-seen.amber { background: #2b1900; color: #f59e0b; }
+    .sc-last-seen.red   { background: #2b0606; color: #ef4444; }
+    .sc-last-seen.none  { background: #1a1a1a; color: #666; }
+
+    .sc-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .sc-stat { text-align: center; }
+    .sc-stat-val { font-size: 1.25rem; font-weight: 700; color: var(--text); }
+    .sc-stat-lbl { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+    .sc-footer { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .sc-badge {
+      font-size: 0.72rem;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: var(--surface-2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+    .sc-badge.pending { background: #1a1200; color: #f59e0b; border-color: #3a2a00; }
+    .sc-badge.streak  { background: #1a0d00; color: #fb923c; border-color: #3a1f00; }
+    .sc-view-btn {
+      margin-left: auto;
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: none;
+      border: 1.5px solid var(--border);
+      color: var(--text-muted);
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+    .sc-view-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Recent activity feed ── */
+    .activity-feed { margin-bottom: 36px; }
+    .activity-item {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+    .activity-body { flex: 1; }
+    .activity-email { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+    .activity-detail { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+    .activity-time { font-size: 0.75rem; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; }
+
+    /* ── Top pieces table ── */
+    .top-pieces { margin-bottom: 36px; }
+    .top-piece-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .top-piece-row:last-child { border-bottom: none; }
+    .top-piece-rank { font-size: 0.9rem; font-weight: 700; color: var(--text-muted); width: 24px; flex-shrink: 0; }
+    .top-piece-name { flex: 1; font-size: 0.88rem; color: var(--text); }
+    .top-piece-composer { font-size: 0.75rem; color: var(--text-muted); }
+    .top-piece-bar-wrap { width: 120px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+    .top-piece-bar { height: 100%; background: var(--accent); border-radius: 3px; }
+    .top-piece-mins { font-size: 0.78rem; color: var(--text-muted); width: 56px; text-align: right; flex-shrink: 0; }
+
+    /* ── Two column layout for bottom section ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+    /* ── Loading ── */
+    .loading-msg { text-align: center; color: var(--text-muted); padding: 60px 0; font-size: 0.95rem; }
+
+    /* ── Requests list ── */
+    .pending-req-item {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .pending-req-item:last-child { border-bottom: none; }
+    .pending-req-title { font-weight: 600; color: var(--text); }
+    .pending-req-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Week heatmap ── */
+    .week-grid { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+    .week-cell {
+      width: 12px; height: 12px;
+      border-radius: 2px;
+      background: var(--border);
+    }
+    .week-cell.l1 { background: #2a1f00; }
+    .week-cell.l2 { background: #6b4c00; }
+    .week-cell.l3 { background: #b07d00; }
+    .week-cell.l4 { background: var(--accent); }
+
+    /* ── Day of week heatmap ── */
+    .dow-grid { display: flex; gap: 6px; margin-bottom: 8px; }
+    .dow-cell {
+      flex: 1; border-radius: 6px; padding: 10px 4px;
+      text-align: center; background: var(--border);
+    }
+    .dow-cell-label { font-size: .65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+    .dow-cell-val   { font-size: .82rem; font-weight: 700; color: var(--text); }
+    .dow-cell.l0 { background: var(--border); }
+    .dow-cell.l1 { background: #2a1f00; }
+    .dow-cell.l2 { background: #5a3f00; }
+    .dow-cell.l3 { background: #996a00; }
+    .dow-cell.l4 { background: var(--accent); }
+
+    /* ── Type breakdown ── */
+    .type-bar-wrap { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; margin: 10px 0; }
+    .type-bar-seg  { height: 100%; border-radius: 3px; }
+    .type-legend   { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
+    .type-legend-item { display: flex; align-items: center; gap: 5px; font-size: .74rem; color: var(--text-muted); }
+    .type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Clinic bookings ── */
+    .clinic-item {
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 12px;
+    }
+    .clinic-item:last-child { border-bottom: none; }
+    .clinic-date  { font-size: .78rem; font-weight: 700; color: var(--accent); min-width: 80px; flex-shrink: 0; }
+    .clinic-name  { font-size: .85rem; font-weight: 600; color: var(--text); }
+    .clinic-meta  { font-size: .74rem; color: var(--text-muted); margin-top: 2px; }
+    .clinic-zoom  { font-size: .72rem; color: #2D8CFF; text-decoration: none; }
+    .clinic-zoom:hover { text-decoration: underline; }
+
+    /* ── Share card ── */
+    .share-bar { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 16px; }
+    .share-btn {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 7px 14px; cursor: pointer;
+      font-size: .78rem; color: var(--text-muted); font-family: inherit;
+      transition: border-color .15s, color .15s;
+    }
+    .share-btn:hover { border-color: var(--accent); color: var(--text); }
+    #share-card {
+      background: #0d0d0d;
+      border-radius: 16px;
+      padding: 0;
+      margin-bottom: 32px;
+      border: 1px solid #222;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+      overflow: hidden;
+    }
+    .scard-accent { height: 4px; background: linear-gradient(90deg, #f59e0b, #f97316, #ec4899); }
+    .scard-body   { padding: 28px 32px; }
+    .scard-top    { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }
+    .scard-title  { font-size: 1.1rem; font-weight: 800; color: #fff; letter-spacing: -.02em; }
+    .scard-sub    { font-size: .72rem; color: #555; margin-top: 3px; }
+    .scard-badge  { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 20px; padding: 5px 12px; font-size: .7rem; color: #888; }
+    .scard-stats  { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 22px; align-items: start; }
+    .scard-stat   { background: #141414; border-radius: 10px; padding: 14px 16px; border: 1px solid #1e1e1e; }
+    .scard-stat .v { font-size: 1.3rem; font-weight: 800; color: #f59e0b; line-height: 1; margin-bottom: 5px; white-space: nowrap; }
+    .scard-stat .l { font-size: .65rem; color: #555; text-transform: uppercase; letter-spacing: .06em; }
+    .scard-divider { height: 1px; background: #1a1a1a; margin: 18px 0; }
+    .scard-section-label { font-size: .65rem; color: #444; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+    .scard-type-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; margin-bottom: 10px; }
+    .scard-type-seg { height: 100%; border-radius: 3px; }
+    .scard-type-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 18px; }
+    .scard-type-item { display: flex; align-items: center; gap: 5px; font-size: .7rem; color: #666; }
+    .scard-type-dot  { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .scard-pieces { display: flex; flex-direction: column; gap: 0; }
+    .scard-piece  { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #1a1a1a; }
+    .scard-piece:last-child { border-bottom: none; }
+    .scard-piece-n  { font-size: .68rem; color: #3a3a3a; width: 14px; font-weight: 700; flex-shrink: 0; }
+    .scard-piece-name { flex: 1; font-size: .8rem; color: #ccc; }
+    .scard-piece-comp { font-size: .7rem; color: #444; margin-left: 5px; }
+    .scard-piece-bar-wrap { width: 80px; height: 4px; background: #1e1e1e; border-radius: 2px; flex-shrink: 0; }
+    .scard-piece-bar { height: 100%; background: #f59e0b; border-radius: 2px; }
+    .scard-piece-mins { font-size: .7rem; color: #555; min-width: 52px; text-align: right; flex-shrink: 0; white-space: nowrap; }
+    .scard-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; padding-top: 16px; border-top: 1px solid #1a1a1a; }
+    .scard-footer-brand { font-size: .72rem; color: #333; font-weight: 600; letter-spacing: .02em; }
+    .scard-footer-url   { font-size: .65rem; color: #333; }
+
+    /* ── Square share cards (YouTube Community — 1 stat each) ── */
+    .sq-cards-wrap { position: fixed; top: -9999px; left: -9999px; pointer-events: none; }
+    .sq-card {
+      width: 500px; height: 500px;
+      background: #080808; overflow: hidden;
+      display: flex; flex-direction: column; position: relative;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    }
+    /* warm radial glow behind content */
+    .sq-glow {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;
+      background: radial-gradient(ellipse 75% 65% at 50% 48%, rgba(245,158,11,.11) 0%, transparent 70%);
+    }
+    .sq-accent { height: 7px; background: linear-gradient(90deg, #f59e0b 0%, #f97316 55%, #ec4899 100%); flex-shrink: 0; position: relative; z-index: 1; }
+    .sq-body   { display: flex; flex-direction: column; flex: 1; padding: 26px 32px 28px; position: relative; z-index: 1; }
+    .sq-brand  { font-size: .6rem; font-weight: 800; color: #f59e0b; letter-spacing: .14em; text-transform: uppercase; opacity: .7; }
+    /* centre stage — big number cards */
+    /* nudge the whole stat block slightly above true centre */
+    .sq-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-bottom: 20px; }
+    /* label + value grouped as one readable unit */
+    .sq-stat-unit { display: flex; flex-direction: column; align-items: center; }
+    .sq-big-label { font-size: 1.05rem; font-weight: 500; color: #bbb; line-height: 1.35; margin-bottom: 14px; }
+    .sq-big-value { font-size: 7rem; font-weight: 900; color: #fff; line-height: 1; letter-spacing: -.05em; white-space: nowrap; }
+    .sq-big-sub   { font-size: .8rem; color: #444; margin-top: 5px; }
+    /* top piece card */
+    .sq-piece-title    { font-size: 2.1rem; font-weight: 900; color: #fff; line-height: 1.12; letter-spacing: -.03em; max-width: 390px; }
+    .sq-piece-composer { font-size: .82rem; color: #4a4a4a; margin-top: 9px; }
+    /* top 5 pieces list */
+    .sq-pl-list { width: 100%; display: flex; flex-direction: column; }
+    .sq-pl-item { display: flex; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid #111; }
+    .sq-pl-item:last-child { border-bottom: none; }
+    .sq-pl-num  { font-size: .95rem; font-weight: 900; color: #222; width: 22px; text-align: right; flex-shrink: 0; line-height: 1; }
+    .sq-pl-num.top { color: #f59e0b; }
+    .sq-pl-info { flex: 1; overflow: hidden; }
+    .sq-pl-name { font-size: .82rem; font-weight: 700; color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sq-pl-comp { font-size: .68rem; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+    .sq-pl-time { font-size: .75rem; font-weight: 700; color: #f59e0b; white-space: nowrap; flex-shrink: 0; }
+    /* type bar card */
+    .sq-type-wrap { display: flex; flex-direction: column; width: 100%; max-width: 380px; }
+    .sq-type-bar  { display: flex; height: 18px; border-radius: 9px; overflow: hidden; gap: 3px; width: 100%; margin-bottom: 24px; }
+    .sq-type-seg  { height: 100%; border-radius: 6px; flex-shrink: 0; }
+    .sq-type-rows { display: flex; flex-direction: column; gap: 13px; width: 100%; }
+    .sq-type-row  { display: flex; align-items: center; gap: 12px; }
+    .sq-type-dot  { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .sq-type-name { font-size: .85rem; color: #aaa; flex: 1; }
+    .sq-type-pct  { font-size: .85rem; font-weight: 800; color: #fff; min-width: 38px; text-align: right; }
+    /* footer */
+    .sq-footer { padding-top: 12px; border-top: 1px solid #111; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .sq-footer-brand { font-size: .62rem; color: #252525; font-weight: 600; letter-spacing: .03em; }
+    .sq-footer-url   { font-size: .6rem; color: #252525; }
+  </style>
+</head>
+<body>
+
+<header id="app-header" style="display:none">
+  <div class="header-logo">🎹</div>
+  <div style="flex:1">
+    <h1>The Practice Room</h1>
+    <p>Admin Analytics</p>
+  </div>
+  <div class="header-user">
+    <span id="header-email"></span>
+    <a class="btn btn-ghost btn-sm" href="/index.html">📚 Database</a>
+    <a class="btn btn-ghost btn-sm" href="https://thepracticeroom.matthewcawood.com">The Practice Room</a>
+    <button class="btn btn-ghost btn-sm" id="logout-btn">Log out</button>
+  </div>
+</header>
+
+<main id="app-main" style="display:none">
+  <div class="analytics-wrap">
+    <div id="analytics-loading" class="loading-msg">Loading analytics…</div>
+    <div id="analytics-content" style="display:none"></div>
+  </div>
+</main>
+
+<div id="app-auth" style="display:none">
+  <div class="hub-header">
+    <div style="font-size:2.5rem;margin-bottom:12px">🎹</div>
+    <h1>The Practice Room</h1>
+    <p>Admin access only</p>
+  </div>
+  <div style="max-width:360px;margin:0 auto;padding:0 20px">
+    <div id="auth-step-email">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="auth-email" placeholder="your@email.com" autocomplete="email"
+               onkeydown="if(event.key==='Enter')sendOTP()" />
+      </div>
+      <div id="auth-error" style="color:#f87171;font-size:0.82rem;margin-bottom:10px;display:none"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="sendOTP()">Send magic link</button>
+    </div>
+    <div id="auth-step-otp" style="display:none">
+      <p style="color:var(--text-muted);font-size:.88rem;margin-bottom:18px;text-align:center">
+        Check your email for a 6-digit code.
+      </p>
+      <div class="form-group">
+        <label>Code</label>
+        <input type="text" id="auth-otp" placeholder="123456" maxlength="6" inputmode="numeric"
+               autocomplete="one-time-code" onkeydown="if(event.key==='Enter')verifyOTP()" />
+      </div>
+      <div id="auth-otp-error" style="color:#f87171;font-size:0.82rem;margin-bottom:10px;display:none"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="verifyOTP()">Verify</button>
+      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:10px" onclick="backToEmail()">← Use different email</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden square cards for YouTube Community image downloads -->
+<div class="sq-cards-wrap">
+  <div id="sq-card-1" class="sq-card"></div>
+  <div id="sq-card-2" class="sq-card"></div>
+  <div id="sq-card-3" class="sq-card"></div>
+  <div id="sq-card-4" class="sq-card"></div>
+  <div id="sq-card-5" class="sq-card"></div>
+  <div id="sq-card-6" class="sq-card"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const OWNER_EMAIL   = "matthew@matthewcawood.com";
+const EXCLUDED_EMAILS = new Set(["matthew@matthewcawood.com", "mcawoodcanada@gmail.com"]);
+// ══════════════════════════════════════════════════════════════
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── Auth (OTP magic link) ─────────────────────────────────────
+let otpEmail = "";
+
+async function sendOTP() {
+  const email = document.getElementById("auth-email").value.trim().toLowerCase();
+  const errEl = document.getElementById("auth-error");
+  errEl.style.display = "none";
+  if (!email) { errEl.textContent = "Enter your email."; errEl.style.display = "block"; return; }
+  if (email !== OWNER_EMAIL) {
+    errEl.textContent = "Admin access only."; errEl.style.display = "block"; return;
+  }
+  const { error } = await db.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+  if (error) { errEl.textContent = error.message; errEl.style.display = "block"; return; }
+  otpEmail = email;
+  document.getElementById("auth-step-email").style.display = "none";
+  document.getElementById("auth-step-otp").style.display   = "block";
+  setTimeout(() => document.getElementById("auth-otp").focus(), 50);
+}
+
+async function verifyOTP() {
+  const token = document.getElementById("auth-otp").value.trim();
+  const errEl = document.getElementById("auth-otp-error");
+  errEl.style.display = "none";
+  if (!token) { errEl.textContent = "Enter the code."; errEl.style.display = "block"; return; }
+  const { error } = await db.auth.verifyOtp({ email: otpEmail, token, type: "email" });
+  if (error) { errEl.textContent = "Invalid or expired code."; errEl.style.display = "block"; return; }
+  document.getElementById("app-auth").style.display = "none";
+  await boot();
+}
+
+function backToEmail() {
+  document.getElementById("auth-step-otp").style.display   = "none";
+  document.getElementById("auth-step-email").style.display = "block";
+  document.getElementById("auth-otp").value = "";
+  document.getElementById("auth-otp-error").style.display  = "none";
+}
+
+async function boot() {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) {
+    document.getElementById("app-auth").style.display = "block";
+    return;
+  }
+  if (session.user.email !== OWNER_EMAIL) {
+    document.getElementById("app-auth").style.display = "block";
+    document.getElementById("auth-error").textContent = "Admin access only.";
+    document.getElementById("auth-error").style.display = "block";
+    await db.auth.signOut();
+    return;
+  }
+  document.getElementById("header-email").textContent = session.user.email;
+  document.getElementById("app-header").style.display = "flex";
+  document.getElementById("app-main").style.display   = "block";
+  document.getElementById("logout-btn").addEventListener("click", async () => {
+    await db.auth.signOut(); location.reload();
+  });
+  await loadAnalytics();
+}
+
+// ── Data loading ─────────────────────────────────────────────
+async function loadAnalytics() {
+  // Fetch everything in parallel
+  const [sessionsRes, itemsRes, streaksRes, requestsRes, piecesRes, gamesRes] = await Promise.all([
+    db.from("practice_sessions")
+      .select("id, email, session_date, duration_minutes, timing_mode")
+      .order("session_date", { ascending: false }),
+    db.from("practice_items")
+      .select("id, session_id, item_type, piece_id, piece_label, label, duration_minutes"),
+    db.from("streak_tokens").select("email, current_streak, longest_streak, last_session_date"),
+    db.from("requests").select("id, email, type, title, done, created_at").order("created_at", { ascending: false }),
+    db.from("pieces").select("id, title, composer"),
+    db.from("passage_games").select("*").order("created_at", { ascending: false }),
+  ]);
+
+  if (sessionsRes.error) { console.error("sessions error:", sessionsRes.error); }
+  if (itemsRes.error)    { console.error("items error:",    itemsRes.error); }
+
+  // Attach practice_items to their sessions manually
+  const itemsBySession = {};
+  for (const item of (itemsRes.data || [])) {
+    if (!itemsBySession[item.session_id]) itemsBySession[item.session_id] = [];
+    itemsBySession[item.session_id].push(item);
+  }
+  const allSessions = (sessionsRes.data || []).map(s => ({
+    ...s, practice_items: itemsBySession[s.id] || []
+  }));
+
+  const allStreaks  = streaksRes.data  || [];
+  const allRequests = requestsRes.data || [];
+  const allPieces   = piecesRes.data   || [];
+  const allGames    = gamesRes.data    || [];
+  const piecesMap   = Object.fromEntries(allPieces.map(p => [p.id, p]));
+
+  // Fetch upcoming clinic bookings from Cal.com via edge function
+  let upcomingClinics = [];
+  try {
+    const cRes = await fetch(`${SUPABASE_URL}/functions/v1/clinic-admin?action=upcoming`, {
+      headers: { "Authorization": `Bearer ${SUPABASE_ANON}` }
+    });
+    const cData = await cRes.json();
+    upcomingClinics = cData.bookings || [];
+  } catch(e) { console.warn("Could not load clinic bookings:", e); }
+
+  render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+function fmtMins(mins, pad = false) {
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const h = Math.floor(mins / 60), m = Math.round(mins % 60);
+  if (m === 0) return `${h}h`;
+  return pad ? `${h}h ${String(m).padStart(2,"0")}m` : `${h}h ${m}m`;
+}
+function fmtMinsSq(mins) { return fmtMins(mins, true); }
+
+function daysSince(dateStr) {
+  if (!dateStr) return Infinity;
+  const d = new Date(dateStr);
+  const now = new Date();
+  return Math.floor((now - d) / 86400000);
+}
+
+function relativeDate(dateStr) {
+  const days = daysSince(dateStr);
+  if (days === 0)  return "Today";
+  if (days === 1)  return "Yesterday";
+  if (days < 7)   return `${days}d ago`;
+  if (days < 30)  return `${Math.floor(days/7)}w ago`;
+  if (days < 365) return `${Math.floor(days/30)}mo ago`;
+  return `${Math.floor(days/365)}y ago`;
+}
+
+function activityClass(days) {
+  if (days === Infinity) return "active-none";
+  if (days <= 7)  return "active-green";
+  if (days <= 14) return "active-amber";
+  return "active-red";
+}
+
+function badgeClass(days) {
+  if (days === Infinity) return "none";
+  if (days <= 7)  return "green";
+  if (days <= 14) return "amber";
+  return "red";
+}
+
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function shortEmail(email) {
+  return email.replace(/@.*/, "");
+}
+
+// ── Constants ────────────────────────────────────────────────
+const TYPE_COLORS = {
+  piece:         { color: "#f59e0b", label: "Pieces" },
+  technique:     { color: "#22c55e", label: "Technique" },
+  sightreading:  { color: "#3b82f6", label: "Sight-reading" },
+  eartraining:   { color: "#a855f7", label: "Ear training" },
+  improvisation: { color: "#ec4899", label: "Improvisation" },
+};
+
+// ── Render ───────────────────────────────────────────────────
+function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics = [], allGames = []) {
+  // ── Group by student ──────────────────────────────────────
+  const studentMap = {}; // email → { sessions, totalMins, lastDate }
+  for (const sess of allSessions) {
+    if (EXCLUDED_EMAILS.has(sess.email)) continue; // exclude self
+    if (!studentMap[sess.email]) {
+      studentMap[sess.email] = { email: sess.email, sessions: [], totalMins: 0, lastDate: null };
+    }
+    const entry = studentMap[sess.email];
+    entry.sessions.push(sess);
+    const sessItems = sess.practice_items || [];
+    let sessMins = 0;
+    if (sess.timing_mode === "per_item") {
+      sessMins = sessItems.reduce((s, i) => s + (i.duration_minutes || 0), 0);
+    } else {
+      sessMins = sess.duration_minutes || 0;
+    }
+    entry.totalMins += sessMins;
+    if (!entry.lastDate || sess.session_date > entry.lastDate) entry.lastDate = sess.session_date;
+  }
+
+  const streakMap   = Object.fromEntries(allStreaks.map(s => [s.email, s]));
+  const students    = Object.values(studentMap)
+    .sort((a, b) => (b.lastDate || "") .localeCompare(a.lastDate || ""));
+
+  // ── Platform totals ───────────────────────────────────────
+  const totalStudents   = students.length;
+  const totalSessions   = students.reduce((s, st) => s + st.sessions.length, 0);
+  const totalMins       = students.reduce((s, st) => s + st.totalMins, 0);
+  const activeThisWeek  = students.filter(st => daysSince(st.lastDate) <= 7).length;
+  const activeThisMonth = students.filter(st => daysSince(st.lastDate) <= 30).length;
+  const pendingRequests = allRequests.filter(r => !r.done).length;
+
+  // ── Top pieces ────────────────────────────────────────────
+  const pieceTotals = {};
+  for (const sess of allSessions) {
+    if (EXCLUDED_EMAILS.has(sess.email)) continue;
+    const items    = sess.practice_items || [];
+    const sessMins = sess.timing_mode === "per_item"
+      ? null
+      : (sess.duration_minutes || 0);
+
+    items.forEach(item => {
+      if (item.item_type !== "piece") return;
+      const mins = sess.timing_mode === "per_item"
+        ? (item.duration_minutes || 0)
+        : (sessMins / (items.length || 1));
+      if (mins <= 0) return;
+
+      const key   = item.piece_id ? `id:${item.piece_id}` : `lbl:${(item.piece_label||item.label||"").toLowerCase()}`;
+      const piece = item.piece_id ? piecesMap[item.piece_id] : null;
+      const name  = piece ? piece.title : (item.piece_label || item.label || "Untitled");
+      const comp  = piece?.composer || "";
+      if (!pieceTotals[key]) pieceTotals[key] = { name, composer: comp, mins: 0, studentSet: new Set() };
+      pieceTotals[key].mins += mins;
+      pieceTotals[key].studentSet.add(sess.email);
+    });
+  }
+  const topPieces = Object.values(pieceTotals)
+    .sort((a, b) => b.mins - a.mins)
+    .slice(0, 10);
+  const maxPieceMins = topPieces[0]?.mins || 1;
+
+  // ── Sessions per week (last 28 days) per student ─────────
+  const cutoff28 = new Date(); cutoff28.setDate(cutoff28.getDate() - 28);
+  for (const st of students) {
+    const recent = st.sessions.filter(s => new Date(s.session_date) >= cutoff28);
+    st.sessPerWeek = +(recent.length / 4).toFixed(1);
+  }
+
+  // ── Practice type breakdown (all students) ────────────────
+  const typeMins = {};
+  for (const sess of allSessions) {
+    if (EXCLUDED_EMAILS.has(sess.email)) continue;
+    for (const item of (sess.practice_items || [])) {
+      const t = item.item_type || "other";
+      typeMins[t] = (typeMins[t] || 0) + (item.duration_minutes || 0);
+    }
+  }
+  const totalTypeMins = Object.values(typeMins).reduce((a, b) => a + b, 0) || 1;
+
+  // ── Day of week heatmap ───────────────────────────────────
+  const DOW_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const dowCounts  = Array(7).fill(0);
+  for (const sess of allSessions) {
+    if (EXCLUDED_EMAILS.has(sess.email)) continue;
+    const d = new Date(sess.session_date + "T12:00:00");
+    dowCounts[d.getDay()]++;
+  }
+  const maxDow = Math.max(...dowCounts, 1);
+
+  // ── Pending requests ──────────────────────────────────────
+  const pendingList = allRequests.filter(r => !r.done).slice(0, 15);
+
+  // ── Recent activity (30 sessions, excluding owner) ────────
+  const recentActivity = allSessions
+    .filter(s => !EXCLUDED_EMAILS.has(s.email))
+    .slice(0, 30);
+
+  // ── Requests per student ──────────────────────────────────
+  const pendingPerStudent = {};
+  for (const r of allRequests) {
+    if (!r.done) {
+      pendingPerStudent[r.email] = (pendingPerStudent[r.email] || 0) + 1;
+    }
+  }
+
+  // ── Passage Fixer stats ───────────────────────────────────
+  const games = allGames.filter(g => !EXCLUDED_EMAILS.has(g.email));
+  const totalGames     = games.length;
+  const clearedGames   = games.filter(g => g.outcome === "cleared").length;
+  const leveledUpGames = games.filter(g => g.outcome === "leveled_up").length;
+  const abandonedGames = games.filter(g => g.outcome === "abandoned").length;
+  const gamesThisWeek  = games.filter(g => daysSince((g.created_at||"").slice(0,10)) <= 7).length;
+
+  const gamesWithAttempts = games.filter(g => g.attempts > 0);
+  const avgAccuracy = gamesWithAttempts.length > 0
+    ? Math.round(gamesWithAttempts.reduce((s, g) => s + (g.correct_count / g.attempts), 0) / gamesWithAttempts.length * 100)
+    : 0;
+  const avgSimplify = totalGames > 0
+    ? (games.reduce((s, g) => s + (g.simplify_triggers || 0), 0) / totalGames).toFixed(1)
+    : "—";
+  const clearanceRate = totalGames > 0
+    ? Math.round(((clearedGames + leveledUpGames) / totalGames) * 100)
+    : 0;
+
+  // Top passages by number of games
+  const passageMap = {};
+  for (const g of games) {
+    const key = (g.passage_label || "").toLowerCase().trim();
+    if (!key) continue;
+    if (!passageMap[key]) passageMap[key] = {
+      label: g.passage_label, piece: g.piece_label || "",
+      count: 0, cleared: 0, leveledUp: 0, abandoned: 0,
+      totalAccuracy: 0, accuracyCount: 0, simplifyTotal: 0, students: new Set()
+    };
+    const e = passageMap[key];
+    e.count++;
+    if (g.outcome === "cleared")   e.cleared++;
+    if (g.outcome === "leveled_up") e.leveledUp++;
+    if (g.outcome === "abandoned") e.abandoned++;
+    if (g.attempts > 0) { e.totalAccuracy += g.correct_count / g.attempts; e.accuracyCount++; }
+    e.simplifyTotal += g.simplify_triggers || 0;
+    e.students.add(g.email);
+  }
+  const topPassages = Object.values(passageMap).sort((a, b) => b.count - a.count).slice(0, 15);
+
+  // Per-student game summary
+  const gamesByStudent = {};
+  for (const g of games) {
+    if (!gamesByStudent[g.email]) gamesByStudent[g.email] = { total: 0, cleared: 0, leveledUp: 0, abandoned: 0, accuracySum: 0, accuracyCount: 0 };
+    const e = gamesByStudent[g.email];
+    e.total++;
+    if (g.outcome === "cleared")   e.cleared++;
+    if (g.outcome === "leveled_up") e.leveledUp++;
+    if (g.outcome === "abandoned") e.abandoned++;
+    if (g.attempts > 0) { e.accuracySum += g.correct_count / g.attempts; e.accuracyCount++; }
+  }
+
+  // ── Build HTML ────────────────────────────────────────────
+  let html = "";
+
+  // ── Share card ───────────────────────────────────────────
+  const weekSessions = allSessions.filter(s =>
+    !EXCLUDED_EMAILS.has(s.email) && daysSince(s.session_date) <= 7
+  );
+  const weekMins = weekSessions.reduce((sum, s) => {
+    const items = s.practice_items || [];
+    return sum + (s.timing_mode === "per_item"
+      ? items.reduce((a, i) => a + (i.duration_minutes || 0), 0)
+      : (s.duration_minutes || 0));
+  }, 0);
+  const weekLabel = new Date().toLocaleDateString("en-GB", { day:"numeric", month:"long", year:"numeric" });
+  const top3 = topPieces.slice(0, 3);
+
+  html += `
+  <div class="share-bar" style="gap:8px">
+    <button class="share-btn" onclick="downloadShareCard()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Wide summary
+    </button>
+    <button class="share-btn" onclick="downloadSquareCard(1)" id="sq-btn-1">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      Sessions/wk
+    </button>
+    <button class="share-btn" onclick="downloadSquareCard(2)" id="sq-btn-2">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      Time/wk
+    </button>
+    <button class="share-btn" onclick="downloadSquareCard(3)" id="sq-btn-3">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      Total sessions
+    </button>
+    <button class="share-btn" onclick="downloadSquareCard(4)" id="sq-btn-4">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      Total time
+    </button>
+    <button class="share-btn" onclick="downloadSquareCard(5)" id="sq-btn-5">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      Top piece
+    </button>
+    <button class="share-btn" onclick="downloadSquareCard(6)" id="sq-btn-6">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      Practice mix
+    </button>
+  </div>`;
+
+  html += `
+  <div id="share-card">
+    <div class="scard-accent"></div>
+    <div class="scard-body">
+
+      <div class="scard-top">
+        <div>
+          <div class="scard-title">🎹 The Practice Room</div>
+          <div class="scard-sub">Community stats · ${weekLabel}</div>
+        </div>
+        <div class="scard-badge">This week</div>
+      </div>
+
+      <div class="scard-stats">
+        <div class="scard-stat"><div class="v">${activeThisWeek}</div><div class="l">Active students</div></div>
+        <div class="scard-stat"><div class="v">${weekSessions.length}</div><div class="l">Sessions logged</div></div>
+        <div class="scard-stat"><div class="v">${fmtMins(weekMins)}</div><div class="l">Practice time</div></div>
+      </div>
+
+      ${totalTypeMins > 0 ? `
+      <div class="scard-section-label">How everyone practised</div>
+      <div class="scard-type-bar">
+        ${Object.entries(TYPE_COLORS).map(([type, cfg]) => {
+          const pct = ((typeMins[type] || 0) / totalTypeMins * 100).toFixed(1);
+          return pct > 0 ? `<div class="scard-type-seg" style="width:${pct}%;background:${cfg.color}"></div>` : "";
+        }).join("")}
+      </div>
+      <div class="scard-type-legend">
+        ${Object.entries(TYPE_COLORS).map(([type, cfg]) => {
+          const mins = typeMins[type] || 0;
+          if (!mins) return "";
+          const pct = (mins / totalTypeMins * 100).toFixed(0);
+          return `<div class="scard-type-item"><div class="scard-type-dot" style="background:${cfg.color}"></div>${cfg.label} · ${pct}%</div>`;
+        }).join("")}
+      </div>` : ""}
+
+      ${topPieces.length ? `
+      <div class="scard-divider"></div>
+      <div class="scard-section-label">Most practised pieces</div>
+      <div class="scard-pieces">
+        ${topPieces.slice(0, 5).map((p, i) => {
+          const barPct = Math.round((p.mins / (topPieces[0]?.mins || 1)) * 100);
+          return `<div class="scard-piece">
+            <div class="scard-piece-n">${i + 1}</div>
+            <div class="scard-piece-name">${escHtml(p.name)}${p.composer ? `<span class="scard-piece-comp">— ${escHtml(p.composer)}</span>` : ""}</div>
+            <div class="scard-piece-bar-wrap"><div class="scard-piece-bar" style="width:${barPct}%"></div></div>
+            <div class="scard-piece-mins">${fmtMins(p.mins)}</div>
+          </div>`;
+        }).join("")}
+      </div>` : ""}
+
+      <div class="scard-footer">
+        <div class="scard-footer-brand">The Practice Room</div>
+        <div class="scard-footer-url">thepracticeroom.matthewcawood.com</div>
+      </div>
+
+    </div>
+  </div>`;
+
+  // Overview stats
+  html += `
+  <div class="overview-grid">
+    <div class="stat-card">
+      <div class="stat-value">${totalStudents}</div>
+      <div class="stat-label">Students</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${activeThisWeek}</div>
+      <div class="stat-label">Active this week</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${activeThisMonth}</div>
+      <div class="stat-label">Active this month</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${totalSessions}</div>
+      <div class="stat-label">Sessions total</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${fmtMins(totalMins)}</div>
+      <div class="stat-label">Total practice time</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${pendingRequests}</div>
+      <div class="stat-label">Pending requests</div>
+    </div>
+  </div>`;
+
+  // Student cards
+  html += `<h2 class="section-header">👥 Students <span class="section-meta">sorted by most recently active</span></h2>`;
+  html += `<div class="students-grid">`;
+  for (const st of students) {
+    const days    = daysSince(st.lastDate);
+    const streak  = streakMap[st.email];
+    const pending = pendingPerStudent[st.email] || 0;
+    const avgMins = st.sessions.length > 0 ? st.totalMins / st.sessions.length : 0;
+    const practiceUrl = `https://thepracticeroom.matthewcawood.com/log?student=${encodeURIComponent(st.email)}`;
+
+    html += `
+    <div class="student-card ${activityClass(days)}">
+      <div class="sc-header">
+        <div class="sc-email">${escHtml(st.email)}</div>
+        <div class="sc-last-seen ${badgeClass(days)}">${relativeDate(st.lastDate)}</div>
+      </div>
+      <div class="sc-stats">
+        <div class="sc-stat">
+          <div class="sc-stat-val">${st.sessions.length}</div>
+          <div class="sc-stat-lbl">Sessions</div>
+        </div>
+        <div class="sc-stat">
+          <div class="sc-stat-val">${fmtMins(st.totalMins)}</div>
+          <div class="sc-stat-lbl">Total time</div>
+        </div>
+        <div class="sc-stat">
+          <div class="sc-stat-val">${st.sessPerWeek}</div>
+          <div class="sc-stat-lbl">Per week</div>
+        </div>
+      </div>
+      <div class="sc-footer">
+        ${streak && streak.current_streak > 0
+          ? `<span class="sc-badge streak">🔥 ${streak.current_streak} day streak</span>`
+          : ""}
+        ${pending > 0
+          ? `<span class="sc-badge pending">📬 ${pending} request${pending === 1 ? "" : "s"}</span>`
+          : ""}
+        ${gamesByStudent[st.email]
+          ? `<span class="sc-badge" style="background:#0d1525;color:#a5b4fc;border-color:#1e2d4a">🎯 ${gamesByStudent[st.email].total} game${gamesByStudent[st.email].total===1?"":"s"}</span>`
+          : ""}
+        <a class="sc-view-btn" href="${practiceUrl}" target="_blank">View log ↗</a>
+      </div>
+    </div>`;
+  }
+  html += `</div>`;
+
+  // Two column: top pieces + pending requests
+  html += `<div class="two-col">`;
+
+  // Top pieces
+  html += `
+  <div class="top-pieces">
+    <h2 class="section-header">🎵 Most practised pieces</h2>`;
+  if (topPieces.length === 0) {
+    html += `<p style="color:var(--text-muted);font-size:0.85rem">No piece data yet.</p>`;
+  } else {
+    topPieces.forEach((p, i) => {
+      const barPct = Math.round((p.mins / maxPieceMins) * 100);
+      const students = p.studentSet.size;
+      html += `
+      <div class="top-piece-row">
+        <div class="top-piece-rank">${i + 1}</div>
+        <div class="top-piece-name">
+          ${escHtml(p.name)}
+          ${p.composer ? `<div class="top-piece-composer">${escHtml(p.composer)}</div>` : ""}
+          <div style="font-size:0.68rem;color:var(--text-muted)">${students} student${students===1?"":"s"}</div>
+        </div>
+        <div class="top-piece-bar-wrap"><div class="top-piece-bar" style="width:${barPct}%"></div></div>
+        <div class="top-piece-mins">${fmtMins(p.mins)}</div>
+      </div>`;
+    });
+  }
+  html += `</div>`;
+
+  // Pending requests
+  html += `
+  <div>
+    <h2 class="section-header">📬 Pending requests <span class="section-meta">${pendingRequests} open</span></h2>`;
+  if (pendingList.length === 0) {
+    html += `<p style="color:var(--text-muted);font-size:0.85rem">All caught up! 🎉</p>`;
+  } else {
+    for (const r of pendingList) {
+      html += `
+      <div class="pending-req-item">
+        <div class="pending-req-title">${escHtml(r.title || "—")}</div>
+        <div class="pending-req-meta">${escHtml(r.email)} · ${r.type} · ${relativeDate(r.created_at?.slice(0,10))}</div>
+      </div>`;
+    }
+    if (pendingRequests > 15) {
+      html += `<p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">+ ${pendingRequests - 15} more — see Requests tab in the database</p>`;
+    }
+  }
+  html += `</div>`;
+
+  html += `</div>`; // end two-col
+
+  // ── Practice type breakdown ───────────────────────────────
+  html += `<div class="two-col" style="margin-bottom:32px"><div>`;
+  html += `<h2 class="section-header">🎯 Practice type breakdown</h2>`;
+  html += `<div class="type-bar-wrap">`;
+  for (const [type, cfg] of Object.entries(TYPE_COLORS)) {
+    const pct = ((typeMins[type] || 0) / totalTypeMins * 100).toFixed(1);
+    if (pct > 0) html += `<div class="type-bar-seg" style="width:${pct}%;background:${cfg.color}" title="${cfg.label}: ${pct}%"></div>`;
+  }
+  html += `</div><div class="type-legend">`;
+  for (const [type, cfg] of Object.entries(TYPE_COLORS)) {
+    const mins = typeMins[type] || 0;
+    if (!mins) continue;
+    const pct = (mins / totalTypeMins * 100).toFixed(0);
+    html += `<div class="type-legend-item"><div class="type-dot" style="background:${cfg.color}"></div>${cfg.label} ${pct}% · ${fmtMins(mins)}</div>`;
+  }
+  html += `</div></div>`;
+
+  // ── Day of week heatmap ───────────────────────────────────
+  html += `<div><h2 class="section-header">📅 Most active days</h2>`;
+  html += `<div class="dow-grid">`;
+  dowCounts.forEach((count, i) => {
+    const pct = count / maxDow;
+    const lvl = count === 0 ? 0 : pct < .33 ? 1 : pct < .66 ? 2 : pct < .9 ? 3 : 4;
+    html += `<div class="dow-cell l${lvl}">
+      <div class="dow-cell-label">${DOW_LABELS[i]}</div>
+      <div class="dow-cell-val">${count}</div>
+    </div>`;
+  });
+  html += `</div></div></div>`;
+
+  // ── Upcoming clinic bookings ──────────────────────────────
+  html += `<h2 class="section-header">🎹 Upcoming clinics <span class="section-meta">${upcomingClinics.length} booked</span></h2>`;
+  if (upcomingClinics.length === 0) {
+    html += `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:32px">No upcoming clinics booked.</p>`;
+  } else {
+    html += `<div style="margin-bottom:32px">`;
+    for (const b of upcomingClinics) {
+      const start   = new Date(b.start);
+      const dateStr = start.toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" });
+      const timeStr = start.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
+      const attendee = b.attendees?.[0];
+      html += `<div class="clinic-item">
+        <div class="clinic-date">${dateStr}<br>${timeStr}</div>
+        <div>
+          <div class="clinic-name">${escHtml(attendee?.name || "—")}</div>
+          <div class="clinic-meta">${escHtml(attendee?.email || "")} · ${b.duration}min</div>
+          ${b.meetingUrl ? `<a class="clinic-zoom" href="${b.meetingUrl}" target="_blank">Join Zoom →</a>` : ""}
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // ── Passage Fixer section ─────────────────────────────────
+  html += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">
+    <span style="color:#a5b4fc">🎯</span> Passage Fixer
+    <span class="section-meta">${totalGames} games all time · ${gamesThisWeek} this week</span>
+  </h2>`;
+
+  if (totalGames === 0) {
+    html += `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:32px">No passage games played yet.</p>`;
+  } else {
+    // Summary stat grid
+    html += `<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:28px">
+      <div class="stat-card" style="border-color:#1e2d4a">
+        <div class="stat-value" style="color:#a5b4fc">${totalGames}</div>
+        <div class="stat-label">Total games</div>
+      </div>
+      <div class="stat-card" style="border-color:#1e2d4a">
+        <div class="stat-value" style="color:#4ade80">${clearanceRate}%</div>
+        <div class="stat-label">Clearance rate</div>
+      </div>
+      <div class="stat-card" style="border-color:#1e2d4a">
+        <div class="stat-value" style="color:#4ade80">${clearedGames}</div>
+        <div class="stat-label">Cleared</div>
+      </div>
+      <div class="stat-card" style="border-color:#1e2d4a">
+        <div class="stat-value" style="color:#60a5fa">${leveledUpGames}</div>
+        <div class="stat-label">Levelled up</div>
+      </div>
+      <div class="stat-card" style="border-color:#1e2d4a">
+        <div class="stat-value" style="color:var(--text-muted)">${abandonedGames}</div>
+        <div class="stat-label">Abandoned</div>
+      </div>
+      <div class="stat-card" style="border-color:#1e2d4a">
+        <div class="stat-value" style="color:#a5b4fc">${avgAccuracy}%</div>
+        <div class="stat-label">Avg accuracy</div>
+      </div>
+    </div>`;
+
+    // Two col: top passages + per-student
+    html += `<div class="two-col" style="margin-bottom:32px">`;
+
+    // Top passages
+    html += `<div>
+      <h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a">Most worked passages</h3>`;
+    if (topPassages.length === 0) {
+      html += `<p style="color:var(--text-muted);font-size:.85rem">None yet.</p>`;
+    } else {
+      const maxPassageCount = topPassages[0].count;
+      html += `<div>`;
+      for (const p of topPassages) {
+        const barPct = Math.round((p.count / maxPassageCount) * 100);
+        const pAcc   = p.accuracyCount > 0 ? Math.round((p.totalAccuracy / p.accuracyCount) * 100) : null;
+        const successCount = p.cleared + p.leveledUp;
+        html += `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:6px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:.88rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.label)}</div>
+              ${p.piece ? `<div style="font-size:.72rem;color:var(--text-muted);margin-top:1px">${escHtml(p.piece)}</div>` : ""}
+            </div>
+            <div style="font-size:.8rem;font-weight:700;color:#a5b4fc;flex-shrink:0">${p.count} game${p.count===1?"":"s"}</div>
+          </div>
+          <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:5px">
+            <div style="height:100%;width:${barPct}%;background:#4f46e5;border-radius:2px"></div>
+          </div>
+          <div style="display:flex;gap:12px;font-size:.68rem;color:var(--text-muted)">
+            <span>${p.students.size} student${p.students.size===1?"":"s"}</span>
+            <span style="color:#4ade80">${successCount} cleared/levelled</span>
+            ${pAcc !== null ? `<span>${pAcc}% accuracy</span>` : ""}
+            ${p.simplifyTotal > 0 ? `<span>${(p.simplifyTotal/p.count).toFixed(1)} simplifies/game</span>` : ""}
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+
+    // Per-student breakdown
+    html += `<div>
+      <h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a">Usage by student</h3>`;
+    const gameStudents = Object.entries(gamesByStudent)
+      .sort((a, b) => b[1].total - a[1].total);
+    if (gameStudents.length === 0) {
+      html += `<p style="color:var(--text-muted);font-size:.85rem">No usage yet.</p>`;
+    } else {
+      html += `<div>`;
+      for (const [email, s] of gameStudents) {
+        const acc     = s.accuracyCount > 0 ? Math.round((s.accuracySum / s.accuracyCount) * 100) : null;
+        const succRate = s.total > 0 ? Math.round(((s.cleared + s.leveledUp) / s.total) * 100) : 0;
+        html += `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:.85rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(email)}</div>
+            <div style="font-size:.7rem;color:var(--text-muted);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap">
+              <span>${s.total} game${s.total===1?"":"s"}</span>
+              <span style="color:#4ade80">${s.cleared} cleared</span>
+              ${s.leveledUp > 0 ? `<span style="color:#60a5fa">${s.leveledUp} levelled up</span>` : ""}
+              ${s.abandoned > 0 ? `<span>${s.abandoned} abandoned</span>` : ""}
+              ${acc !== null ? `<span>${acc}% accuracy</span>` : ""}
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:1.1rem;font-weight:800;color:${succRate>=70?"#4ade80":succRate>=40?"#f59e0b":"var(--text-muted)"}">${succRate}%</div>
+            <div style="font-size:.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">clear rate</div>
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div></div>`;
+
+    // Recent passage game activity
+    html += `<h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a">Recent passage game activity</h3>`;
+    html += `<div class="activity-feed" style="margin-bottom:36px">`;
+    const recentGames = games.slice(0, 20);
+    for (const g of recentGames) {
+      const outcomeColor = g.outcome === "cleared" ? "#4ade80" : g.outcome === "leveled_up" ? "#60a5fa" : "var(--text-muted)";
+      const outcomeLabel = g.outcome === "cleared" ? "Cleared" : g.outcome === "leveled_up" ? "Levelled up" : "Abandoned";
+      const acc = g.attempts > 0 ? Math.round((g.correct_count / g.attempts) * 100) : null;
+      html += `
+      <div class="activity-item">
+        <div class="activity-dot" style="background:#4f46e5"></div>
+        <div class="activity-body">
+          <div class="activity-email">${escHtml(g.email)}</div>
+          <div class="activity-detail">
+            <strong style="color:var(--text)">${escHtml(g.passage_label)}</strong>
+            ${g.piece_label ? ` — ${escHtml(g.piece_label)}` : ""}
+            · Lv.${g.level} · ${g.attempts} attempts${acc !== null ? ` · ${acc}% accuracy` : ""}
+            ${g.simplify_triggers > 0 ? ` · ${g.simplify_triggers} simplify` : ""}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:.72rem;font-weight:700;color:${outcomeColor};text-transform:uppercase;letter-spacing:.06em">${outcomeLabel}</div>
+          <div class="activity-time">${relativeDate((g.created_at||"").slice(0,10))}</div>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Recent activity feed
+  html += `
+  <h2 class="section-header">⏱ Recent sessions <span class="section-meta">latest ${recentActivity.length}</span></h2>
+  <div class="activity-feed">`;
+  if (recentActivity.length === 0) {
+    html += `<p style="color:var(--text-muted);font-size:0.85rem">No sessions yet.</p>`;
+  } else {
+    for (const sess of recentActivity) {
+      const items    = sess.practice_items || [];
+      const sessMins = sess.timing_mode === "per_item"
+        ? items.reduce((s, i) => s + (i.duration_minutes || 0), 0)
+        : (sess.duration_minutes || 0);
+      const pieces   = items.filter(i => i.item_type === "piece")
+        .map(i => i.piece_label || i.label || "Untitled").slice(0, 3);
+      const detail   = pieces.length > 0
+        ? pieces.join(", ") + (items.filter(i=>i.item_type==="piece").length > 3 ? " + more" : "")
+        : `${items.length} item${items.length===1?"":"s"}`;
+
+      html += `
+      <div class="activity-item">
+        <div class="activity-dot"></div>
+        <div class="activity-body">
+          <div class="activity-email">${escHtml(sess.email)}</div>
+          <div class="activity-detail">${escHtml(detail)} · ${fmtMins(sessMins)}</div>
+        </div>
+        <div class="activity-time">${relativeDate(sess.session_date)}</div>
+      </div>`;
+    }
+  }
+  html += `</div>`;
+
+  document.getElementById("analytics-loading").style.display  = "none";
+  document.getElementById("analytics-content").style.display  = "block";
+  document.getElementById("analytics-content").innerHTML = html;
+
+  populateSquareCards({ weekSessions, weekMins, totalSessions, totalMins, typeMins, totalTypeMins, topPieces, weekLabel });
+}
+
+// ── Share card download ───────────────────────────────────────
+async function downloadShareCard() {
+  const card = document.getElementById("share-card");
+  if (!card) return;
+  const btn = document.querySelector(".share-btn");
+  btn.textContent = "Generating…";
+  try {
+    const canvas = await html2canvas(card, {
+      backgroundColor: "#111",
+      scale: 2,
+      useCORS: true,
+    });
+    const link = document.createElement("a");
+    link.download = `practice-room-${new Date().toISOString().slice(0,10)}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  } finally {
+    btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Share summary`;
+  }
+}
+
+// ── Square card population ────────────────────────────────────
+function populateSquareCards({ weekSessions, weekMins, totalSessions, totalMins, typeMins, totalTypeMins, topPieces, weekLabel }) {
+
+  // Shared shell: glow layer + accent bar + body wrapper
+  function sqCard(innerHtml) {
+    return `
+      <div class="sq-glow"></div>
+      <div class="sq-accent"></div>
+      <div class="sq-body">
+        <div class="sq-brand">The Practice Room</div>
+        <div class="sq-center">${innerHtml}</div>
+        <div class="sq-footer">
+          <div class="sq-footer-brand">thepracticeroom.matthewcawood.com</div>
+          <div class="sq-footer-url">${weekLabel}</div>
+        </div>
+      </div>`;
+  }
+
+  // Big-number cards: readable label above, giant number below
+  function statCard(value, label, sub) {
+    return sqCard(`
+      <div class="sq-stat-unit">
+        <div class="sq-big-label">${label}</div>
+        <div class="sq-big-value">${value}</div>
+        ${sub ? `<div class="sq-big-sub">${sub}</div>` : ""}
+      </div>
+    `);
+  }
+
+  // ── Card 1: Sessions this week ────────────────────────────
+  document.getElementById("sq-card-1").innerHTML =
+    statCard(weekSessions.length, "sessions logged this week");
+
+  // ── Card 2: Practice time this week ──────────────────────
+  document.getElementById("sq-card-2").innerHTML =
+    statCard(fmtMinsSq(weekMins), "practice time this week");
+
+  // ── Card 3: Total sessions all time ──────────────────────
+  document.getElementById("sq-card-3").innerHTML =
+    statCard(totalSessions, "sessions logged");
+
+  // ── Card 4: Total practice time all time ─────────────────
+  document.getElementById("sq-card-4").innerHTML =
+    statCard(fmtMinsSq(totalMins), "practice time logged");
+
+  // ── Card 5: Top 5 pieces ──────────────────────────────────
+  const pieceItems = topPieces.slice(0, 5).map((p, i) => `
+    <div class="sq-pl-item">
+      <div class="sq-pl-num ${i === 0 ? "top" : ""}">${i + 1}</div>
+      <div class="sq-pl-info">
+        <div class="sq-pl-name">${escHtml(p.name)}</div>
+      </div>
+      <div class="sq-pl-time">${fmtMins(p.mins)}</div>
+    </div>`).join("");
+
+  document.getElementById("sq-card-5").innerHTML = sqCard(topPieces.length ? `
+    <div style="font-size:.82rem;color:#bbb;margin-bottom:14px;text-align:left;width:100%;font-weight:500">Most practiced pieces</div>
+    <div class="sq-pl-list">${pieceItems}</div>
+  ` : `<div style="color:#333;font-size:.8rem">No piece data yet</div>`);
+
+  // ── Card 6: Practice mix ──────────────────────────────────
+  const typeBarSegs = Object.entries(TYPE_COLORS).map(([type, cfg]) => {
+    const pct = ((typeMins[type] || 0) / (totalTypeMins || 1) * 100).toFixed(1);
+    return Number(pct) > 0 ? `<div class="sq-type-seg" style="flex:${pct};background:${cfg.color}"></div>` : "";
+  }).join("");
+
+  const typeRows = Object.entries(TYPE_COLORS).map(([type, cfg]) => {
+    const mins = typeMins[type] || 0;
+    if (!mins) return "";
+    const pct = (mins / (totalTypeMins || 1) * 100).toFixed(0);
+    return `<div class="sq-type-row">
+      <div class="sq-type-dot" style="background:${cfg.color}"></div>
+      <div class="sq-type-name">${cfg.label}</div>
+      <div class="sq-type-pct">${pct}%</div>
+    </div>`;
+  }).join("");
+
+  document.getElementById("sq-card-6").innerHTML = sqCard(totalTypeMins > 0 ? `
+    <div class="sq-type-wrap">
+      <div style="font-size:.82rem;color:#bbb;margin-bottom:18px;text-align:left;font-weight:500">How the community practices</div>
+      <div class="sq-type-bar">${typeBarSegs}</div>
+      <div class="sq-type-rows">${typeRows}</div>
+    </div>
+  ` : `<div style="color:#333;font-size:.8rem">No data yet</div>`);
+}
+
+// ── Square card download ──────────────────────────────────────
+async function downloadSquareCard(n) {
+  const card = document.getElementById(`sq-card-${n}`);
+  const btn  = document.getElementById(`sq-btn-${n}`);
+  if (!card || !btn) return;
+  const origText = btn.innerHTML;
+  btn.textContent = "Generating…";
+  try {
+    const canvas = await html2canvas(card, {
+      backgroundColor: "#080808",
+      scale: 4,
+      useCORS: true,
+      width: 500,
+      height: 500,
+    });
+    const link = document.createElement("a");
+    const labels = ["", "sessions-week", "time-week", "total-sessions", "total-time", "top-piece", "practice-mix"];
+    link.download = `practice-room-${labels[n]}-${new Date().toISOString().slice(0,10)}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  } finally {
+    btn.innerHTML = origText;
+  }
+}
+
+// ── Start ─────────────────────────────────────────────────────
+boot();
+</script>
+</body>
+</html>

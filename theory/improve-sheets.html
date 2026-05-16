@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Improve All Sheets</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; padding: 24px; max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 1.1rem; margin-bottom: 4px; }
+    p.sub { font-size: 0.85rem; color: #888; margin-bottom: 20px; line-height: 1.6; }
+    .card { background: #222; border: 1px solid #333; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.85rem; font-family: monospace; outline: none; margin-bottom: 12px; }
+    button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+    .btn-primary { background: #2d5a8a; color: #7ab4ff; }
+    .btn-primary:hover { background: #3a6a9a; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-apply { background: #2d6a2d; color: #9de89d; }
+    .btn-apply:hover { background: #3a8a3a; }
+    .btn-apply:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-retry { background: #3a2a1a; color: #f59e0b; border: 1px solid #5a3a1a; }
+    .btn-retry:hover { background: #4a3a2a; }
+    .status { font-size: 0.85rem; color: #888; margin-top: 10px; }
+    .status.ok  { color: #4ade80; }
+    .status.err { color: #f87171; }
+
+    .progress-wrap { margin: 12px 0 4px; }
+    .progress-bar { height: 6px; background: #2a2a2a; border-radius: 3px; }
+    .progress-fill { height: 100%; background: #2d5a8a; border-radius: 3px; transition: width 0.4s; }
+    .progress-label { font-size: 0.8rem; color: #666; margin-top: 5px; }
+
+    #results-wrap { display: none; margin-top: 16px; }
+    .results-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .results-header span { font-size: 0.85rem; color: #888; }
+
+    .sheet-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; font-size: 0.82rem; background: #1e1e1e; border: 1px solid #2a2a2a; }
+    .sheet-row.success { border-color: #1a3a1a; }
+    .sheet-row.failed  { border-color: #3a1a1a; }
+    .sheet-row.pending { opacity: 0.5; }
+    .sheet-row.processing { border-color: #2a3a5a; }
+    .sheet-name { flex: 1; color: #ccc; }
+    .sheet-status { font-size: 0.78rem; white-space: nowrap; }
+    .sheet-status.ok  { color: #4ade80; }
+    .sheet-status.err { color: #f87171; }
+    .sheet-status.processing { color: #7ab4ff; }
+    .sheet-status.pending { color: #555; }
+    input[type=checkbox] { width: 15px; height: 15px; accent-color: #7ab4ff; cursor: pointer; flex-shrink: 0; }
+
+    .apply-bar { display: flex; align-items: center; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #333; flex-wrap: wrap; }
+    .apply-status { font-size: 0.85rem; }
+    .apply-status.ok  { color: #4ade80; }
+    .apply-status.err { color: #f87171; }
+
+    .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #333; border-top-color: #7ab4ff; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 4px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<h1>⚡ Improve All Sheets</h1>
+<p class="sub">Sends all sheets to Claude in small batches to improve content quality and fill out thin sections. Processes 3 at a time with pauses between batches to avoid rate limits. Review and apply when done.</p>
+
+<div class="card">
+  <label>Anthropic API Key</label>
+  <input type="password" id="api-key" placeholder="sk-ant-…" />
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button class="btn-primary" id="run-btn" onclick="startImproving()">⚡ Improve All Sheets</button>
+    <button class="btn-retry" id="retry-btn" style="display:none" onclick="retryFailed()">↺ Retry Failed</button>
+    <span class="status" id="run-status"></span>
+  </div>
+  <div class="progress-wrap" id="progress-wrap" style="display:none">
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+    <div class="progress-label" id="progress-label"></div>
+  </div>
+</div>
+
+<div id="results-wrap">
+  <div class="results-header">
+    <span id="count-label"></span>
+    <span class="apply-status" id="apply-status"></span>
+    <a onclick="clearDone();location.reload()" style="font-size:0.8rem;color:#555;cursor:pointer;text-decoration:underline;margin-left:auto">Clear history &amp; redo all</a>
+  </div>
+  <div id="results-list"></div>
+</div>
+
+<script>
+  const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  const stored = localStorage.getItem("anthropic_key");
+  if (stored) document.getElementById("api-key").value = stored;
+
+  const BATCH_SIZE  = 3;
+  const BATCH_DELAY = 4000; // ms between batches
+  const MAX_RETRIES = 3;
+
+  let sheets = [];
+  let results = []; // { id, title, status, improved, error }
+
+  async function startImproving() {
+    const apiKey = document.getElementById("api-key").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+    localStorage.setItem("anthropic_key", apiKey);
+
+    const btn = document.getElementById("run-btn");
+    btn.disabled = true;
+    setStatus("Fetching sheets…", "");
+
+    const { data, error } = await db.from("theory_sheets").select("id, title, slug, content").order("title");
+    if (error || !data?.length) {
+      setStatus("Failed to load: " + (error?.message || "no data"), "err");
+      btn.disabled = false; return;
+    }
+
+    sheets = data;
+    const savedDone = getSavedDone();
+    results = sheets.map(s => ({
+      id: s.id, title: s.title || s.slug, content: s.content,
+      status: savedDone.has(s.id) ? "success" : "pending",
+      improved: null, error: null
+    }));
+
+    document.getElementById("results-wrap").style.display = "block";
+    document.getElementById("progress-wrap").style.display = "block";
+    renderResults();
+    updateProgress();
+
+    const pending = results.filter(r => r.status === "pending");
+    if (!pending.length) {
+      setStatus("✓ All sheets already improved — click 'Clear history & redo all' to reprocess.", "ok");
+      btn.disabled = false; return;
+    }
+
+    await processBatches(apiKey, results);
+    btn.disabled = false;
+  }
+
+  async function retryFailed() {
+    const apiKey = document.getElementById("api-key").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+    const failed = results.filter(r => r.status === "failed");
+    if (!failed.length) return;
+    failed.forEach(r => { r.status = "pending"; r.error = null; });
+    renderResults();
+    await processBatches(apiKey, failed);
+  }
+
+  async function processBatches(apiKey, items) {
+    document.getElementById("retry-btn").style.display = "none";
+    const pending = items.filter(r => r.status === "pending");
+
+    for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+      const batch = pending.slice(i, i + BATCH_SIZE);
+      batch.forEach(r => { r.status = "processing"; });
+      renderResults();
+      updateProgress();
+
+      await Promise.all(batch.map(r => improveSheet(apiKey, r)));
+
+      renderResults();
+      updateProgress();
+
+      // Pause between batches (not after the last one)
+      if (i + BATCH_SIZE < pending.length) {
+        setStatus(`Batch ${Math.floor(i/BATCH_SIZE)+1} done — pausing before next batch…`, "");
+        await sleep(BATCH_DELAY);
+      }
+    }
+
+    const failed = results.filter(r => r.status === "failed");
+    const ok     = results.filter(r => r.status === "success");
+
+    if (failed.length) {
+      setStatus(`Done — ${ok.length} saved to database, ${failed.length} failed`, "err");
+      document.getElementById("retry-btn").style.display = "";
+    } else {
+      setStatus(`✓ All ${ok.length} sheets improved and saved to database`, "ok");
+    }
+
+    renderResults();
+  }
+
+  const DONE_KEY = "improve_sheets_done";
+  function getSavedDone() { try { return new Set(JSON.parse(localStorage.getItem(DONE_KEY)||"[]")); } catch { return new Set(); } }
+  function markDone(id) { const s = getSavedDone(); s.add(id); localStorage.setItem(DONE_KEY, JSON.stringify([...s])); }
+  function clearDone() { localStorage.removeItem(DONE_KEY); }
+
+  function repairJson(str) {
+    let result = "", inString = false, escaped = false;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (escaped) { result += ch; escaped = false; continue; }
+      if (ch === "\\") { result += ch; escaped = true; continue; }
+      if (!inString) {
+        if (ch === '"') inString = true;
+        result += ch;
+      } else {
+        if (ch === '"' && /^[\s]*[,:\}\]]/.test(str.slice(i + 1))) {
+          inString = false; result += ch;
+        } else if (ch === '"') {
+          result += "'";
+        } else {
+          result += ch;
+        }
+      }
+    }
+    return result;
+  }
+
+  // Inject measurement styles — no height/overflow constraints so natural height is measurable
+  (function() {
+    const style = document.createElement("style");
+    style.textContent = `
+      .m-page { box-sizing:border-box; width:210mm; padding:10mm 14mm 8mm;
+        display:flex; flex-direction:column; font-family:Georgia,'Times New Roman',serif; color:#111;
+        position:fixed; left:-9999px; top:0; visibility:hidden; }
+      .m-brand { font-size:32pt; font-weight:900; line-height:1; padding-bottom:3.5mm;
+        border-bottom:3px solid #111; margin-bottom:4.5mm; }
+      .m-title { font-size:14pt; font-weight:900; line-height:1.15; padding-bottom:2mm;
+        border-bottom:0.75px solid #999; margin-bottom:2.5mm; }
+      .m-intro { font-size:9.5pt; font-style:italic; line-height:1.42; margin-bottom:3mm; }
+      .m-divider { border:none; border-top:1.5px solid #111; margin-bottom:3mm; }
+      .m-columns { display:grid; grid-template-columns:1fr 1fr;
+        column-gap:7mm; row-gap:3mm; padding-bottom:2mm; }
+      .m-section h2 { font-size:10.5pt; font-weight:700; line-height:1.2; margin-bottom:1.5mm; }
+      .m-section p  { font-size:8.8pt; line-height:1.38; margin-bottom:1.5mm; }
+      .m-section ul { list-style:none; padding:0; font-size:8.8pt; line-height:1.38; }
+      .m-section li { padding-left:0.9em; text-indent:-0.9em; margin-bottom:0.8mm; }
+      .m-section li::before { content:'• '; }
+      .m-cheat { grid-column:1/-1; border:2px solid #111; padding:3mm 3.5mm; }
+      .m-cheat h3 { font-size:10.5pt; font-weight:700; margin-bottom:2mm; }
+      .m-cheat ul { list-style:none; padding:0; font-size:8.8pt; line-height:1.4; columns:2; column-gap:7mm; }
+      .m-cheat li { padding-left:0.9em; text-indent:-0.9em; margin-bottom:0.8mm; }
+      .m-cheat li::before { content:'• '; }
+      .m-footer { display:flex; border-top:1px solid #111; padding-top:2mm; margin-top:2.5mm;
+        font-size:7.5pt; font-style:italic; }
+    `;
+    document.head.appendChild(style);
+  })();
+
+  // Measure fit: render page with no height constraint, compare natural height to 297mm
+  function measureFit(content) {
+    const MM = 3.7795;
+    const PAGE_PX = 297 * MM;
+    const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+    const sectionHTML = (s) => s ? `<div class="m-section">
+      <h2>${esc(s.heading)}</h2>
+      ${s.paragraph ? `<p>${esc(s.paragraph)}</p>` : ""}
+      ${(s.bullets||[]).length ? `<ul>${(s.bullets||[]).map(b=>`<li>${esc(b)}</li>`).join("")}</ul>` : ""}
+    </div>` : `<div></div>`;
+
+    const left  = (content.leftSections  || []).slice(0, 4);
+    const right = (content.rightSections || []).slice(0, 4);
+    const maxLen = Math.max(left.length, right.length);
+    let sectionsHTML = "";
+    for (let i = 0; i < maxLen; i++) {
+      sectionsHTML += sectionHTML(left[i]);
+      sectionsHTML += sectionHTML(right[i]);
+    }
+
+    const cheatHTML = `<div class="m-cheat">
+      <h3>${esc(content.cheatTitle || "CHEAT SHEET")}</h3>
+      <ul>${(content.cheatBullets||[]).map(b=>`<li>${esc(b)}</li>`).join("")}</ul>
+    </div>`;
+
+    const page = document.createElement("div");
+    page.className = "m-page";
+    page.innerHTML = `
+      <div class="m-brand">PIANO PRACTICE DAILY</div>
+      <div class="m-title">Title placeholder</div>
+      <div class="m-intro">${esc(content.intro||"")}</div>
+      <div class="m-divider"></div>
+      <div class="m-columns">${sectionsHTML}${cheatHTML}</div>
+      <div class="m-footer"><span>a</span><span>b</span></div>
+    `;
+
+    document.body.appendChild(page);
+    const naturalHeight = page.getBoundingClientRect().height;
+    document.body.removeChild(page);
+
+    // positive = overflows A4, negative = spare space
+    return naturalHeight - PAGE_PX;
+  }
+
+  function contentSummary(c) {
+    return `Intro: ${c.intro || ""}
+
+Left sections:
+${(c.leftSections||[]).map((s,i) => `${i+1}. ${s.heading}: ${s.paragraph||""} ${(s.bullets||[]).join("; ")}`).join("\n")}
+
+Right sections:
+${(c.rightSections||[]).map((s,i) => `${i+1}. ${s.heading}: ${s.paragraph||""} ${(s.bullets||[]).join("; ")}`).join("\n")}
+
+Cheat sheet: ${c.cheatTitle||""}
+${(c.cheatBullets||[]).join("\n")}`;
+  }
+
+  function buildPrompt(topic, summary, extraNote = "") {
+    return `You are rewriting a "Piano Practice Daily" music theory reference sheet for piano students of all levels.
+
+Sheet topic: "${topic}"
+
+Current content:
+${summary}
+${extraNote}
+
+Rewrite this sheet:
+1. ACCESSIBLE: Explain technical terms briefly in plain English when first used.
+2. LAYERED: Include detail useful to intermediate/advanced players too.
+3. PRACTICAL: Ground concepts in what you can hear or do at the piano.
+4. INTRO: 2-3 sentences — introduce the topic, why it matters at the piano, and who will benefit. Aim for 40-60 words. Italic, full-width standfirst style.
+5. SECTIONS: EXACTLY 4 in leftSections, EXACTLY 4 in rightSections. Keep same headings.
+   - Paragraph only: MAX 3 sentences, each under 20 words.
+   - Bullets only: EXACTLY 3 bullets, each under 10 words.
+   - Both paragraph + bullets: MAX 2 sentences + EXACTLY 2 bullets.
+6. CHEAT SHEET: EXACTLY 4 bullets, each under 10 words.
+
+Return JSON only, no markdown fences:
+{
+  "intro": "text",
+  "leftSections": [{ "heading": "heading", "paragraph": "text or empty", "bullets": ["bullet"] }],
+  "rightSections": [{ "heading": "heading", "paragraph": "text or empty", "bullets": ["bullet"] }],
+  "cheatTitle": "CHEAT SHEET: Topic",
+  "cheatBullets": ["bullet 1", "bullet 2"]
+}
+
+CRITICAL: Use single quotes (') not double quotes (") inside string values.`;
+  }
+
+  async function callClaude(apiKey, prompt) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+    if (res.status === 429) {
+      const wait = parseInt(res.headers.get("retry-after") || "15") * 1000;
+      throw Object.assign(new Error("rate_limit"), { wait: Math.max(wait, 8000) });
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API ${res.status}`);
+    }
+    const data = await res.json();
+    const raw  = data.content?.[0]?.text || "";
+    const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
+    if (start === -1) throw new Error("No JSON in response");
+    const cleaned = raw.slice(start, end + 1);
+    try { return JSON.parse(cleaned); }
+    catch(_) { return JSON.parse(repairJson(cleaned)); }
+  }
+
+  async function improveSheet(apiKey, result) {
+    const c = result.content || {};
+    const topic = c.title || result.title;
+    const leftCount  = (c.leftSections||[]).length;
+    const rightCount = (c.rightSections||[]).length;
+
+    let extraNote = "";
+    if (leftCount > 4 || rightCount > 4) {
+      extraNote = `\nIMPORTANT: Currently has ${leftCount} left and ${rightCount} right sections. Consolidate to EXACTLY 4 each — merge extra content into related sections, nothing lost.`;
+    }
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 1) await sleep([0, 3000, 8000, 15000][attempt - 1]);
+
+      try {
+        // Generate initial version
+        let improved = await callClaude(apiKey, buildPrompt(topic, contentSummary(c), extraNote));
+
+        // Measure fit and adjust up to 4 times
+        for (let pass = 0; pass < 4; pass++) {
+          const overflow = measureFit(improved);
+          const MM = 3.7795;
+          const OVERFLOW_THRESHOLD =  0;          // any overflow = too long
+          const SPARE_THRESHOLD    = -(30 * MM);  // >30mm spare = expand
+
+          if (overflow > OVERFLOW_THRESHOLD) {
+            const overflowMM = Math.round(overflow / MM);
+            const urgency = overflowMM > 15 ? "SIGNIFICANTLY shorten" : "shorten";
+            const adjustNote = `\nCRITICAL: The previous version overflows the page by ${overflowMM}mm. You MUST ${urgency} the content. Cut sentences, reduce paragraphs, remove a bullet from sections that have 3+. Do NOT add anything new.`;
+            improved = await callClaude(apiKey, buildPrompt(topic, contentSummary(improved), adjustNote));
+            await sleep(1500);
+          } else if (overflow < SPARE_THRESHOLD) {
+            const spareMM = Math.round(-overflow / MM);
+            const adjustNote = `\nThe previous version left ${spareMM}mm of empty space. Please expand — add a sentence to thin paragraphs, or add a bullet to sections that only have 1-2. Stay within the MAX limits per section.`;
+            improved = await callClaude(apiKey, buildPrompt(topic, contentSummary(improved), adjustNote));
+            await sleep(1500);
+          } else {
+            break; // fits well — done
+          }
+        }
+
+        result.improved = improved;
+
+        // Save to Supabase
+        const updatedContent = {
+          ...result.content,
+          intro:         improved.intro,
+          leftSections:  improved.leftSections,
+          rightSections: improved.rightSections,
+          cheatTitle:    improved.cheatTitle,
+          cheatBullets:  improved.cheatBullets,
+        };
+        const { error: saveError } = await db
+          .from("theory_sheets")
+          .update({ content: updatedContent })
+          .eq("id", result.id);
+
+        if (saveError) {
+          result.status = "failed";
+          result.error  = "Save failed: " + saveError.message;
+        } else {
+          result.status  = "success";
+          result.error   = null;
+          result.content = updatedContent;
+          markDone(result.id);
+        }
+        return;
+
+      } catch(err) {
+        if (err.message === "rate_limit") {
+          await sleep(err.wait || 8000);
+          if (attempt === MAX_RETRIES) { result.status = "failed"; result.error = "Rate limited"; }
+          continue;
+        }
+        result.error = err.message;
+        if (attempt === MAX_RETRIES) result.status = "failed";
+      }
+    }
+  }
+
+  async function retrySingle(i) {
+    const apiKey = document.getElementById("api-key").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+    const r = results[i];
+    if (!r) return;
+    // Un-mark from done so it gets reprocessed
+    const done = getSavedDone(); done.delete(r.id); localStorage.setItem(DONE_KEY, JSON.stringify([...done]));
+    r.status = "pending"; r.improved = null; r.error = null;
+    renderResults();
+    await processBatches(apiKey, [r]);
+  }
+
+  function renderResults() {
+    const list = document.getElementById("results-list");
+    list.innerHTML = results.map((r, i) => {
+      const statusText = {
+        pending:    '<span class="sheet-status pending">⏳ Pending</span>',
+        processing: '<span class="sheet-status processing"><span class="spinner"></span>Processing…</span>',
+        success:    r.improved ? '<span class="sheet-status ok">✓ Improved &amp; saved</span>' : '<span class="sheet-status" style="color:#4ade80">✓ Previously saved</span>',
+        failed:     `<span class="sheet-status err">✗ Failed: ${escHtml(r.error||"")}</span>`,
+      }[r.status] || "";
+
+      const retryBtn = (r.status === "success" || r.status === "failed")
+        ? `<button onclick="retrySingle(${i})" style="padding:2px 8px;font-size:0.72rem;background:#2a2a2a;border:1px solid #444;color:#888;border-radius:4px;cursor:pointer">↺</button>`
+        : '';
+
+      return `<div class="sheet-row ${r.status}">
+        <span class="sheet-name">${escHtml(r.title)}</span>
+        ${statusText}
+        ${retryBtn}
+      </div>`;
+    }).join("");
+
+    const successCount = results.filter(r => r.status === "success").length;
+    const failCount    = results.filter(r => r.status === "failed").length;
+    const pendingCount = results.filter(r => r.status === "pending" || r.status === "processing").length;
+    let parts = [];
+    if (successCount) parts.push(`${successCount} improved`);
+    if (failCount)    parts.push(`${failCount} failed`);
+    if (pendingCount) parts.push(`${pendingCount} remaining`);
+    document.getElementById("count-label").textContent = parts.join(" · ");
+  }
+
+  function updateProgress() {
+    const done  = results.filter(r => r.status === "success" || r.status === "failed").length;
+    const total = results.length;
+    document.getElementById("progress-fill").style.width = total ? (done / total * 100) + "%" : "0%";
+    document.getElementById("progress-label").textContent = `${done} of ${total} processed`;
+  }
+
+  function setStatus(msg, cls) {
+    const el = document.getElementById("run-status");
+    el.textContent = msg;
+    el.className = "status" + (cls ? " " + cls : "");
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  function escHtml(s) {
+    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+</script>
+</body>
+</html>

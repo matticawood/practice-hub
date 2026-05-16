@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Regenerate Piece Content</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 24px; max-width: 900px; }
+    h1 { font-size: 1.2rem; margin-bottom: 4px; }
+    p.sub { font-size: 0.85rem; color: #888; margin-bottom: 24px; line-height: 1.6; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.9rem; font-family: monospace; outline: none; margin-bottom: 12px; }
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+    .btn-primary  { background: #2d6a2d; color: #9de89d; }
+    .btn-stop     { background: #6a2d2d; color: #e89d9d; }
+    .btn-apply    { background: #1a3a6a; color: #7ab4ff; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Progress */
+    .progress-wrap { margin-top: 14px; display: none; }
+    .progress-bar-bg { background: #222; border-radius: 4px; height: 8px; overflow: hidden; }
+    .progress-bar-fill { background: #4ade80; height: 100%; transition: width 0.3s; width: 0%; }
+    .progress-label { font-size: 0.8rem; color: #888; margin-top: 6px; }
+
+    /* Results */
+    .result-item { border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+    .result-header { background: #1e1e1e; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+    .result-title { font-size: 0.9rem; font-weight: 600; }
+    .result-composer { font-size: 0.8rem; color: #888; margin-top: 2px; }
+    .result-status { font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+    .status-done    { background: #1a3a1a; color: #4ade80; }
+    .status-error   { background: #3a1a1a; color: #f87171; }
+    .status-pending { background: #1a1a2a; color: #888; }
+    .result-body { display: none; padding: 14px; border-top: 1px solid #2a2a2a; }
+    .result-body.open { display: block; }
+    .section-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 4px; margin-top: 12px; }
+    .section-label:first-child { margin-top: 0; }
+    .section-text { font-size: 0.85rem; color: #ccc; line-height: 1.7; white-space: pre-wrap; }
+    .apply-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a2a2a; }
+    .apply-check { width: 16px; height: 16px; accent-color: #4ade80; cursor: pointer; }
+    .apply-label { font-size: 0.82rem; color: #aaa; }
+
+    .summary-bar { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: none; font-size: 0.85rem; color: #aaa; display: none; }
+    .summary-bar span { margin-right: 16px; }
+    .ok  { color: #4ade80; }
+    .err { color: #f87171; }
+    .warn { color: #facc15; }
+  </style>
+</head>
+<body>
+
+<h1>🎹 Regenerate Piece Content</h1>
+<p class="sub">
+  Generates Background, Pianist Notes, and Challenges & Level Rationale for each piece using Claude.<br>
+  Processes one piece at a time. Untick any pieces you don't want to update before applying.
+</p>
+
+<div class="card">
+  <label for="api-key">Anthropic API Key</label>
+  <input type="password" id="api-key" placeholder="sk-ant-…" />
+  <div class="controls">
+    <button class="btn-primary" id="run-btn" onclick="startGeneration()">⚡ Generate All Content</button>
+    <button class="btn-stop" id="stop-btn" onclick="stopGeneration()" style="display:none">⏹ Stop</button>
+    <span id="status" style="font-size:0.85rem;color:#888"></span>
+  </div>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    <div class="progress-label" id="progress-label"></div>
+  </div>
+</div>
+
+<div id="apply-bar" style="display:none" class="card">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button class="btn-apply" id="apply-btn" onclick="applySelected()">✓ Apply Selected</button>
+    <button class="btn-primary" id="retry-btn" onclick="retryFailed()" style="display:none">↺ Retry Failed</button>
+    <button style="background:#222;color:#aaa;border:1px solid #333" onclick="selectAll(true)">Select all</button>
+    <button style="background:#222;color:#aaa;border:1px solid #333" onclick="selectAll(false)">Deselect all</button>
+    <span id="apply-status" style="font-size:0.85rem;color:#888"></span>
+  </div>
+</div>
+
+<div id="results-container"></div>
+
+<script>
+  const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  const DIFF_LABELS = ["Absolute Beginner","Beginner","Lower Intermediate","Upper Intermediate","Advanced","Expert"];
+
+  let shouldStop = false;
+  let generatedResults = {}; // id → {background, pianist_notes, challenges}
+
+  const saved = localStorage.getItem("anthropic_key");
+  if (saved) document.getElementById("api-key").value = saved;
+
+  function repairJson(str) {
+    let result = "", inString = false, escaped = false;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (escaped) { result += ch; escaped = false; continue; }
+      if (ch === "\\") { result += ch; escaped = true; continue; }
+      if (!inString) {
+        if (ch === '"') inString = true;
+        result += ch;
+      } else {
+        if (ch === '"' && /^[\s]*[,:\}\]]/.test(str.slice(i + 1))) {
+          inString = false; result += ch;
+        } else if (ch === '"') {
+          result += "'";
+        } else {
+          result += ch;
+        }
+      }
+    }
+    return result;
+  }
+
+  function setStatus(msg) { document.getElementById("status").textContent = msg; }
+
+  function stopGeneration() { shouldStop = true; setStatus("Stopping after current piece…"); }
+
+  function selectAll(val) {
+    document.querySelectorAll(".apply-check").forEach(cb => cb.checked = val);
+  }
+
+  async function generateForPiece(piece, apiKey) {
+    const diffLabel = piece.difficulty != null ? DIFF_LABELS[piece.difficulty] : "unknown";
+    const prompt = `You are writing database entries for "The Practice Room", a piano repertoire reference database for adult piano students. Use British English spelling.
+
+Piece: ${piece.title}${piece.composer ? `\nComposer/Artist: ${piece.composer}` : ""}${piece.year ? `\nYear: ${piece.year}` : ""}${piece.difficulty ? `\nDifficulty: ${diffLabel}` : ""}
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "background": "Two to three paragraphs covering: the historical and compositional context, why the piece was written, the circumstances of its composition, relevant facts about the composer at the time, and its significance in the repertoire.",
+  "pianist_notes": "Two to three paragraphs covering: the structure of the piece, what it represents musically and emotionally, specific techniques it requires, how to approach learning it, particular passages or sections to be aware of, and performance considerations such as tone, phrasing, and character.",
+  "challenges": "Two paragraphs. First: explain the key technical and musical challenges and why the piece has been given its difficulty rating — always refer to the level by name (${diffLabel}), never by number. Second (headed 'Before You Begin'): list the technical skills and musical understanding a pianist should have mastered before attempting this piece."
+}
+
+Write with authority and warmth, aimed at a motivated adult learner. Be thorough and specific to this piece.`;
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2048,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${res.status}`);
+    }
+
+    const data = await res.json();
+    const text = data.content?.[0]?.text || "";
+    const start = text.indexOf("{"), end = text.lastIndexOf("}");
+    if (start === -1) throw new Error("No JSON in response");
+    const raw = text.slice(start, end + 1);
+    try { return JSON.parse(raw); }
+    catch(_) { return JSON.parse(repairJson(raw)); }
+  }
+
+  function renderResultItem(piece, status, content, error) {
+    const el = document.createElement("div");
+    el.className = "result-item";
+    el.id = `result-${piece.id}`;
+
+    const statusHtml = status === "done"
+      ? `<span class="result-status status-done">✓ Generated</span>`
+      : status === "error"
+      ? `<span class="result-status status-error">✗ Failed</span>`
+      : `<span class="result-status status-pending">Pending</span>`;
+
+    el.innerHTML = `
+      <div class="result-header" onclick="toggleResult(${piece.id})">
+        <div>
+          <div class="result-title">${piece.title}</div>
+          ${piece.composer ? `<div class="result-composer">${piece.composer}</div>` : ""}
+        </div>
+        ${statusHtml}
+      </div>
+      <div class="result-body" id="body-${piece.id}">
+        ${status === "done" && content ? `
+          <div class="section-label">Background</div>
+          <div class="section-text">${content.background || ""}</div>
+          <div class="section-label">Pianist Notes</div>
+          <div class="section-text">${content.pianist_notes || ""}</div>
+          <div class="section-label">Challenges & Level Rationale</div>
+          <div class="section-text">${content.challenges || ""}</div>
+          <div class="apply-row">
+            <input type="checkbox" class="apply-check" id="check-${piece.id}" data-id="${piece.id}" checked />
+            <label class="apply-label" for="check-${piece.id}">Include in apply</label>
+          </div>
+        ` : status === "error" ? `<div style="color:#f87171;font-size:0.85rem;padding:4px 0">${error}</div>` : ""}
+      </div>`;
+    return el;
+  }
+
+  function updateResultItem(piece, status, content, error) {
+    const existing = document.getElementById(`result-${piece.id}`);
+    if (existing) existing.replaceWith(renderResultItem(piece, status, content, error));
+    else document.getElementById("results-container").appendChild(renderResultItem(piece, status, content, error));
+  }
+
+  function toggleResult(id) {
+    const body = document.getElementById(`body-${id}`);
+    if (body) body.classList.toggle("open");
+  }
+  window.toggleResult = toggleResult;
+
+  async function startGeneration() {
+    const apiKey = document.getElementById("api-key").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+    localStorage.setItem("anthropic_key", apiKey);
+
+    shouldStop = false;
+    generatedResults = {};
+    document.getElementById("results-container").innerHTML = "";
+    document.getElementById("apply-bar").style.display = "none";
+    document.getElementById("run-btn").disabled = true;
+    document.getElementById("stop-btn").style.display = "inline-block";
+    document.getElementById("progress-wrap").style.display = "block";
+
+    setStatus("Fetching pieces…");
+    const { data: pieces, error } = await db.from("pieces").select("id, title, composer, year, difficulty").order("title");
+    if (error || !pieces) { setStatus("Failed to fetch pieces."); return; }
+
+    let done = 0, failed = 0;
+    const total = pieces.length;
+    const BATCH_SIZE = 3;
+
+    // Add all pending placeholders upfront
+    pieces.forEach(piece =>
+      document.getElementById("results-container").appendChild(renderResultItem(piece, "pending", null, null))
+    );
+
+    // Process in parallel batches
+    for (let i = 0; i < pieces.length; i += BATCH_SIZE) {
+      if (shouldStop) break;
+
+      const batch = pieces.slice(i, i + BATCH_SIZE);
+      setStatus(`Processing ${Math.min(i + BATCH_SIZE, total)} of ${total}…`);
+
+      await Promise.all(batch.map(async piece => {
+        try {
+          let content, lastErr;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 3000));
+              content = await generateForPiece(piece, apiKey);
+              break;
+            } catch(e) { lastErr = e; }
+          }
+          if (content) {
+            generatedResults[piece.id] = content;
+            updateResultItem(piece, "done", content, null);
+            done++;
+          } else throw lastErr;
+        } catch(err) {
+          updateResultItem(piece, "error", null, err.message);
+          failed++;
+        }
+        document.getElementById("progress-fill").style.width = `${((done + failed) / total) * 100}%`;
+        document.getElementById("progress-label").textContent = `${done + failed} of ${total} done`;
+      }));
+
+      // Brief pause between batches
+      if (i + BATCH_SIZE < pieces.length && !shouldStop) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    document.getElementById("progress-fill").style.width = "100%";
+    document.getElementById("progress-label").textContent = `Complete — ${done} generated, ${failed} failed`;
+    setStatus("");
+    document.getElementById("run-btn").disabled = false;
+    document.getElementById("stop-btn").style.display = "none";
+
+    if (done > 0) document.getElementById("apply-bar").style.display = "block";
+    if (failed > 0) document.getElementById("retry-btn").style.display = "inline-block";
+  }
+
+  async function retryFailed() {
+    const apiKey = document.getElementById("api-key").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+
+    // Collect failed piece IDs from the DOM
+    const failedIds = [...document.querySelectorAll(".result-status.status-error")]
+      .map(el => parseInt(el.closest(".result-item").id.replace("result-","")))
+      .filter(Boolean);
+    if (!failedIds.length) { alert("No failed pieces found."); return; }
+
+    const { data: pieces } = await db.from("pieces")
+      .select("id, title, composer, year, difficulty").in("id", failedIds);
+    if (!pieces?.length) return;
+
+    document.getElementById("retry-btn").disabled = true;
+    document.getElementById("run-btn").disabled = true;
+    document.getElementById("stop-btn").style.display = "inline-block";
+    shouldStop = false;
+
+    let done = 0, failed = 0;
+    const total = pieces.length;
+    setStatus(`Retrying ${total} failed piece${total !== 1 ? "s" : ""}…`);
+
+    for (let i = 0; i < pieces.length; i += 3) {
+      if (shouldStop) break;
+      const batch = pieces.slice(i, i + 3);
+      await Promise.all(batch.map(async piece => {
+        updateResultItem(piece, "pending", null, null);
+        try {
+          let content, lastErr;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 3000));
+              content = await generateForPiece(piece, apiKey);
+              break;
+            } catch(e) { lastErr = e; }
+          }
+          if (content) {
+            generatedResults[piece.id] = content;
+            updateResultItem(piece, "done", content, null);
+            done++;
+          } else throw lastErr;
+        } catch(err) {
+          updateResultItem(piece, "error", null, err.message);
+          failed++;
+        }
+      }));
+      if (i + 3 < pieces.length && !shouldStop) await new Promise(r => setTimeout(r, 1500));
+    }
+
+    setStatus(`Retry complete — ${done} succeeded, ${failed} still failed`);
+    document.getElementById("retry-btn").disabled = false;
+    document.getElementById("run-btn").disabled = false;
+    document.getElementById("stop-btn").style.display = "none";
+    if (failed === 0) document.getElementById("retry-btn").style.display = "none";
+  }
+
+  async function applySelected() {
+    const checkboxes = document.querySelectorAll(".apply-check:checked");
+    if (!checkboxes.length) { alert("No pieces selected."); return; }
+
+    const btn = document.getElementById("apply-btn");
+    btn.disabled = true;
+    document.getElementById("apply-status").textContent = "Applying…";
+
+    let applied = 0, failed = 0;
+    for (const cb of checkboxes) {
+      const id = parseInt(cb.dataset.id);
+      const content = generatedResults[id];
+      if (!content) continue;
+      const { error } = await db.from("pieces").update({
+        background: content.background || null,
+        pianist_notes: content.pianist_notes || null,
+        challenges: content.challenges || null,
+      }).eq("id", id);
+      if (error) failed++;
+      else { applied++; cb.checked = false; cb.disabled = true; }
+    }
+
+    document.getElementById("apply-status").textContent =
+      `✓ ${applied} updated${failed ? `, ${failed} failed` : ""}`;
+    btn.disabled = false;
+  }
+
+  function stopGeneration() { shouldStop = true; }
+</script>
+</body>
+</html>

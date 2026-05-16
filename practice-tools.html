@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Practice Tools — The Practice Room</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+
+    /* ─────────────────────────────────────────
+       PAGE SHELL — unique dark feel vs database
+    ───────────────────────────────────────── */
+    body { background: #07070a; }
+
+    .tools-wrap {
+      max-width: 460px; margin: 0 auto;
+      padding: 0 16px 80px;
+    }
+
+    /* ─────────────────────────────────────────
+       SEGMENTED TAB CONTROL
+    ───────────────────────────────────────── */
+    .tool-seg {
+      display: flex; gap: 3px;
+      background: rgba(255,255,255,.05);
+      border-radius: 14px; padding: 4px;
+      margin-bottom: 28px;
+    }
+    .tool-seg-btn {
+      flex: 1; padding: 11px 6px; border: none; border-radius: 10px;
+      background: transparent; color: rgba(255,255,255,.3);
+      font-size: .78rem; font-weight: 700; cursor: pointer;
+      transition: background .18s, color .18s, box-shadow .18s;
+      font-family: inherit; letter-spacing: .02em;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tool-seg-btn.active {
+      background: var(--accent); color: #000;
+      box-shadow: 0 2px 12px rgba(245,158,11,.35);
+    }
+
+    .tool-panel { display: none; }
+    .tool-panel.active { display: block; }
+
+    /* ─────────────────────────────────────────
+       GAME — STATES
+    ───────────────────────────────────────── */
+    .game-state { display: none; }
+    .game-state.active { display: block; }
+
+    /* ── Setup ── */
+    .setup-intro {
+      background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+      border-radius: 12px; padding: 16px 18px;
+      color: rgba(255,255,255,.45); font-size: .85rem; line-height: 1.65;
+      margin-bottom: 28px;
+    }
+    .setup-intro strong { color: rgba(255,255,255,.7); font-weight: 600; }
+
+    /* ── Playing ── */
+    .play-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 10px; margin-bottom: 20px;
+    }
+    .play-passage { font-size: 1rem; font-weight: 700; color: #fff; flex: 1; }
+    .play-piece   { font-size: .75rem; color: rgba(255,255,255,.35); margin-top: 3px; }
+    .play-level   {
+      background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.25);
+      border-radius: 20px; padding: 5px 13px;
+      font-size: .7rem; font-weight: 800; color: var(--accent); white-space: nowrap;
+      letter-spacing: .04em;
+    }
+
+    /* Score number — the hero */
+    .score-wrap  { text-align: center; padding: 20px 0 6px; }
+    .score-num   {
+      font-size: 8.5rem; font-weight: 900; line-height: 1;
+      letter-spacing: -.06em; transition: color .12s;
+    }
+    .score-num.pos    { color: #4ade80; }
+    .score-num.zero   { color: rgba(255,255,255,.2); }
+    .score-num.neg    { color: #f87171; }
+    .score-num.danger { color: #ef4444; animation: shake .3s ease; }
+
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25%      { transform: translateX(-6px); }
+      75%      { transform: translateX(6px); }
+    }
+
+    /* Score track — thick with colour zones */
+    .score-track-outer {
+      position: relative; height: 20px; border-radius: 10px;
+      overflow: hidden; margin: 12px 0 5px;
+      background: rgba(255,255,255,.06);
+    }
+    /* colour zone backgrounds */
+    .score-track-outer::before {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(90deg,
+        #450a0a 0%, #7f1d1d 33.3%,          /* danger zone −10→−5 */
+        rgba(255,255,255,.05) 33.3%, rgba(255,255,255,.05) 66.7%,  /* neutral −5→0 */
+        #14532d 66.7%, #166534 100%          /* clear zone 0→+5 */
+      );
+    }
+    .score-track-fill  { position: absolute; top: 0; bottom: 0; transition: left .15s, width .15s, background .15s; z-index: 1; }
+    .score-track-zero  { position: absolute; top: 0; bottom: 0; left: 66.67%; width: 2px; background: rgba(255,255,255,.2); z-index: 2; }
+    .score-track-thumb {
+      position: absolute; top: 50%; width: 22px; height: 22px;
+      border-radius: 50%; border: 3px solid #07070a;
+      transform: translate(-50%, -50%); z-index: 3;
+      transition: left .15s, background .15s;
+      box-shadow: 0 0 8px rgba(0,0,0,.6);
+    }
+    .score-track-labels {
+      display: flex; justify-content: space-between;
+      font-size: .58rem; color: rgba(255,255,255,.25); letter-spacing: .04em;
+      margin-bottom: 6px;
+    }
+
+    .score-attempts {
+      text-align: center; font-size: .78rem; color: rgba(255,255,255,.3);
+      margin-bottom: 28px;
+    }
+
+    /* Game buttons — the most important UI */
+    .game-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .game-btn {
+      border: none; border-radius: 20px; padding: 36px 16px 28px;
+      font-size: .9rem; font-weight: 800; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      font-family: inherit; -webkit-tap-highlight-color: transparent;
+      transition: transform .08s, filter .08s;
+    }
+    .game-btn:active          { transform: scale(.94); filter: brightness(.8); }
+    .game-btn svg             { width: 36px; height: 36px; }
+    .game-btn-correct         { background: #14532d; color: #4ade80; }
+    .game-btn-wrong           { background: #450a0a; color: #f87171; }
+    .game-btn-correct:active  { background: #166534; }
+    .game-btn-wrong:active    { background: #7f1d1d; }
+
+    .game-abandon {
+      display: block; width: 100%; background: none; border: none;
+      color: rgba(255,255,255,.2); font-size: .75rem; cursor: pointer;
+      padding: 10px; font-family: inherit; text-align: center; letter-spacing: .04em;
+      transition: color .15s;
+    }
+    .game-abandon:hover { color: rgba(255,255,255,.5); }
+
+    /* ── Simplify ── */
+    .simplify-wrap { padding: 8px 0; }
+    .simplify-card {
+      background: #1a0800; border: 1px solid rgba(251,146,60,.2);
+      border-radius: 20px; padding: 32px 24px 28px; margin-bottom: 16px;
+      text-align: center;
+    }
+    .simplify-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .simplify-card h2 { font-size: 1.5rem; font-weight: 900; color: #fb923c; margin: 0 0 10px; letter-spacing: -.02em; }
+    .simplify-card p  { color: rgba(255,255,255,.4); font-size: .85rem; line-height: 1.7; margin: 0 0 24px; }
+    .simplify-tips    { list-style: none; padding: 0; margin: 0 0 28px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+    .simplify-tips li {
+      background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+      border-radius: 10px; padding: 12px 16px;
+      font-size: .84rem; color: rgba(255,255,255,.6);
+      display: flex; align-items: center; gap: 12px;
+    }
+
+    /* ── Cleared ── */
+    .cleared-wrap { text-align: center; padding: 16px 0 20px; }
+    .cleared-badge {
+      display: inline-block; background: rgba(74,222,128,.1);
+      border: 1px solid rgba(74,222,128,.2); border-radius: 30px;
+      padding: 6px 16px; font-size: .7rem; font-weight: 700;
+      color: #4ade80; letter-spacing: .08em; margin-bottom: 16px;
+    }
+    .cleared-title {
+      font-size: 3rem; font-weight: 900; color: #fff;
+      letter-spacing: -.04em; margin-bottom: 4px; line-height: 1;
+    }
+    .cleared-sub  { font-size: .85rem; color: rgba(255,255,255,.3); margin-bottom: 28px; }
+    .cleared-stats {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 8px; margin-bottom: 28px;
+    }
+    .cleared-stat {
+      background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px; padding: 16px 8px;
+    }
+    .cleared-stat .v { font-size: 1.6rem; font-weight: 900; color: var(--accent); line-height: 1; }
+    .cleared-stat .l { font-size: .58rem; color: rgba(255,255,255,.3); text-transform: uppercase; letter-spacing: .1em; margin-top: 6px; }
+    .cleared-actions { display: flex; flex-direction: column; gap: 10px; }
+    .levelup-prompt {
+      background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px; padding: 14px 18px; margin-bottom: 4px;
+      text-align: left;
+    }
+    .levelup-prompt strong { font-size: .8rem; color: #fff; display: block; margin-bottom: 4px; }
+    .levelup-prompt span   { font-size: .76rem; color: rgba(255,255,255,.35); line-height: 1.6; }
+
+    /* ─────────────────────────────────────────
+       HISTORY — below the game
+    ───────────────────────────────────────── */
+    .game-history-section { margin-top: 36px; }
+    .game-history-label {
+      font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+      color: rgba(255,255,255,.2); margin-bottom: 10px;
+    }
+    .game-history-scroll {
+      max-height: 320px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.1) transparent;
+    }
+    .game-history-scroll::-webkit-scrollbar { width: 4px; }
+    .game-history-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 2px; }
+    .history-empty { text-align: center; padding: 28px 0; color: rgba(255,255,255,.2); font-size: .88rem; }
+    .history-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 16px; border-radius: 14px; margin-bottom: 8px;
+      background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+      transition: border-color .15s;
+    }
+    .history-item:hover { border-color: rgba(255,255,255,.14); }
+    .hi-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .hi-dot.cleared    { background: #4ade80; }
+    .hi-dot.leveled_up { background: #60a5fa; }
+    .hi-dot.abandoned  { background: rgba(255,255,255,.2); }
+    .hi-body { flex: 1; overflow: hidden; }
+    .hi-passage {
+      font-size: .88rem; font-weight: 700; color: rgba(255,255,255,.8);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hi-piece { font-size: .72rem; color: rgba(255,255,255,.3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hi-meta  { font-size: .7rem; color: rgba(255,255,255,.25); margin-top: 3px; }
+    .hi-right { text-align: right; flex-shrink: 0; }
+    .hi-outcome {
+      font-size: .65rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    }
+    .hi-outcome.cleared    { color: #4ade80; }
+    .hi-outcome.leveled_up { color: #60a5fa; }
+    .hi-outcome.abandoned  { color: rgba(255,255,255,.2); }
+    .hi-level { font-size: .65rem; color: rgba(255,255,255,.2); margin-top: 3px; }
+
+    /* ─────────────────────────────────────────
+       METRONOME
+    ───────────────────────────────────────── */
+    .metro-wrap { display: flex; flex-direction: column; align-items: center; padding-top: 8px; }
+
+    /* Large disc visual */
+    .metro-disc-wrap { position: relative; width: 140px; height: 140px; margin-bottom: 8px; }
+    .metro-disc {
+      width: 140px; height: 140px; border-radius: 50%;
+      background: rgba(255,255,255,.05); border: 2px solid rgba(255,255,255,.08);
+      display: flex; align-items: center; justify-content: center;
+      transition: background .06s, border-color .06s, box-shadow .06s;
+    }
+    .metro-disc.beat {
+      background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2);
+    }
+    .metro-disc.accent {
+      background: rgba(245,158,11,.25); border-color: rgba(245,158,11,.6);
+      box-shadow: 0 0 32px rgba(245,158,11,.3);
+    }
+    /* Beat pips inside disc */
+    .metro-disc-pips { display: flex; gap: 8px; }
+    .metro-disc-pip {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: rgba(255,255,255,.15); transition: background .05s;
+    }
+    .metro-disc-pip.lit        { background: rgba(255,255,255,.7); }
+    .metro-disc-pip.accent-lit { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+    .metro-bpm-block { text-align: center; margin-bottom: 28px; margin-top: 12px; }
+    .metro-bpm-num   {
+      font-size: 5rem; font-weight: 900; line-height: 1;
+      letter-spacing: -.05em; color: #fff;
+    }
+    .metro-bpm-lbl { font-size: .6rem; color: rgba(255,255,255,.25); text-transform: uppercase; letter-spacing: .14em; margin-top: 4px; }
+
+    .metro-nudge-row { display: flex; align-items: center; gap: 8px; margin-bottom: 22px; }
+    .metro-nudge {
+      width: 46px; height: 46px; border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,.1); background: rgba(255,255,255,.05);
+      color: rgba(255,255,255,.6); font-size: 1rem; font-weight: 700;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: border-color .12s, color .12s, background .12s; font-family: inherit;
+      flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+    }
+    .metro-nudge:hover    { border-color: var(--accent); color: var(--accent); background: rgba(245,158,11,.08); }
+    .metro-nudge:active   { background: rgba(245,158,11,.15); }
+    .metro-nudge.lg       { width: 54px; height: 54px; font-size: .8rem; font-weight: 800; }
+    .metro-bpm-input {
+      width: 80px; text-align: center; font-size: 1.1rem; font-weight: 700;
+      padding: 8px 4px; background: rgba(255,255,255,.06);
+      border: 1.5px solid rgba(255,255,255,.1); border-radius: 10px;
+      color: #fff;
+    }
+
+    .metro-sig { display: flex; gap: 6px; margin-bottom: 22px; }
+    .metro-sig-btn {
+      padding: 8px 18px; border-radius: 20px;
+      border: 1.5px solid rgba(255,255,255,.1); background: rgba(255,255,255,.04);
+      color: rgba(255,255,255,.35); font-size: .8rem; font-weight: 700;
+      cursor: pointer; transition: all .12s; font-family: inherit;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .metro-sig-btn.active  { background: var(--accent); border-color: var(--accent); color: #000; }
+    .metro-sig-btn:hover   { border-color: rgba(255,255,255,.25); color: rgba(255,255,255,.6); }
+
+    .metro-tap-btn {
+      background: rgba(255,255,255,.05); border: 1.5px solid rgba(255,255,255,.1);
+      border-radius: 12px; padding: 12px 36px; color: rgba(255,255,255,.5);
+      font-size: .85rem; font-weight: 700; cursor: pointer; font-family: inherit;
+      margin-bottom: 20px; transition: all .12s; letter-spacing: .04em;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .metro-tap-btn:active { background: rgba(255,255,255,.1); color: #fff; transform: scale(.97); }
+
+    .metro-start-btn {
+      width: 100%; max-width: 320px; padding: 18px;
+      font-size: 1.05rem; font-weight: 800; border-radius: 14px;
+      border: none; cursor: pointer; font-family: inherit; letter-spacing: .04em;
+      transition: background .15s, color .15s, box-shadow .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .metro-start-btn.stopped {
+      background: var(--accent); color: #000;
+      box-shadow: 0 4px 20px rgba(245,158,11,.3);
+    }
+    .metro-start-btn.running {
+      background: rgba(239,68,68,.15); border: 1.5px solid rgba(239,68,68,.3);
+      color: #f87171;
+    }
+
+    /* ─────────────────────────────────────────
+       LOGIN SCREEN
+    ───────────────────────────────────────── */
+    .login-wrap {
+      width: 100%; max-width: 360px; margin: 0 auto;
+      background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+      border-radius: 20px; padding: 36px 28px;
+    }
+
+  </style>
+</head>
+<body>
+
+<header id="app-header" style="display:none">
+  <div class="header-logo">🎹</div>
+  <div style="flex:1">
+    <h1>Practice Tools</h1>
+    <p>The Practice Room</p>
+  </div>
+  <div class="header-user">
+    <span id="header-email"></span>
+    <a class="btn btn-ghost btn-sm" href="https://thepracticeroom.matthewcawood.com">← Hub</a>
+    <button class="btn btn-ghost btn-sm" id="logout-btn">Log out</button>
+  </div>
+</header>
+
+<main id="app-main" style="display:none">
+  <div class="tools-wrap">
+
+    <!-- Segmented tab control -->
+    <div class="tool-seg">
+      <button class="tool-seg-btn active" onclick="switchTool('game')">🎯 Passage Game</button>
+      <button class="tool-seg-btn"        onclick="switchTool('metro')">♩ Metronome</button>
+    </div>
+
+    <!-- ═══════════════════════════════
+         PASSAGE GAME
+    ═══════════════════════════════ -->
+    <div id="tool-game" class="tool-panel active">
+
+      <!-- Setup -->
+      <div id="state-setup" class="game-state active">
+        <div class="setup-intro">
+          Name the passage you're isolating.
+          Tap <strong>✓</strong> each time you nail it, <strong>✗</strong> when you don't.
+          Reach <strong>+5</strong> and it's cleared. Hit <strong>−10</strong> and it's time to simplify.
+        </div>
+        <div class="form-group">
+          <label>What passage?</label>
+          <input id="inp-passage" type="text" placeholder="e.g. bars 14–18, left hand"
+                 autocomplete="off" autocorrect="off" spellcheck="false" />
+        </div>
+        <div class="form-group">
+          <label>Piece <span style="color:rgba(255,255,255,.25);font-weight:400">(optional)</span></label>
+          <input id="inp-piece" type="text" placeholder="e.g. Clair de Lune"
+                 autocomplete="off" autocorrect="off" />
+        </div>
+        <button class="btn btn-primary" style="width:100%;padding:15px;font-size:1rem;border-radius:12px;margin-top:4px;font-weight:800;letter-spacing:.03em" onclick="startGame()">
+          Start
+        </button>
+      </div>
+
+      <!-- Playing -->
+      <div id="state-playing" class="game-state">
+        <div class="play-header">
+          <div>
+            <div class="play-passage" id="play-passage-name"></div>
+            <div class="play-piece"   id="play-piece-name"></div>
+          </div>
+          <div class="play-level" id="play-level-badge">LEVEL 1</div>
+        </div>
+
+        <div class="score-wrap">
+          <div class="score-num zero" id="score-display">0</div>
+        </div>
+
+        <div class="score-track-outer">
+          <div class="score-track-zero"></div>
+          <div class="score-track-fill"  id="score-fill"></div>
+          <div class="score-track-thumb" id="score-thumb"></div>
+        </div>
+        <div class="score-track-labels"><span>−10</span><span>0</span><span>+5</span></div>
+        <div class="score-attempts" id="score-attempts">0 attempts</div>
+
+        <div class="game-btns">
+          <button class="game-btn game-btn-correct" onclick="handleCorrect()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            Correct +1
+          </button>
+          <button class="game-btn game-btn-wrong" onclick="handleWrong()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+            Wrong −2
+          </button>
+        </div>
+        <button class="game-abandon" onclick="abandonGame()">Abandon</button>
+      </div>
+
+      <!-- Simplify -->
+      <div id="state-simplify" class="game-state">
+        <div class="simplify-wrap">
+          <div class="simplify-card">
+            <div class="simplify-icon">🔬</div>
+            <h2>Time to simplify</h2>
+            <p>Score resets to zero. Make it easier before you go again — this is the actual work.</p>
+            <ul class="simplify-tips">
+              <li>🐢 Slow the tempo right down</li>
+              <li>✋ Isolate one hand at a time</li>
+              <li>✂️ Make the passage even shorter</li>
+            </ul>
+            <button class="btn btn-primary" style="width:100%;padding:15px;font-size:1rem;border-radius:12px;font-weight:800" onclick="continueAfterSimplify()">
+              Ready — go again
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cleared -->
+      <div id="state-cleared" class="game-state">
+        <div class="cleared-wrap">
+          <div class="cleared-badge">CLEARED</div>
+          <div class="cleared-title">Nice work.</div>
+          <div class="cleared-sub" id="cleared-level-label">Level 1 complete</div>
+          <div class="cleared-stats">
+            <div class="cleared-stat"><div class="v" id="cs-attempts">—</div><div class="l">Attempts</div></div>
+            <div class="cleared-stat"><div class="v" id="cs-accuracy">—</div><div class="l">Accuracy</div></div>
+            <div class="cleared-stat"><div class="v" id="cs-simplify">—</div><div class="l">Simplifies</div></div>
+          </div>
+          <div class="cleared-actions">
+            <div class="levelup-prompt">
+              <strong>Step it up?</strong>
+              <span>Decide how you'll make it harder — faster tempo, both hands, in context — then go again.</span>
+            </div>
+            <button class="btn btn-primary" style="padding:15px;font-size:1rem;border-radius:12px;font-weight:800" onclick="levelUp()">
+              Go again, harder →
+            </button>
+            <button class="btn btn-ghost" style="padding:14px;font-size:.9rem;border-radius:12px" onclick="newPassage()">
+              New passage
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- History — below the game -->
+      <div class="game-history-section">
+        <div class="game-history-label">Recent</div>
+        <div class="game-history-scroll">
+          <div id="history-list"></div>
+          <div id="history-empty" class="history-empty" style="display:none">
+            No games yet — start your first passage above.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tool-game -->
+
+    <!-- ═══════════════════════════════
+         METRONOME
+    ═══════════════════════════════ -->
+    <div id="tool-metro" class="tool-panel">
+      <div class="metro-wrap">
+
+        <div class="metro-disc-wrap">
+          <div class="metro-disc" id="metro-disc">
+            <div class="metro-disc-pips" id="metro-disc-pips"></div>
+          </div>
+        </div>
+
+        <div class="metro-bpm-block">
+          <div class="metro-bpm-num" id="metro-bpm-display">80</div>
+          <div class="metro-bpm-lbl">BPM</div>
+        </div>
+
+        <div class="metro-nudge-row">
+          <button class="metro-nudge lg" onclick="nudgeBPM(-10)">−10</button>
+          <button class="metro-nudge"    onclick="nudgeBPM(-1)">−1</button>
+          <input  class="metro-bpm-input" id="metro-bpm-input" type="number"
+                  min="20" max="300" value="80" onchange="setBPMFromInput()" />
+          <button class="metro-nudge"    onclick="nudgeBPM(1)">+1</button>
+          <button class="metro-nudge lg" onclick="nudgeBPM(10)">+10</button>
+        </div>
+
+        <div class="metro-sig" id="metro-sig">
+          <button class="metro-sig-btn" onclick="setSig(2)">2/4</button>
+          <button class="metro-sig-btn active" onclick="setSig(4)">4/4</button>
+          <button class="metro-sig-btn" onclick="setSig(3)">3/4</button>
+          <button class="metro-sig-btn" onclick="setSig(6)">6/8</button>
+        </div>
+
+        <button class="metro-tap-btn" onclick="tapTempo()">Tap tempo</button>
+
+        <button class="metro-start-btn stopped" id="metro-start-btn" onclick="toggleMetro()">
+          Start
+        </button>
+
+      </div>
+    </div><!-- /tool-metro -->
+
+  </div>
+</main>
+
+<!-- Login screen -->
+<div id="login-screen" style="display:none;position:fixed;inset:0;background:#07070a;z-index:200;display:none;align-items:center;justify-content:center;padding:20px">
+  <div class="login-wrap">
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="font-size:2.2rem;margin-bottom:10px">🎹</div>
+      <h1 style="font-size:1.3rem;margin:0 0 4px;color:#fff">The Practice Room</h1>
+      <p style="color:rgba(255,255,255,.3);font-size:.84rem;margin:0">Practice Tools</p>
+    </div>
+
+    <div id="login-step-email">
+      <div class="form-group">
+        <label style="color:rgba(255,255,255,.5)">Email address</label>
+        <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email"
+               style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#fff" />
+      </div>
+      <div id="login-error" style="color:#f87171;font-size:.8rem;margin-bottom:10px;display:none"></div>
+      <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;border-radius:12px;font-weight:800">
+        Send verification code
+      </button>
+    </div>
+
+    <div id="login-step-otp" style="display:none">
+      <div style="text-align:center;margin-bottom:22px">
+        <div style="font-size:1.8rem;margin-bottom:10px">📬</div>
+        <p style="font-size:.82rem;color:rgba(255,255,255,.4);line-height:1.8;margin:0">
+          Check your inbox at<br>
+          <strong id="login-sent-to" style="color:#fff"></strong><br>
+          and enter the 6-digit code.
+        </p>
+      </div>
+      <div class="form-group">
+        <input type="text" id="login-otp" placeholder="123456" maxlength="6"
+               autocomplete="one-time-code" inputmode="numeric"
+               style="letter-spacing:.3em;font-size:1.4rem;text-align:center;padding:14px;background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#fff" />
+      </div>
+      <div id="login-otp-error" style="color:#f87171;font-size:.8rem;margin-bottom:10px;display:none"></div>
+      <button class="btn btn-primary" id="login-verify-btn" style="width:100%;padding:13px;border-radius:12px;font-weight:800">
+        Verify &amp; enter
+      </button>
+      <button class="btn btn-ghost" id="login-back-btn"
+              style="width:100%;margin-top:8px;padding:11px;font-size:.84rem;border-radius:12px">
+        ← Different email
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+// ══════════════════════════════════════════════════════════════
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+let currentEmail     = "";
+let pendingLoginEmail = null;
+
+// ── Auth ────────────────────────────────────────────────────
+async function boot() {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) {
+    document.getElementById("login-screen").style.display = "flex";
+    return;
+  }
+  currentEmail = session.user.email;
+  document.getElementById("header-email").textContent = currentEmail;
+  document.getElementById("app-header").style.display = "flex";
+  document.getElementById("app-main").style.display   = "block";
+  document.getElementById("logout-btn").addEventListener("click", async () => {
+    await db.auth.signOut(); location.reload();
+  });
+  buildDiscPips(metroSig);
+  await loadHistory();
+}
+
+document.getElementById("login-btn").addEventListener("click", attemptSendCode);
+document.getElementById("login-email").addEventListener("keydown", e => { if (e.key === "Enter") attemptSendCode(); });
+
+async function attemptSendCode() {
+  const email = document.getElementById("login-email").value.trim().toLowerCase();
+  const errEl = document.getElementById("login-error");
+  errEl.style.display = "none";
+  if (!email) { errEl.textContent = "Please enter your email."; errEl.style.display = "block"; return; }
+  const btn = document.getElementById("login-btn");
+  btn.textContent = "Checking…"; btn.disabled = true;
+  try {
+    const { data, error } = await db.from("allowed_emails").select("email").eq("email", email).maybeSingle();
+    if (error || !data) {
+      errEl.textContent = "This email isn't authorised to access The Practice Room.";
+      errEl.style.display = "block";
+      btn.textContent = "Send verification code"; btn.disabled = false;
+      return;
+    }
+    const { error: otpErr } = await db.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+    btn.textContent = "Send verification code"; btn.disabled = false;
+    if (otpErr) { errEl.textContent = "Couldn't send code: " + otpErr.message; errEl.style.display = "block"; return; }
+    pendingLoginEmail = email;
+    document.getElementById("login-sent-to").textContent = email;
+    document.getElementById("login-step-email").style.display = "none";
+    document.getElementById("login-step-otp").style.display   = "block";
+    setTimeout(() => document.getElementById("login-otp").focus(), 80);
+  } catch(e) {
+    btn.textContent = "Send verification code"; btn.disabled = false;
+    errEl.textContent = "Something went wrong — please try again."; errEl.style.display = "block";
+  }
+}
+
+document.getElementById("login-verify-btn").addEventListener("click", attemptVerifyCode);
+document.getElementById("login-otp").addEventListener("keydown", e => { if (e.key === "Enter") attemptVerifyCode(); });
+document.getElementById("login-back-btn").addEventListener("click", () => {
+  document.getElementById("login-step-otp").style.display   = "none";
+  document.getElementById("login-step-email").style.display = "block";
+  document.getElementById("login-otp").value = "";
+  pendingLoginEmail = null;
+});
+
+async function attemptVerifyCode() {
+  const token = document.getElementById("login-otp").value.replace(/\D/g, "");
+  const errEl = document.getElementById("login-otp-error");
+  errEl.style.display = "none";
+  if (token.length !== 6) { errEl.textContent = "Please enter the full 6-digit code."; errEl.style.display = "block"; return; }
+  const btn = document.getElementById("login-verify-btn");
+  btn.textContent = "Verifying…"; btn.disabled = true;
+  try {
+    const { error } = await db.auth.verifyOtp({ email: pendingLoginEmail, token, type: "email" });
+    btn.textContent = "Verify & enter"; btn.disabled = false;
+    if (error) { errEl.textContent = "Invalid or expired code — please try again."; errEl.style.display = "block"; return; }
+    document.getElementById("login-screen").style.display = "none";
+    await boot();
+  } catch(e) {
+    btn.textContent = "Verify & enter"; btn.disabled = false;
+    errEl.textContent = "Something went wrong — please try again."; errEl.style.display = "block";
+  }
+}
+
+// ── Tab switching ────────────────────────────────────────────
+function switchTool(tool) {
+  document.querySelectorAll(".tool-seg-btn").forEach((b, i) => {
+    b.classList.toggle("active", ["game","metro"][i] === tool);
+  });
+  document.querySelectorAll(".tool-panel").forEach(p => p.classList.remove("active"));
+  document.getElementById("tool-" + tool).classList.add("active");
+}
+
+// ══════════════════════════════════════════════════════════════
+// PASSAGE GAME
+// ══════════════════════════════════════════════════════════════
+const SCORE_MIN = -10, SCORE_MAX = 5;
+
+let game = {
+  passageLabel:"", pieceName:"", level:1, score:0,
+  attempts:0, correctCount:0, incorrectCount:0,
+  simplifyTriggers:0, startTime:null,
+};
+
+function resetGame() {
+  game = { passageLabel:"", pieceName:"", level:1, score:0,
+           attempts:0, correctCount:0, incorrectCount:0,
+           simplifyTriggers:0, startTime:null };
+}
+
+function switchState(id) {
+  document.querySelectorAll(".game-state").forEach(el => el.classList.remove("active"));
+  document.getElementById("state-" + id).classList.add("active");
+}
+
+function startGame() {
+  const passage = document.getElementById("inp-passage").value.trim();
+  if (!passage) { document.getElementById("inp-passage").focus(); return; }
+  game.passageLabel     = passage;
+  game.pieceName        = document.getElementById("inp-piece").value.trim();
+  game.level            = 1;
+  game.score            = 0;
+  game.attempts         = 0;
+  game.correctCount     = 0;
+  game.incorrectCount   = 0;
+  game.simplifyTriggers = 0;
+  game.startTime        = Date.now();
+  renderPlayHeader();
+  updateScoreDisplay();
+  switchState("playing");
+}
+
+function renderPlayHeader() {
+  document.getElementById("play-passage-name").textContent = game.passageLabel;
+  const pn = document.getElementById("play-piece-name");
+  pn.textContent = game.pieceName || "";
+  pn.style.display = game.pieceName ? "block" : "none";
+  document.getElementById("play-level-badge").textContent = `LEVEL ${game.level}`;
+}
+
+function handleCorrect() {
+  game.score++; game.attempts++; game.correctCount++;
+  updateScoreDisplay();
+  if (game.score >= SCORE_MAX) setTimeout(showCleared, 150);
+}
+
+function handleWrong() {
+  game.score -= 2; game.attempts++; game.incorrectCount++;
+  updateScoreDisplay();
+  if (game.score <= SCORE_MIN) setTimeout(showSimplify, 150);
+}
+
+function updateScoreDisplay() {
+  const s  = game.score;
+  const el = document.getElementById("score-display");
+  el.textContent = s > 0 ? `+${s}` : s;
+  el.className   = "score-num " + (s > 0 ? "pos" : s <= SCORE_MIN ? "danger" : s < -5 ? "neg" : s < 0 ? "neg" : "zero");
+
+  const range   = SCORE_MAX - SCORE_MIN; // 15
+  const clamp   = Math.max(SCORE_MIN, Math.min(SCORE_MAX, s));
+  const pct     = ((clamp - SCORE_MIN) / range) * 100;
+  const zeroPct = ((-SCORE_MIN) / range) * 100; // 66.67
+
+  const thumb = document.getElementById("score-thumb");
+  const fill  = document.getElementById("score-fill");
+  thumb.style.left       = `${pct}%`;
+  thumb.style.background = s >= 0 ? "#4ade80" : s <= -8 ? "#ef4444" : "#f87171";
+
+  if (s >= 0) {
+    fill.style.left = `${zeroPct}%`; fill.style.width = `${pct - zeroPct}%`;
+    fill.style.background = "rgba(74,222,128,.35)";
+  } else {
+    fill.style.left = `${pct}%`; fill.style.width = `${zeroPct - pct}%`;
+    fill.style.background = s <= -8 ? "rgba(239,68,68,.5)" : "rgba(248,113,113,.3)";
+  }
+
+  const att = game.attempts;
+  document.getElementById("score-attempts").textContent = `${att} attempt${att === 1 ? "" : "s"}`;
+}
+
+function showSimplify() {
+  game.simplifyTriggers++;
+  switchState("simplify");
+}
+
+function continueAfterSimplify() {
+  game.score = 0;
+  updateScoreDisplay();
+  switchState("playing");
+}
+
+function showCleared() {
+  const acc = game.attempts > 0 ? Math.round((game.correctCount / game.attempts) * 100) : 0;
+  document.getElementById("cleared-level-label").textContent = `Level ${game.level} complete`;
+  document.getElementById("cs-attempts").textContent = game.attempts;
+  document.getElementById("cs-accuracy").textContent = `${acc}%`;
+  document.getElementById("cs-simplify").textContent = game.simplifyTriggers;
+  switchState("cleared");
+}
+
+async function levelUp() {
+  await saveGame("leveled_up");
+  game.level++; game.score = 0; game.attempts = 0;
+  game.correctCount = 0; game.incorrectCount = 0;
+  game.simplifyTriggers = 0; game.startTime = Date.now();
+  renderPlayHeader();
+  updateScoreDisplay();
+  switchState("playing");
+}
+
+async function newPassage() {
+  await saveGame("cleared");
+  document.getElementById("inp-passage").value = "";
+  document.getElementById("inp-piece").value   = "";
+  resetGame();
+  switchState("setup");
+  loadHistory();
+}
+
+async function abandonGame() {
+  if (game.attempts > 0) await saveGame("abandoned");
+  document.getElementById("inp-passage").value = game.passageLabel;
+  document.getElementById("inp-piece").value   = game.pieceName;
+  resetGame();
+  switchState("setup");
+  loadHistory();
+}
+
+async function saveGame(outcome) {
+  const duration = game.startTime ? Math.round((Date.now() - game.startTime) / 1000) : 0;
+  const { error } = await db.from("passage_games").insert({
+    email: currentEmail, passage_label: game.passageLabel,
+    piece_label: game.pieceName || null, level: game.level,
+    attempts: game.attempts, correct_count: game.correctCount,
+    incorrect_count: game.incorrectCount, simplify_triggers: game.simplifyTriggers,
+    outcome, duration_seconds: duration,
+    session_date: new Date().toISOString().slice(0, 10),
+  });
+  if (error) console.error("Save game error:", error);
+}
+
+async function loadHistory() {
+  const { data } = await db.from("passage_games")
+    .select("*").eq("email", currentEmail)
+    .order("created_at", { ascending: false }).limit(30);
+
+  const list  = document.getElementById("history-list");
+  const empty = document.getElementById("history-empty");
+  if (!data || data.length === 0) {
+    list.innerHTML = ""; empty.style.display = "block"; return;
+  }
+  empty.style.display = "none";
+  const outcomeLabel = { cleared:"Cleared", leveled_up:"Levelled up", abandoned:"Abandoned" };
+  list.innerHTML = data.map(g => {
+    const acc = g.attempts > 0 ? Math.round((g.correct_count / g.attempts) * 100) : 0;
+    return `
+    <div class="history-item">
+      <div class="hi-dot ${g.outcome}"></div>
+      <div class="hi-body">
+        <div class="hi-passage">${escHtml(g.passage_label)}</div>
+        ${g.piece_label ? `<div class="hi-piece">${escHtml(g.piece_label)}</div>` : ""}
+        <div class="hi-meta">${g.attempts} attempts · ${acc}% accuracy${g.simplify_triggers > 0 ? ` · ${g.simplify_triggers} simplify` : ""}</div>
+      </div>
+      <div class="hi-right">
+        <div class="hi-outcome ${g.outcome}">${outcomeLabel[g.outcome] || g.outcome}</div>
+        <div class="hi-level">Lv.${g.level}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function escHtml(s) {
+  return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ══════════════════════════════════════════════════════════════
+// METRONOME
+// ══════════════════════════════════════════════════════════════
+let audioCtx     = null;
+let metroRunning = false;
+let metroBPM     = 80;
+let metroSig     = 4;
+let nextNoteTime = 0;
+let currentBeat  = 0;
+let metroTimer   = null;
+let tapTimes     = [];
+
+const LOOKAHEAD      = 25;
+const SCHEDULE_AHEAD = 0.12;
+
+function buildDiscPips(sig) {
+  const wrap = document.getElementById("metro-disc-pips");
+  wrap.innerHTML = "";
+  for (let i = 0; i < sig; i++) {
+    const pip = document.createElement("div");
+    pip.className = "metro-disc-pip";
+    pip.id = `dpip-${i}`;
+    wrap.appendChild(pip);
+  }
+}
+
+function setSig(sig) {
+  metroSig = sig;
+  document.querySelectorAll(".metro-sig-btn").forEach(b => {
+    b.classList.toggle("active", b.textContent.startsWith(String(sig)));
+  });
+  buildDiscPips(sig);
+  if (metroRunning) { stopMetro(); startMetro(); }
+}
+
+function nudgeBPM(delta) {
+  metroBPM = Math.max(20, Math.min(300, metroBPM + delta));
+  updateBPMDisplay();
+  if (metroRunning) { stopMetro(); startMetro(); }
+}
+
+function setBPMFromInput() {
+  const v = parseInt(document.getElementById("metro-bpm-input").value, 10);
+  if (!isNaN(v)) metroBPM = Math.max(20, Math.min(300, v));
+  updateBPMDisplay();
+  if (metroRunning) { stopMetro(); startMetro(); }
+}
+
+function updateBPMDisplay() {
+  document.getElementById("metro-bpm-display").textContent = metroBPM;
+  document.getElementById("metro-bpm-input").value = metroBPM;
+}
+
+function tapTempo() {
+  const now = Date.now();
+  tapTimes.push(now);
+  if (tapTimes.length > 4) tapTimes.shift();
+  if (tapTimes.length >= 2) {
+    let total = 0;
+    for (let i = 1; i < tapTimes.length; i++) total += tapTimes[i] - tapTimes[i - 1];
+    metroBPM = Math.max(20, Math.min(300, Math.round(60000 / (total / (tapTimes.length - 1)))));
+    updateBPMDisplay();
+    if (metroRunning) { stopMetro(); startMetro(); }
+  }
+}
+
+function toggleMetro() {
+  metroRunning ? stopMetro() : startMetro();
+}
+
+function startMetro() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  metroRunning = true; currentBeat = 0;
+  nextNoteTime = audioCtx.currentTime + 0.05;
+  schedulerLoop();
+  const btn = document.getElementById("metro-start-btn");
+  btn.textContent = "Stop";
+  btn.className = "metro-start-btn running";
+}
+
+function stopMetro() {
+  metroRunning = false;
+  clearTimeout(metroTimer);
+  // Reset visual
+  document.getElementById("metro-disc").className = "metro-disc";
+  document.querySelectorAll(".metro-disc-pip").forEach(p => p.className = "metro-disc-pip");
+  const btn = document.getElementById("metro-start-btn");
+  btn.textContent = "Start";
+  btn.className = "metro-start-btn stopped";
+}
+
+function schedulerLoop() {
+  while (nextNoteTime < audioCtx.currentTime + SCHEDULE_AHEAD) {
+    scheduleClick(currentBeat, nextNoteTime);
+    nextNoteTime += 60.0 / metroBPM;
+    currentBeat = (currentBeat + 1) % metroSig;
+  }
+  if (metroRunning) metroTimer = setTimeout(schedulerLoop, LOOKAHEAD);
+}
+
+function scheduleClick(beat, time) {
+  const osc  = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.frequency.value = beat === 0 ? 1100 : 880;
+  gain.gain.setValueAtTime(beat === 0 ? 0.9 : 0.55, time);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+  osc.start(time); osc.stop(time + 0.05);
+
+  const delay = Math.max(0, (time - audioCtx.currentTime) * 1000);
+  setTimeout(() => flashBeat(beat), delay);
+}
+
+function flashBeat(beat) {
+  const disc = document.getElementById("metro-disc");
+  disc.className = "metro-disc " + (beat === 0 ? "accent" : "beat");
+  document.querySelectorAll(".metro-disc-pip").forEach((p, i) => {
+    p.className = "metro-disc-pip" + (i === beat ? (beat === 0 ? " accent-lit" : " lit") : "");
+  });
+  setTimeout(() => {
+    if (disc) disc.className = "metro-disc";
+    const pip = document.getElementById(`dpip-${beat}`);
+    if (pip) pip.className = "metro-disc-pip";
+  }, 90);
+}
+
+// ── Start ────────────────────────────────────────────────────
+boot();
+</script>
+</body>
+</html>

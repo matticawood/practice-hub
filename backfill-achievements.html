@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Backfill Achievements — The Practice Room</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px; max-width: 900px; margin: 0 auto; }
+    h1   { color: #f5c518; margin-bottom: 6px; }
+    p    { color: #999; font-size: 0.9rem; margin-bottom: 24px; }
+    button {
+      background: #f5c518; color: #000; border: none; padding: 12px 28px;
+      font-size: 1rem; font-weight: 700; border-radius: 8px; cursor: pointer; margin-right: 12px;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.danger { background: #ef4444; color: #fff; }
+    #log {
+      margin-top: 28px; background: #111; border: 1px solid #222;
+      border-radius: 8px; padding: 16px; font-size: 0.82rem;
+      font-family: monospace; line-height: 1.8; max-height: 500px;
+      overflow-y: auto; white-space: pre-wrap;
+    }
+    .ok   { color: #84cc16; }
+    .warn { color: #f5c518; }
+    .err  { color: #f87171; }
+    .done { color: #f5c518; font-weight: bold; }
+    .dim  { color: #555; }
+    #actions { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>🏆 Backfill Achievements</h1>
+  <p>
+    Scans every user's full practice history and applies any achievements they've earned
+    but don't yet have recorded. Safe to run multiple times — already-earned achievements
+    are never duplicated.<br><br>
+    <strong>Requires:</strong> <code>admin_get_user_sessions</code> and
+    <code>admin_record_achievements</code> SQL functions to exist in Supabase.
+  </p>
+
+  <button id="btn-scan">Scan All Users</button>
+
+  <div id="log"></div>
+  <div id="actions"></div>
+
+<script>
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── Achievement computation (mirrors practice-log.html) ──────────────────────
+
+function _achTotalMins(s) {
+  return s.reduce((t, ss) => t + (ss.duration_minutes || 0), 0);
+}
+
+function toDateStr(d) { return d.toISOString().slice(0, 10); }
+
+function _achMaxStreak(s) {
+  const dates = [...new Set(s.map(ss => ss.session_date).filter(Boolean))].sort();
+  if (!dates.length) return 0;
+  let best = 1, cur = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const prev = new Date(dates[i-1] + "T12:00:00");
+    prev.setDate(prev.getDate() + 1);
+    if (toDateStr(prev) === dates[i]) { cur++; best = Math.max(best, cur); }
+    else cur = 1;
+  }
+  return best;
+}
+
+function _achUniquePieces(s) {
+  const set = new Set();
+  s.forEach(ss => (ss.practice_items || []).forEach(i => {
+    if (i.item_type === "piece" && i.label) set.add(i.label.toLowerCase().trim());
+  }));
+  return set.size;
+}
+
+function _achMaxPieceMins(s) {
+  const totals = {};
+  s.forEach(ss => {
+    const items = ss.practice_items || [];
+    const sessMins = ss.duration_minutes || 0;
+    items.forEach(i => {
+      if (i.item_type !== "piece" || !i.label) return;
+      const key = i.label.toLowerCase().trim();
+      let mins = 0;
+      if (ss.timing_mode === "per_item") { mins = i.duration_minutes || 0; }
+      else { const pc = items.filter(x => x.item_type === "piece").length; mins = pc > 0 ? sessMins / pc : 0; }
+      totals[key] = (totals[key] || 0) + mins;
+    });
+  });
+  return Object.values(totals).reduce((m, v) => Math.max(m, v), 0);
+}
+
+function _achUniqueScales(s) {
+  const set = new Set();
+  s.forEach(ss => (ss.practice_items || []).forEach(i => {
+    if (i.item_type === "technique" && i.label)
+      i.label.split(",").forEach(t => { const tr = t.trim().toLowerCase(); if (tr) set.add(tr); });
+  }));
+  return set.size;
+}
+
+function _achMaxScaleSessions(s) {
+  const counts = {};
+  s.forEach(ss => {
+    const seen = new Set();
+    (ss.practice_items || []).forEach(i => {
+      if (i.item_type === "technique" && i.label)
+        i.label.split(",").forEach(t => {
+          const tr = t.trim().toLowerCase();
+          if (tr && !seen.has(tr)) { seen.add(tr); counts[tr] = (counts[tr] || 0) + 1; }
+        });
+    });
+  });
+  return Object.values(counts).reduce((m, v) => Math.max(m, v), 0);
+}
+
+function _achItemTypeSessions(s, type) {
+  return s.filter(ss => (ss.practice_items || []).some(i => i.item_type === type)).length;
+}
+
+function _achItemTypeMins(s, type) {
+  let total = 0;
+  s.forEach(ss => {
+    const items = ss.practice_items || [];
+    const matching = items.filter(i => i.item_type === type);
+    if (!matching.length) return;
+    if (ss.timing_mode === "per_item") { matching.forEach(i => { total += i.duration_minutes || 0; }); }
+    else { const sessMins = ss.duration_minutes || 0; const count = items.length; total += count > 0 ? (matching.length / count) * sessMins : 0; }
+  });
+  return Math.round(total);
+}
+
+function _achMaxVarietyTypes(s) {
+  return s.reduce((m, ss) => {
+    const types = new Set((ss.practice_items || []).map(i => i.item_type).filter(Boolean));
+    return Math.max(m, types.size);
+  }, 0);
+}
+
+function _achHasCompleteSession(s) {
+  const EXTRAS = new Set(["theory", "eartraining", "improvisation", "sightreading"]);
+  return s.some(ss => {
+    const types = new Set((ss.practice_items || []).map(i => i.item_type));
+    return types.has("piece") && types.has("technique") && [...types].some(t => EXTRAS.has(t));
+  });
+}
+
+function _achMaxMonthDays(s) {
+  const byMonth = {};
+  s.forEach(ss => {
+    if (!ss.session_date) return;
+    const month = ss.session_date.slice(0, 7);
+    if (!byMonth[month]) byMonth[month] = new Set();
+    byMonth[month].add(ss.session_date);
+  });
+  return Object.values(byMonth).reduce((m, set) => Math.max(m, set.size), 0);
+}
+
+const ACHIEVEMENTS = [
+  { id:"s1",    check:s=>s.length>=1 },
+  { id:"s10",   check:s=>s.length>=10 },
+  { id:"s50",   check:s=>s.length>=50 },
+  { id:"s100",  check:s=>s.length>=100 },
+  { id:"s250",  check:s=>s.length>=250 },
+  { id:"s500",  check:s=>s.length>=500 },
+  { id:"t1",    check:s=>_achTotalMins(s)>=60 },
+  { id:"t10",   check:s=>_achTotalMins(s)>=600 },
+  { id:"t50",   check:s=>_achTotalMins(s)>=3000 },
+  { id:"t100",  check:s=>_achTotalMins(s)>=6000 },
+  { id:"t500",  check:s=>_achTotalMins(s)>=30000 },
+  { id:"k3",    check:s=>_achMaxStreak(s)>=3 },
+  { id:"k7",    check:s=>_achMaxStreak(s)>=7 },
+  { id:"k14",   check:s=>_achMaxStreak(s)>=14 },
+  { id:"k30",   check:s=>_achMaxStreak(s)>=30 },
+  { id:"k60",   check:s=>_achMaxStreak(s)>=60 },
+  { id:"k100",  check:s=>_achMaxStreak(s)>=100 },
+  { id:"k180",  check:s=>_achMaxStreak(s)>=180 },
+  { id:"k365",  check:s=>_achMaxStreak(s)>=365 },
+  { id:"p1",    check:s=>_achUniquePieces(s)>=1 },
+  { id:"p5",    check:s=>_achUniquePieces(s)>=5 },
+  { id:"p15",   check:s=>_achUniquePieces(s)>=15 },
+  { id:"p30",   check:s=>_achUniquePieces(s)>=30 },
+  { id:"p50",   check:s=>_achUniquePieces(s)>=50 },
+  { id:"pd1",   check:s=>_achMaxPieceMins(s)>=60 },
+  { id:"pd5",   check:s=>_achMaxPieceMins(s)>=300 },
+  { id:"pd10",  check:s=>_achMaxPieceMins(s)>=600 },
+  { id:"pd20",  check:s=>_achMaxPieceMins(s)>=1200 },
+  { id:"sc1",   check:s=>_achUniqueScales(s)>=1 },
+  { id:"sc5",   check:s=>_achUniqueScales(s)>=5 },
+  { id:"sc15",  check:s=>_achUniqueScales(s)>=15 },
+  { id:"ss5",   check:s=>_achMaxScaleSessions(s)>=5 },
+  { id:"ss10",  check:s=>_achMaxScaleSessions(s)>=10 },
+  { id:"ss25",  check:s=>_achMaxScaleSessions(s)>=25 },
+  { id:"ss50",  check:s=>_achMaxScaleSessions(s)>=50 },
+  { id:"sr1",   check:s=>_achItemTypeSessions(s,"sightreading")>=1 },
+  { id:"sr10",  check:s=>_achItemTypeSessions(s,"sightreading")>=10 },
+  { id:"sr30",  check:s=>_achItemTypeSessions(s,"sightreading")>=30 },
+  { id:"srt1",  check:s=>_achItemTypeMins(s,"sightreading")>=60 },
+  { id:"srt5",  check:s=>_achItemTypeMins(s,"sightreading")>=300 },
+  { id:"srt25", check:s=>_achItemTypeMins(s,"sightreading")>=1500 },
+  { id:"srt50", check:s=>_achItemTypeMins(s,"sightreading")>=3000 },
+  { id:"im1",   check:s=>_achItemTypeSessions(s,"improvisation")>=1 },
+  { id:"im10",  check:s=>_achItemTypeSessions(s,"improvisation")>=10 },
+  { id:"im30",  check:s=>_achItemTypeSessions(s,"improvisation")>=30 },
+  { id:"imt1",  check:s=>_achItemTypeMins(s,"improvisation")>=60 },
+  { id:"imt5",  check:s=>_achItemTypeMins(s,"improvisation")>=300 },
+  { id:"imt25", check:s=>_achItemTypeMins(s,"improvisation")>=1500 },
+  { id:"imt50", check:s=>_achItemTypeMins(s,"improvisation")>=3000 },
+  { id:"th1",   check:s=>_achItemTypeSessions(s,"theory")>=1 },
+  { id:"th10",  check:s=>_achItemTypeSessions(s,"theory")>=10 },
+  { id:"th30",  check:s=>_achItemTypeSessions(s,"theory")>=30 },
+  { id:"tht1",  check:s=>_achItemTypeMins(s,"theory")>=60 },
+  { id:"tht5",  check:s=>_achItemTypeMins(s,"theory")>=300 },
+  { id:"tht25", check:s=>_achItemTypeMins(s,"theory")>=1500 },
+  { id:"tht50", check:s=>_achItemTypeMins(s,"theory")>=3000 },
+  { id:"et1",   check:s=>_achItemTypeSessions(s,"eartraining")>=1 },
+  { id:"et10",  check:s=>_achItemTypeSessions(s,"eartraining")>=10 },
+  { id:"et30",  check:s=>_achItemTypeSessions(s,"eartraining")>=30 },
+  { id:"ett1",  check:s=>_achItemTypeMins(s,"eartraining")>=60 },
+  { id:"ett5",  check:s=>_achItemTypeMins(s,"eartraining")>=300 },
+  { id:"ett25", check:s=>_achItemTypeMins(s,"eartraining")>=1500 },
+  { id:"ett50", check:s=>_achItemTypeMins(s,"eartraining")>=3000 },
+  { id:"d60",   check:s=>s.some(ss=>(ss.duration_minutes||0)>=60) },
+  { id:"d120",  check:s=>s.some(ss=>(ss.duration_minutes||0)>=120) },
+  { id:"d180",  check:s=>s.some(ss=>(ss.duration_minutes||0)>=180) },
+  { id:"mo20",  check:s=>_achMaxMonthDays(s)>=20 },
+  { id:"bk1",   check:s=>_achItemTypeSessions(s,"book")>=1 },
+  { id:"bk10",  check:s=>_achItemTypeSessions(s,"book")>=10 },
+  { id:"bk30",  check:s=>_achItemTypeSessions(s,"book")>=30 },
+  { id:"bkt5",  check:s=>_achItemTypeMins(s,"book")>=300 },
+  { id:"bkt25", check:s=>_achItemTypeMins(s,"book")>=1500 },
+  { id:"vcomp", check:s=>_achHasCompleteSession(s) },
+  { id:"v4",    check:s=>_achMaxVarietyTypes(s)>=4 },
+  // Extras-dependent (reading, games, library, streak saves) handled separately below
+  { id:"r1",    check:(s,x)=>(x.savedCount||0)>=1 },
+  { id:"r5",    check:(s,x)=>(x.savedCount||0)>=5 },
+  { id:"r10",   check:(s,x)=>(x.readCount||0)>=10 },
+  { id:"r25",   check:(s,x)=>(x.readCount||0)>=25 },
+  { id:"c1",    check:(s,x)=>(x.colTotal||0)>=1 },
+  { id:"c5",    check:(s,x)=>(x.colTotal||0)>=5 },
+  { id:"c10",   check:(s,x)=>(x.colTotal||0)>=10 },
+  { id:"c25",   check:(s,x)=>(x.colTotal||0)>=25 },
+  { id:"c5l",   check:(s,x)=>(x.colLearning||0)>=5 },
+  { id:"c3a",   check:(s,x)=>(x.colAspire||0)>=3 },
+  { id:"c10a",  check:(s,x)=>(x.colAspire||0)>=10 },
+  { id:"c1c",   check:(s,x)=>(x.colCompleted||0)>=1 },
+  { id:"c3c",   check:(s,x)=>(x.colCompleted||0)>=3 },
+  { id:"c5c",   check:(s,x)=>(x.colCompleted||0)>=5 },
+  { id:"c10c",  check:(s,x)=>(x.colCompleted||0)>=10 },
+  { id:"g1",    check:(s,x)=>(x.gamesTotal||0)>=1 },
+  { id:"g5t",   check:(s,x)=>(x.gamesTotal||0)>=5 },
+  { id:"g25t",  check:(s,x)=>(x.gamesTotal||0)>=25 },
+  { id:"g1c",   check:(s,x)=>(x.gamesCleared||0)>=1 },
+  { id:"g10c",  check:(s,x)=>(x.gamesCleared||0)>=10 },
+  { id:"g50c",  check:(s,x)=>(x.gamesCleared||0)>=50 },
+  { id:"g1p",   check:(s,x)=>(x.gamesPerfect||0)>=1 },
+  { id:"g5p",   check:(s,x)=>(x.gamesPerfect||0)>=5 },
+  { id:"g3d",   check:(s,x)=>(x.uniquePassages||0)>=3 },
+  { id:"g10d",  check:(s,x)=>(x.uniquePassages||0)>=10 },
+  { id:"g5",    check:(s,x)=>(x.maxGameLevel||0)>=5 },
+  { id:"g10",   check:(s,x)=>(x.maxGameLevel||0)>=10 },
+  { id:"sv1",   check:(s,x)=>(x.streakSaves||0)>=1 },
+  { id:"sv3",   check:(s,x)=>(x.streakSaves||0)>=3 },
+  { id:"sv5",   check:(s,x)=>(x.streakSaves||0)>=5 },
+];
+
+// ── Logging ──────────────────────────────────────────────────────────────────
+const logEl = document.getElementById("log");
+function log(msg, cls = "") {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+let allResults = [];
+
+document.getElementById("btn-scan").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-scan");
+  btn.disabled = true;
+  logEl.innerHTML = "";
+  document.getElementById("actions").innerHTML = "";
+  allResults = [];
+
+  // 1. Get all distinct user emails from practice_sessions
+  log("Fetching all user emails…", "dim");
+  const { data: emailRows, error: emailErr } = await db
+    .from("practice_sessions").select("email");
+  if (emailErr) { log("Error: " + emailErr.message, "err"); btn.disabled = false; return; }
+  const emails = [...new Set(emailRows.map(r => r.email).filter(Boolean))].sort();
+  log(`Found ${emails.length} users.`, "dim");
+
+  // 2. Get all existing achievement_events
+  log("Fetching existing achievement records…", "dim");
+  const { data: allEvents, error: evErr } = await db
+    .from("achievement_events").select("email, achievement_id");
+  if (evErr) { log("Error: " + evErr.message, "err"); btn.disabled = false; return; }
+  const existingByEmail = {};
+  for (const ev of (allEvents || [])) {
+    if (!existingByEmail[ev.email]) existingByEmail[ev.email] = new Set();
+    existingByEmail[ev.email].add(ev.achievement_id);
+  }
+
+  // 3. Get streak tokens for all users (for sv achievements)
+  log("Fetching streak tokens…", "dim");
+  const { data: tokenRows } = await db.from("streak_tokens").select("email, saved_dates");
+  const tokenByEmail = {};
+  for (const t of (tokenRows || [])) tokenByEmail[t.email] = (t.saved_dates || []).length;
+
+  // 4. Process each user
+  let totalNew = 0;
+  for (const email of emails) {
+    log(`Processing ${email}…`, "dim");
+
+    // Fetch sessions
+    const { data: sessions, error: sessErr } = await db.rpc("admin_get_user_sessions", { p_email: email });
+    if (sessErr) { log(`  ✗ sessions error: ${sessErr.message}`, "err"); continue; }
+
+    // Fetch extras
+    const [readRes, gamesRes, colRes] = await Promise.all([
+      db.rpc("get_user_reading_list",  { p_email: email }),
+      db.rpc("get_user_passage_games", { p_email: email }),
+      db.rpc("get_user_collection",    { p_email: email }),
+    ]);
+    const readRows  = readRes.data  || [];
+    const gameRows  = gamesRes.data || [];
+    const colRows   = colRes.data   || [];
+
+    const extras = {
+      savedCount:     readRows.length,
+      readCount:      readRows.filter(r => r.status === "read").length,
+      gamesTotal:     gameRows.length,
+      gamesCleared:   gameRows.filter(g => g.outcome === "cleared").length,
+      gamesPerfect:   gameRows.filter(g => g.outcome === "cleared" && (g.incorrect_count || 0) === 0).length,
+      maxGameLevel:   gameRows.reduce((m, g) => Math.max(m, g.level || 0), 0),
+      uniquePassages: new Set(gameRows.map(g => g.passage_label).filter(Boolean)).size,
+      colTotal:       colRows.length,
+      colCompleted:   colRows.filter(r => r.status === "completed").length,
+      colLearning:    colRows.filter(r => r.status === "learning").length,
+      colAspire:      colRows.filter(r => r.status === "aspire").length,
+      streakSaves:    tokenByEmail[email] || 0,
+    };
+
+    // Compute which achievements are earned
+    const earned = ACHIEVEMENTS.filter(a => {
+      try { return a.check(sessions || [], extras); } catch { return false; }
+    }).map(a => a.id);
+
+    // Find which ones are new (not yet in DB)
+    const existing = existingByEmail[email] || new Set();
+    const newIds = earned.filter(id => !existing.has(id));
+
+    if (newIds.length > 0) {
+      log(`  ✓ ${email}: ${newIds.length} new achievement(s): ${newIds.join(", ")}`, "warn");
+      allResults.push({ email, newIds });
+      totalNew += newIds.length;
+    } else {
+      log(`  · ${email}: up to date (${earned.length} earned)`, "dim");
+    }
+  }
+
+  log(`\nScan complete. ${allResults.length} user(s) need updates, ${totalNew} new achievement(s) to apply.`,
+    totalNew > 0 ? "warn" : "ok");
+
+  if (allResults.length > 0) renderActions();
+  btn.disabled = false;
+});
+
+function renderActions() {
+  document.getElementById("actions").innerHTML = `
+    <div style="margin-top:24px">
+      <button class="danger" id="btn-apply">Apply All Achievements</button>
+      <span style="color:#999; font-size:0.85rem">Inserts missing achievement records — never removes existing ones.</span>
+    </div>`;
+  document.getElementById("btn-apply").addEventListener("click", applyAll);
+}
+
+async function applyAll() {
+  const btn = document.getElementById("btn-apply");
+  btn.disabled = true;
+  log(`\nApplying achievements…`, "dim");
+  let fixed = 0, errors = 0;
+
+  for (const { email, newIds } of allResults) {
+    const { error } = await db.rpc("admin_record_achievements", {
+      p_email: email,
+      p_ids:   newIds,
+    });
+    if (error) {
+      log(`✗ ${email}: ${error.message}`, "err");
+      errors++;
+    } else {
+      log(`✓ ${email}: applied ${newIds.length} achievement(s)`, "ok");
+      fixed++;
+    }
+  }
+
+  log(`\nDone. ${fixed} user(s) updated, ${errors} error(s).`, "done");
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>

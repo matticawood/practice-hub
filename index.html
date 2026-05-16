@@ -1,0 +1,2471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Practice Room — Piano Database</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#f5c518" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Practice Room" />
+  <link rel="apple-touch-icon" href="/icon-512.svg" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* ── Piece request modal ── */
+    .req-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5); z-index: 300;
+      align-items: center; justify-content: center;
+    }
+    .req-overlay.open { display: flex; }
+    .req-modal-box {
+      background: var(--surface); border-radius: 12px;
+      padding: 24px 26px; width: min(90vw, 400px);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    }
+    .req-modal-box h2 { margin: 0 0 6px; font-size: 1.1rem; }
+    .req-modal-box p { margin: 0 0 16px; font-size: 0.85rem; color: var(--text-muted); }
+    .req-modal-box .form-group { margin-bottom: 12px; }
+    .req-modal-box label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
+    .req-modal-box input {
+      width: 100%; box-sizing: border-box; padding: 9px 12px;
+      border: 1.5px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); color: var(--text);
+      font-size: 0.9rem; outline: none;
+    }
+    .req-modal-box input:focus { border-color: var(--accent); }
+    .req-error { font-size: 0.8rem; color: #f87171; margin-bottom: 8px; display: none; }
+    .req-modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+    /* ── Requests tab view ── */
+    #requests-view { padding-top: 8px; }
+    .req-inbox-item {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px; margin-bottom: 10px;
+      display: flex; gap: 12px; align-items: flex-start;
+    }
+    .req-inbox-item.done { opacity: 0.45; }
+    .req-inbox-body { flex: 1; }
+    .req-inbox-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+    .req-inbox-composer { font-size: 0.85rem; color: var(--text-muted); margin-top: 2px; }
+    .req-inbox-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 6px; }
+    .req-done-badge { font-size: 0.78rem; color: var(--text-muted); flex-shrink: 0; padding-top: 2px; }
+    .req-piece-search-wrap { margin-top: 10px; position: relative; }
+    .req-piece-search-wrap input { width: 100%; box-sizing: border-box; padding: 7px 10px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: 0.85rem; outline: none; }
+    .req-piece-search-wrap input:focus { border-color: var(--accent); }
+    .req-piece-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px; z-index: 50; max-height: 200px; overflow-y: auto; display: none; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+    .req-piece-dropdown-item { padding: 8px 12px; cursor: pointer; font-size: 0.88rem; }
+    .req-piece-dropdown-item:hover { background: var(--surface-2); }
+    .req-piece-dropdown-item .rdi-composer { font-size: 0.78rem; color: var(--text-muted); }
+    .req-piece-linked { background: #0d2d0d; border: 1px solid #1a5c1a; border-radius: 6px; padding: 6px 10px; font-size: 0.82rem; color: #6fcf6f; margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .req-piece-linked button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem; padding: 0; }
+    .req-mark-done-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+
+<header id="app-header" style="display:none">
+  <div class="header-logo">🎹</div>
+  <div style="flex:1">
+    <h1>The Practice Room</h1>
+    <p>A searchable piano repertoire database</p>
+  </div>
+  <div class="header-user">
+    <span id="header-email"></span>
+    <a class="btn btn-ghost btn-sm" href="https://thepracticeroom.matthewcawood.com">The Practice Room</a>
+    <button class="btn btn-ghost btn-sm" id="hub-btn">⌂ Hub</button>
+    <button class="btn btn-ghost btn-sm owner-only" id="access-btn" style="display:none">Manage Access</button>
+    <button class="btn btn-ghost btn-sm" id="logout-btn">Log out</button>
+  </div>
+</header>
+
+<main id="app-main" style="display:none">
+
+  <!-- ── Tab bar ── -->
+  <div class="tab-bar">
+    <button class="tab active" data-tab="database">All Pieces</button>
+    <button class="tab owner-only" data-tab="books" style="display:none">📚 Books</button>
+    <button class="tab" data-tab="collection">My Pieces Collection</button>
+    <button class="tab owner-only" data-tab="requests" style="display:none">📬 Requests<span id="piece-req-badge" style="display:none;background:#c0392b;color:#fff;font-size:0.7rem;border-radius:10px;padding:1px 6px;margin-left:5px;vertical-align:middle"></span></button>
+  </div>
+
+  <!-- ── Database view ── -->
+  <div id="database-view">
+    <div class="controls">
+      <div class="search-wrap">
+        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="search" placeholder="Search title, composer, tag…" autocomplete="off" />
+      </div>
+      <select id="filter-difficulty">
+        <option value="">All levels</option>
+        <option value="0">Absolute Beginner</option>
+        <option value="1">Beginner</option>
+        <option value="2">Lower Intermediate</option>
+        <option value="3">Upper Intermediate</option>
+        <option value="4">Advanced</option>
+        <option value="5">Expert</option>
+      </select>
+      <button class="btn btn-primary owner-only" id="add-btn" style="display:none">+ Add Piece</button>
+      <button class="btn btn-ghost" id="request-btn" onclick="openPieceRequestModal()">💡 Request a piece</button>
+    </div>
+    <p class="results-meta" id="results-meta"></p>
+    <div class="pieces-grid" id="pieces-grid"></div>
+    <div class="empty" id="empty" style="display:none">
+      <div class="empty-icon">🔍</div>
+      <p>No pieces match your search.</p>
+    </div>
+  </div>
+
+  <!-- ── Books view (owner only) ── -->
+  <div id="books-view" style="display:none">
+    <div class="controls">
+      <div class="search-wrap">
+        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="book-search" placeholder="Search books…" autocomplete="off" />
+      </div>
+      <select id="book-filter-difficulty">
+        <option value="">All levels</option>
+        <option value="0">Absolute Beginner</option>
+        <option value="1">Beginner</option>
+        <option value="2">Lower Intermediate</option>
+        <option value="3">Upper Intermediate</option>
+        <option value="4">Advanced</option>
+        <option value="5">Expert</option>
+      </select>
+      <button class="btn btn-primary" id="add-book-btn">+ Add Book</button>
+      <button class="btn btn-ghost" id="add-series-btn" style="border-color:var(--border)">+ Add Series</button>
+    </div>
+
+    <!-- ── Add Series panel ── -->
+    <div id="series-panel" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <h3 style="margin:0 0 14px;font-size:1rem;color:var(--text)">📚 Add a Series of Books</h3>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:1;min-width:200px">
+          <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:5px">Author / Publisher <span style="opacity:0.6">(applies to all — can be left blank)</span></label>
+          <input type="text" id="series-author" placeholder="e.g. ABRSM" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:0.9rem;outline:none" />
+        </div>
+        <div style="flex:1;min-width:200px">
+          <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:5px">Anthropic API Key</label>
+          <input type="password" id="series-api-key" placeholder="sk-ant-…" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:0.85rem;font-family:monospace;outline:none" />
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:5px">Book titles — one per line</label>
+        <textarea id="series-titles" rows="6" placeholder="ABRSM Jazz Piano Pieces: Grade 1&#10;ABRSM Jazz Piano Pieces: Grade 2&#10;ABRSM Jazz Piano Pieces: Grade 3&#10;ABRSM Jazz Piano Pieces: Grade 4&#10;ABRSM Jazz Piano Pieces: Grade 5"
+          style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:0.9rem;outline:none;resize:vertical;font-family:inherit"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+        <button class="btn btn-ghost" id="series-generate-btn" style="background:#1e3a1e;color:#7ec87e;border:1px solid #2d5a2d">⚡ Generate All</button>
+        <button class="btn btn-ghost" id="series-cancel-btn">Cancel</button>
+        <span id="series-progress-label" style="font-size:0.82rem;color:var(--text-muted)"></span>
+      </div>
+      <div id="series-results" style="display:none">
+        <div id="series-book-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+        <button class="btn btn-primary" id="series-save-btn">Save All to Library</button>
+        <span id="series-save-status" style="font-size:0.82rem;color:var(--text-muted);margin-left:12px"></span>
+      </div>
+    </div>
+
+    <p class="results-meta" id="books-meta"></p>
+    <div class="pieces-grid" id="books-grid"></div>
+    <div class="empty" id="books-empty" style="display:none">
+      <div class="empty-icon">📚</div>
+      <p>No books match your search.</p>
+    </div>
+  </div>
+
+  <!-- ── Collection view ── -->
+  <div id="collection-view" style="display:none">
+
+    <!-- Owner: viewing dropdown -->
+    <div class="viewing-bar owner-only" id="viewing-bar" style="display:none">
+      <span>Viewing collection for:</span>
+      <select id="viewing-select"></select>
+    </div>
+
+    <!-- Status sub-tabs -->
+    <div class="sub-tab-bar">
+      <button class="sub-tab active" data-status="learning">Currently Learning <span class="sub-tab-count" id="count-learning">0</span></button>
+      <button class="sub-tab" data-status="aspire">Aspire to Play <span class="sub-tab-count" id="count-aspire">0</span></button>
+      <button class="sub-tab" data-status="completed">Completed <span class="sub-tab-count" id="count-completed">0</span></button>
+    </div>
+
+    <div class="pieces-grid" id="col-content-grid"></div>
+
+    <div class="empty" id="col-status-empty" style="display:none">
+      <div class="empty-icon">🎵</div>
+      <p id="col-status-empty-msg">No pieces here yet.</p>
+    </div>
+
+    <div class="empty" id="collection-empty" style="display:none">
+      <div class="empty-icon">🎵</div>
+      <p>No pieces in your collection yet.<br>Use the All Pieces tab to start adding some.</p>
+    </div>
+  </div>
+
+  <!-- ── Requests view (owner only) ── -->
+  <div id="requests-view" style="display:none">
+    <h3 style="margin:0 0 10px;font-size:0.9rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Pending</h3>
+    <div id="requests-pending-list"><p style="color:var(--text-muted);font-size:0.9rem">Loading…</p></div>
+    <h3 style="margin:24px 0 10px;font-size:0.9rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Added Pieces</h3>
+    <div id="requests-done-list"><p style="color:var(--text-muted);font-size:0.9rem">None yet.</p></div>
+    <h3 style="margin:24px 0 10px;font-size:0.9rem;color:#f87171;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">⚑ Broken Link Reports</h3>
+    <div id="requests-broken-list"><p style="color:var(--text-muted);font-size:0.9rem">None reported.</p></div>
+    <h3 style="margin:24px 0 10px;font-size:0.9rem;color:#a855f7;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">🎯 Piece Goals (not yet in library)</h3>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin:-4px 0 12px">Students have set goals for these pieces — add them to the library and they'll link automatically.</p>
+    <div id="unlinked-goals-list"><p style="color:var(--text-muted);font-size:0.9rem">Loading…</p></div>
+    <h3 style="margin:24px 0 10px;font-size:0.9rem;color:#10b981;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">📚 Book Goals (not yet in library)</h3>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin:-4px 0 12px">Students have set goals for these books — link to an existing library book or add a new one.</p>
+    <div id="unlinked-book-goals-list"><p style="color:var(--text-muted);font-size:0.9rem">Loading…</p></div>
+    <h3 style="margin:24px 0 10px;font-size:0.9rem;color:#f59e0b;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">🎵 Pieces Logged (not in library)</h3>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin:-4px 0 12px">Students have logged practice for these pieces but they aren't linked to the library — link or add them to fix the name in their stats.</p>
+    <div id="unlinked-session-pieces-list"><p style="color:var(--text-muted);font-size:0.9rem">Loading…</p></div>
+    <h3 style="margin:24px 0 10px;font-size:0.9rem;color:#06b6d4;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">📖 Books Logged (not in library)</h3>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin:-4px 0 12px">Students have logged practice for these books but they aren't linked to the library — link or add them to fix the name in their stats.</p>
+    <div id="unlinked-session-books-list"><p style="color:var(--text-muted);font-size:0.9rem">Loading…</p></div>
+  </div>
+
+</main>
+
+<!-- ── Piece request modal ── -->
+<div class="req-overlay" id="piece-req-overlay" onclick="if(event.target===this)closePieceRequestModal()">
+  <div class="req-modal-box">
+    <h2>Request a Piece</h2>
+    <p>Is there a piece you'd love to see added to the database?</p>
+    <div class="form-group">
+      <label for="req-title">Piece / Song title</label>
+      <input type="text" id="req-title" placeholder="e.g. Moonlight Sonata" />
+    </div>
+    <div class="form-group">
+      <label for="req-composer">Composer / Artist</label>
+      <input type="text" id="req-composer" placeholder="e.g. Beethoven" />
+    </div>
+    <div class="req-error" id="req-error"></div>
+    <div class="req-modal-footer">
+      <button class="btn btn-ghost" onclick="closePieceRequestModal()">Cancel</button>
+      <button class="btn btn-primary" id="req-submit-btn" onclick="submitPieceRequest()">Send Request</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Loading overlay ── -->
+<div id="loading-screen">
+  <div class="loading-spinner"></div>
+</div>
+
+<!-- ── Login screen ── -->
+<div id="login-screen" style="display:none">
+  <div class="login-card">
+    <div class="login-logo">🎹</div>
+    <h1 class="login-title">The Practice Room</h1>
+    <p class="login-subtitle">Piano Resources</p>
+
+    <!-- Step 1: Email -->
+    <div id="login-step-email">
+      <div class="form-group" style="margin-top:28px">
+        <label for="login-email">Email address</label>
+        <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email" />
+      </div>
+      <div id="login-error" class="login-error" style="display:none"></div>
+      <button class="btn btn-primary" id="login-btn" style="width:100%;margin-top:8px;padding:12px">
+        Send verification code
+      </button>
+    </div>
+
+    <!-- Step 2: Enter 6-digit code -->
+    <div id="login-step-otp" style="display:none">
+      <div style="text-align:center;margin-top:22px;margin-bottom:18px">
+        <div style="font-size:1.8rem;margin-bottom:10px">📬</div>
+        <p style="font-size:0.84rem;color:var(--text-muted);line-height:1.7">
+          Check your inbox at<br>
+          <strong id="login-sent-to" style="color:var(--text)"></strong><br>
+          and enter the 6-digit code below.
+        </p>
+      </div>
+      <div class="form-group">
+        <input type="text" id="login-otp" placeholder="123456" maxlength="6"
+               autocomplete="one-time-code" inputmode="numeric"
+               style="letter-spacing:0.25em;font-size:1.4rem;text-align:center;padding:12px" />
+      </div>
+      <div id="login-otp-error" class="login-error" style="display:none"></div>
+      <button class="btn btn-primary" id="login-verify-btn" style="width:100%;margin-top:8px;padding:12px">
+        Verify &amp; enter
+      </button>
+      <button class="btn btn-ghost" id="login-back-btn"
+              style="width:100%;margin-top:8px;padding:10px;font-size:0.84rem">
+        ← Use a different email
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Hub screen ── -->
+<div id="hub-screen" style="display:none">
+  <div class="hub-container">
+    <div class="hub-header">
+      <div class="hub-logo">🎹</div>
+      <h1>The Practice Room</h1>
+      <p>Where would you like to go?</p>
+    </div>
+    <div class="hub-cards">
+      <button class="hub-card" id="hub-to-database" style="display:none">
+        <div class="hub-card-icon">🗃️</div>
+        <div class="hub-card-title">Repertoire Database</div>
+        <div class="hub-card-sub">Piano repertoire by difficulty</div>
+      </button>
+      <a class="hub-card" href="theory/">
+        <div class="hub-card-icon">📄</div>
+        <div class="hub-card-title">Piano Practice Daily</div>
+        <div class="hub-card-sub">Music theory reference sheets</div>
+      </a>
+      <a class="hub-card" href="practice-log.html">
+        <div class="hub-card-icon">🗃️</div>
+        <div class="hub-card-title">Practice Hub & Music Library</div>
+        <div class="hub-card-sub">Track sessions, stats & streaks</div>
+      </a>
+      <a class="hub-card" href="practice-tools.html">
+        <div class="hub-card-icon">🎯</div>
+        <div class="hub-card-title">Practice Tools</div>
+        <div class="hub-card-sub">Passage game & metronome</div>
+      </a>
+      <a class="hub-card" href="https://thepracticeroom.matthewcawood.com">
+        <div class="hub-card-icon">🏠</div>
+        <div class="hub-card-title">The Practice Room</div>
+        <div class="hub-card-sub">Return to The Practice Room</div>
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add / Edit Modal ── -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h2 id="modal-title">Add New Piece</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="f-title">Title</label>
+        <input type="text" id="f-title" placeholder="e.g. Clair de lune" />
+      </div>
+      <div class="form-group">
+        <label for="f-composer">Composer</label>
+        <input type="text" id="f-composer" placeholder="e.g. Debussy" />
+      </div>
+    </div>
+    <div class="form-group" style="max-width:180px">
+      <label for="f-year">Year</label>
+      <input type="number" id="f-year" placeholder="e.g. 1905" min="1" max="2100" />
+    </div>
+    <div class="form-group">
+      <label for="f-background">Background</label>
+      <textarea id="f-background" style="min-height:100px"
+        placeholder="Compositional context, why it was written, relevant composer facts…"></textarea>
+    </div>
+    <div class="form-group">
+      <label for="f-pianist-notes">Pianist Notes</label>
+      <textarea id="f-pianist-notes" style="min-height:100px"
+        placeholder="Structure, what it represents, techniques required, how to approach learning it…"></textarea>
+    </div>
+    <div class="form-group">
+      <label for="f-challenges">Challenges &amp; Level Rationale</label>
+      <textarea id="f-challenges" style="min-height:100px"
+        placeholder="Why it has been given this level, techniques required, what to master before attempting it…"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Difficulty Level</label>
+      <div class="diff-picker-row" id="diff-picker">
+        <button class="diff-option" data-val="0">Absolute Beginner</button>
+        <button class="diff-option" data-val="1">Beginner</button>
+        <button class="diff-option" data-val="2">Lower Intermediate</button>
+        <button class="diff-option" data-val="3">Upper Intermediate</button>
+        <button class="diff-option" data-val="4">Advanced</button>
+        <button class="diff-option" data-val="5">Expert</button>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-ghost" id="regen-text-btn" onclick="regenerateTextForDifficulty()"
+                style="background:#1a2a3e;color:#7ab4ff;border:1px solid #2a4a6e;font-size:0.82rem;padding:6px 14px">
+          ↺ Regenerate text for this difficulty
+        </button>
+        <div id="regen-text-status" style="display:none;font-size:0.78rem;color:#888;margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Challenge Tags</label>
+      <div class="tags-input-wrap" id="tags-input-wrap">
+        <input type="text" id="f-tag-input" placeholder="Type a tag and press Enter or comma…" />
+      </div>
+      <div style="font-size:0.75rem;color:#555;margin-top:5px;">
+        e.g. Pedalling, Rubato, Left hand independence — click × to remove a tag
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="f-sheet-music-url">Sheet Music URL <span style="font-weight:normal;color:var(--text-muted)">(optional — e.g. IMSLP link, or upload a PDF below)</span></label>
+      <input type="url" id="f-sheet-music-url" placeholder="https://imslp.org/…" />
+      <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label for="f-sheet-pdf" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;background:var(--surface-2);border:1.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:0.82rem;color:var(--text-muted);margin:0">
+          📄 Upload PDF
+          <input type="file" id="f-sheet-pdf" accept="application/pdf" style="display:none" onchange="uploadSheetPdf(this)" />
+        </label>
+        <span id="f-sheet-pdf-status" style="font-size:0.8rem;color:var(--text-muted)"></span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="f-youtube-url">YouTube URL <span style="font-weight:normal;color:var(--text-muted)">(optional — top recommended recording)</span></label>
+      <input type="url" id="f-youtube-url" placeholder="https://www.youtube.com/watch?v=…" />
+    </div>
+    <div class="form-group" id="ai-key-group">
+      <label for="f-api-key" style="display:flex;justify-content:space-between">
+        <span>Anthropic API Key</span>
+        <a href="https://console.anthropic.com" target="_blank"
+           style="font-size:0.72rem;color:var(--text-muted);text-decoration:none">Get a key ↗</a>
+      </label>
+      <input type="password" id="f-api-key" placeholder="sk-ant-…"
+             style="font-family:monospace;font-size:0.85rem" />
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">Stored in your browser only — never sent anywhere except Anthropic.</div>
+    </div>
+    <div id="gen-error" style="display:none;font-size:0.8rem;color:#f87171;margin-bottom:8px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+      <button class="btn btn-ghost" id="gen-btn" onclick="generatePieceInfo()" style="background:#1e3a1e;color:#7ec87e;border:1px solid #2d5a2d">⚡ Generate with AI</button>
+      <button class="btn btn-primary" id="modal-save">Save Piece</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Manage Access Modal ── -->
+<div class="modal-backdrop" id="access-modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h2>Manage Access</h2>
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:20px;">
+      Add or remove email addresses that can view the database.
+    </p>
+    <div class="form-group">
+      <label>Add emails</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="access-email-input"
+          placeholder="Enter one or more emails, comma-separated"
+          style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:0.9rem;outline:none" />
+        <button class="btn btn-primary" id="access-add-btn">Add</button>
+      </div>
+      <div style="font-size:0.75rem;color:#555;margin-top:5px">Separate multiple emails with commas</div>
+    </div>
+    <div class="form-group">
+      <label>Sync from CSV</label>
+      <label class="csv-upload-label">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Choose CSV file
+        <input type="file" id="csv-upload" accept=".csv,.txt" style="display:none" />
+      </label>
+      <div style="font-size:0.75rem;color:#555;margin-top:5px">
+        Uploads your full member list — adds new emails and removes any no longer in the file. Your owner email is always kept.
+      </div>
+    </div>
+    <div id="access-feedback" style="display:none;font-size:0.83rem;padding:8px 12px;border-radius:8px;margin-bottom:12px"></div>
+    <div class="form-group" style="margin-bottom:0">
+      <label>Current access list</label>
+      <ul class="email-list" id="email-list"></ul>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="access-modal-close">Done</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  SUPABASE CONFIGURATION                                     ║
+// ╚══════════════════════════════════════════════════════════════╝
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const OWNER_EMAIL   = "matthew@matthewcawood.com";
+// ══════════════════════════════════════════════════════════════
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+const DIFFICULTY_LABELS = ["Absolute Beginner", "Beginner", "Lower Intermediate", "Upper Intermediate", "Advanced", "Expert"];
+const STATUS_LABELS = { aspire: "Aspire to Play", learning: "Currently Learning", completed: "Completed" };
+const SESSION_KEY = "practiceRoom_session";
+
+// ── Session ───────────────────────────────────────────────────
+function repairJson(str) {
+  let result = "", inString = false, escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (escaped) { result += ch; escaped = false; continue; }
+    if (ch === "\\") { result += ch; escaped = true; continue; }
+    if (!inString) {
+      if (ch === '"') inString = true;
+      result += ch;
+    } else {
+      if (ch === '"' && /^[\s]*[,:\}\]]/.test(str.slice(i + 1))) {
+        inString = false; result += ch;
+      } else if (ch === '"') {
+        result += "'";
+      } else {
+        result += ch;
+      }
+    }
+  }
+  return result;
+}
+
+function getSession() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch(e) { return null; }
+}
+function setSession(email) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({
+    email, isOwner: email.toLowerCase() === OWNER_EMAIL.toLowerCase()
+  }));
+}
+function clearSession() { localStorage.removeItem(SESSION_KEY); }
+function isOwner() { const s = getSession(); return s && s.email.toLowerCase() === OWNER_EMAIL.toLowerCase(); }
+
+// ── Helpers ──────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function renderText(str) {
+  return escHtml(str)
+    .replace(/\*{0,2}(Before You Begin:?)\*{0,2}/gim, '<strong style="color:#c084fc;display:block;margin-top:10px">$1</strong>')
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n\n/g, "<br><br>")
+    .replace(/\n/g, "<br>");
+}
+function renderStars(n, total = 5) {
+  return Array.from({ length: total }, (_, i) =>
+    `<span class="star ${i < n ? "on" : "off"}">★</span>`
+  ).join("");
+}
+function hideEl(id) { document.getElementById(id).style.display = "none"; }
+function show(id, d="block") { document.getElementById(id).style.display = d; }
+
+// ── Login ─────────────────────────────────────────────────────
+let pendingLoginEmail = null;
+
+function showLoginError(msg) {
+  const el = document.getElementById("login-error");
+  el.textContent = msg; el.style.display = "block";
+}
+function showOtpError(msg) {
+  const el = document.getElementById("login-otp-error");
+  el.textContent = msg; el.style.display = "block";
+}
+
+// Step 1 — check access list then send OTP code
+document.getElementById("login-btn").addEventListener("click", attemptSendCode);
+document.getElementById("login-email").addEventListener("keydown", e => {
+  if (e.key === "Enter") attemptSendCode();
+});
+
+async function attemptSendCode() {
+  const email = document.getElementById("login-email").value.trim().toLowerCase();
+  document.getElementById("login-error").style.display = "none";
+  if (!email) { showLoginError("Please enter your email address."); return; }
+  const btn = document.getElementById("login-btn");
+  btn.textContent = "Checking…"; btn.disabled = true;
+  try {
+    const { data, error } = await db.from("allowed_emails").select("email").eq("email", email).maybeSingle();
+    if (error || !data) {
+      btn.textContent = "Send verification code"; btn.disabled = false;
+      showLoginError("This email address is not authorised to access this database.");
+      return;
+    }
+    const { error: otpErr } = await db.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: true }
+    });
+    btn.textContent = "Send verification code"; btn.disabled = false;
+    if (otpErr) {
+      showLoginError("Could not send code: " + otpErr.message);
+      return;
+    }
+    pendingLoginEmail = email;
+    document.getElementById("login-sent-to").textContent = email;
+    document.getElementById("login-step-email").style.display = "none";
+    document.getElementById("login-step-otp").style.display = "block";
+    setTimeout(() => document.getElementById("login-otp").focus(), 80);
+  } catch (e) {
+    btn.textContent = "Send verification code"; btn.disabled = false;
+    showLoginError("Something went wrong — please try again.");
+    console.error("Login error:", e);
+  }
+}
+
+// Step 2 — verify the 6-digit code
+document.getElementById("login-verify-btn").addEventListener("click", attemptVerifyCode);
+document.getElementById("login-otp").addEventListener("keydown", e => {
+  if (e.key === "Enter") attemptVerifyCode();
+});
+document.getElementById("login-back-btn").addEventListener("click", () => {
+  document.getElementById("login-step-otp").style.display = "none";
+  document.getElementById("login-step-email").style.display = "block";
+  document.getElementById("login-otp").value = "";
+  document.getElementById("login-otp-error").style.display = "none";
+  document.getElementById("login-error").style.display = "none";
+  pendingLoginEmail = null;
+});
+
+async function attemptVerifyCode() {
+  const token = document.getElementById("login-otp").value.replace(/\D/g, "");
+  document.getElementById("login-otp-error").style.display = "none";
+  if (token.length !== 6) { showOtpError("Please enter the full 6-digit code."); return; }
+  const btn = document.getElementById("login-verify-btn");
+  btn.textContent = "Verifying…"; btn.disabled = true;
+  try {
+    const { error } = await db.auth.verifyOtp({ email: pendingLoginEmail, token, type: "email" });
+    btn.textContent = "Verify & enter"; btn.disabled = false;
+    if (error) {
+      showOtpError("Invalid or expired code — please check your email and try again.");
+      return;
+    }
+    setSession(pendingLoginEmail);
+    bootApp();
+  } catch (e) {
+    btn.textContent = "Verify & enter"; btn.disabled = false;
+    showOtpError("Something went wrong — please try again.");
+    console.error("Verify error:", e);
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────────────
+let appBooted = false;
+
+async function bootApp() {
+  const session = getSession();
+  if (!session || appBooted) return;
+  appBooted = true;
+  hideEl("loading-screen");
+  hideEl("login-screen");
+
+  // If we were redirected here due to session expiry, send them back
+  const params = new URLSearchParams(window.location.search);
+  const redirectTo = params.get("redirect");
+  if (redirectTo && redirectTo.startsWith("/")) {
+    window.location.href = redirectTo;
+    return;
+  }
+
+  // Non-owners go straight to the Practice Hub — the hub is admin-only
+  if (!isOwner()) {
+    window.location.href = "practice-log.html";
+    return;
+  }
+
+  const view = sessionStorage.getItem("ppd_view");
+  sessionStorage.removeItem("ppd_view"); // clear so external navigation always returns to hub
+  if (view === "database") {
+    enterDatabase();
+  } else {
+    show("hub-screen", "flex");
+    if (isOwner()) {
+      const dbCard = document.getElementById("hub-to-database");
+      if (dbCard) dbCard.style.display = "";
+    }
+  }
+}
+
+async function enterDatabase() {
+  const session = getSession();
+  hideEl("hub-screen");
+  show("app-header", "flex");
+  show("app-main");
+  document.getElementById("header-email").textContent = session.email;
+  if (session.isOwner) {
+    document.querySelectorAll(".owner-only").forEach(el => el.style.display = "");
+  }
+  viewingEmail = session.email;
+  await loadAndRender();
+  await loadCollection(session.email);
+  if (isOwner()) { await populateViewingDropdown(); updatePieceRequestBadge(); }
+}
+
+document.getElementById("hub-to-database").addEventListener("click", enterDatabase);
+
+document.getElementById("hub-btn").addEventListener("click", () => {
+  hideEl("app-header");
+  hideEl("app-main");
+  show("hub-screen", "flex");
+});
+
+window.addEventListener("beforeunload", () => {
+  if (currentTab && document.getElementById("app-main").style.display !== "none") {
+    sessionStorage.setItem("ppd_view", "database");
+  }
+});
+// ── Auth cookie (for edge function server-side protection) ────
+function setAuthCookie(token, expiresIn) {
+  const maxAge = expiresIn || 3600;
+  document.cookie = `ppd_auth=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; SameSite=Strict`;
+}
+
+function clearAuthCookie() {
+  document.cookie = "ppd_auth=; path=/; max-age=0; SameSite=Strict";
+}
+
+// Keep cookie in sync whenever Supabase refreshes the token
+db.auth.onAuthStateChange((event, session) => {
+  if (session?.access_token) {
+    setAuthCookie(session.access_token, session.expires_in);
+  } else {
+    clearAuthCookie();
+  }
+});
+
+// Set cookie immediately on first load if session exists
+db.auth.getSession().then(({ data }) => {
+  if (data.session?.access_token) {
+    setAuthCookie(data.session.access_token, data.session.expires_in);
+  }
+});
+
+document.getElementById("logout-btn").addEventListener("click", async () => {
+  clearAuthCookie();
+  clearSession();
+  await db.auth.signOut();
+  location.reload();
+});
+
+// ── Pieces ────────────────────────────────────────────────────
+let allPieces = [];
+let allBooks  = [];
+
+async function loadAndRender() {
+  const { data, error } = await db.from("pieces").select("*").or("kind.is.null,kind.eq.piece").order("title");
+  if (error) { console.error(error); return; }
+  allPieces = data || [];
+  render();
+}
+
+async function loadAndRenderBooks() {
+  const { data, error } = await db.from("pieces").select("*").eq("kind", "book").order("title");
+  if (error) { console.error(error); return; }
+  allBooks = data || [];
+  renderBooks();
+}
+
+function renderBooks() {
+  const query = document.getElementById("book-search")?.value.trim().toLowerCase() || "";
+  const diffFilter = document.getElementById("book-filter-difficulty")?.value || "";
+  const filtered = allBooks.filter(b => {
+    const text = [b.title, b.composer, b.background, b.pianist_notes, b.challenges, ...(b.tags||[])].join(" ").toLowerCase();
+    return (!query || text.includes(query)) && (!diffFilter || String(b.difficulty) === diffFilter);
+  });
+  const grid = document.getElementById("books-grid");
+  const meta = document.getElementById("books-meta");
+  if (!grid) return;
+  if (filtered.length === 0) {
+    grid.innerHTML = "";
+    show("books-empty");
+    meta.textContent = "";
+  } else {
+    hideEl("books-empty");
+    grid.innerHTML = filtered.map(renderBookCard).join("");
+    meta.textContent = `${filtered.length} book${filtered.length !== 1 ? "s" : ""}`;
+  }
+}
+
+function renderBookCard(book) {
+  const tags = (book.tags || []).map(t =>
+    `<span class="tag">${escHtml(t)}</span>`
+  ).join("");
+  const hasDiff = book.difficulty != null;
+  const diffLabel = hasDiff ? DIFFICULTY_LABELS[book.difficulty] : "";
+  return `
+  <div class="piece-card" data-id="${book.id}">
+    <div class="card-header" onclick="toggleCard(this)" style="cursor:pointer">
+      <div class="card-title-block">
+        <div class="card-title">📚 ${escHtml(book.title)}</div>
+        <div class="card-meta"><span>${escHtml(book.composer || "")}</span></div>
+        ${hasDiff ? `
+        <div class="difficulty-badge diff-${book.difficulty}">
+          <div class="stars">${renderStars(book.difficulty)}</div>
+          <span class="diff-label">${escHtml(diffLabel)}</span>
+        </div>` : ""}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <button class="btn btn-ghost" onclick="event.stopPropagation();openEditBook(${book.id})">Edit</button>
+        <button class="btn btn-danger" onclick="event.stopPropagation();deleteBook(${book.id})">Delete</button>
+        <span class="expand-chevron">›</span>
+      </div>
+    </div>
+    <div class="card-body">
+      ${book.background ? `<div class="card-section"><div class="section-label">Background</div><div class="section-text">${renderText(book.background)}</div></div>` : ""}
+      ${book.pianist_notes ? `<div class="card-section"><div class="section-label">How to Use It</div><div class="section-text">${renderText(book.pianist_notes)}</div></div>` : ""}
+      ${book.challenges ? `<div class="card-section"><div class="section-label">Content &amp; Level</div><div class="section-text">${renderText(book.challenges)}</div></div>` : ""}
+      ${tags ? `<div class="card-section"><div class="section-label">Tags</div><div class="tags-row">${tags}</div></div>` : ""}
+    </div>
+  </div>`;
+}
+
+function openEditBook(id) {
+  const book = allBooks.find(b => b.id === id);
+  if (!book) return;
+  editingId = id; formTags = [...(book.tags || [])]; selectedDifficulty = book.difficulty ?? 0; modalIsBook = true;
+  document.getElementById("f-title").value        = book.title || "";
+  document.getElementById("f-composer").value     = book.composer || "";
+  document.getElementById("f-year").value         = "";
+  document.getElementById("f-background").value   = book.background || "";
+  document.getElementById("f-pianist-notes").value = book.pianist_notes || "";
+  document.getElementById("f-challenges").value   = book.challenges || "";
+  document.getElementById("f-sheet-music-url").value = book.sheet_music_url || "";
+  document.getElementById("f-youtube-url").value  = book.youtube_url || "";
+  updateDiffPicker(); renderFormTags(); openModal();
+}
+window.openEditBook = openEditBook;
+
+async function deleteBook(id) {
+  const book = allBooks.find(b => b.id === id);
+  if (!book) return;
+  if (!confirm(`Delete "${book.title}"?`)) return;
+  const { error } = await db.from("pieces").delete().eq("id", id);
+  if (error) { alert("Error deleting book: " + error.message); return; }
+  await loadAndRenderBooks();
+}
+window.deleteBook = deleteBook;
+
+// ── Add Series ───────────────────────────────────────────────
+let seriesGeneratedBooks = []; // holds generated data before saving
+
+document.getElementById("add-series-btn").addEventListener("click", () => {
+  const panel = document.getElementById("series-panel");
+  const isOpen = panel.style.display !== "none";
+  panel.style.display = isOpen ? "none" : "";
+  if (!isOpen) {
+    const stored = localStorage.getItem("anthropic_key");
+    if (stored) document.getElementById("series-api-key").value = stored;
+    document.getElementById("series-titles").focus();
+  }
+});
+
+document.getElementById("series-cancel-btn").addEventListener("click", () => {
+  document.getElementById("series-panel").style.display = "none";
+  seriesGeneratedBooks = [];
+});
+
+document.getElementById("series-generate-btn").addEventListener("click", generateSeries);
+document.getElementById("series-save-btn").addEventListener("click", saveSeries);
+
+async function generateSeries() {
+  const apiKey  = document.getElementById("series-api-key").value.trim();
+  const author  = document.getElementById("series-author").value.trim();
+  const rawText = document.getElementById("series-titles").value.trim();
+  const titles  = rawText.split("\n").map(t => t.trim()).filter(Boolean);
+
+  if (!apiKey)        { alert("Please enter your Anthropic API key."); return; }
+  if (!titles.length) { alert("Please enter at least one book title."); return; }
+
+  localStorage.setItem("anthropic_key", apiKey);
+
+  const genBtn    = document.getElementById("series-generate-btn");
+  const progressEl = document.getElementById("series-progress-label");
+  const resultsEl  = document.getElementById("series-results");
+  const listEl     = document.getElementById("series-book-list");
+
+  genBtn.disabled = true; genBtn.textContent = "⚡ Generating…";
+  resultsEl.style.display = "none";
+  listEl.innerHTML = "";
+  seriesGeneratedBooks = [];
+
+  for (let i = 0; i < titles.length; i++) {
+    const title = titles[i];
+    progressEl.textContent = `Generating ${i + 1} of ${titles.length}: ${title}…`;
+
+    // Placeholder row
+    const rowId = `sr-${i}`;
+    listEl.insertAdjacentHTML("beforeend", `
+      <div id="${rowId}" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px 16px">
+        <div style="font-size:0.88rem;color:var(--text-muted)">⏳ ${escHtml(title)}</div>
+      </div>`);
+
+    const prompt = `You are writing database entries for "The Practice Room", a piano learning app. Use British English spelling.
+
+Book / Method: ${title}${author ? `\nAuthor / Publisher: ${author}` : ""}
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "title": "The exact, correctly formatted title",
+  "composer": "The author(s) or publisher",
+  "background": "Two paragraphs: what this book is, who it's for, why it's significant.",
+  "pianist_notes": "Two paragraphs: how to use it, who gets the most from it, practical tips.",
+  "challenges": "One paragraph: technical content covered, starting level, ending level, approximate grade standard (use ABRSM as reference).",
+  "difficulty": 1,
+  "tags": ["Tag1", "Tag2"]
+}
+Rules:
+- difficulty 0–5: 0=Absolute Beginner (pre-Grade 1), 1=Beginner (Grade 1–2), 2=Lower Intermediate (Grade 3–5), 3=Upper Intermediate (Grade 6–7), 4=Advanced (Grade 8+), 5=Expert
+- tags: 2–5 descriptive tags like "Method book", "Exam prep", "Jazz", "ABRSM", "Adult beginner", "Children"
+- Write with authority and warmth for a piano teacher or motivated adult learner`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 2048,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `API error ${res.status}`); }
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      const start = text.indexOf("{"), end = text.lastIndexOf("}");
+      if (start === -1) throw new Error("No JSON returned");
+      let parsed;
+      try { parsed = JSON.parse(text.slice(start, end + 1)); }
+      catch(_) { parsed = JSON.parse(repairJson(text.slice(start, end + 1))); }
+
+      const book = {
+        title:          parsed.title || title,
+        composer:       parsed.composer || author || null,
+        background:     parsed.background || null,
+        pianist_notes:  parsed.pianist_notes || null,
+        challenges:     parsed.challenges || null,
+        difficulty:     parsed.difficulty ?? 1,
+        tags:           Array.isArray(parsed.tags) ? parsed.tags : [],
+        kind:           "book",
+      };
+      seriesGeneratedBooks.push(book);
+
+      const diffLabel = DIFFICULTY_LABELS[book.difficulty] || "";
+      document.getElementById(rowId).innerHTML = `
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;color:var(--text);margin-bottom:2px">📚 ${escHtml(book.title)}</div>
+            ${book.composer ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px">${escHtml(book.composer)}</div>` : ""}
+            <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">${escHtml((book.background || "").slice(0, 180))}…</div>
+          </div>
+          <div style="flex-shrink:0;text-align:right">
+            <div class="difficulty-badge diff-${book.difficulty}" style="display:inline-flex">
+              <span class="diff-label" style="font-size:0.75rem">${escHtml(diffLabel)}</span>
+            </div>
+            <div style="margin-top:6px;font-size:0.75rem;color:#84cc16">✓ Generated</div>
+          </div>
+        </div>`;
+
+    } catch(err) {
+      document.getElementById(rowId).innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:0.88rem;color:#f87171">✗ ${escHtml(title)}</div>
+          <div style="font-size:0.75rem;color:#f87171">${escHtml(err.message)}</div>
+        </div>`;
+    }
+  }
+
+  progressEl.textContent = `Done — ${seriesGeneratedBooks.length} of ${titles.length} generated.`;
+  genBtn.disabled = false; genBtn.textContent = "⚡ Generate All";
+  if (seriesGeneratedBooks.length > 0) resultsEl.style.display = "";
+}
+
+async function saveSeries() {
+  if (!seriesGeneratedBooks.length) return;
+  const saveBtn  = document.getElementById("series-save-btn");
+  const statusEl = document.getElementById("series-save-status");
+  saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+
+  let saved = 0, skipped = 0, errors = 0;
+
+  for (const book of seriesGeneratedBooks) {
+    // Check if already exists
+    const { data: existing } = await db.from("pieces").select("id").ilike("title", book.title).eq("kind", "book").maybeSingle();
+    if (existing) { skipped++; continue; }
+
+    const { data: newBook, error } = await db.from("pieces").insert(book).select("id").single();
+    if (error) { console.error("Error saving", book.title, error); errors++; continue; }
+    saved++;
+
+    // Auto-link any matching book goals
+    await db.rpc("link_book_goals", { p_label: book.title, p_piece_id: newBook.id });
+  }
+
+  saveBtn.textContent = "Save All to Library"; saveBtn.disabled = false;
+  statusEl.textContent = `${saved} saved${skipped ? `, ${skipped} already existed` : ""}${errors ? `, ${errors} errors` : ""}`;
+
+  if (saved > 0) {
+    await loadAndRenderBooks();
+    seriesGeneratedBooks = [];
+    setTimeout(() => {
+      document.getElementById("series-panel").style.display = "none";
+      statusEl.textContent = "";
+    }, 2000);
+  }
+}
+
+// ── Collection state ─────────────────────────────────────────
+let userCollection = {};  // pieceId → status
+let viewingEmail = null;
+let currentTab = "database";
+
+async function loadCollection(email) {
+  const { data } = await db.from("user_collections").select("piece_id, status").eq("email", email);
+  userCollection = {};
+  (data || []).forEach(r => { userCollection[r.piece_id] = r.status; });
+}
+
+async function setCollection(pieceId, status) {
+  const email = getSession()?.email;
+  if (!email) return;
+  // Clicking active status toggles it off
+  if (userCollection[pieceId] === status) {
+    await removeFromCollection(pieceId);
+    return;
+  }
+  const { error } = await db.from("user_collections")
+    .upsert({ email, piece_id: pieceId, status }, { onConflict: "email,piece_id" });
+  if (error) { console.error(error); return; }
+  userCollection[pieceId] = status;
+  refreshCollectionFooter(pieceId);
+  if (currentTab === "collection") renderCollectionView();
+}
+
+async function removeFromCollection(pieceId) {
+  const email = getSession()?.email;
+  const { error } = await db.from("user_collections").delete().eq("email", email).eq("piece_id", pieceId);
+  if (error) { console.error(error); return; }
+  delete userCollection[pieceId];
+  refreshCollectionFooter(pieceId);
+  if (currentTab === "collection") renderCollectionView();
+}
+
+function refreshCollectionFooter(pieceId) {
+  const card = document.querySelector(`.piece-card[data-id="${pieceId}"]`);
+  if (!card) return;
+  const footer = card.querySelector(".collection-footer-inner");
+  if (footer) footer.innerHTML = collectionFooterHTML(pieceId);
+}
+
+function collectionFooterHTML(pieceId) {
+  const status = userCollection[pieceId];
+  const myEmail = getSession()?.email;
+  const canEdit = viewingEmail === myEmail;
+  if (!canEdit) {
+    // Owner viewing someone else — show read-only badge
+    return status
+      ? `<span class="status-badge status-${status}">${STATUS_LABELS[status]}</span>`
+      : `<span style="color:var(--text-muted);font-size:0.8rem">Not in collection</span>`;
+  }
+  return `
+    ${Object.entries(STATUS_LABELS).map(([s, label]) => `
+      <button class="status-btn status-${s}${status === s ? " active" : ""}"
+              onclick="setCollection(${pieceId}, '${s}')">${label}</button>
+    `).join("")}
+    ${status ? `<button class="status-remove-btn" onclick="removeFromCollection(${pieceId})">Remove</button>` : ""}
+  `;
+}
+
+// ── Render cards ─────────────────────────────────────────────
+function toggleCard(el) {
+  const card = el.closest(".piece-card");
+  if (card) card.classList.toggle("card-expanded");
+}
+window.toggleCard = toggleCard;
+
+function renderCard(piece) {
+  const tags = (piece.tags || []).map(t =>
+    `<span class="tag" data-tag="${escHtml(t)}">${escHtml(t)}</span>`
+  ).join("");
+  const hasDiff = piece.difficulty != null;
+  const diffLabel = hasDiff ? DIFFICULTY_LABELS[piece.difficulty] : "";
+
+  return `
+  <div class="piece-card" data-id="${piece.id}">
+    <div class="card-header" onclick="toggleCard(this)" style="cursor:pointer">
+      <div class="card-title-block">
+        <div class="card-title">${escHtml(piece.title)}</div>
+        <div class="card-meta">
+          <span>${escHtml(piece.composer || "")}</span>
+          ${piece.year ? `<span>${piece.year}</span>` : ""}
+        </div>
+        ${hasDiff ? `
+        <div class="difficulty-badge diff-${piece.difficulty}">
+          <div class="stars">${renderStars(piece.difficulty)}</div>
+          <span class="diff-label">${escHtml(diffLabel)}</span>
+        </div>` : ""}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        ${isOwner() ? `
+        <button class="btn btn-ghost" onclick="event.stopPropagation();openEdit(${piece.id})">Edit</button>
+        <button class="btn btn-danger" onclick="event.stopPropagation();deletePiece(${piece.id})">Delete</button>` : ""}
+        <span class="expand-chevron">›</span>
+      </div>
+    </div>
+    <div class="card-body">
+      ${piece.background ? `
+      <div class="card-section">
+        <div class="section-label">Background</div>
+        <div class="section-text">${renderText(piece.background)}</div>
+      </div>` : ""}
+      ${piece.pianist_notes ? `
+      <div class="card-section">
+        <div class="section-label">Pianist Notes</div>
+        <div class="section-text">${renderText(piece.pianist_notes)}</div>
+      </div>` : ""}
+      ${piece.challenges ? `
+      <div class="card-section">
+        <div class="section-label">Challenges &amp; Level Rationale</div>
+        <div class="section-text">${renderText(piece.challenges)}</div>
+      </div>` : ""}
+      ${tags ? `
+      <div class="card-section">
+        <div class="section-label">Challenge Tags</div>
+        <div class="tags-row">${tags}</div>
+      </div>` : ""}
+      ${piece.sheet_music_url ? `
+      <div style="margin-top:14px;background:#1a2a3a;border:1px solid #2a4a6a;border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <a href="${escHtml(piece.sheet_music_url)}" target="_blank"
+           style="font-size:0.88rem;color:#7ab4ff;text-decoration:none;font-weight:600;display:flex;align-items:center;gap:7px">
+          🎼 View Sheet Music ↗
+        </a>
+        <button class="btn btn-ghost btn-sm" style="font-size:0.75rem;color:#4a7aaa;padding:3px 8px;border-color:#2a4a6a"
+          onclick="event.stopPropagation();reportBrokenLink(${piece.id},'${escHtml(piece.title)}')">
+          ⚑ Report broken link
+        </button>
+      </div>` : ""}
+      ${piece.youtube_url && !piece.youtube_reported ? `
+      <div style="margin-top:8px;background:#1a1a2a;border:1px solid #3a2a5a;border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <a href="${escHtml(piece.youtube_url)}" target="_blank"
+           style="font-size:0.88rem;color:#c084fc;text-decoration:none;font-weight:600;display:flex;align-items:center;gap:7px">
+          ▶ Listen on YouTube ↗
+        </a>
+        <button class="btn btn-ghost btn-sm" style="font-size:0.75rem;color:#6a4a8a;padding:3px 8px;border-color:#3a2a5a"
+          onclick="event.stopPropagation();reportYoutubeLink(${piece.id},'${escHtml(piece.title)}')">
+          ⚑ Report wrong video
+        </button>
+      </div>` : ""}
+    </div>
+    <div class="collection-footer">
+      <div class="collection-footer-label">My Collection</div>
+      <div class="collection-footer-inner">${collectionFooterHTML(piece.id)}</div>
+    </div>
+  </div>`;
+}
+
+function render() {
+  const query = document.getElementById("search").value.trim().toLowerCase();
+  const diffFilter = document.getElementById("filter-difficulty").value;
+  const filtered = allPieces.filter(p => {
+    const text = [p.title, p.composer, p.background, p.pianist_notes, p.challenges, ...(p.tags||[])].join(" ").toLowerCase();
+    return (!query || text.includes(query)) && (!diffFilter || String(p.difficulty) === diffFilter);
+  });
+  const grid = document.getElementById("pieces-grid");
+  const meta = document.getElementById("results-meta");
+  if (filtered.length === 0) {
+    grid.innerHTML = "";
+    show("empty");
+    meta.textContent = "";
+  } else {
+    hideEl("empty");
+    grid.innerHTML = filtered.map(renderCard).join("");
+    meta.textContent = `${filtered.length} piece${filtered.length !== 1 ? "s" : ""}`;
+  }
+  grid.querySelectorAll(".tag").forEach(el => {
+    el.addEventListener("click", () => {
+      document.getElementById("search").value = el.dataset.tag;
+      render();
+    });
+  });
+}
+
+document.getElementById("search").addEventListener("input", render);
+document.getElementById("filter-difficulty").addEventListener("change", render);
+
+// ── Collection view ───────────────────────────────────────────
+let currentCollectionStatus = "learning";
+
+document.querySelectorAll(".sub-tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    currentCollectionStatus = btn.dataset.status;
+    document.querySelectorAll(".sub-tab").forEach(b => b.classList.toggle("active", b === btn));
+    renderCollectionView();
+  });
+});
+
+function renderCollectionView() {
+  const groups = { learning: [], aspire: [], completed: [] };
+  allPieces.forEach(p => {
+    const status = userCollection[p.id];
+    if (status) groups[status].push(p);
+  });
+
+  const total = Object.values(groups).reduce((s, a) => s + a.length, 0);
+
+  ["learning","aspire","completed"].forEach(s => {
+    const el = document.getElementById(`count-${s}`);
+    if (el) el.textContent = groups[s].length;
+  });
+
+  const grid = document.getElementById("col-content-grid");
+
+  if (total === 0) {
+    grid.innerHTML = "";
+    hideEl("col-status-empty");
+    show("collection-empty");
+    return;
+  }
+  hideEl("collection-empty");
+
+  const active = groups[currentCollectionStatus] || [];
+  if (active.length === 0) {
+    grid.innerHTML = "";
+    const msgs = {
+      learning: "No pieces currently being learned — add some from the All Pieces tab.",
+      aspire: "No pieces on your aspire list yet — add some from the All Pieces tab.",
+      completed: "No completed pieces yet — mark some from the All Pieces tab."
+    };
+    document.getElementById("col-status-empty-msg").textContent = msgs[currentCollectionStatus] || "No pieces here yet.";
+    show("col-status-empty");
+  } else {
+    hideEl("col-status-empty");
+    grid.innerHTML = active.map(renderCard).join("");
+    grid.querySelectorAll(".tag").forEach(el => {
+      el.addEventListener("click", () => {
+        switchTab("database");
+        document.getElementById("search").value = el.dataset.tag;
+        render();
+      });
+    });
+  }
+}
+
+// ── Owner: viewing dropdown ───────────────────────────────────
+async function populateViewingDropdown() {
+  const { data } = await db.from("allowed_emails").select("email").order("email");
+  const sel = document.getElementById("viewing-select");
+  const myEmail = getSession().email;
+  sel.innerHTML = (data || []).map(({ email: e }) =>
+    `<option value="${escHtml(e)}" ${e === myEmail ? "selected" : ""}>${escHtml(e)}</option>`
+  ).join("");
+  sel.addEventListener("change", async () => {
+    viewingEmail = sel.value;
+    await loadCollection(viewingEmail);
+    renderCollectionView();
+  });
+  show("viewing-bar", "flex");
+}
+
+// ── Tab switching ─────────────────────────────────────────────
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  hideEl("database-view"); hideEl("books-view"); hideEl("collection-view"); hideEl("requests-view");
+  if (tab === "database") {
+    show("database-view");
+  } else if (tab === "books") {
+    show("books-view");
+    loadAndRenderBooks();
+  } else if (tab === "collection") {
+    show("collection-view");
+    renderCollectionView();
+  } else if (tab === "requests") {
+    show("requests-view");
+    loadRequestsView();
+  }
+}
+
+// ── Add / Edit modal ─────────────────────────────────────────
+let editingId = null;
+let formTags = [];
+let selectedDifficulty = 0;
+let modalIsBook = false;
+
+function openAdd() {
+  if (!isOwner()) return;
+  editingId = null; formTags = []; selectedDifficulty = 0; modalIsBook = false;
+  ["f-title","f-composer","f-year","f-background","f-pianist-notes","f-challenges","f-sheet-music-url","f-youtube-url"].forEach(id => {
+    document.getElementById(id).value = "";
+  });
+  updateDiffPicker(); renderFormTags(); openModal();
+}
+
+function openAddBook() {
+  if (!isOwner()) return;
+  editingId = null; formTags = []; selectedDifficulty = 0; modalIsBook = true;
+  ["f-title","f-composer","f-year","f-background","f-pianist-notes","f-challenges","f-sheet-music-url","f-youtube-url"].forEach(id => {
+    document.getElementById(id).value = "";
+  });
+  updateDiffPicker(); renderFormTags(); openModal();
+}
+
+function prefillPieceFromGoal(title) {
+  if (!isOwner()) return;
+  editingId = null; formTags = []; selectedDifficulty = 0; modalIsBook = false;
+  ["f-composer","f-year","f-background","f-pianist-notes","f-challenges","f-sheet-music-url","f-youtube-url"].forEach(id => {
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("f-title").value = title;
+  updateDiffPicker(); renderFormTags(); openModal();
+  setTimeout(() => document.getElementById("f-composer").focus(), 80);
+}
+window.prefillPieceFromGoal = prefillPieceFromGoal;
+
+function prefillBookFromGoal(title) {
+  if (!isOwner()) return;
+  editingId = null; formTags = []; selectedDifficulty = 0; modalIsBook = true;
+  ["f-composer","f-year","f-background","f-pianist-notes","f-challenges","f-sheet-music-url","f-youtube-url"].forEach(id => {
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("f-title").value = title;
+  updateDiffPicker(); renderFormTags(); openModal();
+  setTimeout(() => document.getElementById("f-composer").focus(), 80);
+}
+window.prefillBookFromGoal = prefillBookFromGoal;
+
+function openEdit(id) {
+  if (!isOwner()) return;
+  const piece = allPieces.find(p => p.id === id);
+  if (!piece) return;
+  editingId = id; formTags = [...(piece.tags || [])]; selectedDifficulty = piece.difficulty || 0;
+  modalIsBook = piece.kind === "book";
+  document.getElementById("f-title").value = piece.title || "";
+  document.getElementById("f-composer").value = piece.composer || "";
+  document.getElementById("f-year").value = piece.year || "";
+  document.getElementById("f-background").value = piece.background || "";
+  document.getElementById("f-pianist-notes").value = piece.pianist_notes || "";
+  document.getElementById("f-challenges").value = piece.challenges || "";
+  document.getElementById("f-sheet-music-url").value = piece.sheet_music_url || "";
+  document.getElementById("f-youtube-url").value = piece.youtube_url || "";
+  updateDiffPicker(); renderFormTags(); openModal();
+}
+
+function openModal() {
+  document.getElementById("modal-title").textContent = modalIsBook ? "Add New Book / Method" : (editingId ? "Edit Piece" : "Add New Piece");
+  document.getElementById("modal-save").textContent  = modalIsBook ? "Save Book" : "Save Piece";
+  const composerLabel = document.querySelector("label[for='f-composer']");
+  if (composerLabel) composerLabel.textContent = modalIsBook ? "Author / Publisher" : "Composer";
+  const yearLabel = document.querySelector("label[for='f-year']");
+  if (yearLabel) yearLabel.closest(".form-group").style.display = modalIsBook ? "none" : "";
+  show("modal-backdrop", "flex");
+  initApiKeyField();
+  setTimeout(() => document.getElementById("f-title").focus(), 50);
+}
+function closeModal() { hideEl("modal-backdrop"); modalIsBook = false; }
+
+document.getElementById("add-btn").addEventListener("click", openAdd);
+document.getElementById("add-book-btn").addEventListener("click", openAddBook);
+document.getElementById("book-search").addEventListener("input", renderBooks);
+document.getElementById("book-filter-difficulty").addEventListener("change", renderBooks);
+document.getElementById("modal-cancel").addEventListener("click", closeModal);
+document.getElementById("modal-backdrop").addEventListener("click", e => {
+  if (e.target === document.getElementById("modal-backdrop")) closeModal();
+});
+
+document.getElementById("diff-picker").addEventListener("click", e => {
+  const btn = e.target.closest(".diff-option");
+  if (!btn) return;
+  const val = parseInt(btn.dataset.val);
+  selectedDifficulty = selectedDifficulty === val ? 0 : val;
+  updateDiffPicker();
+});
+function updateDiffPicker() {
+  document.querySelectorAll(".diff-option").forEach(b =>
+    b.classList.toggle("selected", parseInt(b.dataset.val) === selectedDifficulty));
+}
+
+const tagInput = document.getElementById("f-tag-input");
+const tagsWrap = document.getElementById("tags-input-wrap");
+tagsWrap.addEventListener("click", () => tagInput.focus());
+tagInput.addEventListener("keydown", e => {
+  if (["Enter",",","Tab"].includes(e.key)) { e.preventDefault(); commitTag(); }
+  else if (e.key === "Backspace" && tagInput.value === "" && formTags.length) { formTags.pop(); renderFormTags(); }
+});
+function commitTag() {
+  const val = tagInput.value.replace(/,/g,"").trim();
+  if (val && !formTags.includes(val)) { formTags.push(val); renderFormTags(); }
+  tagInput.value = "";
+}
+function removeFormTag(tag) { formTags = formTags.filter(t => t !== tag); renderFormTags(); }
+function renderFormTags() {
+  tagsWrap.querySelectorAll(".tag").forEach(el => el.remove());
+  const frag = document.createDocumentFragment();
+  formTags.forEach(t => {
+    const span = document.createElement("span");
+    span.className = "tag";
+    span.innerHTML = `${escHtml(t)} <span class="tag-remove" title="Remove">×</span>`;
+    span.querySelector(".tag-remove").addEventListener("click", () => removeFormTag(t));
+    frag.appendChild(span);
+  });
+  tagsWrap.insertBefore(frag, tagInput);
+}
+
+// ── PDF upload to Supabase Storage ──────────────────────────
+async function uploadSheetPdf(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("f-sheet-pdf-status");
+  statusEl.textContent = "Uploading…";
+  statusEl.style.color = "var(--text-muted)";
+
+  // Sanitise filename: strip spaces/special chars, keep extension
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `sheet-music/${Date.now()}_${safeName}`;
+
+  const { error } = await db.storage.from("sheet-music").upload(path, file, {
+    contentType: "application/pdf",
+    upsert: false,
+  });
+
+  if (error) {
+    statusEl.textContent = `Upload failed: ${error.message}`;
+    statusEl.style.color = "#f87171";
+    input.value = "";
+    return;
+  }
+
+  const { data } = db.storage.from("sheet-music").getPublicUrl(path);
+  document.getElementById("f-sheet-music-url").value = data.publicUrl;
+  statusEl.textContent = `✓ Uploaded — URL filled in`;
+  statusEl.style.color = "#22c55e";
+  input.value = ""; // reset so same file can be re-selected if needed
+}
+
+document.getElementById("modal-save").addEventListener("click", async () => {
+  if (!isOwner()) return;
+  commitTag();
+  const title = document.getElementById("f-title").value.trim();
+  if (!title) { document.getElementById("f-title").focus(); return; }
+  const payload = {
+    title,
+    composer: document.getElementById("f-composer").value.trim() || null,
+    year: modalIsBook ? null : (parseInt(document.getElementById("f-year").value) || null),
+    background: document.getElementById("f-background").value.trim() || null,
+    pianist_notes: document.getElementById("f-pianist-notes").value.trim() || null,
+    challenges: document.getElementById("f-challenges").value.trim() || null,
+    sheet_music_url: document.getElementById("f-sheet-music-url").value.trim() || null,
+    youtube_url: document.getElementById("f-youtube-url").value.trim() || null,
+    youtube_reported: false,
+    difficulty: selectedDifficulty != null ? selectedDifficulty : null,
+    tags: formTags.length ? formTags : null,
+    kind: modalIsBook ? "book" : "piece",
+  };
+  const saveBtn = document.getElementById("modal-save");
+  saveBtn.textContent = "Saving…"; saveBtn.disabled = true;
+  let error, savedData;
+  if (editingId) {
+    ({ error } = await db.from("pieces").update(payload).eq("id", editingId));
+    savedData = editingId;
+  } else {
+    const res = await db.from("pieces").insert(payload).select("id").single();
+    error = res.error;
+    savedData = res.data?.id;
+  }
+  saveBtn.textContent = modalIsBook ? "Save Book" : "Save Piece"; saveBtn.disabled = false;
+  if (error) { alert("Error saving: " + error.message); return; }
+
+  // Auto-link any piece_goals that reference this book by title (uses SECURITY DEFINER fn to bypass RLS)
+  if (modalIsBook && savedData && !editingId) {
+    await db.rpc("link_book_goals", { p_title: title, p_piece_id: savedData });
+  }
+
+  const wasBook = modalIsBook;
+  closeModal(); // resets modalIsBook to false
+  if (wasBook) {
+    await loadAndRenderBooks();
+  } else {
+    await loadAndRender();
+  }
+});
+
+async function deletePiece(id) {
+  if (!isOwner()) return;
+  const piece = allPieces.find(p => p.id === id);
+  if (!piece) return;
+  if (!confirm(`Delete "${piece.title}"?`)) return;
+  const { error } = await db.from("pieces").delete().eq("id", id);
+  if (error) { alert("Error deleting piece: " + error.message); return; }
+  await loadAndRender();
+}
+
+window.openEdit = openEdit;
+window.deletePiece = deletePiece;
+window.setCollection = setCollection;
+window.removeFromCollection = removeFromCollection;
+
+// ── Manage Access modal ───────────────────────────────────────
+document.getElementById("access-btn").addEventListener("click", openAccessModal);
+document.getElementById("access-modal-close").addEventListener("click", closeAccessModal);
+document.getElementById("access-modal-backdrop").addEventListener("click", e => {
+  if (e.target === document.getElementById("access-modal-backdrop")) closeAccessModal();
+});
+async function openAccessModal() { await renderEmailList(); show("access-modal-backdrop", "flex"); }
+function closeAccessModal() {
+  hideEl("access-modal-backdrop"); hideEl("access-feedback");
+  document.getElementById("access-email-input").value = "";
+}
+async function renderEmailList() {
+  const { data } = await db.from("allowed_emails").select("email").order("email");
+  const owner = OWNER_EMAIL.toLowerCase();
+  document.getElementById("email-list").innerHTML = (data || []).map(({ email: e }) => {
+    const isO = e.toLowerCase() === owner;
+    return `<li class="email-list-item">
+      <span class="email-list-addr">${escHtml(e)}${isO ? ' <span class="owner-badge">owner</span>' : ""}</span>
+      ${isO ? "" : `<button class="btn btn-danger" onclick="handleRemoveEmail('${escHtml(e)}')">Remove</button>`}
+    </li>`;
+  }).join("");
+}
+function showAccessFeedback(msg, type = "success") {
+  const el = document.getElementById("access-feedback");
+  el.textContent = msg; el.style.display = "block";
+  el.style.background = type === "success" ? "#052e16" : "#1f0000";
+  el.style.color      = type === "success" ? "#4ade80" : "#f87171";
+  el.style.border     = `1px solid ${type === "success" ? "#166534" : "#991b1b"}`;
+}
+async function addEmailsToDb(raw) {
+  const incoming = raw.split(/[\n,]+/).map(e => e.trim().toLowerCase())
+    .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  if (!incoming.length) return 0;
+  const { error, data } = await db.from("allowed_emails")
+    .upsert(incoming.map(email => ({ email })), { onConflict: "email", ignoreDuplicates: true }).select();
+  if (error) { showAccessFeedback("Error adding emails: " + error.message, "error"); return 0; }
+  return data ? data.length : 0;
+}
+document.getElementById("access-add-btn").addEventListener("click", async () => {
+  const raw = document.getElementById("access-email-input").value;
+  const added = await addEmailsToDb(raw);
+  document.getElementById("access-email-input").value = "";
+  if (added > 0) { showAccessFeedback(`${added} email${added > 1 ? "s" : ""} added successfully.`); await renderEmailList(); }
+  else showAccessFeedback("No new valid emails found — check the format and try again.", "error");
+});
+document.getElementById("access-email-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("access-add-btn").click();
+});
+
+function parseCSVRow(line) {
+  const result = []; let current = ""; let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i+1] === '"') { current += '"'; i++; } else inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) { result.push(current); current = ""; }
+    else { current += ch; }
+  }
+  result.push(current); return result;
+}
+function parseMembersFromCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (!lines.length) return [];
+  const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase().trim());
+  const emailCol     = headers.indexOf("email");
+  const firstNameCol = headers.indexOf("first name");
+  const lastNameCol  = headers.indexOf("last name");
+  if (emailCol !== -1) {
+    return lines.slice(1).flatMap(line => {
+      const cols  = parseCSVRow(line);
+      const email = cols[emailCol]?.trim().toLowerCase() || "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return [];
+      const first = firstNameCol >= 0 ? (cols[firstNameCol]?.trim() || "") : "";
+      const last  = lastNameCol  >= 0 ? (cols[lastNameCol]?.trim()  || "") : "";
+      const name  = [first, last].filter(Boolean).join(" ") || null;
+      return [{ email, name }];
+    });
+  }
+  // Fallback: plain email list — no names available
+  return text.split(/[\n,\r]+/)
+    .map(s => s.trim().toLowerCase())
+    .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s))
+    .map(email => ({ email, name: null }));
+}
+document.getElementById("csv-upload").addEventListener("change", async e => {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async evt => {
+    e.target.value = "";
+    const csvMembers = parseMembersFromCSV(evt.target.result);
+    if (!csvMembers.length) { showAccessFeedback("No valid emails found in the file.", "error"); return; }
+    const owner = OWNER_EMAIL.toLowerCase();
+    // Ensure owner is always present (with no forced name override)
+    const ownerAlready = csvMembers.some(m => m.email === owner);
+    const incomingMembers = ownerAlready ? csvMembers : [{ email: owner, name: null }, ...csvMembers];
+    const incomingEmails  = incomingMembers.map(m => m.email);
+    const { data: current } = await db.from("allowed_emails").select("email");
+    const currentEmails = (current || []).map(r => r.email.toLowerCase());
+    const toRemove = currentEmails.filter(e => !incomingEmails.includes(e) && e !== owner);
+    if (toRemove.length) {
+      const { error } = await db.from("allowed_emails").delete().in("email", toRemove);
+      if (error) { showAccessFeedback("Error removing old emails: " + error.message, "error"); return; }
+    }
+    // Upsert all incoming members — adds new ones and updates names on existing rows
+    const upsertRows = incomingMembers.map(m => ({ email: m.email, ...(m.name ? { name: m.name } : {}) }));
+    const { error: upsertErr } = await db.from("allowed_emails")
+      .upsert(upsertRows, { onConflict: "email", ignoreDuplicates: false });
+    if (upsertErr) { showAccessFeedback("Error syncing members: " + upsertErr.message, "error"); return; }
+    const toAdd = incomingEmails.filter(e => !currentEmails.includes(e));
+    await renderEmailList();
+    const parts = [];
+    if (toAdd.length)    parts.push(`${toAdd.length} added`);
+    if (toRemove.length) parts.push(`${toRemove.length} removed`);
+    const updated = incomingMembers.filter(m => currentEmails.includes(m.email) && m.name).length;
+    if (updated)         parts.push(`${updated} name${updated !== 1 ? "s" : ""} updated`);
+    if (!parts.length)   parts.push("already up to date");
+    showAccessFeedback(`Sync complete — ${parts.join(", ")}.`);
+    if (isOwner()) await populateViewingDropdown();
+  };
+  reader.readAsText(file);
+});
+async function handleRemoveEmail(email) {
+  const { error } = await db.from("allowed_emails").delete().eq("email", email);
+  if (error) { showAccessFeedback("Error removing email: " + error.message, "error"); return; }
+  showAccessFeedback(`${email} removed.`);
+  await renderEmailList();
+}
+window.handleRemoveEmail = handleRemoveEmail;
+
+// ── Piece request modal ───────────────────────────────────────
+function openPieceRequestModal() {
+  document.getElementById("req-title").value = "";
+  document.getElementById("req-composer").value = "";
+  document.getElementById("req-error").style.display = "none";
+  document.getElementById("req-submit-btn").textContent = "Send Request";
+  document.getElementById("req-submit-btn").disabled = false;
+  document.getElementById("piece-req-overlay").classList.add("open");
+  setTimeout(() => document.getElementById("req-title").focus(), 60);
+}
+function closePieceRequestModal() {
+  document.getElementById("piece-req-overlay").classList.remove("open");
+}
+async function submitPieceRequest() {
+  const title    = document.getElementById("req-title").value.trim();
+  const composer = document.getElementById("req-composer").value.trim();
+  const errEl    = document.getElementById("req-error");
+  errEl.style.display = "none";
+  if (!title) { errEl.textContent = "Please enter the piece title."; errEl.style.display = "block"; return; }
+  const btn = document.getElementById("req-submit-btn");
+  btn.textContent = "Sending…"; btn.disabled = true;
+  const email = getSession()?.email || "";
+  const { error } = await db.from("requests").insert({ type: "piece", title, composer: composer || null, email });
+  if (error) {
+    btn.textContent = "Send Request"; btn.disabled = false;
+    errEl.textContent = "Something went wrong — please try again."; errEl.style.display = "block";
+    return;
+  }
+  btn.textContent = "✓ Sent!";
+  setTimeout(closePieceRequestModal, 1200);
+}
+window.openPieceRequestModal = openPieceRequestModal;
+window.closePieceRequestModal = closePieceRequestModal;
+window.submitPieceRequest = submitPieceRequest;
+
+// ── Broken link report ────────────────────────────────────────
+async function reportBrokenLink(pieceId, pieceTitle) {
+  if (!confirm(`Report the sheet music link for "${pieceTitle}" as broken?`)) return;
+  const email = getSession()?.email || "";
+  const piece = allPieces.find(p => p.id === pieceId);
+  const { error } = await db.from("requests").insert({
+    type: "broken_link",
+    title: pieceTitle,
+    message: piece?.sheet_music_url || "",
+    email
+  });
+  if (error) { alert("Failed to submit report."); return; }
+  alert("Thanks — the broken link has been reported.");
+}
+window.reportBrokenLink = reportBrokenLink;
+
+async function reportYoutubeLink(pieceId, pieceTitle) {
+  if (!confirm(`Report the YouTube link for "${pieceTitle}" as wrong or unavailable?`)) return;
+  const email = getSession()?.email || "";
+  const piece = allPieces.find(p => p.id === pieceId);
+  const { error } = await db.from("requests").insert({
+    type: "broken_youtube",
+    title: pieceTitle,
+    message: piece?.youtube_url || "",
+    email
+  });
+  if (error) { alert("Failed to submit report."); return; }
+  alert("Thanks — the video has been reported and will be updated.");
+}
+window.reportYoutubeLink = reportYoutubeLink;
+
+// ── Requests inbox (owner only) ───────────────────────────────
+async function updatePieceRequestBadge() {
+  if (!isOwner()) return;
+  const { count } = await db.from("requests").select("*", { count: "exact", head: true })
+    .eq("type", "piece").eq("done", false);
+  const badge = document.getElementById("piece-req-badge");
+  if (count) { badge.textContent = count; badge.style.display = "inline-block"; }
+  else { badge.style.display = "none"; }
+}
+
+function renderPieceRequest(r, isDone) {
+  if (isDone) {
+    return `
+      <div class="req-inbox-item done" id="preq-${r.id}">
+        <div class="req-inbox-body">
+          <div class="req-inbox-title">${escHtml(r.title || "—")}</div>
+          ${r.composer ? `<div class="req-inbox-composer">${escHtml(r.composer)}</div>` : ""}
+          <div class="req-inbox-meta">From: ${escHtml(r.email || "anonymous")} · ${new Date(r.created_at).toLocaleDateString("en-GB")}${r.piece_id ? ` · Linked to piece #${r.piece_id}` : ""}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="undoPieceRequest(${r.id})">↩ Undo</button>
+      </div>`;
+  }
+  return `
+    <div class="req-inbox-item" id="preq-${r.id}">
+      <div class="req-inbox-body" style="width:100%">
+        <div class="req-inbox-title">${escHtml(r.title || "—")}</div>
+        ${r.composer ? `<div class="req-inbox-composer">${escHtml(r.composer)}</div>` : ""}
+        <div class="req-inbox-meta">From: ${escHtml(r.email || "anonymous")} · ${new Date(r.created_at).toLocaleDateString("en-GB")}</div>
+        <div class="req-piece-search-wrap">
+          <input type="text" id="req-piece-search-${r.id}" placeholder="Search library to link the piece you added…"
+                 oninput="reqSearchPiece(${r.id}, this.value)" autocomplete="off" />
+          <div class="req-piece-dropdown" id="req-piece-dropdown-${r.id}"></div>
+        </div>
+        <div class="req-piece-linked" id="req-piece-linked-${r.id}" style="display:none"></div>
+        <div class="req-mark-done-row">
+          <button class="btn btn-primary btn-sm" id="req-done-btn-${r.id}"
+                  onclick="markPieceRequestDone(${r.id})" disabled>✓ Mark Added</button>
+          <button class="btn btn-ghost btn-sm" onclick="markPieceRequestDoneNoLink(${r.id})"
+                  style="font-size:0.78rem;opacity:0.7">Mark done without linking</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function loadRequestsView() {
+  const [{ data: pieceData }, { data: brokenData }, { data: goalData }, { data: bookGoalData }, { data: sessData }, { data: sessBookData }] = await Promise.all([
+    db.from("requests").select("*").eq("type", "piece").order("created_at", { ascending: false }),
+    db.from("requests").select("*").in("type", ["broken_link","broken_youtube"]).eq("done", false).order("created_at", { ascending: false }),
+    db.rpc("get_unlinked_piece_goals"),
+    db.rpc("get_unlinked_book_goals"),
+    db.rpc("get_unlinked_session_pieces"),
+    db.rpc("get_unlinked_session_books")
+  ]);
+
+  const pending = (pieceData || []).filter(r => !r.done);
+  const done    = (pieceData || []).filter(r =>  r.done);
+
+  const badge = document.getElementById("piece-req-badge");
+  const total = pending.length + (brokenData || []).length + (goalData || []).length + (bookGoalData || []).length + (sessData || []).length + (sessBookData || []).length;
+  if (total) { badge.textContent = total; badge.style.display = "inline-block"; }
+  else { badge.style.display = "none"; }
+
+  document.getElementById("requests-pending-list").innerHTML =
+    pending.length ? pending.map(r => renderPieceRequest(r, false)).join("") : `<p style="color:var(--text-muted);font-size:0.9rem">No pending requests.</p>`;
+  document.getElementById("requests-done-list").innerHTML =
+    done.length ? done.map(r => renderPieceRequest(r, true)).join("") : `<p style="color:var(--text-muted);font-size:0.9rem">None yet.</p>`;
+
+  const goalEl = document.getElementById("unlinked-goals-list");
+  if (goalEl) {
+    goalEl.innerHTML = (goalData || []).length ? (goalData || []).map(g => {
+      const key = encodeURIComponent(g.piece_label);
+      return `
+      <div class="req-inbox-item" id="pgoal-${key}">
+        <div class="req-inbox-body" style="width:100%">
+          <div class="req-inbox-title">${escHtml(g.piece_label)}</div>
+          <div class="req-inbox-meta">${g.student_count} student${g.student_count !== 1 ? "s" : ""} · ${(g.emails || []).map(e => escHtml(e)).join(", ")}</div>
+          <div class="req-piece-search-wrap">
+            <input type="text" id="pgoal-search-${key}" placeholder="Search library to link an existing piece…"
+                   oninput="pieceGoalSearch('${escHtml(g.piece_label)}', this.value)" autocomplete="off" />
+            <div class="req-piece-dropdown" id="pgoal-dropdown-${key}"></div>
+          </div>
+          <div class="req-piece-linked" id="pgoal-linked-${key}" style="display:none"></div>
+          <div class="req-mark-done-row">
+            <button class="btn btn-primary btn-sm" id="pgoal-done-btn-${key}"
+                    onclick="markPieceGoalLinked('${escHtml(g.piece_label)}')" disabled>✓ Mark Linked</button>
+            <button class="btn btn-ghost btn-sm" onclick="prefillPieceFromGoal('${escHtml(g.piece_label)}')"
+                    style="font-size:0.78rem;opacity:0.7">+ Add to library instead</button>
+          </div>
+        </div>
+      </div>`;
+    }).join("")
+    : `<p style="color:var(--text-muted);font-size:0.9rem">No unlinked piece goals.</p>`;
+  }
+
+  const bookGoalEl = document.getElementById("unlinked-book-goals-list");
+  if (bookGoalEl) {
+    bookGoalEl.innerHTML = (bookGoalData || []).length ? (bookGoalData || []).map(g => {
+      const key = encodeURIComponent(g.piece_label);
+      return `
+      <div class="req-inbox-item" id="bgoal-${key}">
+        <div class="req-inbox-body" style="width:100%">
+          <div class="req-inbox-title">📚 ${escHtml(g.piece_label)}</div>
+          <div class="req-inbox-meta">${g.student_count} student${g.student_count !== 1 ? "s" : ""} · ${(g.emails || []).map(e => escHtml(e)).join(", ")}</div>
+          <div class="req-piece-search-wrap">
+            <input type="text" id="bgoal-search-${key}" placeholder="Search Books library to link…"
+                   oninput="bookGoalSearch('${escHtml(g.piece_label)}', this.value)" autocomplete="off" />
+            <div class="req-piece-dropdown" id="bgoal-dropdown-${key}"></div>
+          </div>
+          <div class="req-piece-linked" id="bgoal-linked-${key}" style="display:none"></div>
+          <div class="req-mark-done-row">
+            <button class="btn btn-primary btn-sm" id="bgoal-done-btn-${key}"
+                    onclick="markBookGoalLinked('${escHtml(g.piece_label)}')" disabled>✓ Mark Linked</button>
+            <button class="btn btn-ghost btn-sm" onclick="prefillBookFromGoal('${escHtml(g.piece_label)}')"
+                    style="font-size:0.78rem;opacity:0.7">+ Add to library instead</button>
+          </div>
+        </div>
+      </div>`;
+    }).join("")
+    : `<p style="color:var(--text-muted);font-size:0.9rem">No unlinked book goals.</p>`;
+  }
+
+  // ── Unlinked session pieces ───────────────────────────────
+  const sessEl = document.getElementById("unlinked-session-pieces-list");
+  if (sessEl) {
+    sessEl.innerHTML = (sessData || []).length ? (sessData || []).map(g => {
+      const key = "sp-" + encodeURIComponent(g.piece_label);
+      return `
+      <div class="req-inbox-item" id="${key}">
+        <div class="req-inbox-body" style="width:100%">
+          <div class="req-inbox-title">${escHtml(g.piece_label)}</div>
+          <div class="req-inbox-meta">${g.student_count} student${g.student_count !== 1 ? "s" : ""} · ${(g.emails || []).map(e => escHtml(e)).join(", ")}</div>
+          <div class="req-piece-search-wrap">
+            <input type="text" id="${key}-search" placeholder="Search library to link…"
+                   oninput="sessItemSearch('piece','${escHtml(g.piece_label)}',this.value)" autocomplete="off" />
+            <div class="req-piece-dropdown" id="${key}-dropdown"></div>
+          </div>
+          <div class="req-piece-linked" id="${key}-linked" style="display:none"></div>
+          <div class="req-mark-done-row">
+            <button class="btn btn-primary btn-sm" id="${key}-done"
+                    onclick="markSessItemLinked('piece','${escHtml(g.piece_label)}')" disabled>✓ Mark Linked</button>
+            <button class="btn btn-ghost btn-sm" onclick="prefillPieceFromGoal('${escHtml(g.piece_label)}')"
+                    style="font-size:0.78rem;opacity:0.7">+ Add to library instead</button>
+          </div>
+        </div>
+      </div>`;
+    }).join("")
+    : `<p style="color:var(--text-muted);font-size:0.9rem">No unlinked pieces logged.</p>`;
+  }
+
+  // ── Unlinked session books ────────────────────────────────
+  const sessBookEl = document.getElementById("unlinked-session-books-list");
+  if (sessBookEl) {
+    sessBookEl.innerHTML = (sessBookData || []).length ? (sessBookData || []).map(g => {
+      const key = "sb-" + encodeURIComponent(g.piece_label);
+      return `
+      <div class="req-inbox-item" id="${key}">
+        <div class="req-inbox-body" style="width:100%">
+          <div class="req-inbox-title">📖 ${escHtml(g.piece_label)}</div>
+          <div class="req-inbox-meta">${g.student_count} student${g.student_count !== 1 ? "s" : ""} · ${(g.emails || []).map(e => escHtml(e)).join(", ")}</div>
+          <div class="req-piece-search-wrap">
+            <input type="text" id="${key}-search" placeholder="Search Books library to link…"
+                   oninput="sessItemSearch('book','${escHtml(g.piece_label)}',this.value)" autocomplete="off" />
+            <div class="req-piece-dropdown" id="${key}-dropdown"></div>
+          </div>
+          <div class="req-piece-linked" id="${key}-linked" style="display:none"></div>
+          <div class="req-mark-done-row">
+            <button class="btn btn-primary btn-sm" id="${key}-done"
+                    onclick="markSessItemLinked('book','${escHtml(g.piece_label)}')" disabled>✓ Mark Linked</button>
+            <button class="btn btn-ghost btn-sm" onclick="prefillBookFromGoal('${escHtml(g.piece_label)}')"
+                    style="font-size:0.78rem;opacity:0.7">+ Add to library instead</button>
+          </div>
+        </div>
+      </div>`;
+    }).join("")
+    : `<p style="color:var(--text-muted);font-size:0.9rem">No unlinked books logged.</p>`;
+  }
+
+  document.getElementById("requests-broken-list").innerHTML = (brokenData || []).length
+    ? (brokenData || []).map(r => `
+        <div class="req-inbox-item" id="preq-${r.id}">
+          <div class="req-inbox-body">
+            <div class="req-inbox-title">${escHtml(r.title || "—")} <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400">${r.type === "broken_youtube" ? "· wrong YouTube video" : "· broken sheet music link"}</span></div>
+            ${r.message ? `<div class="req-inbox-composer" style="word-break:break-all">${escHtml(r.message)}</div>` : ""}
+            <div class="req-inbox-meta">From: ${escHtml(r.email || "anonymous")} · ${new Date(r.created_at).toLocaleDateString("en-GB")}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="dismissBrokenReport(${r.id})">✓ Fixed</button>
+        </div>`).join("")
+    : `<p style="color:var(--text-muted);font-size:0.9rem">None reported.</p>`;
+}
+
+// Per-request state: which piece has been selected
+const reqLinkedPieces = {}; // { [requestId]: { id, title, composer } }
+
+// ── Session item linking (pieces + books logged without library link) ──
+const sessItemLinked = {}; // { ["piece:label" | "book:label"]: { id, title } }
+
+async function sessItemSearch(kind, label, query) {
+  const key = (kind === "book" ? "sb-" : "sp-") + encodeURIComponent(label);
+  const dropdown = document.getElementById(`${key}-dropdown`);
+  if (!dropdown) return;
+  if (!query || query.length < 2) { dropdown.style.display = "none"; return; }
+  let q = db.from("pieces").select("id, title, composer")
+    .or(`title.ilike.%${query}%,composer.ilike.%${query}%`)
+    .order("title").limit(8);
+  if (kind === "book") q = q.eq("kind", "book");
+  else q = q.or("kind.is.null,kind.eq.piece");
+  const { data } = await q;
+  if (!data || data.length === 0) { dropdown.style.display = "none"; return; }
+  dropdown.innerHTML = data.map(p => `
+    <div class="req-piece-dropdown-item"
+         data-id="${p.id}" data-title="${escHtml(p.title)}" data-composer="${escHtml(p.composer || '')}">
+      <div>${kind === "book" ? "📚 " : ""}${escHtml(p.title)}</div>
+      ${p.composer ? `<div class="rdi-composer">${escHtml(p.composer)}</div>` : ""}
+    </div>`).join("");
+  dropdown.querySelectorAll(".req-piece-dropdown-item").forEach(el => {
+    el.addEventListener("mousedown", e => {
+      e.preventDefault();
+      sessItemSelect(kind, label, Number(el.dataset.id), el.dataset.title, el.dataset.composer);
+    });
+  });
+  dropdown.style.display = "block";
+}
+window.sessItemSearch = sessItemSearch;
+
+function sessItemSelect(kind, label, id, title, composer) {
+  const key = (kind === "book" ? "sb-" : "sp-") + encodeURIComponent(label);
+  sessItemLinked[`${kind}:${label}`] = { id, title };
+  const dropdown = document.getElementById(`${key}-dropdown`);
+  const input    = document.getElementById(`${key}-search`);
+  if (dropdown) dropdown.style.display = "none";
+  if (input)    input.value = "";
+  const linkedEl = document.getElementById(`${key}-linked`);
+  if (linkedEl) {
+    linkedEl.innerHTML = `
+      <span>🔗 ${escHtml(title)}${composer ? ` — ${escHtml(composer)}` : ""}</span>
+      <button onclick="sessItemClear('${kind}','${escHtml(label)}')">✕ Change</button>`;
+    linkedEl.style.display = "flex";
+  }
+  const doneBtn = document.getElementById(`${key}-done`);
+  if (doneBtn) doneBtn.disabled = false;
+}
+window.sessItemSelect = sessItemSelect;
+
+function sessItemClear(kind, label) {
+  const key = (kind === "book" ? "sb-" : "sp-") + encodeURIComponent(label);
+  delete sessItemLinked[`${kind}:${label}`];
+  const linkedEl = document.getElementById(`${key}-linked`);
+  if (linkedEl) linkedEl.style.display = "none";
+  const doneBtn = document.getElementById(`${key}-done`);
+  if (doneBtn) doneBtn.disabled = true;
+}
+window.sessItemClear = sessItemClear;
+
+async function markSessItemLinked(kind, label) {
+  const linked = sessItemLinked[`${kind}:${label}`];
+  if (!linked) return;
+  const key = (kind === "book" ? "sb-" : "sp-") + encodeURIComponent(label);
+  const btn = document.getElementById(`${key}-done`);
+  if (btn) { btn.disabled = true; btn.textContent = "Linking…"; }
+  const rpc = kind === "book" ? "link_book_goals" : "link_piece_goals";
+  const { error } = await db.rpc(rpc, { p_label: label, p_piece_id: linked.id });
+  if (error) { alert("Error linking: " + error.message); if (btn) { btn.disabled = false; btn.textContent = "✓ Mark Linked"; } return; }
+  delete sessItemLinked[`${kind}:${label}`];
+  loadRequestsView();
+}
+window.markSessItemLinked = markSessItemLinked;
+
+// ── Piece goal linking ────────────────────────────────────────
+const pieceGoalLinked = {}; // { [goalLabel]: { id, title } }
+
+async function pieceGoalSearch(goalLabel, query) {
+  const key = encodeURIComponent(goalLabel);
+  const dropdown = document.getElementById(`pgoal-dropdown-${key}`);
+  if (!dropdown) return;
+  if (!query || query.length < 2) { dropdown.style.display = "none"; return; }
+  const { data } = await db.from("pieces").select("id, title, composer")
+    .or("kind.is.null,kind.eq.piece")
+    .or(`title.ilike.%${query}%,composer.ilike.%${query}%`)
+    .order("title").limit(8);
+  if (!data || data.length === 0) { dropdown.style.display = "none"; return; }
+  dropdown.innerHTML = data.map(p => `
+    <div class="req-piece-dropdown-item"
+         data-piece-id="${p.id}"
+         data-piece-title="${escHtml(p.title)}"
+         data-piece-composer="${escHtml(p.composer || '')}">
+      <div>${escHtml(p.title)}</div>
+      ${p.composer ? `<div class="rdi-composer">${escHtml(p.composer)}</div>` : ""}
+    </div>`).join("");
+  dropdown.querySelectorAll(".req-piece-dropdown-item").forEach(el => {
+    el.addEventListener("mousedown", e => {
+      e.preventDefault();
+      pieceGoalSelect(goalLabel, Number(el.dataset.pieceId), el.dataset.pieceTitle, el.dataset.pieceComposer);
+    });
+  });
+  dropdown.style.display = "block";
+}
+window.pieceGoalSearch = pieceGoalSearch;
+
+function pieceGoalSelect(goalLabel, pieceId, title, composer) {
+  const key = encodeURIComponent(goalLabel);
+  pieceGoalLinked[goalLabel] = { id: pieceId, title };
+  const dropdown = document.getElementById(`pgoal-dropdown-${key}`);
+  const searchInput = document.getElementById(`pgoal-search-${key}`);
+  if (dropdown) dropdown.style.display = "none";
+  if (searchInput) searchInput.value = "";
+  const linkedEl = document.getElementById(`pgoal-linked-${key}`);
+  if (linkedEl) {
+    linkedEl.innerHTML = `
+      <span>🔗 ${escHtml(title)}${composer ? ` — ${escHtml(composer)}` : ""}</span>
+      <button onclick="pieceGoalClear('${escHtml(goalLabel)}')">✕ Change</button>`;
+    linkedEl.style.display = "flex";
+  }
+  const doneBtn = document.getElementById(`pgoal-done-btn-${key}`);
+  if (doneBtn) doneBtn.disabled = false;
+}
+window.pieceGoalSelect = pieceGoalSelect;
+
+function pieceGoalClear(goalLabel) {
+  const key = encodeURIComponent(goalLabel);
+  delete pieceGoalLinked[goalLabel];
+  const linkedEl = document.getElementById(`pgoal-linked-${key}`);
+  if (linkedEl) linkedEl.style.display = "none";
+  const doneBtn = document.getElementById(`pgoal-done-btn-${key}`);
+  if (doneBtn) doneBtn.disabled = true;
+}
+window.pieceGoalClear = pieceGoalClear;
+
+async function markPieceGoalLinked(goalLabel) {
+  const linked = pieceGoalLinked[goalLabel];
+  if (!linked) return;
+  const key = encodeURIComponent(goalLabel);
+  const btn = document.getElementById(`pgoal-done-btn-${key}`);
+  if (btn) { btn.disabled = true; btn.textContent = "Linking…"; }
+  const { error } = await db.rpc("link_piece_goals", { p_label: goalLabel, p_piece_id: linked.id });
+  if (error) { alert("Error linking: " + error.message); if (btn) { btn.disabled = false; btn.textContent = "✓ Mark Linked"; } return; }
+  delete pieceGoalLinked[goalLabel];
+  loadRequestsView();
+}
+window.markPieceGoalLinked = markPieceGoalLinked;
+
+// ── Book goal linking ─────────────────────────────────────────
+const bookGoalLinked = {}; // { [goalLabel]: { id, title } }
+
+async function bookGoalSearch(goalLabel, query) {
+  const key = encodeURIComponent(goalLabel);
+  const dropdown = document.getElementById(`bgoal-dropdown-${key}`);
+  if (!dropdown) return;
+  if (!query || query.length < 2) { dropdown.style.display = "none"; return; }
+  const { data } = await db.from("pieces").select("id, title, composer")
+    .eq("kind", "book")
+    .ilike("title", `%${query}%`)
+    .order("title").limit(8);
+  if (!data || data.length === 0) { dropdown.style.display = "none"; return; }
+  dropdown.innerHTML = data.map(b => `
+    <div class="req-piece-dropdown-item"
+         data-book-id="${b.id}"
+         data-book-title="${escHtml(b.title)}"
+         data-book-composer="${escHtml(b.composer || '')}">
+      <div>📚 ${escHtml(b.title)}</div>
+      ${b.composer ? `<div class="rdi-composer">${escHtml(b.composer)}</div>` : ""}
+    </div>`).join("");
+  dropdown.querySelectorAll(".req-piece-dropdown-item").forEach(el => {
+    el.addEventListener("mousedown", e => {
+      e.preventDefault();
+      bookGoalSelect(goalLabel, Number(el.dataset.bookId), el.dataset.bookTitle);
+    });
+  });
+  dropdown.style.display = "block";
+}
+window.bookGoalSearch = bookGoalSearch;
+
+function bookGoalSelect(goalLabel, bookId, bookTitle) {
+  const key = encodeURIComponent(goalLabel);
+  bookGoalLinked[goalLabel] = { id: bookId, title: bookTitle };
+  const dropdown = document.getElementById(`bgoal-dropdown-${key}`);
+  const searchInput = document.getElementById(`bgoal-search-${key}`);
+  if (dropdown) dropdown.style.display = "none";
+  if (searchInput) searchInput.value = "";
+  const linkedEl = document.getElementById(`bgoal-linked-${key}`);
+  if (linkedEl) {
+    linkedEl.innerHTML = `
+      <span>🔗 ${escHtml(bookTitle)}</span>
+      <button onclick="bookGoalClear('${escHtml(goalLabel)}')">✕ Change</button>`;
+    linkedEl.style.display = "flex";
+  }
+  const doneBtn = document.getElementById(`bgoal-done-btn-${key}`);
+  if (doneBtn) { doneBtn.disabled = false; }
+}
+window.bookGoalSelect = bookGoalSelect;
+
+function bookGoalClear(goalLabel) {
+  const key = encodeURIComponent(goalLabel);
+  delete bookGoalLinked[goalLabel];
+  const linkedEl = document.getElementById(`bgoal-linked-${key}`);
+  if (linkedEl) linkedEl.style.display = "none";
+  const doneBtn = document.getElementById(`bgoal-done-btn-${key}`);
+  if (doneBtn) doneBtn.disabled = true;
+}
+window.bookGoalClear = bookGoalClear;
+
+async function markBookGoalLinked(goalLabel) {
+  const linked = bookGoalLinked[goalLabel];
+  if (!linked) return;
+  const key = encodeURIComponent(goalLabel);
+  const btn = document.getElementById(`bgoal-done-btn-${key}`);
+  if (btn) { btn.disabled = true; btn.textContent = "Linking…"; }
+  // Uses SECURITY DEFINER fn — updates piece_id AND renames piece_label to canonical title
+  const { error } = await db.rpc("link_book_goals", { p_label: goalLabel, p_piece_id: linked.id });
+  if (error) { alert("Error linking: " + error.message); if (btn) { btn.disabled = false; btn.textContent = "✓ Mark Linked"; } return; }
+  delete bookGoalLinked[goalLabel];
+  loadRequestsView(); // refresh
+}
+window.markBookGoalLinked = markBookGoalLinked;
+
+async function reqSearchPiece(reqId, query) {
+  const dropdown = document.getElementById(`req-piece-dropdown-${reqId}`);
+  if (!query || query.length < 2) { dropdown.style.display = "none"; return; }
+  const { data } = await db.from("pieces").select("id, title, composer")
+    .or(`title.ilike.%${query}%,composer.ilike.%${query}%`)
+    .order("title").limit(8);
+  if (!data || data.length === 0) { dropdown.style.display = "none"; return; }
+  dropdown.innerHTML = data.map(p => `
+    <div class="req-piece-dropdown-item"
+         data-piece-id="${p.id}"
+         data-piece-title="${escHtml(p.title)}"
+         data-piece-composer="${escHtml(p.composer || '')}">
+      <div>${escHtml(p.title)}</div>
+      ${p.composer ? `<div class="rdi-composer">${escHtml(p.composer)}</div>` : ""}
+    </div>`).join("");
+  dropdown.querySelectorAll(".req-piece-dropdown-item").forEach(el => {
+    el.addEventListener("mousedown", e => {
+      e.preventDefault(); // prevent input blur before selection registers
+      reqSelectPiece(reqId, Number(el.dataset.pieceId), el.dataset.pieceTitle, el.dataset.pieceComposer);
+    });
+  });
+  dropdown.style.display = "block";
+}
+
+function reqSelectPiece(reqId, pieceId, title, composer) {
+  reqLinkedPieces[reqId] = { id: pieceId, title, composer };
+  // Hide dropdown and search input
+  const dropdown = document.getElementById(`req-piece-dropdown-${reqId}`);
+  const searchInput = document.getElementById(`req-piece-search-${reqId}`);
+  if (dropdown) dropdown.style.display = "none";
+  if (searchInput) searchInput.value = "";
+  // Show linked display
+  const linkedEl = document.getElementById(`req-piece-linked-${reqId}`);
+  if (linkedEl) {
+    linkedEl.innerHTML = `
+      <span>🔗 ${escHtml(title)}${composer ? ` — ${escHtml(composer)}` : ""}</span>
+      <button onclick="reqClearPiece(${reqId})">✕ Change</button>`;
+    linkedEl.style.display = "flex";
+  }
+  // Enable mark-done button
+  const doneBtn = document.getElementById(`req-done-btn-${reqId}`);
+  if (doneBtn) { doneBtn.disabled = false; doneBtn.textContent = "✓ Mark Added"; }
+}
+
+function reqClearPiece(reqId) {
+  delete reqLinkedPieces[reqId];
+  const linkedEl = document.getElementById(`req-piece-linked-${reqId}`);
+  if (linkedEl) linkedEl.style.display = "none";
+  const doneBtn = document.getElementById(`req-done-btn-${reqId}`);
+  if (doneBtn) { doneBtn.disabled = true; }
+}
+
+async function markPieceRequestDone(id) {
+  const linked = reqLinkedPieces[id];
+  let update = { done: true };
+  if (linked) update.piece_id = linked.id;
+
+  let { data, error } = await db.from("requests").update(update).eq("id", id).select();
+
+  // Unique constraint on piece_id — retry without piece_id
+  if (error && (error.code === "23505" || error.message?.includes("unique"))) {
+    update = { done: true };
+    ({ data, error } = await db.from("requests").update(update).eq("id", id).select());
+  }
+
+  if (error) { alert("Error marking done: " + error.message); return; }
+  if (!data || data.length === 0) {
+    alert("Update blocked — check that your Supabase RLS policy allows the owner to update the requests table.");
+    return;
+  }
+
+  // Also rename practice_items and piece_goals so stats use the canonical title
+  if (linked) {
+    const req = data[0];
+    if (req?.title) {
+      await db.rpc("link_piece_goals", { p_label: req.title, p_piece_id: linked.id });
+    }
+  }
+
+  delete reqLinkedPieces[id];
+  loadRequestsView();
+}
+
+async function markPieceRequestDoneNoLink(id) {
+  await db.from("requests").update({ done: true }).eq("id", id);
+  loadRequestsView();
+}
+window.markPieceRequestDoneNoLink = markPieceRequestDoneNoLink;
+
+async function undoPieceRequest(id) {
+  await db.from("requests").update({ done: false }).eq("id", id);
+  loadRequestsView();
+}
+async function dismissBrokenReport(id) {
+  const { error } = await db.from("requests").update({ done: true }).eq("id", id);
+  if (error) { alert("Failed to mark as fixed: " + error.message); return; }
+  loadRequestsView();
+}
+window.dismissBrokenReport = dismissBrokenReport;
+window.markPieceRequestDone = markPieceRequestDone;
+window.undoPieceRequest = undoPieceRequest;
+window.reqSearchPiece = reqSearchPiece;
+window.reqSelectPiece = reqSelectPiece;
+window.reqClearPiece = reqClearPiece;
+
+// ── AI Generator ──────────────────────────────────────────────
+function initApiKeyField() {
+  const saved = localStorage.getItem("anthropic_key");
+  if (saved) document.getElementById("f-api-key").value = saved;
+}
+
+async function generatePieceInfo() {
+  const apiKey = document.getElementById("f-api-key").value.trim();
+  const title    = document.getElementById("f-title").value.trim();
+  const composer = document.getElementById("f-composer").value.trim();
+  const errEl  = document.getElementById("gen-error");
+  const btn    = document.getElementById("gen-btn");
+  errEl.style.display = "none";
+
+  if (!apiKey) { errEl.textContent = "Please enter your Anthropic API key."; errEl.style.display = "block"; return; }
+  if (!title)  { errEl.textContent = "Please enter the piece title first."; errEl.style.display = "block"; return; }
+
+  localStorage.setItem("anthropic_key", apiKey);
+  btn.textContent = "⚡ Generating…"; btn.disabled = true;
+
+  const prompt = modalIsBook
+  ? `You are writing database entries for "The Practice Room", a piano learning app used by adult students and their teachers. Use British English spelling.
+
+Book / Method: ${title}${composer ? `\nAuthor / Publisher: ${composer}` : ""}
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "title": "The exact, correctly formatted title of the book or method — e.g. 'Piano Adventures: Level 2A', 'Alfred's Adult All-in-One Piano Course: Level 1', 'ABRSM Piano Pieces: Grade 3'",
+  "composer": "The author(s) or publisher — e.g. 'Nancy & Randall Faber', 'Palmer, Manus & Lethco', 'ABRSM', 'John Thompson'",
+  "background": "Two paragraphs covering: what this book is, who publishes it, where it fits in the piano learning landscape, what kind of students it is designed for, and why it is significant or widely used.",
+  "pianist_notes": "Two paragraphs covering: how this book is best used in practice, what type of student or teacher will get the most from it, how it fits alongside other resources, and any practical tips for working through it effectively.",
+  "challenges": "One paragraph covering: the technical and musical content this book covers, what level of playing it assumes at the start, what a student will have achieved by the end, and roughly what grade standard it corresponds to (use ABRSM as a reference).",
+  "difficulty": 1,
+  "tags": ["Tag1", "Tag2", "Tag3"]
+}
+
+Rules:
+- difficulty is an integer 0–5 representing the level at which the book is primarily pitched:
+  0 = Absolute Beginner (pre-Grade 1, complete beginners)
+  1 = Beginner (approx ABRSM Grade 1–2)
+  2 = Lower Intermediate (approx ABRSM Grade 3–5)
+  3 = Upper Intermediate (approx ABRSM Grade 6–7)
+  4 = Advanced (ABRSM Grade 8 and above)
+  5 = Expert
+- tags describe the type of book, e.g. "Method book", "Adult beginner", "Children", "Exam prep", "ABRSM", "Trinity", "Technique" — 2 to 5 tags
+- Write with authority and warmth, aimed at a piano teacher or motivated adult learner`
+  : `You are writing database entries for "The Practice Room", a piano repertoire reference database for adult piano students. Use British English spelling.
+
+Piece: ${title}${composer ? `\nComposer/Artist: ${composer}` : ""}
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "title": "The canonical title of the original composition, including opus/catalogue number in parentheses where applicable — e.g. 'Nocturne Op. 9, No. 2 in E flat major', 'Invention No. 1 in C major (BWV 772)', 'Air on the G String (BWV 1068)'. Do NOT mention arrangements, arrangers, or transcriptions — this is a reference to the piece itself, not a specific edition.",
+  "composer": "Full name with correct diacritics — e.g. 'Frédéric Chopin', 'Ludwig van Beethoven', 'Wolfgang Amadeus Mozart', 'J.S. Bach', 'Franz Schubert', 'Robert Schumann', 'Claude Debussy'",
+  "year": "The year of the original composition (not a piano arrangement) — e.g. 1717 for the Air from Bach's Orchestral Suite No. 3, regardless of when any piano transcription was made",
+  "background": "Two to three paragraphs covering: the historical and compositional context, why the piece was written, the circumstances of its composition, relevant facts about the composer at the time, and its significance in the repertoire.",
+  "pianist_notes": "Two to three paragraphs covering: the structure of the piece, what it represents musically and emotionally, specific techniques it requires, how to approach learning it, particular passages or sections to be aware of, and performance considerations such as tone, phrasing, and character.",
+  "challenges": "Two paragraphs. First: explain the key technical and musical challenges and why the piece has been given its difficulty rating — always refer to the level by name (Absolute Beginner, Beginner, Lower Intermediate, Upper Intermediate, Advanced, or Expert), never by number. Second (headed 'Before You Begin'): list the technical skills and musical understanding a pianist should have mastered before attempting this piece.",
+  "difficulty": 3,
+  "tags": ["Tag1", "Tag2", "Tag3", "Tag4", "Tag5"]
+}
+
+Note: year must be an integer (the four-digit year number only, no text).
+
+Rules:
+- difficulty is an integer 0–5 — be accurate and do not underestimate, using ABRSM grades as a guide:
+  0 = Absolute Beginner: pre-Grade 1, first 1–3 months of learning, five-finger positions, minimal hand coordination
+  1 = Beginner: approximately ABRSM Grade 1–2
+  2 = Lower Intermediate: approximately ABRSM Grade 3–5
+  3 = Upper Intermediate: approximately ABRSM Grade 6–7
+  4 = Advanced: approximately ABRSM Grade 8 up to diploma level
+  5 = Expert: concert repertoire or pieces widely considered professional/virtuosic level
+- When in doubt between two levels, choose the higher one
+- tags are specific piano technique/musicality concepts, e.g. "Pedalling", "Voicing", "Rubato", "Hand independence", "Sight-reading", "Ornaments" — 4 to 8 tags
+- Write about the original composition, not any specific piano arrangement or edition — do not name arrangers or reference a particular transcription, unless the transcription itself is the famous work being catalogued (e.g. a Liszt piano transcription, in which case discuss the transcription and its significance)
+- Write with authority and warmth, aimed at a motivated adult learner`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${res.status}`);
+    }
+
+    const data = await res.json();
+    const text = data.content?.[0]?.text || "";
+    const start = text.indexOf("{"), end = text.lastIndexOf("}");
+    if (start === -1) throw new Error("No JSON in response — please try again.");
+    const raw = text.slice(start, end + 1);
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch(_) { parsed = JSON.parse(repairJson(raw)); }
+
+    if (parsed.title)    document.getElementById("f-title").value    = parsed.title;
+    if (parsed.composer) document.getElementById("f-composer").value = parsed.composer;
+    if (!modalIsBook && parsed.year) document.getElementById("f-year").value = parseInt(parsed.year) || parsed.year;
+    document.getElementById("f-background").value     = parsed.background     || "";
+    document.getElementById("f-pianist-notes").value  = parsed.pianist_notes  || "";
+    document.getElementById("f-challenges").value     = parsed.challenges     || "";
+    if (parsed.difficulty != null) { selectedDifficulty = parsed.difficulty; updateDiffPicker(); }
+    if (Array.isArray(parsed.tags)) { formTags = parsed.tags; renderFormTags(); }
+
+  } catch(err) {
+    errEl.textContent = err.message || "Something went wrong. Check your API key and try again.";
+    errEl.style.display = "block";
+  }
+
+  btn.textContent = "⚡ Generate with AI"; btn.disabled = false;
+}
+
+async function regenerateTextForDifficulty() {
+  const apiKey = document.getElementById("f-api-key").value.trim();
+  const title    = document.getElementById("f-title").value.trim();
+  const composer = document.getElementById("f-composer").value.trim();
+  const errEl    = document.getElementById("gen-error");
+  const btn      = document.getElementById("regen-text-btn");
+  const statusEl = document.getElementById("regen-text-status");
+  errEl.style.display = "none";
+
+  if (!apiKey) { errEl.textContent = "Please enter your Anthropic API key."; errEl.style.display = "block"; return; }
+  if (!title)  { errEl.textContent = "Please enter the piece title first."; errEl.style.display = "block"; return; }
+  if (selectedDifficulty == null) { errEl.textContent = "Please select a difficulty level first."; errEl.style.display = "block"; return; }
+
+  const diffLabel = DIFFICULTY_LABELS[selectedDifficulty];
+  localStorage.setItem("anthropic_key", apiKey);
+  btn.textContent = "↺ Regenerating…"; btn.disabled = true;
+  statusEl.textContent = `Generating text for ${diffLabel}…`; statusEl.style.display = "block";
+
+  const prompt = `You are writing database entries for "The Practice Room", a piano repertoire reference database for adult piano students. Use British English spelling.
+
+Piece: ${title}${composer ? `\nComposer/Artist: ${composer}` : ""}
+Difficulty: ${diffLabel}
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "title": "The canonical title of the original composition, including opus/catalogue number in parentheses where applicable — e.g. 'Nocturne Op. 9, No. 2 in E flat major', 'Invention No. 1 in C major (BWV 772)', 'Air on the G String (BWV 1068)'. Do NOT mention arrangements, arrangers, or transcriptions — this is a reference to the piece itself, not a specific edition.",
+  "composer": "Full name with correct diacritics — e.g. 'Frédéric Chopin', 'Ludwig van Beethoven', 'Wolfgang Amadeus Mozart', 'J.S. Bach', 'Franz Schubert', 'Robert Schumann', 'Claude Debussy'",
+  "background": "Two to three paragraphs covering: the historical and compositional context, why the piece was written, the circumstances of its composition, relevant facts about the composer at the time, and its significance in the repertoire.",
+  "pianist_notes": "Two to three paragraphs covering: the structure of the piece, what it represents musically and emotionally, specific techniques it requires, how to approach learning it, particular passages or sections to be aware of, and performance considerations such as tone, phrasing, and character.",
+  "challenges": "Two paragraphs. First: explain the key technical and musical challenges and why the piece has been given its difficulty rating — always refer to the level by name (${diffLabel}), never by number. Second (headed 'Before You Begin'): list the technical skills and musical understanding a pianist should have mastered before attempting this piece."
+}
+
+Write about the original composition, not any specific piano arrangement or edition — do not name arrangers or reference a particular transcription, unless the transcription itself is the famous work being catalogued (e.g. a Liszt piano transcription, in which case discuss the transcription and its significance). Write with authority and warmth, aimed at a motivated adult learner. Be thorough and specific to this piece.`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 3000,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${res.status}`);
+    }
+
+    const data = await res.json();
+    const text = data.content?.[0]?.text || "";
+    const start = text.indexOf("{"), end = text.lastIndexOf("}");
+    if (start === -1) throw new Error("No JSON in response — please try again.");
+    const raw = text.slice(start, end + 1);
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch(_) { parsed = JSON.parse(repairJson(raw)); }
+
+    if (parsed.title)    document.getElementById("f-title").value    = parsed.title;
+    if (parsed.composer) document.getElementById("f-composer").value = parsed.composer;
+    document.getElementById("f-background").value    = parsed.background    || "";
+    document.getElementById("f-pianist-notes").value = parsed.pianist_notes || "";
+    document.getElementById("f-challenges").value    = parsed.challenges    || "";
+
+    statusEl.textContent = `✓ Text updated for ${diffLabel}`;
+    statusEl.style.color = "#4ade80";
+
+  } catch(err) {
+    errEl.textContent = err.message || "Something went wrong. Check your API key and try again.";
+    errEl.style.display = "block";
+    statusEl.style.display = "none";
+  }
+
+  btn.textContent = "↺ Regenerate text for this difficulty"; btn.disabled = false;
+}
+
+// ── Init ─────────────────────────────────────────────────────
+(async () => {
+  try {
+    // Magic link click — Supabase puts the token in the URL hash
+    if (window.location.hash.includes("access_token")) {
+      const { data: { session: authSession } } = await db.auth.getSession();
+      if (authSession?.user?.email) {
+        const email = authSession.user.email.toLowerCase();
+        const { data } = await db.from("allowed_emails").select("email").eq("email", email).maybeSingle();
+        if (data) {
+          setSession(email);
+          history.replaceState(null, "", window.location.pathname); // clean up URL
+          bootApp();
+          return;
+        }
+      }
+      // Token present but auth failed — show login
+      history.replaceState(null, "", window.location.pathname);
+      hideEl("loading-screen");
+      show("login-screen", "flex");
+      return;
+    }
+
+    // Normal flow — check localStorage session
+    const session = getSession();
+    if (session) {
+      const { data } = await db.from("allowed_emails").select("email").eq("email", session.email).maybeSingle();
+      if (data) { bootApp(); }
+      else { clearSession(); hideEl("loading-screen"); show("login-screen", "flex"); }
+    } else {
+      hideEl("loading-screen"); show("login-screen", "flex");
+    }
+  } catch (e) {
+    console.error("Init error:", e);
+    clearSession();
+    hideEl("loading-screen");
+    show("login-screen", "flex");
+  }
+})();
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>

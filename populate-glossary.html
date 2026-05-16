@@ -1,0 +1,1775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Populate Glossary</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 24px; max-width: 960px; }
+    h1 { font-size: 1.2rem; margin-bottom: 4px; }
+    p.sub { font-size: 0.85rem; color: #888; margin-bottom: 24px; line-height: 1.6; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.9rem; font-family: monospace; outline: none; margin-bottom: 12px; }
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .filter-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .filter-btn { padding: 5px 12px; border-radius: 20px; border: 1px solid #333; background: #1a1a1a; color: #aaa; cursor: pointer; font-size: 0.8rem; }
+    .filter-btn.active { background: #1a3a1a; border-color: #2d6a2d; color: #4ade80; }
+    button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+    .btn-primary { background: #2d6a2d; color: #9de89d; }
+    .btn-missing { background: #1a3a6a; color: #7ab4ff; }
+    .btn-stop    { background: #6a2d2d; color: #e89d9d; }
+    .btn-apply   { background: #2d4a6a; color: #7ab4ff; }
+    .btn-neutral { background: #222; color: #aaa; border: 1px solid #333; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .progress-wrap { margin-top: 14px; display: none; }
+    .progress-bar-bg { background: #222; border-radius: 4px; height: 8px; overflow: hidden; }
+    .progress-bar-fill { background: #4ade80; height: 100%; transition: width 0.3s; width: 0%; }
+    .progress-label { font-size: 0.8rem; color: #888; margin-top: 6px; }
+
+    .stats-bar { font-size: 0.82rem; color: #888; margin-bottom: 14px; display: none; }
+    .stats-bar span { margin-right: 14px; }
+    .ok  { color: #4ade80; }
+    .warn { color: #facc15; }
+    .err { color: #f87171; }
+    .info { color: #7ab4ff; }
+
+    .result-item { border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+    .result-header { background: #1e1e1e; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; gap: 10px; }
+    .result-meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .result-title { font-size: 0.9rem; font-weight: 600; }
+    .badge { font-size: 0.7rem; padding: 2px 7px; border-radius: 10px; background: #222; color: #888; border: 1px solid #333; white-space: nowrap; }
+    .badge-cat  { background: #1a2a3a; color: #7ab4ff; border-color: #1e3a5a; }
+    .badge-orig { background: #2a1a2a; color: #c084fc; border-color: #3a1a4a; }
+    .badge-sym  { background: #2a2a1a; color: #fbbf24; border-color: #4a3a1a; }
+    .result-status { font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+    .status-done    { background: #1a3a1a; color: #4ade80; }
+    .status-error   { background: #3a1a1a; color: #f87171; }
+    .status-pending { background: #1a1a2a; color: #888; }
+    .status-skipped { background: #2a2a1a; color: #888; }
+    .result-body { display: none; padding: 14px; border-top: 1px solid #2a2a2a; }
+    .result-body.open { display: block; }
+    .section-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin-bottom: 4px; margin-top: 10px; }
+    .section-label:first-child { margin-top: 0; }
+    .section-text { font-size: 0.87rem; color: #ccc; line-height: 1.7; }
+    .section-text.existing { color: #888; font-style: italic; }
+    .apply-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #2a2a2a; }
+    .apply-check { width: 15px; height: 15px; accent-color: #4ade80; cursor: pointer; }
+    .apply-label { font-size: 0.82rem; color: #aaa; }
+
+    #apply-bar { display: none; }
+
+    details { margin-bottom: 16px; }
+    details summary { font-size: 0.85rem; color: #888; cursor: pointer; user-select: none; padding: 6px 0; }
+    details summary:hover { color: #ccc; }
+    .add-form { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .add-form input, .add-form select { padding: 8px 10px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.85rem; outline: none; width: 100%; }
+    .add-form select option { background: #111; }
+  </style>
+</head>
+<body>
+
+<h1>📖 Populate Glossary</h1>
+<p class="sub">
+  Generates definitions for all glossary terms using Claude. Each term gets its own focused API call.<br>
+  Use <strong>Generate missing only</strong> for a first run, or <strong>Generate all</strong> to regenerate everything.
+</p>
+
+<div class="card">
+  <label for="api-key">Anthropic API Key</label>
+  <input type="password" id="api-key" placeholder="sk-ant-…" />
+
+  <div class="filter-row" id="cat-filters"></div>
+
+  <div class="controls">
+    <button class="btn-missing" id="missing-btn" onclick="startGeneration('missing')">⚡ Generate missing only</button>
+    <button class="btn-primary" id="all-btn" onclick="startGeneration('all')">↺ Regenerate all</button>
+    <button class="btn-stop" id="stop-btn" onclick="shouldStop=true" style="display:none">⏹ Stop</button>
+    <span id="status" style="font-size:0.85rem;color:#888"></span>
+  </div>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    <div class="progress-label" id="progress-label"></div>
+  </div>
+</div>
+
+<div class="card" id="apply-bar">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button class="btn-apply" id="apply-btn" onclick="applySelected()">✓ Apply selected to database</button>
+    <button class="btn-neutral" onclick="selectAll(true)">Select all</button>
+    <button class="btn-neutral" onclick="selectAll(false)">Deselect all</button>
+    <button class="btn-neutral" id="retry-btn" onclick="retryFailed()" style="display:none">↺ Retry failed</button>
+    <span id="apply-status" style="font-size:0.85rem;color:#888"></span>
+  </div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>+ Add a new term</summary>
+    <div class="add-form">
+      <div>
+        <label>Term</label>
+        <input type="text" id="new-term" placeholder="e.g. Schwebend" />
+      </div>
+      <div>
+        <label>Category</label>
+        <select id="new-cat"></select>
+      </div>
+      <div>
+        <label>Origin</label>
+        <select id="new-origin">
+          <option value="">None</option>
+          <option>Italian</option>
+          <option>German</option>
+          <option>French</option>
+          <option>Latin</option>
+          <option>Greek</option>
+        </select>
+      </div>
+      <div>
+        <label>Type</label>
+        <select id="new-type">
+          <option value="term">term</option>
+          <option value="symbol">symbol</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:10px;align-items:center">
+      <button class="btn-missing" onclick="addAndGenerate()">⚡ Add &amp; generate definition</button>
+      <span id="add-status" style="font-size:0.85rem;color:#888"></span>
+    </div>
+  </details>
+</div>
+
+<div class="stats-bar" id="stats-bar"></div>
+<div id="results-container"></div>
+
+<script>
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── Full term list ────────────────────────────────────────────────────────────
+const GLOSSARY_TERMS = [
+  // TEMPO
+  { term:"Larghissimo",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Grave",             category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Largo",             category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Larghetto",         category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Adagio",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Adagietto",         category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Andante",           category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Andantino",         category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Moderato",          category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Allegretto",        category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Allegro",           category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Vivace",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Vivacissimo",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Presto",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Prestissimo",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Accelerando",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Ritardando",        category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Rallentando",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Ritenuto",          category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Rubato",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"A tempo",           category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Tempo giusto",      category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Meno mosso",        category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Più mosso",         category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Poco a poco",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Subito",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Assai",             category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Come prima",        category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Comodo",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Doppio movimento",  category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"L'istesso tempo",   category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Ma non troppo",     category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Molto",             category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Non troppo",        category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Sempre",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Stringendo",        category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Vivo",              category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Con spirito",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Stretto",           category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Langsam",           category:"Tempo",       origin:"German",  entry_type:"term"   },
+  { term:"Schnell",           category:"Tempo",       origin:"German",  entry_type:"term"   },
+  { term:"Mäßig",             category:"Tempo",       origin:"German",  entry_type:"term"   },
+  { term:"Lebhaft",           category:"Tempo",       origin:"German",  entry_type:"term"   },
+  { term:"Bewegt",            category:"Tempo",       origin:"German",  entry_type:"term"   },
+  { term:"Lent",              category:"Tempo",       origin:"French",  entry_type:"term"   },
+  { term:"Vif",               category:"Tempo",       origin:"French",  entry_type:"term"   },
+  { term:"Modéré",            category:"Tempo",       origin:"French",  entry_type:"term"   },
+  { term:"Animé",             category:"Tempo",       origin:"French",  entry_type:"term"   },
+
+  // DYNAMICS
+  { term:"Pianississimo",     category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Pianissimo",        category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Piano",             category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Mezzo-piano",       category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Mezzo-forte",       category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Forte",             category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Fortissimo",        category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Fortississimo",     category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Sforzando",         category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Forte-piano",       category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Crescendo",         category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Decrescendo",       category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Diminuendo",        category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Niente",            category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Morendo",           category:"Dynamics",    origin:"Italian", entry_type:"term"   },
+  { term:"Calando",           category:"Dynamics",    origin:"Italian", entry_type:"term"   },
+  { term:"Smorzando",         category:"Dynamics",    origin:"Italian", entry_type:"term"   },
+  { term:"Perdendosi",        category:"Dynamics",    origin:"Italian", entry_type:"term"   },
+  { term:"Rinforzando",       category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Forzando",          category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+
+  // ARTICULATION
+  { term:"Legato",            category:"Articulation",origin:"Italian", entry_type:"symbol" },
+  { term:"Staccato",          category:"Articulation",origin:"Italian", entry_type:"symbol" },
+  { term:"Tenuto",            category:"Articulation",origin:"Italian", entry_type:"symbol" },
+  { term:"Accent",            category:"Articulation",origin:"Italian", entry_type:"symbol" },
+  { term:"Marcato",           category:"Articulation",origin:"Italian", entry_type:"symbol" },
+  { term:"Portato",           category:"Articulation",origin:"Italian", entry_type:"symbol" },
+  { term:"Staccatissimo",     category:"Articulation",origin:"Italian", entry_type:"symbol" },
+  { term:"Slur",              category:"Articulation",origin:null,      entry_type:"symbol" },
+  { term:"Tie",               category:"Articulation",origin:null,      entry_type:"symbol" },
+  { term:"Fermata",           category:"Articulation",origin:"Italian", entry_type:"symbol" },
+
+  // ORNAMENTS
+  { term:"Trill",             category:"Ornaments",   origin:null,      entry_type:"symbol" },
+  { term:"Mordent",           category:"Ornaments",   origin:null,      entry_type:"symbol" },
+  { term:"Inverted Mordent",  category:"Ornaments",   origin:null,      entry_type:"symbol" },
+  { term:"Turn",              category:"Ornaments",   origin:null,      entry_type:"symbol" },
+  { term:"Appoggiatura",      category:"Ornaments",   origin:"Italian", entry_type:"symbol" },
+  { term:"Acciaccatura",      category:"Ornaments",   origin:"Italian", entry_type:"symbol" },
+  { term:"Glissando",         category:"Ornaments",   origin:"Italian", entry_type:"symbol" },
+  { term:"Tremolo",           category:"Ornaments",   origin:"Italian", entry_type:"symbol" },
+  { term:"Vibrato",           category:"Ornaments",   origin:"Italian", entry_type:"term"   },
+  { term:"Arpeggio",          category:"Ornaments",   origin:"Italian", entry_type:"symbol" },
+
+  // EXPRESSION
+  { term:"Cantabile",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Dolce",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Espressivo",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Grazioso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Maestoso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Misterioso",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Agitato",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Animato",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Brillante",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con brio",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con fuoco",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con moto",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Giocoso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Grandioso",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Leggiero",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Pesante",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Scherzando",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Semplice",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Tranquillo",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Vigoroso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sostenuto",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Appassionato",      category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Furioso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Lamentoso",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Mesto",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Affettuoso",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Affrettando",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Alla marcia",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Amabile",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con anima",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con bravura",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con delicatezza",   category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con forza",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con grazia",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con passione",      category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con tenerezza",     category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con vigore",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Deciso",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Doloroso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Energico",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Eroico",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Feroce",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Flessibile",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Impetuoso",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Innocente",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Languido",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Largamente",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Liberamente",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Lusingando",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Nobile",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Pastorale",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Piacevole",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Pietoso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Pomposo",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Risoluto",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Rustico",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Serioso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Solenne",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sotto voce",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Teneramente",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Tenero",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Tristamente",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Triste",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Volante",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Zart",              category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Kräftig",           category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Feierlich",         category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Innig",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Ruhig",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Breit",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Heftig",            category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Fließend",          category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Doux",              category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Léger",             category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"En dehors",         category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Cédez",             category:"Expression",  origin:"French",  entry_type:"term"   },
+
+  // FORM
+  { term:"Binary form",          category:"Form", origin:null,      entry_type:"term" },
+  { term:"Ternary form",         category:"Form", origin:null,      entry_type:"term" },
+  { term:"Rondo form",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Sonata form",          category:"Form", origin:null,      entry_type:"term" },
+  { term:"Theme and variations", category:"Form", origin:null,      entry_type:"term" },
+  { term:"Canon",                category:"Form", origin:null,      entry_type:"term" },
+  { term:"Fugue",                category:"Form", origin:null,      entry_type:"term" },
+  { term:"Through-composed",     category:"Form", origin:null,      entry_type:"term" },
+  { term:"Coda",                 category:"Form", origin:"Italian", entry_type:"symbol"},
+  { term:"Exposition",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Development",          category:"Form", origin:null,      entry_type:"term" },
+  { term:"Recapitulation",       category:"Form", origin:null,      entry_type:"term" },
+  { term:"Prelude",              category:"Form", origin:null,      entry_type:"term" },
+  { term:"Nocturne",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Étude",                category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Intermezzo",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Impromptu",            category:"Form", origin:null,      entry_type:"term" },
+  { term:"Ballade",              category:"Form", origin:null,      entry_type:"term" },
+  { term:"Scherzo",              category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Minuet",               category:"Form", origin:null,      entry_type:"term" },
+  { term:"Suite",                category:"Form", origin:null,      entry_type:"term" },
+  { term:"Concerto",             category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Sonata",               category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Ritornello",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Ground bass",          category:"Form", origin:null,      entry_type:"term" },
+  { term:"Passacaglia",          category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Chaconne",             category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Fantasia",             category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Toccata",              category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Invention",            category:"Form", origin:null,      entry_type:"term" },
+  { term:"Capriccio",            category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Rhapsody",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Tone poem",            category:"Form", origin:null,      entry_type:"term" },
+  { term:"Overture",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Symphony",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Aria",                 category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Recitative",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Chorale",              category:"Form", origin:null,      entry_type:"term" },
+  { term:"March",                category:"Form", origin:null,      entry_type:"term" },
+  { term:"Waltz",                category:"Form", origin:null,      entry_type:"term" },
+  { term:"Mazurka",              category:"Form", origin:null,      entry_type:"term" },
+  { term:"Polonaise",            category:"Form", origin:null,      entry_type:"term" },
+  { term:"Sarabande",            category:"Form", origin:null,      entry_type:"term" },
+  { term:"Allemande",            category:"Form", origin:null,      entry_type:"term" },
+  { term:"Courante",             category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Gigue",                category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Bourrée",              category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Gavotte",              category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Siciliana",            category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Tarantella",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Barcarolle",           category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Berceuse",             category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Romance",              category:"Form", origin:null,      entry_type:"term" },
+  { term:"Fugato",               category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Codetta",              category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Episode",              category:"Form", origin:null,      entry_type:"term" },
+  { term:"Cadenza",              category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Da capo aria",         category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Strophic form",        category:"Form", origin:null,      entry_type:"term" },
+  { term:"Divertimento",         category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Serenade",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Partita",              category:"Form", origin:"Italian", entry_type:"term" },
+
+  // RHYTHM
+  { term:"Beat",                    category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Pulse",                   category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Metre",                   category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Time signature",          category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Common time",             category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Cut time",                category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Simple time",             category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Compound time",           category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Irregular time signature",category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Syncopation",             category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Cross-rhythm",            category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Polyrhythm",              category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Hemiola",                 category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Triplet",                 category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Duplet",                  category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Anacrusis",               category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Downbeat",                category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Upbeat",                  category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Agogic accent",           category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Ostinato",                category:"Rhythm", origin:"Italian", entry_type:"term" },
+  { term:"Augmentation",            category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Diminution",              category:"Rhythm", origin:null, entry_type:"term"   },
+  { term:"Beaming",                 category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Breve",                   category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Demisemiquaver",          category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Hemidemisemiquaver",      category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Double dotted note",      category:"Rhythm", origin:null, entry_type:"symbol" },
+
+  // PITCH
+  { term:"Pitch",                   category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Sharp",                   category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Flat",                    category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Natural",                 category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Double sharp",            category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Double flat",             category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Accidental",              category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Semitone",                category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Tone",                    category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Diatonic semitone",       category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Chromatic semitone",      category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Octave",                  category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Unison",                  category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Enharmonic",              category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Register",                category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Ledger lines",            category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Concert pitch",           category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Transposing instrument",  category:"Pitch", origin:null,      entry_type:"term"   },
+  { term:"Clef",                    category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Tenor clef",              category:"Pitch", origin:null,      entry_type:"symbol" },
+  { term:"Ottava",                  category:"Pitch", origin:"Italian", entry_type:"symbol" },
+  { term:"Ottava bassa",            category:"Pitch", origin:"Italian", entry_type:"symbol" },
+  { term:"Loco",                    category:"Pitch", origin:"Italian", entry_type:"term"   },
+
+  // HARMONY
+  { term:"Major scale",             category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Minor scale",             category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Harmonic minor scale",    category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Melodic minor scale",     category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Chromatic scale",         category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Pentatonic scale",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Whole tone scale",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Ionian mode",             category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Dorian mode",             category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Phrygian mode",           category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Lydian mode",             category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Mixolydian mode",         category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Aeolian mode",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Locrian mode",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Chord",                   category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Triad",                   category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Seventh chord",           category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Dominant seventh",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Diminished seventh chord",category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Augmented chord",         category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Diminished chord",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Interval",                category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Perfect interval",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Major interval",          category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Minor interval",          category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Augmented interval",      category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Diminished interval",     category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Root position",           category:"Harmony", origin:null, entry_type:"term" },
+  { term:"First inversion",         category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Second inversion",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Inversion",               category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Tonic",                   category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Supertonic",              category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Mediant",                 category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Subdominant",             category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Dominant",                category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Submediant",              category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Subtonic",                category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Leading note",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Perfect cadence",         category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Plagal cadence",          category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Imperfect cadence",       category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Interrupted cadence",     category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Phrygian cadence",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Modulation",              category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Relative key",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Parallel key",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Circle of fifths",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Transposition",           category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Diatonic",                category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Chromatic",               category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Consonance",              category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Dissonance",              category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Counterpoint",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Pedal point",             category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Passing note",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Auxiliary note",          category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Suspension",              category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Anticipation",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"False relation",          category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Consecutive fifths",      category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Consecutive octaves",     category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Figured bass",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Harmonic rhythm",         category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Voice leading",           category:"Harmony", origin:null, entry_type:"term" },
+
+  // NOTATION
+  { term:"Treble clef",              category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Bass clef",                category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Alto clef",                category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Grand staff",              category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Key signature",            category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Bar",                      category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Double bar",               category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Repeat sign",              category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"First and second time bars",category:"Notation",origin:null,      entry_type:"symbol" },
+  { term:"Da capo",                  category:"Notation", origin:"Italian", entry_type:"symbol" },
+  { term:"Dal segno",                category:"Notation", origin:"Italian", entry_type:"symbol" },
+  { term:"Fine",                     category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Segno",                    category:"Notation", origin:"Italian", entry_type:"symbol" },
+  { term:"Coda sign",                category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Volta bracket",            category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Ossia",                    category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Semibreve",                category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Minim",                    category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Crotchet",                 category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Quaver",                   category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Semiquaver",               category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Dotted note",              category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Rest",                     category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Tempo marking",            category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Metronome",                category:"Notation", origin:null,      entry_type:"term"   },
+  { term:"Breath mark",              category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"8va",                      category:"Notation", origin:"Italian", entry_type:"symbol" },
+  { term:"Con sordino",              category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Senza sordino",            category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Ped.",                     category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Divisi",                   category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Simile",                   category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Tacet",                    category:"Notation", origin:"Latin",   entry_type:"term"   },
+
+  // TEXTURE
+  { term:"Monophony",              category:"Texture", origin:null, entry_type:"term" },
+  { term:"Homophony",              category:"Texture", origin:null, entry_type:"term" },
+  { term:"Polyphony",              category:"Texture", origin:null, entry_type:"term" },
+  { term:"Heterophony",            category:"Texture", origin:null, entry_type:"term" },
+  { term:"Homorhythm",             category:"Texture", origin:null, entry_type:"term" },
+  { term:"Melody and accompaniment",category:"Texture",origin:null, entry_type:"term" },
+  { term:"Contrapuntal",           category:"Texture", origin:null, entry_type:"term" },
+  { term:"Alberti bass",           category:"Texture", origin:null, entry_type:"term" },
+  { term:"Broken chord",           category:"Texture", origin:null, entry_type:"term" },
+  { term:"Timbre",                 category:"Texture", origin:null, entry_type:"term" },
+
+  // STRUCTURE
+  { term:"Motif",                  category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Theme",                  category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Phrase",                 category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Period",                 category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Antecedent phrase",      category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Consequent phrase",      category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Melodic sequence",       category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Harmonic sequence",      category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Imitation",              category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Retrograde",             category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Melodic inversion",      category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Retrograde inversion",   category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Fragmentation",          category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Subject",                category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Answer",                 category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Countersubject",         category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Stretto (fugue)",        category:"Structure", origin:"Italian", entry_type:"term" },
+
+  // PERFORMANCE
+  { term:"Pizzicato",    category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Arco",         category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Col legno",    category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Sul tasto",    category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Sul ponticello",category:"Performance",origin:"Italian", entry_type:"term" },
+  { term:"Harmonics",    category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Flutter-tongue",category:"Performance", origin:null,     entry_type:"term" },
+  { term:"A cappella",   category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Tutti",        category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Solo",         category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Ad libitum",   category:"Performance", origin:"Latin",   entry_type:"term" },
+  { term:"Attacca",      category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Segue",        category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Colla voce",   category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Obbligato",    category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Portamento",   category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Spiccato",     category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Détaché",      category:"Performance", origin:"French",  entry_type:"term" },
+  { term:"Unisono",      category:"Performance", origin:"Italian", entry_type:"term" },
+
+  // VOICE
+  { term:"Soprano",      category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Mezzo-soprano",category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Alto",         category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Contralto",    category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Tenor",        category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Baritone",     category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Bass voice",   category:"Voice", origin:null,      entry_type:"term" },
+  { term:"SATB",         category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Tessitura",    category:"Voice", origin:"Italian", entry_type:"term" },
+
+  // TEMPO (additions)
+  { term:"Lento",              category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Mosso",              category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Quasi",              category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Tempo primo",        category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Incalzando",         category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Allargando",         category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"A piacere",          category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Serrez",             category:"Tempo",       origin:"French",  entry_type:"term"   },
+  { term:"Retenu",             category:"Tempo",       origin:"French",  entry_type:"term"   },
+  { term:"Pressez",            category:"Tempo",       origin:"French",  entry_type:"term"   },
+  { term:"Au mouvement",       category:"Tempo",       origin:"French",  entry_type:"term"   },
+  { term:"Nicht zu schnell",   category:"Tempo",       origin:"German",  entry_type:"term"   },
+  { term:"Etwas langsamer",    category:"Tempo",       origin:"German",  entry_type:"term"   },
+  { term:"Veloce",             category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Spedito",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Trattenuto",         category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Cedendo",            category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Slentando",          category:"Tempo",       origin:"Italian", entry_type:"term"   },
+  { term:"Senza misura",       category:"Tempo",       origin:"Italian", entry_type:"term"   },
+
+  // DYNAMICS (additions)
+  { term:"Al niente",          category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Dal niente",         category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Sforzato",           category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Sforzandissimo",     category:"Dynamics",    origin:"Italian", entry_type:"symbol" },
+  { term:"Più forte",          category:"Dynamics",    origin:"Italian", entry_type:"term"   },
+
+  // ARTICULATION (additions)
+  { term:"Non legato",         category:"Articulation",origin:"Italian", entry_type:"term"   },
+  { term:"Ben marcato",        category:"Articulation",origin:"Italian", entry_type:"term"   },
+  { term:"Louré",              category:"Articulation",origin:"French",  entry_type:"term"   },
+  { term:"Martelé",            category:"Articulation",origin:"French",  entry_type:"term"   },
+  { term:"Saltando",           category:"Articulation",origin:"Italian", entry_type:"term"   },
+
+  // ORNAMENTS (additions)
+  { term:"Upper mordent",      category:"Ornaments",   origin:null,      entry_type:"symbol" },
+  { term:"Lower mordent",      category:"Ornaments",   origin:null,      entry_type:"symbol" },
+  { term:"Bebung",             category:"Ornaments",   origin:"German",  entry_type:"term"   },
+  { term:"Slide",              category:"Ornaments",   origin:null,      entry_type:"symbol" },
+  { term:"Schleifer",          category:"Ornaments",   origin:"German",  entry_type:"symbol" },
+  { term:"Nachschlag",         category:"Ornaments",   origin:"German",  entry_type:"term"   },
+
+  // EXPRESSION — Italian (additions)
+  { term:"Marziale",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Capriccioso",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Lugubre",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Patetico",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Inquieto",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Tempestoso",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Religioso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Gioioso",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Trionfante",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Melanconico",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Lacrimoso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Placido",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Drammatico",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Spiritoso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Guerriero",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Festivo",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Nervoso",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Violento",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Fiero",              category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Soave",              category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Cupo",               category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Mormorando",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sospirando",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Volubile",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Ardito",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Dolente",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Elegante",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Estatico",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Gaio",               category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Gentile",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Malinconico",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Morbido",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Pensieroso",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Quieto",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sognando",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Scorrevole",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sonoro",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Tragico",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Ritmico",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con slancio",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con calore",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Veemente",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Strepitoso",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Addolorato",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Aggraziato",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Animoso",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Ardente",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Brioso",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Cantando",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Commosso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con abbandono",      category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con dolcezza",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con espressione",    category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con garbo",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con sentimento",     category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Declamando",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Esitante",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Facile",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Franco",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Giubilante",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Incisivo",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Indolente",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Lontano",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Mancando",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Meditativo",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Netto",              category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Pacato",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Rabbioso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Recitando",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sentito",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Severo",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sinistro",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Svelto",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Tenebroso",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Timido",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Urgente",            category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Vago",               category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Valoroso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sereno",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Nobilmente",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Arioso",             category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Bizzarro",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Caloroso",           category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con eleganza",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con impeto",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con fantasia",       category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con malinconia",     category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Con umore",          category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Disinvolto",         category:"Expression",  origin:"Italian", entry_type:"term"   },
+  { term:"Sussurrando",        category:"Expression",  origin:"Italian", entry_type:"term"   },
+
+  // EXPRESSION — German (additions)
+  { term:"Ausdrucksvoll",      category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Einfach",            category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Feurig",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Fröhlich",           category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Gemächlich",         category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Getragen",           category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Heiter",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Herzlich",           category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Leidenschaftlich",   category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Lieblich",           category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Munter",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Sanft",              category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Schwer",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Traurig",            category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Weich",              category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Wehmütig",           category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Wild",               category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Stark",              category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Drängend",           category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Düster",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Ernst",              category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Frisch",             category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Klagend",            category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Kühn",               category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Schmelzend",         category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Schmerzlich",        category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Schwebend",          category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Sehnsuchtsvoll",     category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Singend",            category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Stürmisch",          category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Träumerisch",        category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Triumphierend",      category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Weinend",            category:"Expression",  origin:"German",  entry_type:"term"   },
+  { term:"Zierlich",           category:"Expression",  origin:"German",  entry_type:"term"   },
+
+  // EXPRESSION — French (additions)
+  { term:"Expressif",          category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Fondu",              category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Joyeux",             category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Lourd",              category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Mélancolique",       category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Passionné",          category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Plaintif",           category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Profond",            category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Solennel",           category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Brusquement",        category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Vaillant",           category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Marqué",             category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Agité",              category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Brillant",           category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Calme",              category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Décidé",             category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Délicat",            category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Élégant",            category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Majestueux",         category:"Expression",  origin:"French",  entry_type:"term"   },
+  { term:"Avec abandon",       category:"Expression",  origin:"French",  entry_type:"term"   },
+
+  // FORM (additions)
+  { term:"Cantata",            category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Mass",               category:"Form", origin:null,      entry_type:"term" },
+  { term:"Requiem",            category:"Form", origin:"Latin",   entry_type:"term" },
+  { term:"Oratorio",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Motet",              category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Madrigal",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Anthem",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Lied",               category:"Form", origin:"German",  entry_type:"term" },
+  { term:"Art song",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Opera",              category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Bagatelle",          category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Humoresque",         category:"Form", origin:null,      entry_type:"term" },
+  { term:"Sonatina",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Concerto grosso",    category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Chamber music",      category:"Form", origin:null,      entry_type:"term" },
+  { term:"Programme music",    category:"Form", origin:null,      entry_type:"term" },
+  { term:"Absolute music",     category:"Form", origin:null,      entry_type:"term" },
+  { term:"Character piece",    category:"Form", origin:null,      entry_type:"term" },
+  { term:"Introduction",       category:"Form", origin:null,      entry_type:"term" },
+  { term:"Transition",         category:"Form", origin:null,      entry_type:"term" },
+  { term:"Postlude",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Mélodie",            category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Chanson",            category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Rigaudon",           category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Passepied",          category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Loure",              category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Basso ostinato",     category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Leitmotif",          category:"Form", origin:"German",  entry_type:"term" },
+  { term:"Hornpipe",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Musette",            category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Cyclic form",        category:"Form", origin:null,      entry_type:"term" },
+  { term:"Pavane",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Galliard",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Double",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Air",                category:"Form", origin:null,      entry_type:"term" },
+  { term:"Vocalise",           category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Dumka",              category:"Form", origin:null,      entry_type:"term" },
+  { term:"Moment musical",     category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Strathspey",         category:"Form", origin:null,      entry_type:"term" },
+  { term:"Fandango",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Habanera",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"Bolero",             category:"Form", origin:null,      entry_type:"term" },
+  { term:"Song cycle",         category:"Form", origin:null,      entry_type:"term" },
+  { term:"Chorale prelude",    category:"Form", origin:null,      entry_type:"term" },
+  { term:"Ballet",             category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Singspiel",          category:"Form", origin:"German",  entry_type:"term" },
+
+  // HARMONY (additions)
+  { term:"Neapolitan chord",       category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Augmented sixth chord",  category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Secondary dominant",     category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Borrowed chord",         category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Suspended chord",        category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Tritone",                category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Enharmonic modulation",  category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Pivot chord",            category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Tonal centre",           category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Tonality",               category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Atonality",              category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Blue note",              category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Open harmony",           category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Close harmony",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Bitonality",             category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Half-diminished seventh",category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Basso continuo",         category:"Harmony", origin:"Italian", entry_type:"term" },
+  { term:"Functional harmony",     category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Quartal harmony",        category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Chromatic mediant",      category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Minor second",           category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Major second",           category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Minor third",            category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Major third",            category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Perfect fourth",         category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Perfect fifth",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Major sixth",            category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Minor sixth",            category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Major seventh",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Minor seventh",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Resolution",             category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Non-harmonic tone",      category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Tendency tone",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Added ninth chord",      category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Chromaticism",           category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Octatonic scale",        category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Third inversion",        category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Modal mixture",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Acoustic scale",         category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Chord progression",      category:"Harmony", origin:null,      entry_type:"term" },
+
+  // PITCH (additions)
+  { term:"Microtone",           category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Quarter tone",        category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Solfège",             category:"Pitch", origin:"French", entry_type:"term" },
+  { term:"Scale degree",        category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Fixed do",            category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Movable do",          category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Tonic sol-fa",        category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Chromatic alteration",category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Middle C",            category:"Pitch", origin:null,     entry_type:"term" },
+  { term:"Ambitus",             category:"Pitch", origin:"Latin",  entry_type:"term" },
+
+  // NOTATION (additions)
+  { term:"Stave",                category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"System",               category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Score",                category:"Notation", origin:null,      entry_type:"term"   },
+  { term:"Part",                 category:"Notation", origin:null,      entry_type:"term"   },
+  { term:"Una corda",            category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Tre corde",            category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Sostenuto pedal",      category:"Notation", origin:null,      entry_type:"term"   },
+  { term:"15ma",                 category:"Notation", origin:"Italian", entry_type:"symbol" },
+  { term:"Senza pedale",         category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Brace",                category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Grace note",           category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Cue note",             category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Grand pause",          category:"Notation", origin:null,      entry_type:"symbol" },
+  { term:"Vide",                 category:"Notation", origin:"Latin",   entry_type:"term"   },
+  { term:"Cautionary accidental",category:"Notation", origin:null,      entry_type:"symbol" },
+
+  // RHYTHM (additions)
+  { term:"Additive rhythm",      category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Free time",            category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Swing rhythm",         category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Dotted rhythm",        category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Lombardic rhythm",     category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Metric modulation",    category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Mixed metre",          category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Asymmetric metre",     category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Rhythmic displacement",category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Polymetre",            category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Compound beat",        category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Simple beat",          category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Duple metre",          category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Triple metre",         category:"Rhythm", origin:null, entry_type:"term" },
+  { term:"Quadruple metre",      category:"Rhythm", origin:null, entry_type:"term" },
+
+  // TEXTURE (additions)
+  { term:"Arpeggiated accompaniment", category:"Texture", origin:null, entry_type:"term" },
+  { term:"Chordal texture",           category:"Texture", origin:null, entry_type:"term" },
+  { term:"Imitative texture",         category:"Texture", origin:null, entry_type:"term" },
+  { term:"Layered texture",           category:"Texture", origin:null, entry_type:"term" },
+  { term:"Thick texture",             category:"Texture", origin:null, entry_type:"term" },
+  { term:"Thin texture",              category:"Texture", origin:null, entry_type:"term" },
+  { term:"Monodic texture",           category:"Texture", origin:null, entry_type:"term" },
+  { term:"Doubling",                  category:"Texture", origin:null, entry_type:"term" },
+  { term:"Drone",                     category:"Texture", origin:null, entry_type:"term" },
+  { term:"Murky bass",                category:"Texture", origin:null, entry_type:"term" },
+  { term:"Stride bass",               category:"Texture", origin:null, entry_type:"term" },
+  { term:"Pedal texture",             category:"Texture", origin:null, entry_type:"term" },
+
+  // STRUCTURE (additions)
+  { term:"Invertible counterpoint", category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Bridge",                  category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Contrary motion",         category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Parallel motion",         category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Similar motion",          category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Oblique motion",          category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Closing theme",           category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Second subject",          category:"Structure", origin:null,      entry_type:"term" },
+  { term:"First subject",           category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Point of imitation",      category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Thematic transformation", category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Developmental episode",   category:"Structure", origin:null,      entry_type:"term" },
+  { term:"False entry",             category:"Structure", origin:null,      entry_type:"term" },
+  { term:"Stretto entry",           category:"Structure", origin:"Italian", entry_type:"term" },
+
+  // PERFORMANCE (additions)
+  { term:"Martellato",           category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Sautillé",             category:"Performance", origin:"French",  entry_type:"term" },
+  { term:"Double stopping",      category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Scordatura",           category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Snap pizzicato",       category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Flautando",            category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Sprechstimme",         category:"Performance", origin:"German",  entry_type:"term" },
+  { term:"Parlando",             category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Jeté",                 category:"Performance", origin:"French",  entry_type:"term" },
+  { term:"Ricochet",             category:"Performance", origin:"French",  entry_type:"term" },
+  { term:"Extended technique",   category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Prepared piano",       category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Natural harmonics",    category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Artificial harmonics", category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Col legno tratto",     category:"Performance", origin:"Italian", entry_type:"term" },
+
+  // VOICE (additions)
+  { term:"Falsetto",             category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Coloratura",           category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Countertenor",         category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Chest voice",          category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Head voice",           category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Basso profondo",       category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Dramatic soprano",     category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Lyric tenor",          category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Passaggio",            category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Bass-baritone",        category:"Voice", origin:null,      entry_type:"term" },
+
+  // HISTORICAL
+  { term:"Baroque period",       category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Classical period",     category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Romantic period",      category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Renaissance",          category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Medieval music",       category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Modern period",        category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Impressionism",        category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Expressionism",        category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Neoclassicism",        category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Minimalism",           category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Serialism",            category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Aleatory music",       category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Nationalism in music", category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Galant style",         category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Sturm und Drang",      category:"Historical", origin:"German", entry_type:"term" },
+  { term:"Contemporary music",   category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Second Viennese School", category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Common practice period", category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Ars Nova",               category:"Historical", origin:"Latin",   entry_type:"term" },
+  { term:"Ars Antiqua",            category:"Historical", origin:"Latin",   entry_type:"term" },
+  { term:"Gebrauchsmusik",         category:"Historical", origin:"German",  entry_type:"term" },
+  { term:"Musique concrète",       category:"Historical", origin:"French",  entry_type:"term" },
+  { term:"Electronic music",       category:"Historical", origin:null,      entry_type:"term" },
+  { term:"Post-Romanticism",       category:"Historical", origin:null,      entry_type:"term" },
+
+  // FORM (further additions)
+  { term:"Ricercar",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Canzona",            category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Cavatina",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Fanfare",            category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Aubade",             category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Rondeau",            category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Sinfonia",           category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Entr'acte",          category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Tombeau",            category:"Form", origin:"French",  entry_type:"term" },
+  { term:"Quodlibet",          category:"Form", origin:"Latin",   entry_type:"term" },
+  { term:"Incidental music",   category:"Form", origin:null,      entry_type:"term" },
+  { term:"Divertissement",     category:"Form", origin:"French",  entry_type:"term" },
+
+  // HARMONY (further additions)
+  { term:"Italian sixth",      category:"Harmony", origin:null, entry_type:"term" },
+  { term:"German sixth",       category:"Harmony", origin:null, entry_type:"term" },
+  { term:"French sixth",       category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Cadential six-four", category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Retardation",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Échappée",           category:"Harmony", origin:"French", entry_type:"term" },
+  { term:"Planing",            category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Blues scale",        category:"Harmony", origin:null, entry_type:"term" },
+  { term:"Tritone substitution", category:"Harmony", origin:null, entry_type:"term" },
+
+  // EXPRESSION — Italian (further additions)
+  { term:"Funebre",            category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Flebile",            category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Supplichevole",      category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Tumultuoso",         category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Robusto",            category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Piangendo",          category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Amoroso",            category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Desolato",           category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Alla turca",         category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Alla zingarese",     category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Alla polacca",       category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Con smania",         category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Alla caccia",        category:"Expression", origin:"Italian", entry_type:"term" },
+
+  // ORNAMENTS (further additions)
+  { term:"Pralltriller",       category:"Ornaments",  origin:"German", entry_type:"symbol" },
+  { term:"Double trill",       category:"Ornaments",  origin:null,     entry_type:"symbol" },
+
+  // RHYTHM (further additions)
+  { term:"Tuplet",             category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Quintuplet",         category:"Rhythm", origin:null, entry_type:"symbol" },
+  { term:"Sextuplet",          category:"Rhythm", origin:null, entry_type:"symbol" },
+
+  // STRUCTURE (further additions)
+  { term:"Real answer",        category:"Structure", origin:null, entry_type:"term" },
+  { term:"Tonal answer",       category:"Structure", origin:null, entry_type:"term" },
+  { term:"Counter-exposition", category:"Structure", origin:null, entry_type:"term" },
+
+  // PERFORMANCE (further additions)
+  { term:"Ordinario",          category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Naturale",           category:"Performance", origin:"Italian", entry_type:"term" },
+  { term:"Messa di voce",      category:"Performance", origin:"Italian", entry_type:"term" },
+
+  // NOTATION (further additions)
+  { term:"Bracket",            category:"Notation", origin:null, entry_type:"symbol" },
+  { term:"Roman numeral analysis", category:"Notation", origin:null, entry_type:"term" },
+
+  // PITCH (further additions)
+  { term:"Overtone",           category:"Pitch", origin:null, entry_type:"term" },
+  { term:"Harmonic series",    category:"Pitch", origin:null, entry_type:"term" },
+
+  // TEMPO (further additions — modifier concepts encountered standalone in scores)
+  { term:"Alla breve",         category:"Tempo",    origin:"Italian", entry_type:"term" },
+  { term:"Più",                category:"Tempo",    origin:"Italian", entry_type:"term" },
+  { term:"Meno",               category:"Tempo",    origin:"Italian", entry_type:"term" },
+  { term:"Ben",                category:"Tempo",    origin:"Italian", entry_type:"term" },
+  { term:"Troppo",             category:"Tempo",    origin:"Italian", entry_type:"term" },
+  { term:"Poco",               category:"Tempo",    origin:"Italian", entry_type:"term" },
+
+  // NOTATION (further additions)
+  { term:"Con pedale",         category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Chord symbol",       category:"Notation", origin:null,      entry_type:"term"   },
+  { term:"D.C. al Fine",       category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"D.S. al Coda",       category:"Notation", origin:"Italian", entry_type:"term"   },
+  { term:"Lead sheet",         category:"Notation", origin:null,      entry_type:"term"   },
+  { term:"Measure",            category:"Notation", origin:null,      entry_type:"term"   },
+
+  // HARMONY (further additions)
+  { term:"Neapolitan sixth",   category:"Harmony",  origin:null,      entry_type:"term"   },
+  { term:"Cambiata",           category:"Harmony",  origin:"Italian", entry_type:"term"   },
+  { term:"Extended harmony",   category:"Harmony",  origin:null,      entry_type:"term"   },
+  { term:"Chord tone",         category:"Harmony",  origin:null,      entry_type:"term"   },
+  { term:"Negative harmony",   category:"Harmony",  origin:null,      entry_type:"term"   },
+  { term:"Axis system",        category:"Harmony",  origin:null,      entry_type:"term"   },
+  { term:"Mirror inversion",   category:"Harmony",  origin:null,      entry_type:"term"   },
+  { term:"Spectral harmony",   category:"Harmony",  origin:null,      entry_type:"term"   },
+  { term:"Symmetric scale",    category:"Harmony",  origin:null,      entry_type:"term"   },
+
+  // ANALYSIS
+  { term:"Schenkerian analysis", category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Urlinie",              category:"Analysis", origin:"German", entry_type:"term" },
+  { term:"Ursatz",               category:"Analysis", origin:"German", entry_type:"term" },
+  { term:"Prolongation",         category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Foreground",           category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Middleground",         category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Background",           category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Kopfton",              category:"Analysis", origin:"German", entry_type:"term" },
+  { term:"Auskomponierung",      category:"Analysis", origin:"German", entry_type:"term" },
+  { term:"Interruption",         category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Initial ascent",       category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Neo-Riemannian theory",category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Tonnetz",              category:"Analysis", origin:"German", entry_type:"term" },
+  { term:"Pitch class set",      category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Prime form",           category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Normal form",          category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Forte number",         category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Transformational theory", category:"Analysis", origin:null,  entry_type:"term" },
+  { term:"Set theory",           category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Functional analysis",  category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Harmonic reduction",   category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Voice-leading graph",  category:"Analysis", origin:null,     entry_type:"term" },
+  { term:"Reduction",            category:"Analysis", origin:null,     entry_type:"term" },
+
+  // EXPRESSION — Italian (further additions)
+  { term:"Dolcissimo",         category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Leggierissimo",      category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Affannato",          category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Lacrimevole",        category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Alla tedesca",       category:"Expression", origin:"Italian", entry_type:"term" },
+
+  // VOICE (further additions)
+  { term:"Heldentenor",        category:"Voice", origin:"German",  entry_type:"term" },
+  { term:"Lyric soprano",      category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Spinto",             category:"Voice", origin:"Italian", entry_type:"term" },
+  { term:"Messa di voce",      category:"Voice", origin:"Italian", entry_type:"term" },
+
+  // TECHNIQUE — piano-specific technique and practice terms
+  // Pedalling
+  { term:"Direct pedalling",     category:"Technique", origin:null, entry_type:"term" },
+  { term:"Indirect pedalling",   category:"Technique", origin:null, entry_type:"term" },
+  { term:"Syncopated pedalling", category:"Technique", origin:null, entry_type:"term" },
+  { term:"Legato pedalling",     category:"Technique", origin:null, entry_type:"term" },
+  { term:"Half pedal",           category:"Technique", origin:null, entry_type:"term" },
+  { term:"Quarter pedal",        category:"Technique", origin:null, entry_type:"term" },
+  { term:"Flutter pedalling",    category:"Technique", origin:null, entry_type:"term" },
+  { term:"Vibrato pedalling",    category:"Technique", origin:null, entry_type:"term" },
+  { term:"Pedal change",         category:"Technique", origin:null, entry_type:"term" },
+  { term:"Pedal on the beat",    category:"Technique", origin:null, entry_type:"term" },
+  { term:"Pedal after the beat", category:"Technique", origin:null, entry_type:"term" },
+  { term:"Overholding",          category:"Technique", origin:null, entry_type:"term" },
+  // Touch and tone
+  { term:"Touch",                category:"Technique", origin:null, entry_type:"term" },
+  { term:"Voicing",              category:"Technique", origin:null, entry_type:"term" },
+  { term:"Tone production",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Arm weight",           category:"Technique", origin:null, entry_type:"term" },
+  { term:"Cantabile touch",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Projection",           category:"Technique", origin:null, entry_type:"term" },
+  { term:"Balance",              category:"Technique", origin:null, entry_type:"term" },
+  { term:"Attack",               category:"Technique", origin:null, entry_type:"term" },
+  // Hand and arm mechanics
+  { term:"Forearm rotation",     category:"Technique", origin:null, entry_type:"term" },
+  { term:"Wrist technique",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Lateral movement",     category:"Technique", origin:null, entry_type:"term" },
+  { term:"Relaxation",           category:"Technique", origin:null, entry_type:"term" },
+  { term:"Tension",              category:"Technique", origin:null, entry_type:"term" },
+  // Fingering and hand position
+  { term:"Thumb under",          category:"Technique", origin:null, entry_type:"term" },
+  { term:"Thumb over",           category:"Technique", origin:null, entry_type:"term" },
+  { term:"Finger substitution",  category:"Technique", origin:null, entry_type:"term" },
+  { term:"Finger independence",  category:"Technique", origin:null, entry_type:"term" },
+  { term:"Span",                 category:"Technique", origin:null, entry_type:"term" },
+  { term:"Fingering",            category:"Technique", origin:null, entry_type:"term" },
+  // Technical passage types
+  { term:"Fingered octaves",     category:"Technique", origin:null, entry_type:"term" },
+  { term:"Double thirds",        category:"Technique", origin:null, entry_type:"term" },
+  { term:"Double sixths",        category:"Technique", origin:null, entry_type:"term" },
+  { term:"Octave technique",     category:"Technique", origin:null, entry_type:"term" },
+  { term:"Trill technique",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Passage work",         category:"Technique", origin:null, entry_type:"term" },
+  // Practice methods
+  { term:"Hands separate",       category:"Technique", origin:null, entry_type:"term" },
+  { term:"Hands together",       category:"Technique", origin:null, entry_type:"term" },
+  { term:"Slow practice",        category:"Technique", origin:null, entry_type:"term" },
+  { term:"Rhythmic practice",    category:"Technique", origin:null, entry_type:"term" },
+  { term:"Mental practice",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Blocking",             category:"Technique", origin:null, entry_type:"term" },
+  { term:"Chunking",             category:"Technique", origin:null, entry_type:"term" },
+  { term:"Practising in context",category:"Technique", origin:null, entry_type:"term" },
+  // Staccato types — by source of movement
+  { term:"Finger staccato",     category:"Technique", origin:null, entry_type:"term" },
+  { term:"Wrist staccato",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Arm staccato",        category:"Technique", origin:null, entry_type:"term" },
+  // Legato types — by source of movement
+  { term:"Finger legato",       category:"Technique", origin:null, entry_type:"term" },
+  { term:"Weight legato",       category:"Technique", origin:null, entry_type:"term" },
+  // Tremolo and trill types
+  { term:"Finger tremolo",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Wrist tremolo",       category:"Technique", origin:null, entry_type:"term" },
+  { term:"Arm tremolo",         category:"Technique", origin:null, entry_type:"term" },
+  { term:"Wrist trill",         category:"Technique", origin:null, entry_type:"term" },
+  // Octave techniques
+  { term:"Wrist octaves",       category:"Technique", origin:null, entry_type:"term" },
+  { term:"Arm octaves",         category:"Technique", origin:null, entry_type:"term" },
+  { term:"Rotary octaves",      category:"Technique", origin:null, entry_type:"term" },
+  // Hand position and finger shape
+  { term:"Curved fingers",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Flat fingers",        category:"Technique", origin:null, entry_type:"term" },
+  { term:"High wrist",          category:"Technique", origin:null, entry_type:"term" },
+  { term:"Low wrist",           category:"Technique", origin:null, entry_type:"term" },
+  { term:"Loose wrist",         category:"Technique", origin:null, entry_type:"term" },
+  // Tone concepts
+  { term:"Singing tone",        category:"Technique", origin:null, entry_type:"term" },
+  { term:"Weight playing",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Portato touch",       category:"Technique", origin:null, entry_type:"term" },
+  // Technique — musicianship and practice skills
+  { term:"Sight-reading",        category:"Technique", origin:null, entry_type:"term" },
+  { term:"Aural training",       category:"Technique", origin:null, entry_type:"term" },
+  { term:"Memorisation",         category:"Technique", origin:null, entry_type:"term" },
+  { term:"Performance anxiety",  category:"Technique", origin:null, entry_type:"term" },
+  { term:"Warm-up",              category:"Technique", origin:null, entry_type:"term" },
+  { term:"Velocity",             category:"Technique", origin:null, entry_type:"term" },
+  { term:"Even touch",           category:"Technique", origin:null, entry_type:"term" },
+  { term:"Graded touch",         category:"Technique", origin:null, entry_type:"term" },
+  { term:"Note repetition",      category:"Technique", origin:null, entry_type:"term" },
+  { term:"Trill preparation",    category:"Technique", origin:null, entry_type:"term" },
+  { term:"Trill resolution",     category:"Technique", origin:null, entry_type:"term" },
+
+  // HARMONY (further additions)
+  { term:"Picardy third",        category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Hidden fifths",        category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Hidden octaves",       category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Voice crossing",       category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Conjunct motion",      category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Disjunct motion",      category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Stepwise motion",      category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Leap",                 category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Skip",                 category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Dominant pedal",       category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Tonic pedal",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Internal pedal",       category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Evaded cadence",       category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Feminine cadence",     category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Masculine cadence",    category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Major pentatonic scale",category:"Harmony",origin:null,      entry_type:"term" },
+  { term:"Minor pentatonic scale",category:"Harmony",origin:null,      entry_type:"term" },
+  { term:"Phrygian dominant",    category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Ninth chord",          category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Eleventh chord",       category:"Harmony", origin:null,      entry_type:"term" },
+  { term:"Thirteenth chord",     category:"Harmony", origin:null,      entry_type:"term" },
+
+  // FORM (further additions)
+  { term:"Piano trio",           category:"Form", origin:null,      entry_type:"term" },
+  { term:"String quartet",       category:"Form", origin:null,      entry_type:"term" },
+  { term:"Piano quartet",        category:"Form", origin:null,      entry_type:"term" },
+  { term:"String quintet",       category:"Form", origin:null,      entry_type:"term" },
+  { term:"Piano quintet",        category:"Form", origin:null,      entry_type:"term" },
+  { term:"Trio sonata",          category:"Form", origin:null,      entry_type:"term" },
+  { term:"Sonata da camera",     category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Sonata da chiesa",     category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Fughetta",             category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Arietta",              category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Cabaletta",            category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Organum",              category:"Form", origin:"Latin",   entry_type:"term" },
+  { term:"Cantus firmus",        category:"Form", origin:"Latin",   entry_type:"term" },
+  { term:"Opera seria",          category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Opera buffa",          category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Operetta",             category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Scena",                category:"Form", origin:"Italian", entry_type:"term" },
+  { term:"Melodrama",            category:"Form", origin:null,      entry_type:"term" },
+
+  // STRUCTURE (further additions)
+  { term:"Rounded binary",       category:"Structure", origin:null, entry_type:"term" },
+  { term:"False recapitulation", category:"Structure", origin:null, entry_type:"term" },
+  { term:"Retransition",         category:"Structure", origin:null, entry_type:"term" },
+  { term:"Canonic imitation",    category:"Structure", origin:null, entry_type:"term" },
+  { term:"Tonal sequence",       category:"Structure", origin:null, entry_type:"term" },
+  { term:"Real sequence",        category:"Structure", origin:null, entry_type:"term" },
+  { term:"Modulating sequence",  category:"Structure", origin:null, entry_type:"term" },
+
+  // DYNAMICS (further additions)
+  { term:"Terraced dynamics",    category:"Dynamics",  origin:null, entry_type:"term" },
+  { term:"Echo",                 category:"Dynamics",  origin:null, entry_type:"term" },
+  { term:"Subito piano",         category:"Dynamics",  origin:"Italian", entry_type:"term" },
+  { term:"Subito forte",         category:"Dynamics",  origin:"Italian", entry_type:"term" },
+
+  // TEXTURE (further additions)
+  { term:"Antiphony",            category:"Texture",   origin:null, entry_type:"term" },
+  { term:"Responsorial",         category:"Texture",   origin:null, entry_type:"term" },
+  { term:"Canonic texture",      category:"Texture",   origin:null, entry_type:"term" },
+  { term:"Block chords",         category:"Texture",   origin:null, entry_type:"term" },
+  { term:"Sustained texture",    category:"Texture",   origin:null, entry_type:"term" },
+
+  // NOTATION (further additions)
+  { term:"Rehearsal mark",       category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Hairpin",              category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Accent mark",          category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Note head",            category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Stem",                 category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Flag",                 category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Wavy line",            category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Staff line",           category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Barline",              category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Final barline",        category:"Notation",  origin:null,      entry_type:"symbol" },
+  { term:"Full score",           category:"Notation",  origin:null,      entry_type:"term"   },
+  { term:"Vocal score",          category:"Notation",  origin:null,      entry_type:"term"   },
+  { term:"Piano reduction",      category:"Notation",  origin:null,      entry_type:"term"   },
+  { term:"Graphic notation",     category:"Notation",  origin:null,      entry_type:"term"   },
+  { term:"Tablature",            category:"Notation",  origin:null,      entry_type:"term"   },
+
+  // RHYTHM (further additions)
+  { term:"Septuplet",            category:"Rhythm",    origin:null, entry_type:"symbol" },
+  { term:"Note value",           category:"Rhythm",    origin:null, entry_type:"term"   },
+  { term:"Duration",             category:"Rhythm",    origin:null, entry_type:"term"   },
+  { term:"Off-beat",             category:"Rhythm",    origin:null, entry_type:"term"   },
+
+  // PITCH (further additions)
+  { term:"Absolute pitch",       category:"Pitch",     origin:null, entry_type:"term" },
+  { term:"Relative pitch",       category:"Pitch",     origin:null, entry_type:"term" },
+  { term:"Keynote",              category:"Pitch",     origin:null, entry_type:"term" },
+  { term:"Pitch class",          category:"Pitch",     origin:null, entry_type:"term" },
+  { term:"Harmonic partial",     category:"Pitch",     origin:null, entry_type:"term" },
+  { term:"Fundamental",          category:"Pitch",     origin:null, entry_type:"term" },
+
+  // HISTORICAL (further additions)
+  { term:"Empfindsamkeit",       category:"Historical", origin:"German", entry_type:"term" },
+  { term:"Mannheim School",      category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Florentine Camerata",  category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Early music",          category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Spectralism",          category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Les Six",              category:"Historical", origin:"French", entry_type:"term" },
+  { term:"Neue Sachlichkeit",    category:"Historical", origin:"German", entry_type:"term" },
+  { term:"Russian Five",         category:"Historical", origin:null,     entry_type:"term" },
+  { term:"Common practice",      category:"Historical", origin:null,     entry_type:"term" },
+
+  // TUNING
+  { term:"Temperament",          category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Equal temperament",    category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Just intonation",      category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Well temperament",     category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Meantone temperament", category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Pythagorean tuning",   category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Cent",                 category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Comma",                category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Wolf interval",        category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Stretch tuning",       category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Intonation",           category:"Tuning", origin:null, entry_type:"term" },
+  { term:"Pure interval",        category:"Tuning", origin:null, entry_type:"term" },
+
+  // EXPRESSION — Italian (further additions)
+  { term:"Fantastico",           category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Burlesco",             category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Grottesco",            category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Buffo",                category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Poetico",              category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Nostalgico",           category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Mistico",              category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Con licenza",          category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Ballabile",            category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Danzante",             category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"All'antica",           category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Ansioso",              category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Febbrile",             category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Languoroso",           category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Delirante",            category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Precipitato",          category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Luminoso",             category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Con disperazione",     category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Con entusiasmo",       category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Con dignità",          category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Aggressivo",           category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Ironico",              category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Contemplativo",        category:"Expression", origin:"Italian", entry_type:"term" },
+  { term:"Serenamente",          category:"Expression", origin:"Italian", entry_type:"term" },
+
+  // EXPRESSION — German (further additions)
+  { term:"Liebevoll",            category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Zärtlich",             category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Mächtig",              category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Grimmig",              category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Gespenstisch",         category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Märchenhaft",          category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Mystisch",             category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Schwärmerisch",        category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Spielerisch",          category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Trotzig",              category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Mutig",                category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Gemütlich",            category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Schlicht",             category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Naiv",                 category:"Expression", origin:"German",  entry_type:"term" },
+  { term:"Kindlich",             category:"Expression", origin:"German",  entry_type:"term" },
+
+  // EXPRESSION — French (further additions)
+  { term:"Avec chaleur",         category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Mystérieux",           category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Rêveur",               category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Lointain",             category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Chantant",             category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Espiègle",             category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Sombre",               category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Avec humour",          category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Avec tendresse",       category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Tristement",           category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Gaiement",             category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Librement",            category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Vivement",             category:"Expression", origin:"French",  entry_type:"term" },
+  { term:"Doucement",            category:"Expression", origin:"French",  entry_type:"term" },
+
+  // VOICE (further additions)
+  { term:"Coloratura soprano",   category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Soubrette",            category:"Voice", origin:"French",  entry_type:"term" },
+  { term:"Vocal range",          category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Straight tone",        category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Mixed register",       category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Dramatic mezzo-soprano",category:"Voice",origin:null,      entry_type:"term" },
+  { term:"Lyric baritone",       category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Diction",              category:"Voice", origin:null,      entry_type:"term" },
+  { term:"Breath support",       category:"Voice", origin:null,      entry_type:"term" },
+
+  // PERFORMANCE (further additions)
+  { term:"Up bow",               category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Down bow",             category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Bariolage",            category:"Performance", origin:"French",  entry_type:"term" },
+  { term:"Embouchure",           category:"Performance", origin:"French",  entry_type:"term" },
+  { term:"Circular breathing",   category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Multiphonics",         category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Tonguing",             category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Double tonguing",      category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Triple tonguing",      category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Overpressure",         category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Bow speed",            category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Bow pressure",         category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Open string",          category:"Performance", origin:null,      entry_type:"term" },
+  { term:"Stopped note",         category:"Performance", origin:null,      entry_type:"term" },
+];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let existingMap    = {}; // "term||category" → { id, definition }
+let generatedMap   = {}; // "term||category" → definition string
+let shouldStop     = false;
+let activeFilter   = "All";
+
+const key = t => t.term + "||" + t.category;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+const saved = localStorage.getItem("anthropic_key");
+if (saved) document.getElementById("api-key").value = saved;
+
+(async function init() {
+  const { data } = await db.from("glossary").select("id, term, category, definition");
+  if (data) data.forEach(r => { existingMap[r.term + "||" + r.category] = { id: r.id, definition: r.definition }; });
+
+  // Populate "Add new term" category dropdown
+  const allCats = [...new Set(GLOSSARY_TERMS.map(t => t.category))].sort();
+  const newCatSel = document.getElementById("new-cat");
+  allCats.forEach(c => { const o = document.createElement("option"); o.value = o.textContent = c; newCatSel.appendChild(o); });
+
+  // Build category filter buttons
+  const cats = ["All", ...new Set(GLOSSARY_TERMS.map(t => t.category))];
+  const filterRow = document.getElementById("cat-filters");
+  cats.forEach(cat => {
+    const btn = document.createElement("button");
+    btn.className = "filter-btn" + (cat === "All" ? " active" : "");
+    btn.textContent = cat;
+    btn.onclick = () => {
+      activeFilter = cat;
+      filterRow.querySelectorAll(".filter-btn").forEach(b => b.classList.toggle("active", b.textContent === cat));
+      renderStatsBar();
+    };
+    filterRow.appendChild(btn);
+  });
+
+  renderStatsBar();
+})();
+
+function renderStatsBar() {
+  const terms = filteredTerms();
+  const missing = terms.filter(t => !existingMap[key(t)]?.definition).length;
+  const existing = terms.length - missing;
+  const bar = document.getElementById("stats-bar");
+  bar.style.display = "block";
+  bar.innerHTML = `<span class="info">${terms.length} terms${activeFilter !== "All" ? " in " + activeFilter : ""}</span><span class="ok">${existing} have definitions</span><span class="warn">${missing} missing</span>`;
+}
+
+function filteredTerms() {
+  return activeFilter === "All" ? GLOSSARY_TERMS : GLOSSARY_TERMS.filter(t => t.category === activeFilter);
+}
+
+// ── API call ──────────────────────────────────────────────────────────────────
+async function generateDefinition(t, apiKey) {
+  const originNote = t.origin ? ` (${t.origin} origin)` : "";
+  const prompt = `Write a glossary definition for the musical term "${t.term}"${originNote}, category: ${t.category}.
+
+Requirements:
+- 20–55 words, one to three sentences
+- Stand alone — a complete beginner must understand it without looking up other terms
+- Technically accurate; avoid absolute claims such as "the slowest", "the only", "always means"
+- Include what the term sounds like, where it appears in a score, or what effect it creates — whichever is most useful
+- British English spelling
+- Do not begin with the term name itself
+- Do not use "This term", "This word", "This is a", "Refers to"
+
+Return only the definition. No labels, no quotation marks.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-5",
+      max_tokens: 200,
+      system: "You are a music educator writing a glossary for The Practice Room, a piano practice app for students from complete beginner to advanced level. Use British English. Write with precision and warmth. Each definition must be self-contained — no references to other glossary terms.",
+      messages: [{ role: "user", content: prompt }]
+    })
+  });
+  if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
+  const data = await res.json();
+  return (data.content?.[0]?.text || "").trim();
+}
+
+// ── Generation ────────────────────────────────────────────────────────────────
+async function startGeneration(mode) {
+  const apiKey = document.getElementById("api-key").value.trim();
+  if (!apiKey) { alert("Enter your Anthropic API key."); return; }
+  localStorage.setItem("anthropic_key", apiKey);
+
+  const terms = filteredTerms().filter(t => mode === "all" || !existingMap[key(t)]?.definition);
+  if (!terms.length) { alert("No terms to generate."); return; }
+
+  shouldStop = false;
+  generatedMap = {};
+  document.getElementById("results-container").innerHTML = "";
+  document.getElementById("apply-bar").style.display = "none";
+  document.getElementById("missing-btn").disabled = true;
+  document.getElementById("all-btn").disabled = true;
+  document.getElementById("stop-btn").style.display = "inline-block";
+  document.getElementById("progress-wrap").style.display = "block";
+  document.getElementById("progress-fill").style.width = "0%";
+
+  terms.forEach(t => {
+    document.getElementById("results-container").appendChild(renderCard(t, "pending", null, null));
+  });
+
+  let done = 0, failed = 0;
+  const BATCH = 4;
+  for (let i = 0; i < terms.length; i += BATCH) {
+    if (shouldStop) break;
+    const batch = terms.slice(i, i + BATCH);
+    document.getElementById("status").textContent = `Processing ${Math.min(i + BATCH, terms.length)} of ${terms.length}…`;
+    await Promise.all(batch.map(async t => {
+      try {
+        let def, lastErr;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt > 0) await sleep(attempt * 3000);
+            def = await generateDefinition(t, apiKey);
+            break;
+          } catch(e) { lastErr = e; }
+        }
+        if (def) { generatedMap[key(t)] = def; updateCard(t, "done", def, null); done++; }
+        else throw lastErr;
+      } catch(e) { updateCard(t, "error", null, e.message); failed++; }
+      const pct = ((done + failed) / terms.length * 100).toFixed(0);
+      document.getElementById("progress-fill").style.width = pct + "%";
+      document.getElementById("progress-label").textContent = `${done + failed} of ${terms.length} — ${done} ok, ${failed} failed`;
+    }));
+    if (i + BATCH < terms.length && !shouldStop) await sleep(800);
+  }
+
+  document.getElementById("status").textContent = "";
+  document.getElementById("missing-btn").disabled = false;
+  document.getElementById("all-btn").disabled = false;
+  document.getElementById("stop-btn").style.display = "none";
+  if (done > 0)   { document.getElementById("apply-bar").style.display = "block"; }
+  if (failed > 0) { document.getElementById("retry-btn").style.display = "inline-block"; }
+}
+
+async function retryFailed() {
+  const apiKey = document.getElementById("api-key").value.trim();
+  if (!apiKey) return;
+  const failed = [...document.querySelectorAll(".status-error")].map(el => {
+    const k = el.closest(".result-item")?.dataset.key;
+    return GLOSSARY_TERMS.find(t => key(t) === k);
+  }).filter(Boolean);
+  if (!failed.length) return;
+  document.getElementById("retry-btn").disabled = true;
+  shouldStop = false;
+  let done = 0, err = 0;
+  for (let i = 0; i < failed.length; i += 4) {
+    if (shouldStop) break;
+    await Promise.all(failed.slice(i, i+4).map(async t => {
+      updateCard(t, "pending", null, null);
+      try {
+        const def = await generateDefinition(t, apiKey);
+        generatedMap[key(t)] = def; updateCard(t, "done", def, null); done++;
+      } catch(e) { updateCard(t, "error", null, e.message); err++; }
+    }));
+    if (i + 4 < failed.length) await sleep(800);
+  }
+  document.getElementById("retry-btn").disabled = false;
+  if (err === 0) document.getElementById("retry-btn").style.display = "none";
+}
+
+// ── Apply ─────────────────────────────────────────────────────────────────────
+async function applySelected() {
+  const checked = [...document.querySelectorAll(".apply-check:checked")];
+  if (!checked.length) { alert("Nothing selected."); return; }
+  const btn = document.getElementById("apply-btn");
+  btn.disabled = true;
+  document.getElementById("apply-status").textContent = "Applying…";
+
+  let applied = 0, failed = 0;
+  for (const cb of checked) {
+    const k = cb.dataset.key;
+    const def = generatedMap[k];
+    if (!def) continue;
+    const t = GLOSSARY_TERMS.find(t => key(t) === k);
+    if (!t) continue;
+    const existing = existingMap[k];
+    let error;
+    if (existing) {
+      const { error: e } = await db.from("glossary").update({ definition: def }).eq("id", existing.id);
+      error = e;
+    } else {
+      const { error: e } = await db.from("glossary").insert({
+        term: t.term, definition: def, category: t.category,
+        origin: t.origin || null, entry_type: t.entry_type
+      });
+      error = e;
+    }
+    if (error) { failed++; }
+    else { applied++; existingMap[k] = { ...(existingMap[k] || {}), definition: def }; cb.checked = false; cb.disabled = true; }
+  }
+  document.getElementById("apply-status").textContent = `✓ ${applied} saved${failed ? `, ${failed} failed` : ""}`;
+  btn.disabled = false;
+  renderStatsBar();
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function renderCard(t, status, def, err) {
+  const k = key(t);
+  const existing = existingMap[k];
+  const el = document.createElement("div");
+  el.className = "result-item";
+  el.id = "card-" + k.replace(/[^a-z0-9]/gi, "_");
+  el.dataset.key = k;
+
+  const statusHtml = {
+    done:    `<span class="result-status status-done">✓ Generated</span>`,
+    error:   `<span class="result-status status-error">✗ Failed</span>`,
+    pending: `<span class="result-status status-pending">Pending</span>`,
+  }[status] || "";
+
+  const symBadge = t.entry_type === "symbol" ? `<span class="badge badge-sym">symbol</span>` : "";
+  const origBadge = t.origin ? `<span class="badge badge-orig">${t.origin}</span>` : "";
+
+  el.innerHTML = `
+    <div class="result-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <div class="result-meta">
+        <span class="result-title">${t.term}</span>
+        <span class="badge badge-cat">${t.category}</span>
+        ${origBadge}${symBadge}
+      </div>
+      ${statusHtml}
+    </div>
+    <div class="result-body">
+      ${existing?.definition ? `<div class="section-label">Current definition</div><div class="section-text existing">${existing.definition}</div>` : ""}
+      ${status === "done" && def ? `
+        <div class="section-label">Generated</div>
+        <div class="section-text">${def}</div>
+        <div class="apply-row">
+          <input type="checkbox" class="apply-check" data-key="${k}" checked />
+          <label class="apply-label">Include in apply</label>
+        </div>` : ""}
+      ${status === "error" ? `<div style="color:#f87171;font-size:0.85rem;padding:4px 0">${err}</div>` : ""}
+    </div>`;
+  return el;
+}
+
+function updateCard(t, status, def, err) {
+  const k = key(t);
+  const id = "card-" + k.replace(/[^a-z0-9]/gi, "_");
+  const existing = document.getElementById(id);
+  const newCard = renderCard(t, status, def, err);
+  if (existing) existing.replaceWith(newCard);
+  else document.getElementById("results-container").appendChild(newCard);
+}
+
+function selectAll(val) {
+  document.querySelectorAll(".apply-check").forEach(cb => { if (!cb.disabled) cb.checked = val; });
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Add new term ──────────────────────────────────────────────────────────────
+async function addAndGenerate() {
+  const termVal = document.getElementById("new-term").value.trim();
+  const cat     = document.getElementById("new-cat").value;
+  const origin  = document.getElementById("new-origin").value || null;
+  const etype   = document.getElementById("new-type").value;
+  const apiKey  = document.getElementById("api-key").value.trim();
+  const status  = document.getElementById("add-status");
+
+  if (!termVal) { status.textContent = "Enter a term first."; return; }
+  if (!apiKey)  { status.textContent = "Enter your API key first."; return; }
+
+  // Check for duplicate in GLOSSARY_TERMS
+  if (GLOSSARY_TERMS.find(t => t.term.toLowerCase() === termVal.toLowerCase() && t.category === cat)) {
+    status.textContent = `"${termVal}" already exists in ${cat}.`; return;
+  }
+
+  const t = { term: termVal, category: cat, origin, entry_type: etype };
+  GLOSSARY_TERMS.push(t);
+  status.textContent = "Generating…";
+
+  // Refresh the category filter buttons to include any new category
+  const filterRow = document.getElementById("cat-filters");
+  if (![...filterRow.querySelectorAll(".filter-btn")].some(b => b.textContent === cat)) {
+    const btn = document.createElement("button");
+    btn.className = "filter-btn";
+    btn.textContent = cat;
+    btn.onclick = () => {
+      activeFilter = cat;
+      filterRow.querySelectorAll(".filter-btn").forEach(b => b.classList.toggle("active", b.textContent === cat));
+      renderStatsBar();
+    };
+    filterRow.appendChild(btn);
+  }
+
+  // Scroll to / show the results container
+  document.getElementById("apply-bar").style.display = "block";
+  document.getElementById("results-container").prepend(renderCard(t, "pending", null, null));
+
+  try {
+    const def = await generateDefinition(t, apiKey);
+    generatedMap[key(t)] = def;
+    updateCard(t, "done", def, null);
+    status.textContent = `✓ Definition ready — select it below and apply to database.`;
+    document.getElementById("new-term").value = "";
+  } catch(e) {
+    updateCard(t, "error", null, e.message);
+    status.textContent = `Failed: ${e.message}`;
+    GLOSSARY_TERMS.pop(); // remove from list if it failed
+  }
+  renderStatsBar();
+}
+</script>
+</body>
+</html>

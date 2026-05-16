@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script>
+    (function() {
+      try {
+        const s = JSON.parse(localStorage.getItem('practiceRoom_session'));
+        if (s && s.email) return;
+      } catch(e) {}
+      window.location.replace('/');
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Piano Practice Daily</title>
+  <link rel="stylesheet" href="../styles.css?v=8">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&display=swap">
+  <style>
+    .notes-card {
+      width: 210mm;
+      background: #f0ebe0;
+      box-shadow: 0 3px 16px rgba(0,0,0,0.35);
+      padding: 6mm 14mm 8mm;
+      flex-shrink: 0;
+    }
+    .notes-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      border-bottom: 1px solid #c8c2b8;
+      padding-bottom: 3mm;
+      margin-bottom: 4mm;
+    }
+    .notes-label {
+      font-family: Georgia, serif;
+      font-size: 8pt;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #999;
+    }
+    .notes-status {
+      margin-left: auto;
+      font-family: Georgia, serif;
+      font-size: 8pt;
+      font-style: italic;
+      color: #bbb;
+    }
+    .notes-textarea {
+      width: 100%;
+      border: none;
+      background: transparent;
+      background-image: repeating-linear-gradient(
+        transparent, transparent 31px, #d5cfc3 31px, #d5cfc3 32px
+      );
+      background-attachment: local;
+      font-family: 'Caveat', cursive;
+      font-size: 15pt;
+      color: #1a3a5c;
+      line-height: 32px;
+      resize: none;
+      outline: none;
+      min-height: 96px;
+      box-sizing: border-box;
+      padding: 2px 0 0;
+      overflow: hidden;
+    }
+    .notes-textarea::placeholder { color: #c8c2b8; }
+    #status-btn { transition: background 0.15s, color 0.15s; }
+    #status-btn.status-none    { background: #f0ebe0; color: #111; border-color: #f0ebe0; }
+    #status-btn.status-reading { background: #e8f2e8; color: #3a6e3a; border-color: #a8cca8; }
+    #status-btn.status-read    { background: rgba(240,235,224,0.25); color: #f0ebe0; border-color: rgba(240,235,224,0.45); font-weight: normal; }
+    @media print { .notes-card { display: none; } }
+    /* Floating notes button */
+    .notes-fab {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #f0ebe0;
+      border: 1.5px solid #c8c2b8;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.25);
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s, box-shadow 0.15s;
+      z-index: 50;
+    }
+    .notes-fab:hover {
+      transform: scale(1.08);
+      box-shadow: 0 5px 18px rgba(0,0,0,0.3);
+    }
+    @media screen and (max-width: 650px) {
+      .notes-fab { display: none; }
+    }
+    @media screen and (max-width: 650px) {
+      .notes-card { width: 100%; box-shadow: none; padding: 5mm 5mm 6mm; }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+
+<nav class="sheet-nav">
+  <a href="#" onclick="history.back(); return false;">← Back</a>
+  <a href="/">⌂ Hub</a>
+  <div style="display:flex;gap:6px;align-items:center">
+    <button id="status-btn" class="nav-primary" onclick="cycleSheetStatus()" style="display:none"></button>
+    <button onclick="downloadSheet()">↓ Download</button>
+  </div>
+</nav>
+
+<div class="page" id="sheet-page">
+  <div class="brand">PIANO PRACTICE DAILY</div>
+  <h1 class="page-title" id="s-title"></h1>
+  <p class="intro" id="s-intro"></p>
+  <hr class="divider">
+  <div class="columns" id="s-columns"></div>
+  <footer>
+    <span>matthewcawood.com</span>
+    <span id="s-footer"></span>
+  </footer>
+</div>
+
+<button class="notes-fab" title="My Notes" onclick="openNotes()">✏</button>
+
+<div class="notes-card" id="notes-card">
+  <div class="notes-header">
+    <span style="font-size:13pt;line-height:1">✏</span>
+    <span class="notes-label">My Notes</span>
+    <span class="notes-status" id="notes-status"></span>
+  </div>
+  <textarea class="notes-textarea" id="notes-textarea"
+    placeholder="Jot down thoughts, things to practise, connections to pieces you're working on…"
+    oninput="onNotesInput()" rows="4"></textarea>
+</div>
+
+<script>
+  const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  const OWNER = 'matthew@matthewcawood.com';
+  let currentContent = null;
+  let currentSlug = '';
+  let currentSheetId = null;
+  let isOwner = false;
+  let userEmail = '';
+  try {
+    const s = JSON.parse(localStorage.getItem('practiceRoom_session'));
+    isOwner = s?.email?.toLowerCase() === OWNER;
+    userEmail = s?.email || '';
+  } catch(e) {}
+
+  function esc(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function buildSectionsHTML(c) {
+    const sectionHTML = (sec) => {
+      const bullets = (sec.bullets || []).filter(b => b.trim())
+        .map(b => `<li>${esc(b)}</li>`).join('');
+      return `<section>
+        <h2>${esc(sec.heading)}</h2>
+        ${sec.paragraph?.trim() ? `<p>${esc(sec.paragraph)}</p>` : ''}
+        ${bullets ? `<ul>${bullets}</ul>` : ''}
+      </section>`;
+    };
+
+    const left  = (c.leftSections  || []).slice(0, 4); // max 4 per column
+    const right = (c.rightSections || []).slice(0, 4);
+    const maxLen = Math.max(left.length, right.length);
+
+    let html = '';
+    for (let i = 0; i < maxLen; i++) {
+      if (left[i])  html += sectionHTML(left[i]);
+      if (right[i]) html += sectionHTML(right[i]);
+    }
+
+    const cheatBullets = (c.cheatBullets || []).map(b => `<li>${esc(b)}</li>`).join('');
+    html += `<div class="cheat-sheet" style="grid-column:1/-1;grid-row:5">
+      <h3>${esc(c.cheatTitle || 'CHEAT SHEET')}</h3>
+      <ul>${cheatBullets}</ul>
+    </div>`;
+
+    return `<div class="col">${html}</div>`;
+  }
+
+  function renderSheet(c) {
+    document.title = `Piano Practice Daily — ${c.title}`;
+    document.getElementById('s-title').textContent  = c.title  || '';
+    document.getElementById('s-intro').textContent  = c.intro  || '';
+    document.getElementById('s-footer').textContent = c.footer || '';
+    document.getElementById('s-columns').innerHTML  = buildSectionsHTML(c);
+  }
+
+  async function downloadImage(format) {
+    if (!currentContent) return;
+    const element  = document.getElementById('sheet-page');
+    const filename = (currentSlug || 'sheet') + '.' + format;
+    const btn = document.getElementById('img-btn');
+    if (btn) { btn.textContent = '↓ Generating…'; btn.disabled = true; }
+    try {
+      await document.fonts.ready;
+      const dataUrl = format === 'png'
+        ? await htmlToImage.toPng(element, { pixelRatio: 3, skipFonts: false })
+        : await htmlToImage.toJpeg(element, { quality: 0.98, pixelRatio: 3, skipFonts: false });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      a.click();
+    } finally {
+      if (btn) { btn.textContent = '↓ Image'; btn.disabled = false; }
+    }
+  }
+
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+  async function downloadSheet() {
+    if (!currentContent) return;
+    const element = document.getElementById('sheet-page');
+    const btn = document.querySelector('button[onclick="downloadSheet()"]');
+    if (btn) { btn.textContent = '↓ Generating…'; btn.disabled = true; }
+    // Cover the screen so the user doesn't see the transform being removed for capture
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:#a8a49a;z-index:9999;display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;color:#f0ebe0;font-size:1rem;letter-spacing:0.05em';
+    overlay.textContent = 'Generating…';
+    document.body.appendChild(overlay);
+    try {
+      await document.fonts.ready;
+      // Temporarily remove mobile transform so capture isn't distorted
+      const prevTransform = element.style.transform;
+      const prevMarginBottom = element.style.marginBottom;
+      element.style.transform = 'none';
+      element.style.marginBottom = '0';
+      const dataUrl = await htmlToImage.toJpeg(element, {
+        quality: 0.98,
+        pixelRatio: 3,
+        skipFonts: false,
+        backgroundColor: '#f0ebe0'
+      });
+      element.style.transform = prevTransform;
+      element.style.marginBottom = prevMarginBottom;
+      if (isIOS) {
+        // iOS can't download blobs — write image into a new tab, user taps Share → Save to Photos
+        const newTab = window.open('', '_blank');
+        newTab.document.write(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Save Sheet</title></head><body style="margin:0;background:#f5f5f5;font-family:sans-serif"><div style="background:#1a1a1a;padding:16px 20px;text-align:center"><p style="color:#fff;font-size:15px;font-weight:600;margin:0 0 4px">Press and hold the image below</p><p style="color:#aaa;font-size:13px;margin:0">then tap <strong style="color:#F5C518">Save to Photos</strong></p></div><div style="padding:12px"><img src="${dataUrl}" style="width:100%;display:block;box-shadow:0 2px 12px rgba(0,0,0,0.15)"></div></body></html>`);
+        newTab.document.close();
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      pdf.addImage(dataUrl, 'JPEG', 0, 0, 210, 297);
+      pdf.save((currentSlug || 'sheet') + '.pdf');
+    } catch(e) {
+      element.style.transform = '';
+      element.style.marginBottom = '';
+      window.print();
+    } finally {
+      document.body.removeChild(overlay);
+      if (btn) { btn.textContent = '↓ Download'; btn.disabled = false; }
+    }
+  }
+
+  async function loadSheet() {
+    const slug = new URLSearchParams(window.location.search).get('slug');
+    if (!slug) { window.location.replace('../index.html'); return; }
+    currentSlug = slug;
+    loadNote(slug);
+
+    const { data } = await db
+      .from('theory_sheets')
+      .select('id, content, title')
+      .eq('slug', slug)
+      .single();
+
+    if (data && data.content) {
+      currentContent = data.content;
+      currentSheetId = data.id;
+      renderSheet(data.content);
+      loadSheetStatusById(data.id);
+      return;
+    }
+
+    // Fallback: try static HTML file
+    const staticRes = await fetch(slug + '.html');
+    if (staticRes.ok) {
+      window.location.replace(slug + '.html');
+      return;
+    }
+
+    // Nothing found
+    document.getElementById('s-title').textContent = 'Sheet not found';
+    document.getElementById('s-intro').textContent = 'This sheet has no content yet. Go back to the sheet list and regenerate it.';
+    document.getElementById('s-columns').innerHTML = '<div class="col"><section><p><a href="../index.html" style="color:#111">← Back to all sheets</a></p></section></div>';
+  }
+
+  // ── Reading status in nav ────────────────────────────────────
+  let currentStatus = 'none';
+
+  const STATUS_LABELS = { none: '+ Save to My List', reading: '📖 Reading', read: '✓ Read' };
+  const STATUS_NEXT   = { none: 'reading', reading: 'read', read: 'none' };
+
+  function updateStatusBtn(status) {
+    const btn = document.getElementById('status-btn');
+    btn.textContent = STATUS_LABELS[status];
+    btn.className = `status-${status}`;
+    btn.style.display = '';
+    currentStatus = status;
+  }
+
+  async function loadSheetStatus(slug) {
+    if (!userEmail) return;
+    const { data } = await db.from('reading_list')
+      .select('status').eq('email', userEmail).eq('sheet_id', slug).single();
+    // reading_list uses sheet_id (uuid) not slug — need to get the id first
+    // we already have it from loadSheet, so we'll call this after sheet loads
+  }
+
+  async function loadSheetStatusById(sheetId) {
+    if (!userEmail || !sheetId) return;
+    const { data } = await db.from('reading_list')
+      .select('status').eq('email', userEmail).eq('sheet_id', sheetId).single();
+    updateStatusBtn(data?.status || 'none');
+  }
+
+  async function cycleSheetStatus() {
+    if (!userEmail || !currentSheetId) return;
+    const next = STATUS_NEXT[currentStatus];
+    const btn = document.getElementById('status-btn');
+    btn.disabled = true;
+    if (next === 'none') {
+      await db.from('reading_list').delete().eq('email', userEmail).eq('sheet_id', currentSheetId);
+    } else if (currentStatus === 'none') {
+      await db.from('reading_list').insert({ email: userEmail, sheet_id: currentSheetId, status: next });
+    } else {
+      await db.from('reading_list').update({ status: next }).eq('email', userEmail).eq('sheet_id', currentSheetId);
+    }
+    btn.disabled = false;
+    updateStatusBtn(next);
+  }
+
+  function openNotes() {
+    const card = document.getElementById('notes-card');
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => document.getElementById('notes-textarea').focus(), 400);
+  }
+
+  // ── Personal notes ───────────────────────────────────────────
+  let notesSaveTimer = null;
+
+  function autoResize(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  }
+
+  async function loadNote(slug) {
+    if (!userEmail) return;
+    const { data } = await db
+      .from('sheet_notes')
+      .select('note')
+      .eq('email', userEmail)
+      .eq('sheet_slug', slug)
+      .single();
+    const ta = document.getElementById('notes-textarea');
+    if (data && data.note) {
+      ta.value = data.note;
+      autoResize(ta);
+    }
+  }
+
+  function onNotesInput() {
+    const ta = document.getElementById('notes-textarea');
+    autoResize(ta);
+    const status = document.getElementById('notes-status');
+    status.textContent = 'Saving…';
+    clearTimeout(notesSaveTimer);
+    notesSaveTimer = setTimeout(() => saveNote(ta.value), 1500);
+  }
+
+  async function saveNote(text) {
+    if (!userEmail || !currentSlug) return;
+    const status = document.getElementById('notes-status');
+    let error;
+    if (!text.trim()) {
+      ({ error } = await db.from('sheet_notes').delete().eq('email', userEmail).eq('sheet_slug', currentSlug));
+    } else {
+      ({ error } = await db.from('sheet_notes').upsert(
+        { email: userEmail, sheet_slug: currentSlug, note: text, updated_at: new Date().toISOString() },
+        { onConflict: 'email,sheet_slug' }
+      ));
+    }
+    if (error) {
+      console.error('Note save failed:', error);
+      status.textContent = 'Save failed ✗';
+      status.style.color = '#c0392b';
+      setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 3000);
+      return;
+    }
+    status.textContent = 'Saved ✓';
+    setTimeout(() => { status.textContent = ''; }, 2000);
+  }
+
+  // ── Embedded mode (inside practice-log.html iframe) ──────────────
+  if (window.parent !== window) {
+    document.body.style.minHeight = '0';
+    document.body.style.padding   = '0 0 20px';
+    document.body.style.gap       = '16px';
+    const hubLink = document.querySelector('.sheet-nav a[href="/"]');
+    if (hubLink) hubLink.style.display = 'none';
+    const fab = document.querySelector('.notes-fab');
+    if (fab) fab.style.display = 'none';
+  }
+
+  loadSheet();
+
+  // Show image download button for owner only
+  if (isOwner) {
+    const btn = document.createElement('button');
+    btn.id = 'img-btn';
+    btn.textContent = '↓ Image';
+    btn.title = 'Download as PNG (right-click to choose JPG)';
+    btn.onclick = () => downloadImage('png');
+    btn.oncontextmenu = (e) => { e.preventDefault(); downloadImage('jpg'); };
+    document.querySelector('.sheet-nav').appendChild(btn);
+  }
+</script>
+
+</body>
+</html>

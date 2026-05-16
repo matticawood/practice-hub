@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Repair Streak Tokens — The Practice Room</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px; max-width: 860px; margin: 0 auto; }
+    h1   { color: #f5c518; margin-bottom: 6px; }
+    p    { color: #999; font-size: 0.9rem; margin-bottom: 24px; }
+    button {
+      background: #f5c518; color: #000; border: none; padding: 12px 28px;
+      font-size: 1rem; font-weight: 700; border-radius: 8px; cursor: pointer;
+      margin-right: 12px;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.danger { background: #ef4444; color: #fff; }
+    #log {
+      margin-top: 28px; background: #111; border: 1px solid #222;
+      border-radius: 8px; padding: 16px; font-size: 0.82rem;
+      font-family: monospace; line-height: 1.8; max-height: 400px;
+      overflow-y: auto; white-space: pre-wrap;
+    }
+    .ok     { color: #84cc16; }
+    .warn   { color: #f5c518; }
+    .err    { color: #f87171; }
+    .done   { color: #f5c518; font-weight: bold; }
+    .dim    { color: #555; }
+    table { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 0.85rem; }
+    th { text-align: left; padding: 8px 12px; border-bottom: 2px solid #333; color: #f5c518; }
+    td { padding: 8px 12px; border-bottom: 1px solid #222; vertical-align: top; }
+    tr.needs-fix td { background: #1a1000; }
+    tr.ok-row td { background: #0a1a0a; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.75rem; font-weight: 700; }
+    .badge-fix  { background: #f5c518; color: #000; }
+    .badge-ok   { background: #166534; color: #86efac; }
+    .badge-new  { background: #1d4ed8; color: #bfdbfe; }
+    #actions { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>🔧 Repair Streak Tokens</h1>
+  <p>
+    Scans every user's session history and recalculates how many streak-save tokens they
+    should have earned. Shows a diff, then lets you apply corrections.
+    <br><br>
+    <strong>Balance</strong> = correct total earned − tokens already spent (saved_dates used).
+  </p>
+
+  <button id="btn-scan">Scan All Users</button>
+
+  <div id="log"></div>
+  <div id="table-wrap"></div>
+  <div id="actions"></div>
+
+<script>
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── Helpers ─────────────────────────────────────────────────────
+function toDateStr(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Given a set of date strings, compute the streak ending at `anchorDateStr`.
+ * Walks backwards from anchorDate as long as consecutive dates exist.
+ */
+function streakAt(dateSet, anchorDateStr) {
+  if (!anchorDateStr || !dateSet.has(anchorDateStr)) return 0;
+  let streak = 0;
+  const d = new Date(anchorDateStr + "T12:00:00");
+  while (dateSet.has(toDateStr(d))) {
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+/**
+ * Simulate adding each date chronologically and count how many times
+ * a new 5-day milestone is crossed. This mirrors the saveSession logic.
+ * sessionDates  — array of YYYY-MM-DD strings from practice_sessions
+ * savedDates    — array of YYYY-MM-DD strings from streak_tokens.saved_dates
+ */
+function computeCorrectTotalEarned(sessionDates, savedDates) {
+  // Combine all "active" dates (sessions + saves) and sort chronologically
+  const allDates = [...new Set([...sessionDates, ...(savedDates || [])])].sort();
+  if (allDates.length === 0) return 0;
+
+  let milestones = 0;
+  let cumulativeSet = new Set();
+
+  for (let i = 0; i < allDates.length; i++) {
+    const prevSet = new Set(cumulativeSet); // snapshot before this date
+    const prevDate = i > 0 ? allDates[i - 1] : null;
+    cumulativeSet.add(allDates[i]);
+
+    const streakBefore = streakAt(prevSet, prevDate);
+    const streakNow    = streakAt(cumulativeSet, allDates[i]);
+
+    if (streakNow > 0 && Math.floor(streakNow / 5) > Math.floor(streakBefore / 5)) {
+      milestones++;
+    }
+  }
+
+  return milestones;
+}
+
+// ── Logging ─────────────────────────────────────────────────────
+const logEl = document.getElementById("log");
+function log(msg, cls = "") {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ── Main scan ───────────────────────────────────────────────────
+let scanResults = [];
+
+document.getElementById("btn-scan").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-scan");
+  btn.disabled = true;
+  logEl.innerHTML = "";
+  document.getElementById("table-wrap").innerHTML = "";
+  document.getElementById("actions").innerHTML = "";
+  scanResults = [];
+
+  log("Fetching all streak_tokens rows…", "dim");
+
+  // 1. Get all streak token rows
+  const { data: tokenRows, error: tokErr } = await db
+    .from("streak_tokens")
+    .select("email, balance, total_earned, saved_dates");
+
+  if (tokErr) { log("Error fetching streak_tokens: " + tokErr.message, "err"); btn.disabled = false; return; }
+  log(`Found ${tokenRows.length} users with streak tokens.`, "dim");
+
+  // 2. Get all session dates grouped by email
+  log("Fetching all practice_sessions…", "dim");
+  const { data: sessions, error: sessErr } = await db
+    .from("practice_sessions")
+    .select("email, session_date")
+    .order("session_date", { ascending: true });
+
+  if (sessErr) { log("Error fetching practice_sessions: " + sessErr.message, "err"); btn.disabled = false; return; }
+
+  // Group by email
+  const sessionsByEmail = {};
+  for (const row of sessions) {
+    if (!sessionsByEmail[row.email]) sessionsByEmail[row.email] = [];
+    sessionsByEmail[row.email].push(row.session_date);
+  }
+  log(`Loaded sessions for ${Object.keys(sessionsByEmail).length} users.`, "dim");
+
+  // 3. Process each token row
+  for (const tok of tokenRows) {
+    const email = tok.email;
+    const currentBalance     = tok.balance      ?? 0;
+    const currentTotalEarned = tok.total_earned  ?? 0;
+    const savedDates         = tok.saved_dates   || [];
+    const sessDateRaw        = sessionsByEmail[email] || [];
+    // Deduplicate session dates
+    const sessionDates       = [...new Set(sessDateRaw)];
+
+    const correctTotalEarned = computeCorrectTotalEarned(sessionDates, savedDates);
+    const tokensSpent        = savedDates.length;
+    const correctBalance     = Math.max(0, correctTotalEarned - tokensSpent);
+
+    const balanceOk      = currentBalance     === correctBalance;
+    const totalEarnedOk  = currentTotalEarned === correctTotalEarned;
+    const needsFix       = !balanceOk || !totalEarnedOk;
+
+    scanResults.push({
+      email,
+      currentBalance, currentTotalEarned,
+      correctBalance, correctTotalEarned,
+      savedDatesCount: tokensSpent,
+      sessionCount: sessionDates.length,
+      needsFix,
+    });
+
+    if (needsFix) {
+      log(`⚠ ${email} — earned: ${currentTotalEarned}→${correctTotalEarned}, balance: ${currentBalance}→${correctBalance}`, "warn");
+    }
+  }
+
+  // 4. Also check users who have sessions but NO streak_tokens row
+  for (const email of Object.keys(sessionsByEmail)) {
+    if (!tokenRows.find(t => t.email === email)) {
+      const sessionDates = [...new Set(sessionsByEmail[email])];
+      const correctTotalEarned = computeCorrectTotalEarned(sessionDates, []);
+      if (correctTotalEarned > 0) {
+        scanResults.push({
+          email,
+          currentBalance: 0, currentTotalEarned: 0,
+          correctBalance: correctTotalEarned, correctTotalEarned,
+          savedDatesCount: 0,
+          sessionCount: sessionDates.length,
+          needsFix: true,
+          missingRow: true,
+        });
+        log(`⚠ ${email} — no token row but should have ${correctTotalEarned} earned`, "warn");
+      }
+    }
+  }
+
+  const needsFixCount = scanResults.filter(r => r.needsFix).length;
+  log(`\nScan complete. ${needsFixCount} user(s) need correction.`, needsFixCount > 0 ? "warn" : "ok");
+
+  renderTable(scanResults);
+  if (needsFixCount > 0) renderActions();
+  btn.disabled = false;
+});
+
+function renderTable(results) {
+  // Sort: needs-fix first, then alpha
+  const sorted = [...results].sort((a, b) => {
+    if (a.needsFix !== b.needsFix) return a.needsFix ? -1 : 1;
+    return a.email.localeCompare(b.email);
+  });
+
+  const rows = sorted.map(r => {
+    const cls = r.needsFix ? "needs-fix" : "ok-row";
+    const badge = r.needsFix
+      ? (r.missingRow ? `<span class="badge badge-new">MISSING ROW</span>` : `<span class="badge badge-fix">NEEDS FIX</span>`)
+      : `<span class="badge badge-ok">✓ OK</span>`;
+
+    const earnedDisplay = r.needsFix
+      ? `${r.currentTotalEarned} → <strong>${r.correctTotalEarned}</strong>`
+      : `${r.currentTotalEarned}`;
+    const balDisplay = r.needsFix
+      ? `${r.currentBalance} → <strong>${r.correctBalance}</strong>`
+      : `${r.currentBalance}`;
+
+    return `<tr class="${cls}">
+      <td>${r.email}</td>
+      <td>${r.sessionCount}</td>
+      <td>${r.savedDatesCount}</td>
+      <td>${earnedDisplay}</td>
+      <td>${balDisplay}</td>
+      <td>${badge}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("table-wrap").innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Sessions</th>
+          <th>Saves Used</th>
+          <th>Total Earned (current → correct)</th>
+          <th>Balance (current → correct)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderActions() {
+  document.getElementById("actions").innerHTML = `
+    <div style="margin-top:24px">
+      <button class="danger" id="btn-fix">Apply Fixes to All Users</button>
+      <span style="color:#999; font-size:0.85rem">This will update balance &amp; total_earned for users that need correction.</span>
+    </div>`;
+  document.getElementById("btn-fix").addEventListener("click", applyFixes);
+}
+
+async function applyFixes() {
+  const btn = document.getElementById("btn-fix");
+  btn.disabled = true;
+  const toFix = scanResults.filter(r => r.needsFix);
+  log(`\nApplying fixes to ${toFix.length} user(s)…`, "dim");
+
+  let fixed = 0, errors = 0;
+
+  for (const r of toFix) {
+    const { error } = await db.from("streak_tokens").upsert({
+      email: r.email,
+      balance: r.correctBalance,
+      total_earned: r.correctTotalEarned,
+      // saved_dates left unchanged — we only fix earned/balance
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "email" });
+
+    if (error) {
+      log(`✗ ${r.email}: ${error.message}`, "err");
+      errors++;
+    } else {
+      log(`✓ ${r.email}: total_earned=${r.correctTotalEarned}, balance=${r.correctBalance}`, "ok");
+      fixed++;
+    }
+  }
+
+  log(`\nDone. ${fixed} fixed, ${errors} errors.`, "done");
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Review & Improve Sheets</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #111; color: #e0e0e0; font-family: system-ui, sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+
+    /* Top bar */
+    .topbar { background: #1e1e1e; border-bottom: 1px solid #2a2a2a; padding: 10px 20px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+    .topbar h1 { font-size: 0.95rem; margin: 0; color: #e0e0e0; white-space: nowrap; }
+    .topbar input[type=password] { background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.82rem; font-family: monospace; padding: 5px 9px; outline: none; width: 220px; }
+    .topbar .spacer { flex: 1; }
+    .topbar .progress-label { font-size: 0.8rem; color: #666; white-space: nowrap; }
+    .nav-btn { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.82rem; background: #2a2a2a; color: #aaa; }
+    .nav-btn:hover { background: #333; color: #ccc; }
+    .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* Progress bar */
+    .prog-wrap { height: 3px; background: #2a2a2a; flex-shrink: 0; }
+    .prog-fill { height: 100%; background: #2d5a8a; transition: width 0.3s; }
+
+    /* Main layout */
+    .layout { display: flex; flex: 1; overflow: hidden; gap: 0; }
+
+    /* Sheet selector sidebar */
+    .sidebar { width: 200px; flex-shrink: 0; background: #1a1a1a; border-right: 1px solid #222; overflow-y: auto; }
+    .sidebar-item { padding: 8px 12px; font-size: 0.78rem; cursor: pointer; border-bottom: 1px solid #1e1e1e; color: #888; transition: all 0.1s; }
+    .sidebar-item:hover { background: #222; color: #ccc; }
+    .sidebar-item.active { background: #1a2a3a; color: #7ab4ff; }
+    .sidebar-item.done { color: #4ade80; }
+    .sidebar-item.done::after { content: ' ✓'; }
+
+    /* Content area */
+    .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Sheet name header */
+    .sheet-header { padding: 12px 20px 10px; border-bottom: 1px solid #222; flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
+    .sheet-header h2 { font-size: 0.9rem; margin: 0; color: #e0e0e0; flex: 1; }
+    .btn-generate { padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.82rem; background: #2d5a8a; color: #7ab4ff; }
+    .btn-generate:hover { background: #3a6a9a; }
+    .btn-generate:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-save { padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.82rem; background: #2d6a2d; color: #9de89d; }
+    .btn-save:hover { background: #3a8a3a; }
+    .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-skip { padding: 7px 14px; border-radius: 6px; border: 1px solid #333; cursor: pointer; font-size: 0.82rem; background: none; color: #666; }
+    .btn-skip:hover { color: #aaa; border-color: #555; }
+    .status-msg { font-size: 0.8rem; color: #888; }
+    .status-msg.ok { color: #4ade80; }
+    .status-msg.err { color: #f87171; }
+
+    /* Panels */
+    .panels { display: flex; flex: 1; overflow: hidden; gap: 0; }
+    .panel { flex: 1; overflow-y: auto; padding: 16px 20px; border-right: 1px solid #1e1e1e; }
+    .panel:last-child { border-right: none; }
+    .panel-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #444; margin-bottom: 12px; }
+
+    /* Section display */
+    .section-block { background: #1a1a1a; border: 1px solid #222; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-size: 0.8rem; }
+    .section-block .s-heading { font-weight: 700; color: #e0e0e0; margin-bottom: 6px; font-size: 0.82rem; }
+    .section-block .s-para { color: #aaa; margin-bottom: 4px; line-height: 1.5; }
+    .section-block .s-bullets { margin: 0; padding-left: 14px; color: #aaa; line-height: 1.5; }
+    .section-block .s-col-label { font-size: 0.68rem; color: #444; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    .intro-block { background: #1a1a1a; border: 1px solid #222; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-size: 0.8rem; color: #aaa; line-height: 1.5; font-style: italic; }
+    .cheat-block { background: #1a2a1a; border: 1px solid #2a3a2a; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-size: 0.8rem; }
+    .cheat-block .s-heading { font-weight: 700; color: #9de89d; margin-bottom: 6px; }
+    .cheat-block ul { margin: 0; padding-left: 14px; color: #aaa; line-height: 1.5; }
+
+    .field-label { font-size: 0.7rem; color: #555; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* Improved panel editable */
+    .editable { outline: none; }
+    .editable:focus { outline: 1px solid #3a5a8a; border-radius: 3px; }
+
+    .empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; color: #333; font-size: 0.85rem; text-align: center; padding: 20px; }
+
+    /* Loading spinner */
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #333; border-top-color: #7ab4ff; border-radius: 50%; animation: spin 0.7s linear infinite; margin-right: 6px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>📋 Review &amp; Improve Sheets</h1>
+  <input type="password" id="api-key" placeholder="sk-ant-… API key" />
+  <div class="spacer"></div>
+  <span class="progress-label" id="progress-label"></span>
+  <button class="nav-btn" id="prev-btn" onclick="navigate(-1)" disabled>← Prev</button>
+  <button class="nav-btn" id="next-btn" onclick="navigate(1)" disabled>Next →</button>
+</div>
+<div class="prog-wrap"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="content">
+    <div class="sheet-header" id="sheet-header" style="display:none">
+      <h2 id="sheet-title"></h2>
+      <button class="btn-generate" id="gen-btn" onclick="generateImproved()">⚡ Improve with Claude</button>
+      <button class="btn-save" id="save-btn" onclick="saveImproved()" style="display:none">✓ Save Improved Version</button>
+      <button class="btn-skip" onclick="skipSheet()">→ Skip</button>
+      <span class="status-msg" id="status-msg"></span>
+    </div>
+
+    <div class="panels">
+      <div class="panel" id="panel-current">
+        <div class="empty-panel" id="empty-state">Select a sheet from the sidebar to begin.</div>
+        <div id="current-content" style="display:none">
+          <div class="panel-label">Current Version</div>
+          <div id="current-intro" class="intro-block"></div>
+          <div id="current-sections"></div>
+          <div id="current-cheat" class="cheat-block"></div>
+        </div>
+      </div>
+      <div class="panel" id="panel-improved">
+        <div class="empty-panel" id="improved-empty">Hit "Improve with Claude" to generate a better version.</div>
+        <div id="improved-content" style="display:none">
+          <div class="panel-label">Improved Version — edit before saving</div>
+          <div class="field-label">Intro</div>
+          <div class="intro-block editable" id="imp-intro" contenteditable="true"></div>
+          <div id="imp-sections"></div>
+          <div class="cheat-block">
+            <div class="field-label">Cheat Sheet Title</div>
+            <div class="s-heading editable" id="imp-cheat-title" contenteditable="true"></div>
+            <div class="field-label" style="margin-top:6px">Cheat Sheet Bullets (one per line)</div>
+            <div class="editable" id="imp-cheat-bullets" contenteditable="true" style="color:#aaa;font-size:0.8rem;line-height:1.6;white-space:pre-wrap;outline:none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  const stored = localStorage.getItem("anthropic_key");
+  if (stored) document.getElementById("api-key").value = stored;
+  document.getElementById("api-key").addEventListener("input", e => localStorage.setItem("anthropic_key", e.target.value.trim()));
+
+  let sheets = [];
+  let currentIndex = 0;
+  let improvedData = null;
+  const doneIds = new Set(JSON.parse(localStorage.getItem("review_done") || "[]"));
+
+  async function init() {
+    const { data, error } = await db.from("theory_sheets").select("id, title, slug, content").order("title");
+    if (error || !data?.length) { document.getElementById("empty-state").textContent = "Failed to load sheets."; return; }
+    sheets = data;
+    renderSidebar();
+    updateProgress();
+    if (sheets.length) loadSheet(0);
+  }
+
+  function renderSidebar() {
+    document.getElementById("sidebar").innerHTML = sheets.map((s, i) => `
+      <div class="sidebar-item ${i === currentIndex ? "active" : ""} ${doneIds.has(s.id) ? "done" : ""}"
+           onclick="loadSheet(${i})">${s.title || s.slug}</div>
+    `).join("");
+  }
+
+  function updateProgress() {
+    const done = doneIds.size;
+    const total = sheets.length;
+    document.getElementById("progress-label").textContent = `${done} / ${total} reviewed`;
+    document.getElementById("prog-fill").style.width = total ? (done / total * 100) + "%" : "0%";
+    document.getElementById("prev-btn").disabled = currentIndex === 0;
+    document.getElementById("next-btn").disabled = currentIndex >= sheets.length - 1;
+  }
+
+  function loadSheet(index) {
+    currentIndex = index;
+    improvedData = null;
+    const sheet = sheets[index];
+
+    renderSidebar();
+    updateProgress();
+
+    document.getElementById("sheet-header").style.display = "flex";
+    document.getElementById("sheet-title").textContent = sheet.title || sheet.slug;
+    document.getElementById("status-msg").textContent = "";
+    document.getElementById("status-msg").className = "status-msg";
+    document.getElementById("save-btn").style.display = "none";
+    document.getElementById("gen-btn").disabled = false;
+    document.getElementById("gen-btn").textContent = "⚡ Improve with Claude";
+
+    // Show current content
+    document.getElementById("empty-state").style.display = "none";
+    document.getElementById("current-content").style.display = "block";
+    document.getElementById("improved-empty").style.display = "flex";
+    document.getElementById("improved-content").style.display = "none";
+
+    const c = sheet.content || {};
+    document.getElementById("current-intro").textContent = c.intro || "(no intro)";
+    renderCurrentSections(c);
+    const cheatEl = document.getElementById("current-cheat");
+    cheatEl.innerHTML = `<div class="s-heading">${esc(c.cheatTitle || "CHEAT SHEET")}</div><ul>${(c.cheatBullets||[]).map(b=>`<li>${esc(b)}</li>`).join("")}</ul>`;
+  }
+
+  function renderCurrentSections(c) {
+    const left  = c.leftSections  || [];
+    const right = c.rightSections || [];
+    const el = document.getElementById("current-sections");
+    let html = "";
+    for (let i = 0; i < Math.max(left.length, right.length); i++) {
+      if (left[i])  html += sectionHtml(left[i],  "Left col " + (i+1));
+      if (right[i]) html += sectionHtml(right[i], "Right col " + (i+1));
+    }
+    el.innerHTML = html;
+  }
+
+  function sectionHtml(s, label) {
+    return `<div class="section-block">
+      <div class="s-col-label">${label}</div>
+      <div class="s-heading">${esc(s.heading)}</div>
+      ${s.paragraph ? `<div class="s-para">${esc(s.paragraph)}</div>` : ""}
+      ${s.bullets?.length ? `<ul class="s-bullets">${s.bullets.map(b=>`<li>${esc(b)}</li>`).join("")}</ul>` : ""}
+    </div>`;
+  }
+
+  async function generateImproved() {
+    const apiKey = document.getElementById("api-key").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+
+    const sheet = sheets[currentIndex];
+    const c = sheet.content || {};
+    const btn = document.getElementById("gen-btn");
+    const status = document.getElementById("status-msg");
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generating…';
+    status.textContent = ""; status.className = "status-msg";
+
+    // Summarise current content for Claude
+    const currentSummary = `Title: ${c.title || sheet.title}
+Intro: ${c.intro || ""}
+
+Left sections:
+${(c.leftSections||[]).map((s,i) => `${i+1}. ${s.heading}: ${s.paragraph || ""} ${(s.bullets||[]).join("; ")}`).join("\n")}
+
+Right sections:
+${(c.rightSections||[]).map((s,i) => `${i+1}. ${s.heading}: ${s.paragraph || ""} ${(s.bullets||[]).join("; ")}`).join("\n")}
+
+Cheat sheet: ${c.cheatTitle || ""}
+${(c.cheatBullets||[]).join("\n")}`;
+
+    const prompt = `You are improving a "Piano Practice Daily" music theory reference sheet. These are A4 printed sheets for piano students.
+
+The sheet is about: "${c.title || sheet.title}"
+
+Here is the current content:
+${currentSummary}
+
+Please improve this sheet by:
+1. Making the intro more engaging and informative (2-3 sentences max, it should hook the reader and explain why this topic matters)
+2. Ensuring each section is substantive and fills its space well — each section should have either a meaningful paragraph OR 3-5 good bullet points (or both if needed). Thin sections should be expanded with genuinely useful content.
+3. Making sure the content is accurate, practical and useful for a piano student
+4. The cheat sheet bullets should be the most memorable, practical takeaways — aim for 5-6 strong bullets
+
+Keep the same section headings and overall structure. Keep content concise but dense with useful information — this is a reference sheet, not an essay.
+
+Return a JSON object with no markdown fences:
+{
+  "intro": "improved intro text",
+  "leftSections": [
+    { "heading": "exact same heading", "paragraph": "improved paragraph or empty string", "bullets": ["bullet 1", "bullet 2"] }
+  ],
+  "rightSections": [
+    { "heading": "exact same heading", "paragraph": "improved paragraph or empty string", "bullets": ["bullet 1", "bullet 2"] }
+  ],
+  "cheatTitle": "CHEAT SHEET: Topic",
+  "cheatBullets": ["bullet 1", "bullet 2", "bullet 3", "bullet 4", "bullet 5"]
+}
+
+CRITICAL: Use single quotes (') not double quotes (") inside string values. Return ONLY the JSON.`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 8192,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `API error ${res.status}`);
+      }
+
+      const data = await res.json();
+      const raw  = data.content?.[0]?.text || "";
+      const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
+      if (start === -1) throw new Error("No JSON in response");
+      improvedData = JSON.parse(raw.slice(start, end + 1));
+
+      renderImproved(improvedData);
+      status.textContent = "✓ Ready — review and edit, then save";
+      status.className = "status-msg ok";
+      document.getElementById("save-btn").style.display = "";
+
+    } catch(err) {
+      status.textContent = "Error: " + err.message;
+      status.className = "status-msg err";
+    }
+
+    btn.disabled = false;
+    btn.textContent = "↺ Regenerate";
+  }
+
+  function renderImproved(d) {
+    document.getElementById("improved-empty").style.display = "none";
+    document.getElementById("improved-content").style.display = "block";
+
+    document.getElementById("imp-intro").textContent = d.intro || "";
+
+    // Render editable sections
+    const sectionsEl = document.getElementById("imp-sections");
+    const allSections = [];
+    const maxLen = Math.max((d.leftSections||[]).length, (d.rightSections||[]).length);
+    for (let i = 0; i < maxLen; i++) {
+      if (d.leftSections?.[i])  allSections.push({ s: d.leftSections[i],  side: "left",  i });
+      if (d.rightSections?.[i]) allSections.push({ s: d.rightSections[i], side: "right", i });
+    }
+
+    sectionsEl.innerHTML = allSections.map(({ s, side, i }) => `
+      <div class="section-block">
+        <div class="s-col-label">${side === "left" ? "Left" : "Right"} col ${i+1}</div>
+        <div class="s-heading">${esc(s.heading)}</div>
+        ${s.paragraph ? `<div class="s-para editable" contenteditable="true" data-side="${side}" data-i="${i}" data-field="paragraph">${esc(s.paragraph)}</div>` : ""}
+        ${s.bullets?.length ? `<ul class="s-bullets">${s.bullets.map((b,bi) => `<li class="editable" contenteditable="true" data-side="${side}" data-i="${i}" data-bi="${bi}">${esc(b)}</li>`).join("")}</ul>` : ""}
+      </div>
+    `).join("");
+
+    document.getElementById("imp-cheat-title").textContent = d.cheatTitle || "";
+    document.getElementById("imp-cheat-bullets").textContent = (d.cheatBullets||[]).join("\n");
+  }
+
+  async function saveImproved() {
+    if (!improvedData) return;
+    const sheet = sheets[currentIndex];
+    const btn = document.getElementById("save-btn");
+    const status = document.getElementById("status-msg");
+    btn.disabled = true; btn.textContent = "Saving…";
+
+    // Read back any edits
+    const updatedContent = {
+      ...sheet.content,
+      intro: document.getElementById("imp-intro").textContent.trim(),
+      leftSections:  improvedData.leftSections,
+      rightSections: improvedData.rightSections,
+      cheatTitle:    document.getElementById("imp-cheat-title").textContent.trim(),
+      cheatBullets:  document.getElementById("imp-cheat-bullets").textContent.split("\n").map(s=>s.trim()).filter(Boolean),
+    };
+
+    const { error } = await db.from("theory_sheets").update({ content: updatedContent }).eq("id", sheet.id);
+    if (error) {
+      status.textContent = "Save failed: " + error.message;
+      status.className = "status-msg err";
+      btn.disabled = false; btn.textContent = "✓ Save Improved Version";
+      return;
+    }
+
+    // Mark done
+    doneIds.add(sheet.id);
+    localStorage.setItem("review_done", JSON.stringify([...doneIds]));
+    sheets[currentIndex].content = updatedContent;
+
+    status.textContent = "✓ Saved!";
+    status.className = "status-msg ok";
+    btn.textContent = "✓ Saved";
+    renderSidebar();
+    updateProgress();
+
+    // Auto-advance after a moment
+    setTimeout(() => {
+      const next = sheets.findIndex((s, i) => i > currentIndex && !doneIds.has(s.id));
+      if (next !== -1) loadSheet(next);
+    }, 800);
+  }
+
+  function skipSheet() {
+    const next = sheets.findIndex((s, i) => i > currentIndex && !doneIds.has(s.id));
+    if (next !== -1) loadSheet(next);
+    else if (currentIndex < sheets.length - 1) loadSheet(currentIndex + 1);
+  }
+
+  function navigate(dir) {
+    const newIndex = currentIndex + dir;
+    if (newIndex >= 0 && newIndex < sheets.length) loadSheet(newIndex);
+  }
+
+  function esc(s) {
+    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  init();
+</script>
+</body>
+</html>

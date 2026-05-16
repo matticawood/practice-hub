@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Retitle & Recategorise Sheets</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; padding: 24px; max-width: 1000px; margin: 0 auto; }
+    h1 { font-size: 1.1rem; margin-bottom: 16px; }
+    p.sub { font-size: 0.85rem; color: #888; margin-bottom: 20px; line-height: 1.6; }
+    .card { background: #222; border: 1px solid #333; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.85rem; font-family: monospace; outline: none; margin-bottom: 12px; }
+    button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+    .btn-primary { background: #2d5a8a; color: #7ab4ff; }
+    .btn-primary:hover { background: #3a6a9a; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-apply { background: #2d6a2d; color: #9de89d; }
+    .btn-apply:hover { background: #3a8a3a; }
+    .btn-apply:disabled { opacity: 0.4; cursor: not-allowed; }
+    .status { font-size: 0.85rem; color: #888; margin-top: 10px; }
+    .status.ok  { color: #4ade80; }
+    .status.err { color: #f87171; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid #333; }
+    .tab { padding: 8px 20px; font-size: 0.85rem; cursor: pointer; color: #888; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; }
+    .tab:hover { color: #ccc; }
+    .tab.active { color: #7ab4ff; border-bottom-color: #7ab4ff; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Results table */
+    .results-wrap { display: none; }
+    .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .toolbar span { font-size: 0.85rem; color: #888; }
+    .toolbar a { font-size: 0.82rem; color: #7ab4ff; cursor: pointer; text-decoration: underline; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #333; color: #666; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    td { padding: 8px 10px; border-bottom: 1px solid #2a2a2a; vertical-align: middle; }
+    tr:hover td { background: #252525; }
+    tr.no-change td { opacity: 0.45; }
+    .tag-cur  { font-size: 0.75rem; padding: 2px 7px; border-radius: 10px; background: #2a2a2a; color: #888; }
+    .tag-new  { font-size: 0.75rem; padding: 2px 7px; border-radius: 10px; background: #1a3a5a; color: #7ab4ff; }
+    .tag-same { font-size: 0.75rem; padding: 2px 7px; border-radius: 10px; background: #1a3a1a; color: #4ade80; }
+    .arrow { color: #555; padding: 0 4px; }
+    .title-new { color: #e0e0e0; }
+    .title-cur { color: #666; font-size: 0.78rem; }
+    input[type=checkbox] { width: 15px; height: 15px; accent-color: #7ab4ff; cursor: pointer; }
+    .apply-bar { display: flex; align-items: center; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #333; }
+    .apply-status { font-size: 0.85rem; }
+    .apply-status.ok  { color: #4ade80; }
+    .apply-status.err { color: #f87171; }
+    .progress { height: 4px; background: #2a2a2a; border-radius: 2px; margin-bottom: 16px; }
+    .progress-fill { height: 100%; background: #2d5a8a; border-radius: 2px; transition: width 0.3s; }
+  </style>
+</head>
+<body>
+
+<h1>✏️ Retitle &amp; Recategorise Sheets</h1>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('index')">Index Titles &amp; Categories</div>
+  <div class="tab" onclick="switchTab('article')">Article Titles</div>
+</div>
+
+<!-- TAB 1: Index titles & categories -->
+<div class="tab-panel active" id="panel-index">
+  <p class="sub">Proposes a short succinct title for the index list and a sensible category for each sheet. Does <strong>not</strong> affect what appears on the sheet itself.</p>
+  <div class="card">
+    <label>Anthropic API Key</label>
+    <input type="password" id="api-key-1" placeholder="sk-ant-…" />
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn-primary" id="run-btn-1" onclick="runIndexAnalysis()">⚡ Analyse All Sheets</button>
+      <span class="status" id="run-status-1"></span>
+    </div>
+  </div>
+  <div class="results-wrap" id="results-wrap-1">
+    <div class="progress"><div class="progress-fill" id="prog-1" style="width:0%"></div></div>
+    <div class="toolbar">
+      <span id="count-label-1"></span>
+      <a onclick="selectAll(1, true)">Select all</a>
+      <a onclick="selectAll(1, false)">Deselect all</a>
+      <a onclick="selectChanged(1)">Select changed only</a>
+    </div>
+    <table>
+      <thead><tr>
+        <th style="width:32px"></th>
+        <th>Current Index Title</th>
+        <th>Proposed Index Title</th>
+        <th>Category</th>
+      </tr></thead>
+      <tbody id="results-body-1"></tbody>
+    </table>
+    <div class="apply-bar">
+      <button class="btn-apply" id="apply-btn-1" onclick="applyIndexChanges()">✓ Apply Selected</button>
+      <span class="apply-status" id="apply-status-1"></span>
+    </div>
+  </div>
+</div>
+
+<!-- TAB 2: Article titles -->
+<div class="tab-panel" id="panel-article">
+  <p class="sub">Proposes a better heading title for each sheet as it appears on the printed article. Replaces the ALL-CAPS "PIANO PRACTICE DAILY: TOPIC: Subtitle" format with a clean, well-worded heading. Does <strong>not</strong> affect the index list title.</p>
+  <div class="card">
+    <label>Anthropic API Key</label>
+    <input type="password" id="api-key-2" placeholder="sk-ant-…" />
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn-primary" id="run-btn-2" onclick="runArticleAnalysis()">⚡ Generate Article Titles</button>
+      <span class="status" id="run-status-2"></span>
+    </div>
+  </div>
+  <div class="results-wrap" id="results-wrap-2">
+    <div class="progress"><div class="progress-fill" id="prog-2" style="width:0%"></div></div>
+    <div class="toolbar">
+      <span id="count-label-2"></span>
+      <a onclick="selectAll(2, true)">Select all</a>
+      <a onclick="selectAll(2, false)">Deselect all</a>
+      <a onclick="selectChanged(2)">Select changed only</a>
+    </div>
+    <table>
+      <thead><tr>
+        <th style="width:32px"></th>
+        <th>Current Article Title</th>
+        <th>Proposed Article Title</th>
+      </tr></thead>
+      <tbody id="results-body-2"></tbody>
+    </table>
+    <div class="apply-bar">
+      <button class="btn-apply" id="apply-btn-2" onclick="applyArticleChanges()">✓ Apply Selected</button>
+      <span class="apply-status" id="apply-status-2"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  // Sync API key between tabs
+  ['api-key-1','api-key-2'].forEach(id => {
+    const el = document.getElementById(id);
+    const stored = localStorage.getItem("anthropic_key");
+    if (stored) el.value = stored;
+    el.addEventListener('input', () => {
+      localStorage.setItem("anthropic_key", el.value.trim());
+      ['api-key-1','api-key-2'].forEach(other => {
+        if (other !== id) document.getElementById(other).value = el.value;
+      });
+    });
+  });
+
+  let indexProposals   = [];
+  let articleProposals = [];
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', ['index','article'][i] === name));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+  }
+
+  // ── TAB 1: Index titles & categories ─────────────────────────────
+
+  async function runIndexAnalysis() {
+    const apiKey = document.getElementById("api-key-1").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+
+    const btn = document.getElementById("run-btn-1");
+    const status = document.getElementById("run-status-1");
+    btn.disabled = true;
+    status.textContent = "Fetching sheets…"; status.className = "status";
+    setProgress(1, 5);
+
+    const { data: sheets, error } = await db.from("theory_sheets").select("id, title, category").order("created_at");
+    if (error || !sheets?.length) {
+      status.textContent = "Failed to load sheets: " + (error?.message || "no data");
+      status.className = "status err"; btn.disabled = false; return;
+    }
+
+    status.textContent = `Sending ${sheets.length} sheets to Claude…`;
+    setProgress(1, 15);
+
+    const sheetList = sheets.map((s, i) =>
+      `${i + 1}. ID: ${s.id} | Title: "${s.title}" | Category: "${s.category || "none"}"`
+    ).join("\n");
+
+    const prompt = `You are helping organise a music theory reference sheet library called "Piano Practice Daily".
+
+Below is a list of ${sheets.length} sheets. For each sheet:
+1. Give a SHORT, CLEAN, SUCCINCT index title — 2–6 words, clear topic label. E.g. "The Circle of Fifths", "Rubato", "Major vs Minor Chords". No "Piano Practice Daily" prefix.
+2. Assign ONE category from a small consistent set of 6–10 (e.g. Harmony, Scales & Keys, Rhythm, Technique, Expression, Notation, Form & Structure, Ear Training).
+
+Return a JSON array with no markdown fences:
+[{ "id": "uuid", "title": "Short Title", "category": "Category" }, ...]
+
+Return ALL ${sheets.length} sheets.
+
+${sheetList}`;
+
+    try {
+      const result = await callClaude(apiKey, prompt);
+      const start = result.indexOf("["), end = result.lastIndexOf("]");
+      if (start === -1) throw new Error("No JSON array in response");
+      const parsed = JSON.parse(result.slice(start, end + 1));
+
+      indexProposals = sheets.map(sheet => {
+        const p = parsed.find(x => x.id === sheet.id);
+        return { id: sheet.id, currentTitle: sheet.title, currentCategory: sheet.category || "", newTitle: p?.title || sheet.title, newCategory: p?.category || sheet.category || "" };
+      });
+
+      setProgress(1, 100);
+      status.textContent = `✓ ${indexProposals.length} proposals ready`;
+      status.className = "status ok";
+      renderTable(1);
+    } catch(err) {
+      status.textContent = "Error: " + err.message;
+      status.className = "status err";
+    }
+    btn.disabled = false;
+  }
+
+  function renderTable(tab) {
+    const proposals = tab === 1 ? indexProposals : articleProposals;
+    document.getElementById(`results-wrap-${tab}`).style.display = "block";
+    const tbody = document.getElementById(`results-body-${tab}`);
+
+    tbody.innerHTML = proposals.map((p, i) => {
+      const titleChanged = p.newTitle !== p.currentTitle;
+      const catChanged   = tab === 1 && p.newCategory !== p.currentCategory;
+      const anyChange    = titleChanged || catChanged;
+
+      const catCell = tab === 1
+        ? `<td>${catChanged
+            ? `<span class="tag-cur">${escHtml(p.currentCategory||"none")}</span><span class="arrow">→</span><span class="tag-new">${escHtml(p.newCategory)}</span>`
+            : `<span class="tag-same">${escHtml(p.newCategory)}</span>`}</td>`
+        : "";
+
+      return `<tr class="${anyChange ? "" : "no-change"}">
+        <td><input type="checkbox" id="chk-${tab}-${i}" ${anyChange ? "checked" : ""}></td>
+        <td><div class="title-cur">${escHtml(p.currentTitle)}</div></td>
+        <td><div class="title-new">${escHtml(p.newTitle)}</div></td>
+        ${catCell}
+      </tr>`;
+    }).join("");
+
+    updateCountLabel(tab);
+  }
+
+  async function applyIndexChanges() {
+    const toApply = indexProposals.filter((_, i) => document.getElementById(`chk-1-${i}`)?.checked);
+    if (!toApply.length) { alert("Nothing selected."); return; }
+    const btn = document.getElementById("apply-btn-1");
+    const status = document.getElementById("apply-status-1");
+    btn.disabled = true; status.textContent = `Saving ${toApply.length} sheets…`;
+
+    let ok = 0, fail = 0;
+    for (const p of toApply) {
+      const { error } = await db.from("theory_sheets").update({ title: p.newTitle, category: p.newCategory }).eq("id", p.id);
+      error ? fail++ : ok++;
+    }
+    status.textContent = fail === 0 ? `✓ ${ok} updated` : `${ok} saved, ${fail} failed`;
+    status.className = "apply-status " + (fail === 0 ? "ok" : "err");
+    btn.disabled = false;
+  }
+
+  // ── TAB 2: Article titles ─────────────────────────────────────────
+
+  async function runArticleAnalysis() {
+    const apiKey = document.getElementById("api-key-2").value.trim();
+    if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
+
+    const btn = document.getElementById("run-btn-2");
+    const status = document.getElementById("run-status-2");
+    btn.disabled = true;
+    status.textContent = "Fetching sheets…"; status.className = "status";
+    setProgress(2, 5);
+
+    const { data: sheets, error } = await db.from("theory_sheets").select("id, content").order("created_at");
+    if (error || !sheets?.length) {
+      status.textContent = "Failed: " + (error?.message || "no data");
+      status.className = "status err"; btn.disabled = false; return;
+    }
+
+    status.textContent = `Sending ${sheets.length} sheets to Claude…`;
+    setProgress(2, 15);
+
+    const sheetList = sheets.map((s, i) =>
+      `${i + 1}. ID: ${s.id} | Current article title: "${s.content?.title || ""}"`
+    ).join("\n");
+
+    const prompt = `You are improving the article heading titles for a music theory reference sheet library called "Piano Practice Daily".
+
+The current titles are in ALL-CAPS format like "PIANO PRACTICE DAILY: RUBATO: The Art of Expressive Timing". These appear as the large heading on each printed sheet.
+
+For each sheet, write a clean, well-worded article heading that:
+- Is in proper Title Case (not ALL CAPS)
+- Sounds like a strong chapter heading in a music textbook
+- Is clear and descriptive but not too long (ideally under 8 words)
+- Does NOT include "Piano Practice Daily" as a prefix
+- Can include a short subtitle after a colon if helpful, e.g. "Rubato: The Art of Expressive Timing" or just "Rubato"
+
+Return a JSON array with no markdown fences:
+[{ "id": "uuid", "title": "New Article Title" }, ...]
+
+Return ALL ${sheets.length} sheets.
+
+${sheetList}`;
+
+    try {
+      const result = await callClaude(apiKey, prompt);
+      const start = result.indexOf("["), end = result.lastIndexOf("]");
+      if (start === -1) throw new Error("No JSON array in response");
+      const parsed = JSON.parse(result.slice(start, end + 1));
+
+      articleProposals = sheets.map(sheet => {
+        const p = parsed.find(x => x.id === sheet.id);
+        return { id: sheet.id, content: sheet.content, currentTitle: sheet.content?.title || "", newTitle: p?.title || sheet.content?.title || "" };
+      });
+
+      setProgress(2, 100);
+      status.textContent = `✓ ${articleProposals.length} proposals ready`;
+      status.className = "status ok";
+      renderTable(2);
+    } catch(err) {
+      status.textContent = "Error: " + err.message;
+      status.className = "status err";
+    }
+    btn.disabled = false;
+  }
+
+  async function applyArticleChanges() {
+    const toApply = articleProposals.filter((_, i) => document.getElementById(`chk-2-${i}`)?.checked);
+    if (!toApply.length) { alert("Nothing selected."); return; }
+    const btn = document.getElementById("apply-btn-2");
+    const status = document.getElementById("apply-status-2");
+    btn.disabled = true; status.textContent = `Saving ${toApply.length} sheets…`;
+
+    let ok = 0, fail = 0;
+    for (const p of toApply) {
+      // Merge new title into content JSON
+      const updatedContent = { ...p.content, title: p.newTitle };
+      const { error } = await db.from("theory_sheets").update({ content: updatedContent }).eq("id", p.id);
+      error ? fail++ : ok++;
+    }
+    status.textContent = fail === 0 ? `✓ ${ok} article titles updated` : `${ok} saved, ${fail} failed`;
+    status.className = "apply-status " + (fail === 0 ? "ok" : "err");
+    btn.disabled = false;
+  }
+
+  // ── Shared helpers ────────────────────────────────────────────────
+
+  async function callClaude(apiKey, prompt) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8192,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${res.status}`);
+    }
+    const data = await res.json();
+    return data.content?.[0]?.text || "";
+  }
+
+  function setProgress(tab, pct) {
+    document.getElementById(`results-wrap-${tab}`).style.display = "block";
+    document.getElementById(`prog-${tab}`).style.width = pct + "%";
+  }
+
+  function selectAll(tab, val) {
+    const proposals = tab === 1 ? indexProposals : articleProposals;
+    proposals.forEach((_, i) => { const c = document.getElementById(`chk-${tab}-${i}`); if(c) c.checked = val; });
+    updateCountLabel(tab);
+  }
+
+  function selectChanged(tab) {
+    const proposals = tab === 1 ? indexProposals : articleProposals;
+    proposals.forEach((p, i) => {
+      const c = document.getElementById(`chk-${tab}-${i}`);
+      const changed = p.newTitle !== p.currentTitle || (tab === 1 && p.newCategory !== p.currentCategory);
+      if(c) c.checked = changed;
+    });
+    updateCountLabel(tab);
+  }
+
+  function updateCountLabel(tab) {
+    const proposals = tab === 1 ? indexProposals : articleProposals;
+    const checked = proposals.filter((_, i) => document.getElementById(`chk-${tab}-${i}`)?.checked).length;
+    document.getElementById(`count-label-${tab}`).textContent = `${proposals.length} sheets · ${checked} selected`;
+  }
+
+  function escHtml(s) {
+    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+</script>
+</body>
+</html>
