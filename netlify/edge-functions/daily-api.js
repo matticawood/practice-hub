@@ -132,6 +132,34 @@ export default async (request) => {
     return json({ token: data.token });
   }
 
+  // ── Action: setup-webhook ──────────────────────────────────────────────────
+  // One-time call to register the Daily.co recording.ready webhook.
+  if (action === "setup-webhook") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+
+    const webhookUrl = new URL(request.url).origin + "/api/daily-webhook";
+
+    // Check if webhook already exists
+    const listRes = await fetch("https://api.daily.co/v1/webhooks", {
+      headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+    });
+    const listData = await listRes.json();
+    const existing = listData?.data?.find(w => w.url === webhookUrl);
+    if (existing) return json({ message: "Webhook already exists", webhook: existing });
+
+    const res = await fetch("https://api.daily.co/v1/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        url: webhookUrl,
+        event_types: ["recording.ready"]
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) return json({ error: data }, res.status);
+    return json({ message: "Webhook created", webhook: data });
+  }
+
   return json({ error: "Unknown action" }, 400);
 };
 
