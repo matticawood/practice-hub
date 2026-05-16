@@ -641,7 +641,6 @@
     <!-- Admin stream controls -->
     <div id="stream-admin-bar">
       <span class="admin-bar-label">⚙️ Host Controls</span>
-      <button class="btn btn-sm btn-ghost" onclick="toggleRecording()" id="btn-recording">⏺ Start Recording</button>
       <button class="btn btn-sm btn-danger" onclick="endStream()">⏹ End Stream</button>
       <button class="btn btn-sm btn-ghost" onclick="showView('detail')">← Back to event page</button>
     </div>
@@ -1290,13 +1289,6 @@ async function startStream(eventId) {
   }
 }
 
-async function endStreamFromDetail(eventId) {
-  if (!confirm("End the live stream?")) return;
-  await db.from("live_events").update({ status: "ended" }).eq("id", eventId);
-  currentEvent = { ...currentEvent, status: "ended" };
-  renderDetailView(currentEvent);
-}
-
 // ── Join stream ───────────────────────────────────────────────────────────────
 // Returns true on success, false on any failure (caller should restore UI).
 async function joinStream(eventId) {
@@ -1598,17 +1590,47 @@ async function markAnswered(qaId, currentState) {
 
 async function endStream() {
   if (!confirm("End the live stream for everyone?")) return;
+
+  const btn = document.querySelector("#stream-admin-bar .btn-danger");
+  if (btn) { btn.disabled = true; btn.textContent = "Ending…"; }
+
+  // Stop the recording cleanly and wait for Daily.co to acknowledge
+  // before destroying the call — otherwise the recording file gets cut off.
+  if (window._callFrame) {
+    try {
+      await new Promise((resolve) => {
+        const done = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(done, 6000); // max 6s wait
+        window._callFrame.on("recording-stopped", done);
+        window._callFrame.stopRecording().catch(done);
+      });
+    } catch(e) { console.warn("stopRecording:", e); }
+  }
+
   await db.from("live_events").update({ status: "ended" }).eq("id", currentEvent.id);
   currentEvent = { ...currentEvent, status: "ended" };
   showView("detail");
+  renderDetailView(currentEvent);
 }
 
-function toggleRecording() {
-  isRecording = !isRecording;
-  document.getElementById("btn-recording").textContent =
-    isRecording ? "⏹ Stop Recording" : "⏺ Start Recording";
-  // Note: Daily.co cloud recording is started/stopped via their dashboard or REST API.
-  // This button is a visual indicator only for now — full API integration TBD.
+async function endStreamFromDetail(eventId) {
+  if (!confirm("End the live stream?")) return;
+
+  // Stop recording if the host still has an active call frame
+  if (window._callFrame) {
+    try {
+      await new Promise((resolve) => {
+        const done = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(done, 6000);
+        window._callFrame.on("recording-stopped", done);
+        window._callFrame.stopRecording().catch(done);
+      });
+    } catch(e) { console.warn("stopRecording:", e); }
+  }
+
+  await db.from("live_events").update({ status: "ended" }).eq("id", eventId);
+  currentEvent = { ...currentEvent, status: "ended" };
+  renderDetailView(currentEvent);
 }
 
 // ── Sidebar tabs ──────────────────────────────────────────────────────────────
