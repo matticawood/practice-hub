@@ -9,7 +9,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <link rel="icon" href="/icon-192.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <style>
     /* ── Events page ─────────────────────────────────────────────────────────── */
     #app-header {
@@ -392,6 +394,70 @@
     }
     .mux-form-row input:focus { outline: none; border-color: var(--accent); }
 
+    /* ── Flatpickr dark theme overrides ─────────────────────────────────────── */
+    .flatpickr-calendar {
+      background: var(--surface-2) !important;
+      border: 1.5px solid var(--border) !important;
+      border-radius: var(--radius) !important;
+      box-shadow: var(--shadow) !important;
+      font-family: inherit !important;
+    }
+    .flatpickr-months .flatpickr-month,
+    .flatpickr-weekdays,
+    span.flatpickr-weekday {
+      background: var(--surface-2) !important;
+      color: var(--text-muted) !important;
+      fill: var(--text-muted) !important;
+    }
+    .flatpickr-day { color: var(--text) !important; border-radius: 6px !important; }
+    .flatpickr-day:hover { background: var(--surface) !important; border-color: var(--accent) !important; }
+    .flatpickr-day.selected,
+    .flatpickr-day.selected:hover {
+      background: var(--accent) !important;
+      border-color: var(--accent) !important;
+      color: #000 !important;
+    }
+    .flatpickr-day.today { border-color: var(--accent) !important; }
+    .flatpickr-day.flatpickr-disabled { color: var(--text-muted) !important; opacity: .35; }
+    .numInputWrapper input,
+    .flatpickr-time input {
+      color: var(--text) !important;
+      background: var(--surface) !important;
+    }
+    .flatpickr-time .flatpickr-time-separator,
+    .flatpickr-time .flatpickr-am-pm { color: var(--text-muted) !important; }
+    .flatpickr-current-month .flatpickr-monthDropdown-months,
+    .flatpickr-current-month input.cur-year {
+      color: var(--text) !important;
+      background: transparent !important;
+    }
+    .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: var(--text-muted) !important; }
+    .flatpickr-prev-month:hover svg, .flatpickr-next-month:hover svg { fill: var(--accent) !important; }
+    /* Hide the raw input — show only our styled trigger */
+    .flatpickr-input { display: none !important; }
+    .date-trigger {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 10px 14px; cursor: pointer;
+      transition: border-color .15s; color: var(--text); font-size: 0.9rem;
+      user-select: none;
+    }
+    .date-trigger:hover { border-color: var(--accent); }
+    .date-trigger .dt-icon { font-size: 1rem; }
+    .date-trigger .dt-text { flex: 1; }
+    .date-trigger .dt-placeholder { color: var(--text-muted); }
+
+    /* ── Timezone display ────────────────────────────────────────────────────── */
+    .tz-display {
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .tz-primary { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+    .tz-local {
+      font-size: 0.8rem; color: var(--accent);
+      display: flex; align-items: center; gap: 5px;
+    }
+    .tz-local-label { color: var(--text-muted); font-weight: normal; }
+
     /* ── Buttons (shared with style.css) ─────────────────────────────────────── */
     .btn { display: inline-flex; align-items: center; gap: 6px;
            padding: 8px 16px; border-radius: 8px; font-size: 0.88rem;
@@ -520,7 +586,15 @@
     </div>
     <div class="form-field">
       <label>Date &amp; Time *</label>
-      <input id="f-date" type="datetime-local" />
+      <input id="f-date" type="text" placeholder="Pick a date and time" />
+      <div class="date-trigger" id="date-trigger" onclick="datePicker && datePicker.open()">
+        <span class="dt-icon">📅</span>
+        <span class="dt-text" id="date-trigger-text"><span class="dt-placeholder">Pick a date and time</span></span>
+      </div>
+    </div>
+    <div class="form-field">
+      <label>Timezone</label>
+      <select id="f-timezone"></select>
     </div>
     <div class="form-field">
       <label>Duration (minutes)</label>
@@ -534,6 +608,63 @@
 </div>
 
 <script>
+// ── Timezones ─────────────────────────────────────────────────────────────────
+const TIMEZONES = [
+  { label: "London (GMT/BST)",          value: "Europe/London" },
+  { label: "Dublin (GMT/IST)",           value: "Europe/Dublin" },
+  { label: "Paris / Berlin (CET/CEST)", value: "Europe/Paris" },
+  { label: "Athens / Helsinki (EET)",   value: "Europe/Athens" },
+  { label: "Moscow (MSK)",              value: "Europe/Moscow" },
+  { label: "Dubai (GST)",               value: "Asia/Dubai" },
+  { label: "Mumbai (IST)",              value: "Asia/Kolkata" },
+  { label: "Singapore / HK (SGT/HKT)", value: "Asia/Singapore" },
+  { label: "Tokyo (JST)",               value: "Asia/Tokyo" },
+  { label: "Sydney (AEST/AEDT)",        value: "Australia/Sydney" },
+  { label: "Auckland (NZST/NZDT)",      value: "Pacific/Auckland" },
+  { label: "New York (ET)",             value: "America/New_York" },
+  { label: "Chicago (CT)",              value: "America/Chicago" },
+  { label: "Denver (MT)",               value: "America/Denver" },
+  { label: "Los Angeles (PT)",          value: "America/Los_Angeles" },
+  { label: "Toronto (ET)",              value: "America/Toronto" },
+  { label: "Vancouver (PT)",            value: "America/Vancouver" },
+  { label: "São Paulo (BRT)",           value: "America/Sao_Paulo" },
+  { label: "UTC",                       value: "UTC" },
+];
+
+function populateTzSelect() {
+  const sel = document.getElementById("f-timezone");
+  if (!sel) return;
+  // Try to pre-select the user's local timezone
+  const local = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  sel.innerHTML = TIMEZONES.map(tz =>
+    `<option value="${tz.value}" ${tz.value === local || (local === "America/Toronto" && tz.value === "America/Toronto") ? "selected" : ""}>${tz.label}</option>`
+  ).join("");
+}
+
+// ── Flatpickr ─────────────────────────────────────────────────────────────────
+let datePicker = null;
+
+function initDatePicker() {
+  datePicker = flatpickr("#f-date", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    time_24hr: false,
+    minuteIncrement: 15,
+    minDate: "today",
+    disableMobile: true,
+    onChange: (selectedDates, dateStr) => {
+      const trigger = document.getElementById("date-trigger-text");
+      if (selectedDates.length > 0) {
+        const d = selectedDates[0];
+        trigger.innerHTML = `<strong>${d.toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}</strong>
+          &nbsp;at&nbsp; ${d.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" })}`;
+      } else {
+        trigger.innerHTML = `<span class="dt-placeholder">Pick a date and time</span>`;
+      }
+    }
+  });
+}
+
 // ── Supabase ──────────────────────────────────────────────────────────────────
 const SUPA_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
 const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
@@ -630,7 +761,7 @@ async function loadEvents(tab) {
       ? `<span class="event-card-status status-scheduled">Upcoming</span>`
       : `<span class="event-card-status status-ended">Replay</span>`;
 
-    const dateStr = formatEventDate(ev.scheduled_at);
+    const dateStr = formatEventDate(ev.scheduled_at, ev.timezone);
 
     card.innerHTML = `
       ${cover}
@@ -666,7 +797,7 @@ async function renderDetailView(ev) {
   if (data) { currentEvent = ev = data; }
 
   const el = document.getElementById("event-detail-content");
-  const dateStr = formatEventDate(ev.scheduled_at);
+  const dateStr = formatEventDateWithLocal(ev.scheduled_at, ev.timezone);
   const endTime = new Date(new Date(ev.scheduled_at).getTime() + ev.duration_mins * 60000);
 
   const cover = ev.cover_url
@@ -746,8 +877,8 @@ async function renderDetailView(ev) {
 
     <div class="event-info-row">
       <div class="event-info-item">
-        <span class="event-info-label">Date</span>
-        <span class="event-info-val">${dateStr}</span>
+        <span class="event-info-label">Date &amp; Time</span>
+        <div class="event-info-val">${dateStr}</div>
       </div>
       <div class="event-info-item">
         <span class="event-info-label">Duration</span>
@@ -1076,8 +1207,10 @@ function openCreateModal() {
   document.getElementById("f-title").value    = "";
   document.getElementById("f-desc").value     = "";
   document.getElementById("f-cover").value    = "";
-  document.getElementById("f-date").value     = "";
   document.getElementById("f-duration").value = "60";
+  document.getElementById("date-trigger-text").innerHTML = `<span class="dt-placeholder">Pick a date and time</span>`;
+  populateTzSelect();
+  if (!datePicker) initDatePicker(); else datePicker.clear();
   document.getElementById("modal-create").style.display = "flex";
 }
 
@@ -1088,9 +1221,18 @@ function openEditModal() {
   document.getElementById("f-title").value    = currentEvent.title || "";
   document.getElementById("f-desc").value     = currentEvent.description || "";
   document.getElementById("f-cover").value    = currentEvent.cover_url || "";
-  document.getElementById("f-date").value     = currentEvent.scheduled_at
-    ? new Date(currentEvent.scheduled_at).toISOString().slice(0,16) : "";
   document.getElementById("f-duration").value = currentEvent.duration_mins || 60;
+  populateTzSelect();
+  // Set the saved timezone
+  const tzSel = document.getElementById("f-timezone");
+  if (currentEvent.timezone) tzSel.value = currentEvent.timezone;
+  if (!datePicker) initDatePicker();
+  if (currentEvent.scheduled_at) {
+    datePicker.setDate(new Date(currentEvent.scheduled_at), true);
+  } else {
+    datePicker.clear();
+    document.getElementById("date-trigger-text").innerHTML = `<span class="dt-placeholder">Pick a date and time</span>`;
+  }
   document.getElementById("modal-create").style.display = "flex";
 }
 
@@ -1107,12 +1249,14 @@ async function saveEvent() {
 
   if (!title || !dateVal) { alert("Title and date are required."); return; }
 
+  const timezone = document.getElementById("f-timezone").value || "Europe/London";
   const payload = {
     title,
     description:   desc || null,
     cover_url:     cover || null,
     scheduled_at:  new Date(dateVal).toISOString(),
     duration_mins: duration,
+    timezone,
     created_by:    myEmail
   };
 
@@ -1149,10 +1293,41 @@ function esc(str) {
             .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-function formatEventDate(iso) {
+function formatEventDate(iso, timezone) {
   const d = new Date(iso);
-  return d.toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"long", year:"numeric" })
-    + " · " + d.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
+  const tz = timezone || "UTC";
+  const eventTzStr = d.toLocaleString("en-GB", {
+    timeZone: tz,
+    weekday: "short", day: "numeric", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit"
+  });
+  // Get the timezone abbreviation
+  const tzAbbr = new Intl.DateTimeFormat("en", { timeZone: tz, timeZoneName: "short" })
+    .formatToParts(d).find(p => p.type === "timeZoneName")?.value || "";
+  return `${eventTzStr} ${tzAbbr}`;
+}
+
+function formatEventDateWithLocal(iso, timezone) {
+  const d = new Date(iso);
+  const tz = timezone || "UTC";
+  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  const primary = formatEventDate(iso, tz);
+
+  // Only show local time if the viewer is in a different timezone
+  if (localTz === tz) return `<div class="tz-display"><span class="tz-primary">${primary}</span></div>`;
+
+  const localStr = d.toLocaleString("en-GB", {
+    timeZone: localTz,
+    hour: "2-digit", minute: "2-digit"
+  });
+  const localAbbr = new Intl.DateTimeFormat("en", { timeZone: localTz, timeZoneName: "short" })
+    .formatToParts(d).find(p => p.type === "timeZoneName")?.value || "";
+
+  return `<div class="tz-display">
+    <span class="tz-primary">${primary}</span>
+    <span class="tz-local"><span class="tz-local-label">Your time:</span> ${localStr} ${localAbbr}</span>
+  </div>`;
 }
 
 function timeAgo(iso) {
