@@ -16,12 +16,19 @@ export default async (request) => {
   let body;
   try { body = await request.json(); } catch { return new Response("OK"); }
 
-  const { action, recording } = body;
+  // Daily.co sends either v1 {action, recording} or v2 {type, payload}
+  console.log("daily-webhook body:", JSON.stringify(body));
+
+  const eventType = body.type || body.action;
+  const recordingData = body.payload || body.recording;
 
   // Only handle recording.ready
-  if (action !== "recording.ready" || !recording) return new Response("OK");
+  if (eventType !== "recording.ready" || !recordingData) {
+    console.log("Ignoring event type:", eventType);
+    return new Response("OK");
+  }
 
-  const { room_name, download_link } = recording;
+  const { room_name, download_link } = recordingData;
   if (!room_name || !download_link) return new Response("OK");
 
   const SERVICE_KEY    = Netlify.env.get("SUPABASE_SERVICE_KEY");
