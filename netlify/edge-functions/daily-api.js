@@ -173,8 +173,20 @@ export default async (request) => {
 
     // Most recent recording
     const rec = recordings.sort((a, b) => b.start_ts - a.start_ts)[0];
-    const downloadLink = rec.download_link;
-    if (!downloadLink) return json({ error: "Recording has no download_link yet — try again in a minute" }, 404);
+
+    // Get a fresh signed download URL via the access-link endpoint
+    // (download_link on the recording object may be absent or expired)
+    const accessRes = await fetch(
+      `https://api.daily.co/v1/recordings/${rec.id}/access-link`,
+      { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
+    );
+    const accessData = await accessRes.json();
+    const downloadLink = accessData?.download_link || rec.download_link;
+    if (!downloadLink) return json({
+      error: "Recording not ready yet — Daily.co is still processing it. Try again in a minute.",
+      recordingId: rec.id,
+      recordingStatus: rec.status
+    }, 404);
 
     // Create Mux asset
     const muxRes = await fetch("https://api.mux.com/video/v1/assets", {
