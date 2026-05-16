@@ -151,8 +151,7 @@ export default async (request) => {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
       body: JSON.stringify({
-        url: webhookUrl,
-        event_types: ["recording.ready"]
+        url: webhookUrl
       })
     });
     const data = await res.json();
