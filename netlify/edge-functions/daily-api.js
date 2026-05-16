@@ -120,8 +120,10 @@ export default async (request) => {
           is_owner: isOwner || false,
           start_video_off: !isOwner,
           start_audio_off: !isOwner,
+          enable_video: isOwner || false,       // viewers cannot enable camera
+          enable_audio: isOwner || false,       // viewers cannot enable mic
           enable_screenshare: isOwner || false,
-          start_cloud_recording: false // host starts manually
+          start_cloud_recording: false
         }
       })
     });
