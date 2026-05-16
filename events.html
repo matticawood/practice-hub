@@ -1258,30 +1258,56 @@ async function joinStream(eventId) {
   }
   const token = result.token;
 
-  // Set up Daily.co call frame via SDK (bypasses pre-join screen)
-  if (window._callFrame) { window._callFrame.destroy(); window._callFrame = null; }
-
-  const container = document.getElementById("daily-container");
-  container.innerHTML = ""; // clear any previous frame
-
-  window._callFrame = DailyIframe.createFrame(container, {
-    showLeaveButton: true,
-    showFullscreenButton: true,
-    showPrejoinUI: false,      // skip pre-join for all users
-    iframeStyle: {
-      position: "absolute",
-      top: 0, left: 0,
-      width: "100%", height: "100%",
-      border: "none"
+  // Set up Daily.co call frame via SDK
+  try {
+    if (window._callFrame) {
+      try { await window._callFrame.destroy(); } catch(e) {}
+      window._callFrame = null;
     }
-  });
 
-  await window._callFrame.join({
-    url:            ev.daily_room_url,
-    token:          result.token,
-    startVideoOff:  !isAdmin,
-    startAudioOff:  !isAdmin
-  });
+    if (typeof DailyIframe === "undefined") throw new Error("Daily.co SDK not loaded");
+
+    const container = document.getElementById("daily-container");
+    container.innerHTML = "";
+
+    window._callFrame = DailyIframe.createFrame(container, {
+      showLeaveButton: true,
+      showFullscreenButton: true,
+      showPrejoinUI: false,
+      iframeStyle: {
+        position: "absolute", top: 0, left: 0,
+        width: "100%", height: "100%", border: "none"
+      }
+    });
+
+    await window._callFrame.join({
+      url:           ev.daily_room_url,
+      token:         result.token,
+      startVideoOff: !isAdmin,
+      startAudioOff: !isAdmin
+    });
+
+    // When the user leaves via Daily.co's built-in Leave button, go back to detail
+    window._callFrame.on("left-meeting", () => {
+      if (window._callFrame) {
+        try { window._callFrame.destroy(); } catch(e) {}
+        window._callFrame = null;
+      }
+      const container = document.getElementById("daily-container");
+      if (container) container.innerHTML = "";
+      // Show a rejoin button in the video area
+      if (container) {
+        container.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
+            <p style="color:var(--text-muted)">You left the stream.</p>
+            <button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button>
+          </div>`;
+      }
+    });
+  } catch(e) {
+    alert("Failed to start video: " + e.message);
+    return;
+  }
 
   // Event title in sidebar
   document.getElementById("stream-event-title").textContent = ev.title;

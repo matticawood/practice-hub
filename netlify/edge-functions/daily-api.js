@@ -121,7 +121,6 @@ export default async (request) => {
           is_owner: isOwner || false,
           start_video_off: !isOwner,
           start_audio_off: !isOwner,
-          enable_screenshare: isOwner || false,
           start_cloud_recording: false
         }
       })
