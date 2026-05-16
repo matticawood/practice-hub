@@ -78,7 +78,6 @@ export default async (request) => {
           start_video_off: false,
           start_audio_off: false,
           enable_screenshare: true,
-          enable_recording: "cloud",
           exp: Math.floor(Date.now() / 1000) + 60 * 60 * 6, // expires 6h from now
         }
       })
