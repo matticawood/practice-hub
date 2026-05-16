@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Events & Replays — The Practice Room</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#f5c518" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="icon" href="/icon-192.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* ── Events page ─────────────────────────────────────────────────────────── */
+    #app-header {
+      position: sticky; top: 0; z-index: 150;
+      background: var(--surface);
+      border-bottom: 1.5px solid var(--border);
+      padding: 0 20px;
+      height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px;
+    }
+    .header-left  { display: flex; align-items: center; gap: 12px; }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .app-logo {
+      width: 30px; height: 30px;
+      background: var(--accent); border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; text-decoration: none; flex-shrink: 0;
+    }
+    .header-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+
+    /* ── Main layout ─────────────────────────────────────────────────────────── */
+    #events-main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 28px 20px 60px;
+    }
+
+    /* ── View transitions ────────────────────────────────────────────────────── */
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* ── Events list ─────────────────────────────────────────────────────────── */
+    .events-page-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+    }
+    .events-page-hdr h1 { font-size: 1.5rem; font-weight: 700; color: #fff; }
+
+    .evt-tabs {
+      display: flex; gap: 4px;
+      border-bottom: 1.5px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .evt-tab {
+      background: none; border: none; cursor: pointer;
+      padding: 8px 16px; font-size: 0.9rem; font-weight: 600;
+      color: var(--text-muted); border-bottom: 2.5px solid transparent;
+      margin-bottom: -1.5px; transition: color .15s, border-color .15s;
+    }
+    .evt-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .events-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 18px;
+    }
+    .event-card {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .15s, transform .15s;
+    }
+    .event-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .event-card-cover {
+      width: 100%; aspect-ratio: 16/7;
+      background: var(--surface-2);
+      object-fit: cover; display: block;
+    }
+    .event-card-cover-placeholder {
+      width: 100%; aspect-ratio: 16/7;
+      background: linear-gradient(135deg, #1a1200 0%, #2a2000 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2.5rem;
+    }
+    .event-card-body { padding: 14px 16px 16px; }
+    .event-card-status {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; padding: 3px 8px; border-radius: 20px;
+      margin-bottom: 8px;
+    }
+    .status-scheduled { background: #1a2a1a; color: #6bcb77; border: 1px solid #2a4a2a; }
+    .status-live      { background: #2a1010; color: #ff6b6b; border: 1px solid #4a2020;
+                        animation: pulse-border 1.5s infinite; }
+    .status-ended     { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    @keyframes pulse-border {
+      0%, 100% { border-color: #4a2020; }
+      50%      { border-color: #ff6b6b; }
+    }
+    .live-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: #ff6b6b;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .event-card-title {
+      font-size: 1rem; font-weight: 700; color: #fff;
+      margin-bottom: 6px; line-height: 1.3;
+    }
+    .event-card-meta { font-size: 0.8rem; color: var(--text-muted); }
+    .event-card-footer {
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 10px; flex-wrap: wrap;
+    }
+    .evt-badge {
+      font-size: 0.72rem; color: var(--text-muted);
+      display: flex; align-items: center; gap: 4px;
+    }
+
+    /* ── Event detail ────────────────────────────────────────────────────────── */
+    .back-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: var(--text-muted); font-size: 0.88rem; font-weight: 600;
+      padding: 6px 12px; border-radius: 8px;
+      border: 1.5px solid var(--border); background: none;
+      cursor: pointer; transition: border-color .15s, color .15s;
+      margin-bottom: 20px;
+    }
+    .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .event-detail-cover {
+      width: 100%; aspect-ratio: 16/5;
+      border-radius: var(--radius); object-fit: cover;
+      margin-bottom: 20px; display: block;
+    }
+    .event-detail-cover-placeholder {
+      width: 100%; aspect-ratio: 16/5;
+      border-radius: var(--radius);
+      background: linear-gradient(135deg, #1a1200 0%, #2a2000 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 4rem; margin-bottom: 20px;
+    }
+    .event-detail-hdr {
+      display: flex; justify-content: space-between;
+      align-items: flex-start; gap: 16px; flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .event-detail-title { font-size: 1.6rem; font-weight: 700; color: #fff; line-height: 1.2; }
+    .event-detail-meta  { font-size: 0.88rem; color: var(--text-muted); margin-top: 6px; }
+    .event-detail-desc  {
+      color: var(--text-muted); font-size: 0.93rem; line-height: 1.7;
+      margin-bottom: 20px;
+    }
+
+    .event-info-row {
+      display: flex; gap: 20px; flex-wrap: wrap;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: var(--radius); padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+    .event-info-item { display: flex; flex-direction: column; gap: 3px; }
+    .event-info-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+                        letter-spacing: .08em; color: var(--text-muted); }
+    .event-info-val   { font-size: 0.9rem; color: var(--text); font-weight: 600; }
+
+    .event-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 28px; }
+
+    /* ── Countdown ───────────────────────────────────────────────────────────── */
+    .countdown-block {
+      background: var(--accent-subtle); border: 1.5px solid #3d3200;
+      border-radius: var(--radius); padding: 20px 24px; margin-bottom: 24px;
+      text-align: center;
+    }
+    .countdown-label { font-size: 0.8rem; color: var(--accent); font-weight: 700;
+                       text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+    .countdown-digits { display: flex; gap: 16px; justify-content: center; }
+    .countdown-unit { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    .countdown-num { font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1; }
+    .countdown-unit-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase;
+                            letter-spacing: .08em; }
+
+    /* ── Mux recording player ────────────────────────────────────────────────── */
+    .recording-block {
+      margin-bottom: 28px;
+    }
+    .recording-block h3 {
+      font-size: 1rem; font-weight: 700; color: var(--text);
+      margin-bottom: 12px;
+    }
+    .mux-player-wrap {
+      width: 100%; aspect-ratio: 16/9;
+      background: #000; border-radius: var(--radius); overflow: hidden;
+    }
+    mux-player { width: 100%; height: 100%; }
+
+    /* ── Comments ────────────────────────────────────────────────────────────── */
+    .comments-section h3 {
+      font-size: 1rem; font-weight: 700; color: var(--text);
+      margin-bottom: 14px;
+    }
+    .comment-input-row {
+      display: flex; gap: 10px; margin-bottom: 18px;
+    }
+    .comment-input-row textarea {
+      flex: 1; min-height: 64px; resize: vertical;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 10px 14px;
+      color: var(--text); font-size: 0.9rem; font-family: inherit;
+    }
+    .comment-input-row textarea:focus { outline: none; border-color: var(--accent); }
+    .comment-list { display: flex; flex-direction: column; gap: 12px; }
+    .comment-item {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: var(--radius); padding: 12px 16px;
+    }
+    .comment-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .comment-author { font-size: 0.83rem; font-weight: 700; color: var(--accent); }
+    .comment-date   { font-size: 0.75rem; color: var(--text-muted); }
+    .comment-body   { font-size: 0.9rem; color: var(--text); line-height: 1.5; }
+
+    /* ── Live stream layout ──────────────────────────────────────────────────── */
+    #view-stream.active { display: flex; flex-direction: column; gap: 0; }
+    #stream-wrap {
+      display: flex; gap: 0;
+      height: calc(100vh - 56px);
+      overflow: hidden;
+    }
+    #stream-video-col {
+      flex: 1; display: flex; flex-direction: column;
+      background: #000; position: relative;
+    }
+    #daily-iframe {
+      width: 100%; flex: 1; border: none; display: block;
+    }
+    #featured-qa-bar {
+      display: none;
+      background: rgba(0,0,0,.85); border-top: 2px solid var(--accent);
+      padding: 10px 20px;
+      font-size: 0.95rem; color: #fff;
+      animation: slideUp .3s ease;
+    }
+    @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .featured-qa-label { font-size: 0.7rem; color: var(--accent); font-weight: 700;
+                         text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
+    .featured-qa-text  { font-size: 0.95rem; color: #fff; }
+    .featured-qa-asker { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+
+    #stream-sidebar {
+      width: 320px; flex-shrink: 0;
+      background: var(--surface); border-left: 1.5px solid var(--border);
+      display: flex; flex-direction: column;
+    }
+    .stream-event-title {
+      padding: 12px 16px 0;
+      font-size: 0.9rem; font-weight: 700; color: var(--text);
+      border-bottom: none;
+    }
+    .sidebar-tabs {
+      display: flex; border-bottom: 1.5px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sid-tab {
+      flex: 1; background: none; border: none; cursor: pointer;
+      padding: 10px; font-size: 0.85rem; font-weight: 600;
+      color: var(--text-muted); border-bottom: 2.5px solid transparent;
+      margin-bottom: -1.5px; transition: color .15s, border-color .15s;
+    }
+    .sid-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Chat */
+    #sidebar-chat, #sidebar-qa { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+    #chat-messages, #qa-questions {
+      flex: 1; overflow-y: auto; padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .chat-msg {
+      background: var(--surface-2); border-radius: 8px; padding: 8px 10px;
+    }
+    .chat-msg-author { font-size: 0.75rem; font-weight: 700; color: var(--accent); margin-bottom: 2px; }
+    .chat-msg-text   { font-size: 0.88rem; color: var(--text); line-height: 1.4; word-break: break-word; }
+    .chat-msg.mine   { background: #1a1200; border: 1px solid #3d3200; }
+
+    .chat-input-row {
+      display: flex; gap: 8px; padding: 10px 12px;
+      border-top: 1.5px solid var(--border); flex-shrink: 0;
+    }
+    .chat-input-row input {
+      flex: 1; background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; color: var(--text);
+      font-size: 0.88rem;
+    }
+    .chat-input-row input:focus { outline: none; border-color: var(--accent); }
+
+    /* Q&A */
+    .qa-item {
+      background: var(--surface-2); border-radius: 8px; padding: 10px 12px;
+      border: 1px solid var(--border);
+    }
+    .qa-item.featured { border-color: var(--accent); background: #1a1200; }
+    .qa-item-asker { font-size: 0.75rem; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
+    .qa-item-text  { font-size: 0.88rem; color: var(--text); line-height: 1.4; }
+    .qa-item-actions {
+      display: flex; gap: 6px; margin-top: 8px;
+    }
+    .qa-item-actions button {
+      font-size: 0.72rem; padding: 3px 8px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); cursor: pointer; transition: all .15s;
+    }
+    .qa-item-actions button:hover { border-color: var(--accent); color: var(--accent); }
+    .qa-item-actions button.featured-btn { border-color: var(--accent); color: var(--accent); }
+
+    .qa-input-row {
+      display: flex; gap: 8px; padding: 10px 12px;
+      border-top: 1.5px solid var(--border); flex-shrink: 0;
+    }
+    .qa-input-row input {
+      flex: 1; background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; color: var(--text);
+      font-size: 0.88rem;
+    }
+    .qa-input-row input:focus { outline: none; border-color: var(--accent); }
+
+    /* Stream admin bar */
+    #stream-admin-bar {
+      display: none;
+      background: #1a1200; border-top: 1.5px solid #3d3200;
+      padding: 10px 16px; flex-shrink: 0;
+      display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #stream-admin-bar.visible { display: flex; }
+    .admin-bar-label { font-size: 0.8rem; color: var(--accent); font-weight: 700; }
+
+    @media (max-width: 700px) {
+      #stream-wrap { flex-direction: column; height: auto; }
+      #stream-sidebar { width: 100%; height: 380px; border-left: none; border-top: 1.5px solid var(--border); }
+      #daily-iframe { min-height: 240px; }
+    }
+
+    /* ── Admin create event form ──────────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      z-index: 500; display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .modal {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: var(--radius); padding: 28px;
+      width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal h2 { font-size: 1.2rem; font-weight: 700; color: #fff; margin-bottom: 20px; }
+    .form-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+    .form-field label { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+                        letter-spacing: .06em; color: var(--text-muted); }
+    .form-field input, .form-field textarea, .form-field select {
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 10px 14px; color: var(--text);
+      font-size: 0.9rem; font-family: inherit;
+    }
+    .form-field textarea { resize: vertical; min-height: 80px; }
+    .form-field input:focus, .form-field textarea:focus { outline: none; border-color: var(--accent); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+
+    /* ── Admin event controls on detail page ─────────────────────────────────── */
+    .admin-event-controls {
+      background: #1a1200; border: 1.5px solid #3d3200;
+      border-radius: var(--radius); padding: 14px 18px;
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .admin-event-controls span { font-size: 0.82rem; color: var(--accent); font-weight: 700; }
+
+    /* ── Add Mux playback form ────────────────────────────────────────────────── */
+    .mux-form {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: var(--radius); padding: 16px 18px; margin-bottom: 24px;
+    }
+    .mux-form h4 { font-size: 0.85rem; font-weight: 700; color: var(--accent);
+                   margin-bottom: 10px; }
+    .mux-form-row { display: flex; gap: 10px; }
+    .mux-form-row input {
+      flex: 1; background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 0.88rem;
+    }
+    .mux-form-row input:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Buttons (shared with style.css) ─────────────────────────────────────── */
+    .btn { display: inline-flex; align-items: center; gap: 6px;
+           padding: 8px 16px; border-radius: 8px; font-size: 0.88rem;
+           font-weight: 600; cursor: pointer; border: none;
+           transition: opacity .15s, background .15s; }
+    .btn:hover { opacity: .88; }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-ghost   { background: none; border: 1.5px solid var(--border); color: var(--text-muted); }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
+
+    /* ── Empty state ─────────────────────────────────────────────────────────── */
+    .empty-state {
+      text-align: center; padding: 60px 20px; color: var(--text-muted);
+    }
+    .empty-state .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+    .empty-state p { font-size: 0.93rem; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header id="app-header">
+  <div class="header-left">
+    <a href="/practice-log.html" class="app-logo" title="Practice Hub">🎹</a>
+    <span class="header-title">Events &amp; Replays</span>
+  </div>
+  <div class="header-right">
+    <span id="header-user-name" style="font-size:.82rem;color:var(--text-muted)"></span>
+    <button class="btn btn-ghost btn-sm" onclick="signOut()">Sign out</button>
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<main id="events-main">
+
+  <!-- ── View: Events list ─────────────────────────────────────────────────── -->
+  <div id="view-list" class="view active">
+    <div class="events-page-hdr">
+      <h1>Events &amp; Replays</h1>
+      <button id="btn-new-event" class="btn btn-primary" style="display:none" onclick="openCreateModal()">
+        + New Event
+      </button>
+    </div>
+    <div class="evt-tabs">
+      <button class="evt-tab active" onclick="showEvtTab('upcoming', this)">Upcoming</button>
+      <button class="evt-tab" onclick="showEvtTab('past', this)">Past Replays</button>
+    </div>
+    <div id="events-grid"></div>
+  </div>
+
+  <!-- ── View: Event detail ─────────────────────────────────────────────────── -->
+  <div id="view-detail" class="view">
+    <button class="back-btn" onclick="showView('list')">← Back to Events</button>
+    <div id="event-detail-content"></div>
+  </div>
+
+  <!-- ── View: Live stream ──────────────────────────────────────────────────── -->
+  <div id="view-stream" class="view" style="padding:0;max-width:100vw;">
+    <div id="stream-wrap">
+      <!-- Video col -->
+      <div id="stream-video-col">
+        <iframe id="daily-iframe"
+          allow="camera; microphone; fullscreen; speaker; display-capture; autoplay"
+        ></iframe>
+        <div id="featured-qa-bar">
+          <div class="featured-qa-label">💬 Featured Question</div>
+          <div class="featured-qa-text" id="featured-qa-text"></div>
+          <div class="featured-qa-asker" id="featured-qa-asker"></div>
+        </div>
+      </div>
+      <!-- Sidebar -->
+      <div id="stream-sidebar">
+        <div class="stream-event-title" id="stream-event-title"></div>
+        <div class="sidebar-tabs">
+          <button class="sid-tab active" onclick="showSidebarTab('chat', this)">💬 Chat</button>
+          <button class="sid-tab" onclick="showSidebarTab('qa', this)">🙋 Q&amp;A</button>
+        </div>
+        <!-- Chat panel -->
+        <div id="sidebar-chat" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+          <div id="chat-messages"></div>
+          <div class="chat-input-row">
+            <input id="chat-input" placeholder="Say something…" maxlength="300"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}" />
+            <button class="btn btn-primary btn-sm" onclick="sendChat()">Send</button>
+          </div>
+        </div>
+        <!-- Q&A panel -->
+        <div id="sidebar-qa" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+          <div id="qa-questions"></div>
+          <div class="qa-input-row">
+            <input id="qa-input" placeholder="Ask a question…" maxlength="400"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();submitQA()}" />
+            <button class="btn btn-primary btn-sm" onclick="submitQA()">Ask</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Admin stream controls -->
+    <div id="stream-admin-bar">
+      <span class="admin-bar-label">⚙️ Host Controls</span>
+      <button class="btn btn-sm btn-ghost" onclick="toggleRecording()" id="btn-recording">⏺ Start Recording</button>
+      <button class="btn btn-sm btn-danger" onclick="endStream()">⏹ End Stream</button>
+      <button class="btn btn-sm btn-ghost" onclick="showView('detail')">← Back to event page</button>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Create / Edit event modal ──────────────────────────────────────────── -->
+<div id="modal-create" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <h2 id="modal-title">New Event</h2>
+    <div class="form-field">
+      <label>Title *</label>
+      <input id="f-title" placeholder="Live Practice Clinic: …" />
+    </div>
+    <div class="form-field">
+      <label>Description</label>
+      <textarea id="f-desc" placeholder="What will we cover in this session?"></textarea>
+    </div>
+    <div class="form-field">
+      <label>Cover image URL</label>
+      <input id="f-cover" placeholder="https://…" />
+    </div>
+    <div class="form-field">
+      <label>Date &amp; Time *</label>
+      <input id="f-date" type="datetime-local" />
+    </div>
+    <div class="form-field">
+      <label>Duration (minutes)</label>
+      <input id="f-duration" type="number" value="60" min="15" max="360" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeCreateModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEvent()">Save Event</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Supabase ──────────────────────────────────────────────────────────────────
+const SUPA_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const db = supabase.createClient(SUPA_URL, SUPA_ANON);
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let myEmail    = null;
+let myName     = null;
+let isAdmin    = false;
+let authToken  = null;
+let currentEvent = null;
+let editingEventId = null;
+let chatChannel  = null;
+let qaChannel    = null;
+let countdownInterval = null;
+let isRecording  = false;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) { window.location.href = "/practice-log.html"; return; }
+
+  myEmail   = session.user.email;
+  authToken = session.access_token;
+
+  // Get display name
+  const { data: ae } = await db.from("allowed_emails").select("name, is_admin").eq("email", myEmail).single();
+  myName  = ae?.name || myEmail.split("@")[0];
+  isAdmin = !!ae;  // any row in allowed_emails = admin for now
+
+  document.getElementById("header-user-name").textContent = myName;
+  if (isAdmin) document.getElementById("btn-new-event").style.display = "inline-flex";
+
+  loadEvents("upcoming");
+})();
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function signOut() {
+  await db.auth.signOut();
+  window.location.href = "/practice-log.html";
+}
+
+// ── View routing ──────────────────────────────────────────────────────────────
+function showView(name) {
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+  document.getElementById("view-" + name).classList.add("active");
+
+  if (name !== "stream") {
+    // Clean up realtime channels when leaving stream
+    if (chatChannel) { db.removeChannel(chatChannel); chatChannel = null; }
+    if (qaChannel)   { db.removeChannel(qaChannel);   qaChannel   = null; }
+  }
+  if (name === "detail" && currentEvent) {
+    renderDetailView(currentEvent);
+  }
+  window.scrollTo(0, 0);
+}
+
+// ── Events list ───────────────────────────────────────────────────────────────
+async function loadEvents(tab) {
+  const grid = document.getElementById("events-grid");
+  grid.innerHTML = `<p style="color:var(--text-muted);font-size:.9rem">Loading…</p>`;
+
+  let query = db.from("live_events").select("*").order("scheduled_at", { ascending: tab === "upcoming" });
+  if (tab === "upcoming") {
+    query = query.in("status", ["scheduled", "live"]);
+  } else {
+    query = query.eq("status", "ended");
+  }
+
+  const { data: events } = await query;
+  if (!events || events.length === 0) {
+    grid.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">${tab === "upcoming" ? "📅" : "🎬"}</div>
+      <p>${tab === "upcoming" ? "No upcoming events scheduled yet." : "No past replays yet."}</p>
+    </div>`;
+    return;
+  }
+
+  grid.innerHTML = "";
+  events.forEach(ev => {
+    const card = document.createElement("div");
+    card.className = "event-card";
+    card.onclick = () => openEvent(ev);
+
+    const cover = ev.cover_url
+      ? `<img class="event-card-cover" src="${ev.cover_url}" alt="" loading="lazy">`
+      : `<div class="event-card-cover-placeholder">🎹</div>`;
+
+    const statusBadge = ev.status === "live"
+      ? `<span class="event-card-status status-live"><span class="live-dot"></span> Live Now</span>`
+      : ev.status === "scheduled"
+      ? `<span class="event-card-status status-scheduled">Upcoming</span>`
+      : `<span class="event-card-status status-ended">Replay</span>`;
+
+    const dateStr = formatEventDate(ev.scheduled_at);
+
+    card.innerHTML = `
+      ${cover}
+      <div class="event-card-body">
+        ${statusBadge}
+        <div class="event-card-title">${esc(ev.title)}</div>
+        <div class="event-card-meta">${dateStr}</div>
+        <div class="event-card-footer">
+          <span class="evt-badge">⏱ ${ev.duration_mins} min</span>
+          ${ev.status === "live" ? `<span class="evt-badge" style="color:#ff6b6b">● Streaming now</span>` : ""}
+        </div>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function showEvtTab(tab, btn) {
+  document.querySelectorAll(".evt-tab").forEach(t => t.classList.remove("active"));
+  btn.classList.add("active");
+  loadEvents(tab);
+}
+
+// ── Event detail ──────────────────────────────────────────────────────────────
+async function openEvent(ev) {
+  currentEvent = ev;
+  showView("detail");
+}
+
+async function renderDetailView(ev) {
+  // Refresh event data
+  const { data } = await db.from("live_events").select("*").eq("id", ev.id).single();
+  if (data) { currentEvent = ev = data; }
+
+  const el = document.getElementById("event-detail-content");
+  const dateStr = formatEventDate(ev.scheduled_at);
+  const endTime = new Date(new Date(ev.scheduled_at).getTime() + ev.duration_mins * 60000);
+
+  const cover = ev.cover_url
+    ? `<img class="event-detail-cover" src="${ev.cover_url}" alt="">`
+    : `<div class="event-detail-cover-placeholder">🎹</div>`;
+
+  // RSVP status
+  const { data: rsvpRow } = await db.from("event_rsvps")
+    .select("id").eq("event_id", ev.id).eq("email", myEmail).maybeSingle();
+  const hasRsvp = !!rsvpRow;
+
+  // RSVP count
+  const { count: rsvpCount } = await db.from("event_rsvps")
+    .select("id", { count: "exact", head: true }).eq("event_id", ev.id);
+
+  // Admin controls
+  const adminHtml = isAdmin ? `
+    <div class="admin-event-controls">
+      <span>⚙️ Admin</span>
+      <button class="btn btn-sm btn-ghost" onclick="openEditModal()">Edit</button>
+      ${ev.status === "scheduled" ? `<button class="btn btn-sm btn-primary" onclick="startStream('${ev.id}')">▶ Go Live</button>` : ""}
+      ${ev.status === "live" ? `<button class="btn btn-sm btn-danger" onclick="endStreamFromDetail('${ev.id}')">⏹ End Stream</button>` : ""}
+    </div>` : "";
+
+  // Mux recording input (admin, ended events)
+  const muxHtml = isAdmin && ev.status === "ended" && !ev.mux_playback_id ? `
+    <div class="mux-form">
+      <h4>Add Recording</h4>
+      <div class="mux-form-row">
+        <input id="mux-pid-input" placeholder="Mux Playback ID" />
+        <button class="btn btn-sm btn-primary" onclick="saveMuxPlaybackId('${ev.id}')">Save</button>
+      </div>
+    </div>` : "";
+
+  // Recording player
+  const recordingHtml = ev.mux_playback_id ? `
+    <div class="recording-block">
+      <h3>📽 Recording</h3>
+      <div class="mux-player-wrap">
+        <video controls style="width:100%;height:100%;border-radius:var(--radius);"
+          src="https://stream.mux.com/${ev.mux_playback_id}/high.mp4">
+        </video>
+      </div>
+    </div>` : "";
+
+  // Countdown (scheduled only)
+  const countdownHtml = ev.status === "scheduled" ? `
+    <div class="countdown-block">
+      <div class="countdown-label">📅 Stream starts in</div>
+      <div class="countdown-digits" id="countdown-digits"></div>
+    </div>` : "";
+
+  // Join stream button
+  let joinBtn = "";
+  if (ev.status === "live") {
+    joinBtn = `<button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Join Live Stream</button>`;
+  }
+
+  // RSVP button (scheduled only)
+  const rsvpBtn = ev.status === "scheduled"
+    ? hasRsvp
+      ? `<button class="btn btn-ghost" onclick="removeRsvp('${ev.id}')">✓ Going · Remove</button>`
+      : `<button class="btn btn-primary" onclick="addRsvp('${ev.id}')">📅 I'm Going</button>`
+    : "";
+
+  el.innerHTML = `
+    ${cover}
+    <div class="event-detail-hdr">
+      <div>
+        <div class="event-detail-title">${esc(ev.title)}</div>
+        <div class="event-detail-meta">Hosted by Matthew Cawood · ${ev.duration_mins} min</div>
+      </div>
+      <span class="event-card-status ${ev.status === "live" ? "status-live" : ev.status === "scheduled" ? "status-scheduled" : "status-ended"}">
+        ${ev.status === "live" ? '<span class="live-dot"></span> Live Now' : ev.status === "scheduled" ? "Upcoming" : "Ended"}
+      </span>
+    </div>
+
+    <div class="event-info-row">
+      <div class="event-info-item">
+        <span class="event-info-label">Date</span>
+        <span class="event-info-val">${dateStr}</span>
+      </div>
+      <div class="event-info-item">
+        <span class="event-info-label">Duration</span>
+        <span class="event-info-val">${ev.duration_mins} minutes</span>
+      </div>
+      <div class="event-info-item">
+        <span class="event-info-label">Attendees</span>
+        <span class="event-info-val">${rsvpCount || 0} going</span>
+      </div>
+    </div>
+
+    ${ev.description ? `<div class="event-detail-desc">${esc(ev.description)}</div>` : ""}
+
+    ${adminHtml}
+    ${countdownHtml}
+
+    <div class="event-actions">
+      ${joinBtn}
+      ${rsvpBtn}
+    </div>
+
+    ${muxHtml}
+    ${recordingHtml}
+
+    <div class="comments-section">
+      <h3>💬 Discussion</h3>
+      <div class="comment-input-row">
+        <textarea id="comment-input" placeholder="Ask a question or leave a comment…"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="postComment('${ev.id}')">Post</button>
+      </div>
+      <div class="comment-list" id="comment-list">
+        <p style="color:var(--text-muted);font-size:.88rem">Loading comments…</p>
+      </div>
+    </div>
+  `;
+
+  loadComments(ev.id);
+
+  if (ev.status === "scheduled") {
+    startCountdown(new Date(ev.scheduled_at));
+  }
+}
+
+// ── Countdown ─────────────────────────────────────────────────────────────────
+function startCountdown(targetDate) {
+  if (countdownInterval) clearInterval(countdownInterval);
+  function tick() {
+    const el = document.getElementById("countdown-digits");
+    if (!el) { clearInterval(countdownInterval); return; }
+    const diff = targetDate - Date.now();
+    if (diff <= 0) { el.innerHTML = `<span style="color:var(--accent)">Starting now…</span>`; clearInterval(countdownInterval); return; }
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    const unit = (n, l) => `<div class="countdown-unit"><span class="countdown-num">${String(n).padStart(2,"0")}</span><span class="countdown-unit-label">${l}</span></div>`;
+    el.innerHTML = (d > 0 ? unit(d,"days") : "") + unit(h,"hrs") + unit(m,"min") + unit(s,"sec");
+  }
+  tick();
+  countdownInterval = setInterval(tick, 1000);
+}
+
+// ── RSVP ──────────────────────────────────────────────────────────────────────
+async function addRsvp(eventId) {
+  await db.from("event_rsvps").insert({ event_id: eventId, email: myEmail });
+  renderDetailView(currentEvent);
+}
+async function removeRsvp(eventId) {
+  await db.from("event_rsvps").delete().eq("event_id", eventId).eq("email", myEmail);
+  renderDetailView(currentEvent);
+}
+
+// ── Comments ──────────────────────────────────────────────────────────────────
+async function loadComments(eventId) {
+  const { data } = await db.from("event_comments")
+    .select("*").eq("event_id", eventId).order("created_at", { ascending: true });
+  const el = document.getElementById("comment-list");
+  if (!el) return;
+  if (!data || data.length === 0) {
+    el.innerHTML = `<p style="color:var(--text-muted);font-size:.88rem">No comments yet. Be the first!</p>`;
+    return;
+  }
+  el.innerHTML = data.map(c => `
+    <div class="comment-item">
+      <div class="comment-header">
+        <span class="comment-author">${esc(c.name || c.email.split("@")[0])}</span>
+        <span class="comment-date">${timeAgo(c.created_at)}</span>
+      </div>
+      <div class="comment-body">${esc(c.content)}</div>
+    </div>
+  `).join("");
+}
+
+async function postComment(eventId) {
+  const input = document.getElementById("comment-input");
+  const content = input.value.trim();
+  if (!content) return;
+  input.value = "";
+  await db.from("event_comments").insert({
+    event_id: eventId, email: myEmail, name: myName, content
+  });
+  loadComments(eventId);
+}
+
+// ── Start / End stream (admin) ─────────────────────────────────────────────────
+async function startStream(eventId) {
+  const btn = event.target;
+  btn.textContent = "Creating room…";
+  btn.disabled = true;
+
+  try {
+    const res = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+      body: JSON.stringify({ action: "create-room", eventId })
+    });
+    const room = await res.json();
+    if (room.error) throw new Error(JSON.stringify(room.error));
+
+    // Update event in DB
+    const { error } = await db.from("live_events").update({
+      status: "live",
+      daily_room_name: room.roomName,
+      daily_room_url:  room.roomUrl
+    }).eq("id", eventId);
+
+    if (error) throw error;
+    currentEvent = { ...currentEvent, status: "live", daily_room_name: room.roomName, daily_room_url: room.roomUrl };
+    await joinStream(eventId);
+  } catch (e) {
+    alert("Failed to start stream: " + e.message);
+    btn.textContent = "▶ Go Live";
+    btn.disabled = false;
+  }
+}
+
+async function endStreamFromDetail(eventId) {
+  if (!confirm("End the live stream?")) return;
+  await db.from("live_events").update({ status: "ended" }).eq("id", eventId);
+  currentEvent = { ...currentEvent, status: "ended" };
+  renderDetailView(currentEvent);
+}
+
+// ── Join stream ───────────────────────────────────────────────────────────────
+async function joinStream(eventId) {
+  // Refresh event to get latest room details
+  const { data: ev } = await db.from("live_events").select("*").eq("id", eventId).single();
+  if (!ev || ev.status !== "live") { alert("Stream is not live."); return; }
+  currentEvent = ev;
+
+  // Get a Daily.co token
+  const res = await fetch("/api/daily", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+    body: JSON.stringify({ action: "get-token", roomName: ev.daily_room_name, isOwner: isAdmin })
+  });
+  const { token, error } = await res.json();
+  if (error || !token) { alert("Could not join stream."); return; }
+
+  // Set up iframe
+  const iframe = document.getElementById("daily-iframe");
+  iframe.src = `${ev.daily_room_url}?t=${token}`;
+
+  // Event title in sidebar
+  document.getElementById("stream-event-title").textContent = ev.title;
+
+  // Admin bar
+  if (isAdmin) document.getElementById("stream-admin-bar").classList.add("visible");
+
+  showView("stream");
+  setupRealtimeStream(ev);
+}
+
+// ── Realtime chat & Q&A ───────────────────────────────────────────────────────
+function setupRealtimeStream(ev) {
+  // Load existing chat
+  db.from("event_chat").select("*").eq("event_id", ev.id)
+    .order("created_at").then(({ data }) => {
+      if (data) data.forEach(appendChatMsg);
+    });
+
+  // Load existing Q&A
+  db.from("event_qa").select("*").eq("event_id", ev.id)
+    .order("created_at").then(({ data }) => {
+      if (data) data.forEach(appendQAItem);
+    });
+
+  // Subscribe to new chat messages
+  chatChannel = db.channel(`event-chat-${ev.id}`)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_chat",
+      filter: `event_id=eq.${ev.id}` }, p => appendChatMsg(p.new))
+    .subscribe();
+
+  // Subscribe to new Q&A / updates
+  qaChannel = db.channel(`event-qa-${ev.id}`)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_qa",
+      filter: `event_id=eq.${ev.id}` }, p => appendQAItem(p.new))
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "event_qa",
+      filter: `event_id=eq.${ev.id}` }, p => updateQAItem(p.new))
+    .subscribe();
+}
+
+function appendChatMsg(msg) {
+  const el = document.getElementById("chat-messages");
+  if (!el) return;
+  const mine = msg.email === myEmail;
+  const div = document.createElement("div");
+  div.className = "chat-msg" + (mine ? " mine" : "");
+  div.dataset.id = msg.id;
+  div.innerHTML = `
+    <div class="chat-msg-author">${esc(msg.name || msg.email.split("@")[0])}</div>
+    <div class="chat-msg-text">${esc(msg.message)}</div>
+  `;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendChat() {
+  const input = document.getElementById("chat-input");
+  const message = input.value.trim();
+  if (!message || !currentEvent) return;
+  input.value = "";
+  await db.from("event_chat").insert({
+    event_id: currentEvent.id, email: myEmail, name: myName, message
+  });
+}
+
+function appendQAItem(q) {
+  const el = document.getElementById("qa-questions");
+  if (!el) return;
+  const existing = el.querySelector(`[data-id="${q.id}"]`);
+  if (existing) { existing.replaceWith(buildQAEl(q)); return; }
+  el.appendChild(buildQAEl(q));
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateQAItem(q) {
+  const el = document.getElementById("qa-questions");
+  if (!el) return;
+  const existing = el.querySelector(`[data-id="${q.id}"]`);
+  if (existing) existing.replaceWith(buildQAEl(q));
+
+  // Update featured bar
+  if (q.is_featured) {
+    document.getElementById("featured-qa-text").textContent = q.question;
+    document.getElementById("featured-qa-asker").textContent = "— " + (q.name || q.email.split("@")[0]);
+    document.getElementById("featured-qa-bar").style.display = "block";
+  }
+}
+
+function buildQAEl(q) {
+  const div = document.createElement("div");
+  div.className = "qa-item" + (q.is_featured ? " featured" : "");
+  div.dataset.id = q.id;
+  let actions = "";
+  if (isAdmin) {
+    actions = `<div class="qa-item-actions">
+      <button class="${q.is_featured ? "featured-btn" : ""}" onclick="featureQA('${q.id}', ${!q.is_featured})">
+        ${q.is_featured ? "★ Featured" : "☆ Feature"}
+      </button>
+      <button onclick="markAnswered('${q.id}')">✓ Answered</button>
+    </div>`;
+  }
+  div.innerHTML = `
+    <div class="qa-item-asker">${esc(q.name || q.email.split("@")[0])}</div>
+    <div class="qa-item-text">${esc(q.question)}</div>
+    ${q.answered ? `<div style="font-size:.72rem;color:var(--accent);margin-top:4px">✓ Answered</div>` : ""}
+    ${actions}
+  `;
+  return div;
+}
+
+async function submitQA() {
+  const input = document.getElementById("qa-input");
+  const question = input.value.trim();
+  if (!question || !currentEvent) return;
+  input.value = "";
+  await db.from("event_qa").insert({
+    event_id: currentEvent.id, email: myEmail, name: myName, question
+  });
+}
+
+async function featureQA(qaId, feature) {
+  // Unfeature all others first
+  if (feature) {
+    await db.from("event_qa").update({ is_featured: false }).eq("event_id", currentEvent.id);
+  }
+  await db.from("event_qa").update({ is_featured: feature }).eq("id", qaId);
+  if (!feature) {
+    document.getElementById("featured-qa-bar").style.display = "none";
+  }
+}
+
+async function markAnswered(qaId) {
+  await db.from("event_qa").update({ answered: true, is_featured: false }).eq("id", qaId);
+  document.getElementById("featured-qa-bar").style.display = "none";
+}
+
+async function endStream() {
+  if (!confirm("End the live stream for everyone?")) return;
+  await db.from("live_events").update({ status: "ended" }).eq("id", currentEvent.id);
+  currentEvent = { ...currentEvent, status: "ended" };
+  showView("detail");
+}
+
+function toggleRecording() {
+  isRecording = !isRecording;
+  document.getElementById("btn-recording").textContent =
+    isRecording ? "⏹ Stop Recording" : "⏺ Start Recording";
+  // Note: Daily.co cloud recording is started/stopped via their dashboard or REST API.
+  // This button is a visual indicator only for now — full API integration TBD.
+}
+
+// ── Sidebar tabs ──────────────────────────────────────────────────────────────
+function showSidebarTab(tab, btn) {
+  document.querySelectorAll(".sid-tab").forEach(t => t.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  document.getElementById("sidebar-chat").style.display = tab === "chat" ? "flex" : "none";
+  document.getElementById("sidebar-qa").style.display   = tab === "qa"   ? "flex" : "none";
+}
+
+// ── Create / Edit event modal ─────────────────────────────────────────────────
+function openCreateModal() {
+  editingEventId = null;
+  document.getElementById("modal-title").textContent = "New Event";
+  document.getElementById("f-title").value    = "";
+  document.getElementById("f-desc").value     = "";
+  document.getElementById("f-cover").value    = "";
+  document.getElementById("f-date").value     = "";
+  document.getElementById("f-duration").value = "60";
+  document.getElementById("modal-create").style.display = "flex";
+}
+
+function openEditModal() {
+  if (!currentEvent) return;
+  editingEventId = currentEvent.id;
+  document.getElementById("modal-title").textContent = "Edit Event";
+  document.getElementById("f-title").value    = currentEvent.title || "";
+  document.getElementById("f-desc").value     = currentEvent.description || "";
+  document.getElementById("f-cover").value    = currentEvent.cover_url || "";
+  document.getElementById("f-date").value     = currentEvent.scheduled_at
+    ? new Date(currentEvent.scheduled_at).toISOString().slice(0,16) : "";
+  document.getElementById("f-duration").value = currentEvent.duration_mins || 60;
+  document.getElementById("modal-create").style.display = "flex";
+}
+
+function closeCreateModal() {
+  document.getElementById("modal-create").style.display = "none";
+}
+
+async function saveEvent() {
+  const title    = document.getElementById("f-title").value.trim();
+  const desc     = document.getElementById("f-desc").value.trim();
+  const cover    = document.getElementById("f-cover").value.trim();
+  const dateVal  = document.getElementById("f-date").value;
+  const duration = parseInt(document.getElementById("f-duration").value) || 60;
+
+  if (!title || !dateVal) { alert("Title and date are required."); return; }
+
+  const payload = {
+    title,
+    description:   desc || null,
+    cover_url:     cover || null,
+    scheduled_at:  new Date(dateVal).toISOString(),
+    duration_mins: duration,
+    created_by:    myEmail
+  };
+
+  if (editingEventId) {
+    await db.from("live_events").update(payload).eq("id", editingEventId);
+    currentEvent = { ...currentEvent, ...payload };
+  } else {
+    const { data } = await db.from("live_events").insert(payload).select().single();
+    currentEvent = data;
+  }
+
+  closeCreateModal();
+  if (editingEventId) {
+    renderDetailView(currentEvent);
+  } else {
+    showView("detail");
+    renderDetailView(currentEvent);
+  }
+}
+
+// ── Add Mux playback ID ───────────────────────────────────────────────────────
+async function saveMuxPlaybackId(eventId) {
+  const pid = document.getElementById("mux-pid-input").value.trim();
+  if (!pid) return;
+  await db.from("live_events").update({ mux_playback_id: pid }).eq("id", eventId);
+  currentEvent = { ...currentEvent, mux_playback_id: pid };
+  renderDetailView(currentEvent);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(str) {
+  if (!str) return "";
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+            .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+function formatEventDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"long", year:"numeric" })
+    + " · " + d.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
+}
+
+function timeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60000)  return "just now";
+  if (diff < 3600000) return Math.floor(diff/60000) + "m ago";
+  if (diff < 86400000) return Math.floor(diff/3600000) + "h ago";
+  return Math.floor(diff/86400000) + "d ago";
+}
+</script>
+</body>
+</html>
