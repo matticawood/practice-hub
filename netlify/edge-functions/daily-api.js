@@ -80,7 +80,6 @@ export default async (request) => {
           enable_screenshare: true,
           enable_recording: "cloud",
           exp: Math.floor(Date.now() / 1000) + 60 * 60 * 6, // expires 6h from now
-          max_participants: 200
         }
       })
     });
