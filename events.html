@@ -1315,49 +1315,98 @@ async function joinStream(eventId) {
     return false;
   }
 
-  // Set up Daily.co call frame via SDK
+  if (typeof DailyIframe === "undefined") {
+    alert("Daily.co SDK not loaded");
+    return false;
+  }
+
+  // Destroy any existing call
+  if (window._callFrame) {
+    try { await window._callFrame.destroy(); } catch(e) {}
+    window._callFrame = null;
+  }
+
+  const container = document.getElementById("daily-container");
+  container.innerHTML = "";
+
   try {
-    if (window._callFrame) {
-      try { await window._callFrame.destroy(); } catch(e) {}
-      window._callFrame = null;
-    }
+    if (isAdmin) {
+      // ── HOST: full Daily.co iframe UI with camera/mic controls ──────────────
+      window._callFrame = DailyIframe.createFrame(container, {
+        showLeaveButton: true,
+        showFullscreenButton: true,
+        iframeStyle: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }
+      });
 
-    if (typeof DailyIframe === "undefined") throw new Error("Daily.co SDK not loaded");
+      await window._callFrame.join({
+        url: ev.daily_room_url,
+        token: result.token
+      });
 
-    const container = document.getElementById("daily-container");
-    container.innerHTML = "";
+      window._callFrame.on("left-meeting", () => {
+        if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
+        const c = document.getElementById("daily-container");
+        if (c) c.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;"><p style="color:var(--text-muted)">You left the stream.</p><button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button></div>`;
+      });
 
-    window._callFrame = DailyIframe.createFrame(container, {
-      showLeaveButton: true,
-      showFullscreenButton: true,
-      iframeStyle: {
-        position: "absolute", top: 0, left: 0,
-        width: "100%", height: "100%", border: "none"
-      }
-    });
-
-    await window._callFrame.join({
-      url:           ev.daily_room_url,
-      token:         result.token,
-      startVideoOff: !isAdmin,
-      startAudioOff: !isAdmin,
-      // Viewers: don't request camera/mic access from the browser at all
-      ...(!isAdmin ? { videoSource: false, audioSource: false } : {})
-    });
-
-    // When the user clicks Daily's Leave button, show a Rejoin prompt in-place
-    window._callFrame.on("left-meeting", () => {
-      if (window._callFrame) {
-        try { window._callFrame.destroy(); } catch(e) {}
-        window._callFrame = null;
-      }
-      const c = document.getElementById("daily-container");
-      if (c) c.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
-          <p style="color:var(--text-muted)">You left the stream.</p>
-          <button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button>
+    } else {
+      // ── VIEWER: headless call object — no Daily.co UI whatsoever ───────────
+      // Build the video + audio elements first
+      container.innerHTML = `
+        <video id="viewer-video" autoplay playsinline
+          style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:#000;border-radius:var(--radius)">
+        </video>
+        <audio id="viewer-audio" autoplay></audio>
+        <div id="viewer-waiting" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--text-muted);pointer-events:none;">
+          <span style="font-size:2rem">🎹</span>
+          <span>Stream starting…</span>
         </div>`;
-    });
+
+      const call = DailyIframe.createCallObject({ videoSource: false, audioSource: false });
+      window._callFrame = call;
+
+      await call.join({ url: ev.daily_room_url, token: result.token });
+
+      // Wire up remote tracks to our video/audio elements
+      function syncTracks() {
+        const videoEl = document.getElementById("viewer-video");
+        const audioEl = document.getElementById("viewer-audio");
+        const waitEl  = document.getElementById("viewer-waiting");
+        if (!videoEl) return;
+
+        const videoTracks = [], audioTracks = [];
+        Object.values(call.participants()).forEach(p => {
+          if (p.local) return;
+          const vt = p.tracks?.video?.persistentTrack;
+          const at = p.tracks?.audio?.persistentTrack;
+          if (vt && p.tracks.video.state === "playable") videoTracks.push(vt);
+          if (at && p.tracks.audio.state === "playable") audioTracks.push(at);
+        });
+
+        if (videoTracks.length) {
+          videoEl.srcObject = new MediaStream(videoTracks);
+          if (waitEl) waitEl.style.display = "none";
+        } else {
+          videoEl.srcObject = null;
+          if (waitEl) waitEl.style.display = "flex";
+        }
+        if (audioTracks.length && audioEl) {
+          audioEl.srcObject = new MediaStream(audioTracks);
+        }
+      }
+
+      call.on("track-started",        syncTracks);
+      call.on("track-stopped",        syncTracks);
+      call.on("participant-joined",   syncTracks);
+      call.on("participant-updated",  syncTracks);
+      call.on("participant-left",     syncTracks);
+
+      call.on("left-meeting", () => {
+        if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
+        const c = document.getElementById("daily-container");
+        if (c) c.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;"><p style="color:var(--text-muted)">You left the stream.</p><button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button></div>`;
+      });
+    }
   } catch(e) {
     alert("Failed to start video: " + e.message);
     return false;
