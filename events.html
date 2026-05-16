@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://unpkg.com/@daily-co/daily-js"></script>
   <style>
     /* ── Events page ─────────────────────────────────────────────────────────── */
     #app-header {
@@ -244,12 +245,13 @@
       background: #000; position: relative;
     }
     .video-ratio-wrap {
-      width: 100%; height: 100%; position: relative;
+      width: 100%; height: 100%; position: relative; background: #000;
     }
-    #daily-iframe {
+    /* Daily.co SDK injects its own iframe — make sure it fills the container */
+    .video-ratio-wrap iframe {
       position: absolute; top: 0; left: 0;
-      width: 100%; height: 100%;
-      border: none; display: block;
+      width: 100% !important; height: 100% !important;
+      border: none;
     }
     /* Featured Q&A — lives at top of sidebar on all screen sizes */
     #featured-qa-bar {
@@ -576,11 +578,7 @@
     <div id="stream-wrap">
       <!-- Video col -->
       <div id="stream-video-col">
-        <div class="video-ratio-wrap">
-          <iframe id="daily-iframe"
-            allow="camera; microphone; fullscreen; speaker; display-capture; autoplay"
-          ></iframe>
-        </div>
+        <div class="video-ratio-wrap" id="daily-container"></div>
       </div> <!-- /stream-video-col -->
       <!-- Sidebar -->
       <div id="stream-sidebar">
@@ -889,6 +887,8 @@ function showView(name) {
     // Clean up realtime channels when leaving stream
     if (chatChannel) { db.removeChannel(chatChannel); chatChannel = null; }
     if (qaChannel)   { db.removeChannel(qaChannel);   qaChannel   = null; }
+    // Clean up Daily.co call frame
+    if (window._callFrame) { window._callFrame.destroy(); window._callFrame = null; }
   }
   if (name === "detail" && currentEvent) {
     renderDetailView(currentEvent);
@@ -1239,9 +1239,30 @@ async function joinStream(eventId) {
   }
   const token = result.token;
 
-  // Set up iframe
-  const iframe = document.getElementById("daily-iframe");
-  iframe.src = `${ev.daily_room_url}?t=${result.token}`;
+  // Set up Daily.co call frame via SDK (bypasses pre-join screen)
+  if (window._callFrame) { window._callFrame.destroy(); window._callFrame = null; }
+
+  const container = document.getElementById("daily-container");
+  container.innerHTML = ""; // clear any previous frame
+
+  window._callFrame = DailyIframe.createFrame(container, {
+    showLeaveButton: true,
+    showFullscreenButton: true,
+    showPrejoinUI: false,      // skip pre-join for all users
+    iframeStyle: {
+      position: "absolute",
+      top: 0, left: 0,
+      width: "100%", height: "100%",
+      border: "none"
+    }
+  });
+
+  await window._callFrame.join({
+    url:            ev.daily_room_url,
+    token:          result.token,
+    startVideoOff:  !isAdmin,
+    startAudioOff:  !isAdmin
+  });
 
   // Event title in sidebar
   document.getElementById("stream-event-title").textContent = ev.title;
