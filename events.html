@@ -1094,6 +1094,22 @@ async function renderDetailView(ev) {
   if (ev.status === "scheduled") {
     startCountdown(new Date(ev.scheduled_at));
   }
+
+  // For ended events without a recording yet, watch for the webhook to populate it
+  if (ev.status === "ended" && !ev.mux_playback_id) {
+    const recordingWatcher = db.channel(`event-recording-${ev.id}`)
+      .on("postgres_changes", {
+        event: "UPDATE", schema: "public", table: "live_events",
+        filter: `id=eq.${ev.id}`
+      }, payload => {
+        if (payload.new.mux_playback_id) {
+          db.removeChannel(recordingWatcher);
+          currentEvent = { ...currentEvent, ...payload.new };
+          renderDetailView(currentEvent);
+        }
+      })
+      .subscribe();
+  }
 }
 
 // ── Countdown ─────────────────────────────────────────────────────────────────
