@@ -1233,7 +1233,8 @@ async function startStream(eventId) {
     // If room already exists (e.g. after page refresh), just rejoin
     if (latestEv?.daily_room_name) {
       currentEvent = { ...currentEvent, ...latestEv };
-      await joinStream(eventId);
+      const ok = await joinStream(eventId);
+      if (!ok) btn.disabled = false;
       return;
     }
 
@@ -1259,7 +1260,12 @@ async function startStream(eventId) {
 
     if (error) throw error;
     currentEvent = { ...currentEvent, status: "live", daily_room_name: room.roomName, daily_room_url: room.roomUrl };
-    await joinStream(eventId);
+
+    const ok = await joinStream(eventId);
+    if (!ok) {
+      btn.textContent = "▶ Go Live";
+      btn.disabled = false;
+    }
   } catch (e) {
     alert("Failed to start stream: " + e.message);
     btn.textContent = "▶ Go Live";
@@ -1275,31 +1281,31 @@ async function endStreamFromDetail(eventId) {
 }
 
 // ── Join stream ───────────────────────────────────────────────────────────────
+// Returns true on success, false on any failure (caller should restore UI).
 async function joinStream(eventId) {
   // Refresh event to get latest room details
   const { data: ev } = await db.from("live_events").select("*").eq("id", eventId).single();
-  if (!ev || ev.status !== "live") { alert("Stream is not live."); return; }
+  if (!ev || ev.status !== "live") { alert("Stream is not live."); return false; }
   currentEvent = ev;
 
-  if (!ev.daily_room_name) { alert("Room not ready yet — try again in a moment."); return; }
+  if (!ev.daily_room_name) { alert("Room not ready yet — try again in a moment."); return false; }
 
   // Always refresh the auth token before calling the edge function
   const { data: { session }, error: sessErr } = await db.auth.getSession();
-  if (sessErr || !session) { alert("Session expired — please sign in again."); window.location.href = "/practice-log.html"; return; }
+  if (sessErr || !session) { alert("Session expired — please sign in again."); window.location.href = "/practice-log.html"; return false; }
   authToken = session.access_token;
 
   // Get a Daily.co token
-  const res = await fetch("/api/daily", {
+  const tokenRes = await fetch("/api/daily", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
     body: JSON.stringify({ action: "get-token", roomName: ev.daily_room_name, isOwner: isAdmin })
   });
-  const result = await res.json();
+  const result = await tokenRes.json();
   if (result.error || !result.token) {
-    alert("Could not join stream: " + JSON.stringify(result.error || "no token returned"));
-    return;
+    alert("Could not get stream token: " + JSON.stringify(result.error || "no token returned"));
+    return false;
   }
-  const token = result.token;
 
   // Set up Daily.co call frame via SDK
   try {
@@ -1332,36 +1338,30 @@ async function joinStream(eventId) {
       ...(!isAdmin ? { videoSource: false, audioSource: false } : {})
     });
 
-    // When the user leaves via Daily.co's built-in Leave button, go back to detail
+    // When the user clicks Daily's Leave button, show a Rejoin prompt in-place
     window._callFrame.on("left-meeting", () => {
       if (window._callFrame) {
         try { window._callFrame.destroy(); } catch(e) {}
         window._callFrame = null;
       }
-      const container = document.getElementById("daily-container");
-      if (container) container.innerHTML = "";
-      // Show a rejoin button in the video area
-      if (container) {
-        container.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
-            <p style="color:var(--text-muted)">You left the stream.</p>
-            <button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button>
-          </div>`;
-      }
+      const c = document.getElementById("daily-container");
+      if (c) c.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
+          <p style="color:var(--text-muted)">You left the stream.</p>
+          <button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button>
+        </div>`;
     });
   } catch(e) {
     alert("Failed to start video: " + e.message);
-    return;
+    return false;
   }
 
-  // Event title in sidebar
+  // Show stream view
   document.getElementById("stream-event-title").textContent = ev.title;
-
-  // Admin bar
   if (isAdmin) document.getElementById("stream-admin-bar").classList.add("visible");
-
   showView("stream");
   setupRealtimeStream(ev);
+  return true;
 }
 
 // ── Realtime chat & Q&A ───────────────────────────────────────────────────────
