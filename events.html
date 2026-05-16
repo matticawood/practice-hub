@@ -1203,18 +1203,29 @@ async function joinStream(eventId) {
   if (!ev || ev.status !== "live") { alert("Stream is not live."); return; }
   currentEvent = ev;
 
+  if (!ev.daily_room_name) { alert("Room not ready yet — try again in a moment."); return; }
+
+  // Always refresh the auth token before calling the edge function
+  const { data: { session }, error: sessErr } = await db.auth.getSession();
+  if (sessErr || !session) { alert("Session expired — please sign in again."); window.location.href = "/practice-log.html"; return; }
+  authToken = session.access_token;
+
   // Get a Daily.co token
   const res = await fetch("/api/daily", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
     body: JSON.stringify({ action: "get-token", roomName: ev.daily_room_name, isOwner: isAdmin })
   });
-  const { token, error } = await res.json();
-  if (error || !token) { alert("Could not join stream."); return; }
+  const result = await res.json();
+  if (result.error || !result.token) {
+    alert("Could not join stream: " + JSON.stringify(result.error || "no token returned"));
+    return;
+  }
+  const token = result.token;
 
   // Set up iframe
   const iframe = document.getElementById("daily-iframe");
-  iframe.src = `${ev.daily_room_url}?t=${token}`;
+  iframe.src = `${ev.daily_room_url}?t=${result.token}`;
 
   // Event title in sidebar
   document.getElementById("stream-event-title").textContent = ev.title;
