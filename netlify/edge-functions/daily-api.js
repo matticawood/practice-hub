@@ -54,6 +54,22 @@ export default async (request) => {
     return Array.isArray(rows) && rows.length > 0;
   }
 
+  // ── Action: update-room ────────────────────────────────────────────────────
+  // Patch properties on an existing room (admin only).
+  if (action === "update-room") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { roomName: rn, properties } = body;
+    if (!rn || !properties) return json({ error: "roomName and properties required" }, 400);
+    const res = await fetch(`https://api.daily.co/v1/rooms/${rn}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({ properties })
+    });
+    const data = await res.json();
+    if (!res.ok) return json({ error: data }, res.status);
+    return json({ ok: true, room: data });
+  }
+
   // ── Action: create-room ────────────────────────────────────────────────────
   // Only admin. Creates a Daily.co room for an event.
   if (action === "create-room") {
@@ -75,6 +91,7 @@ export default async (request) => {
         name: roomName,
         properties: {
           enable_chat: false,          // we use our own Supabase chat
+          enable_prejoin_ui: false,    // skip Daily.co's pre-join screen for everyone
           start_video_off: false,
           start_audio_off: false,
           enable_screenshare: true,
