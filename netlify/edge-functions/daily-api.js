@@ -116,12 +116,13 @@ export default async (request) => {
       },
       body: JSON.stringify({
         properties: {
-          room_name: roomName,
-          user_name: displayName,
-          is_owner: isOwner || false,
-          start_video_off: !isOwner,
-          start_audio_off: !isOwner,
-          start_cloud_recording: isOwner || false   // auto-start recording when host joins
+          room_name:            roomName,
+          user_name:            displayName,
+          is_owner:             isOwner || false,
+          enable_prejoin_ui:    false,               // skip the Daily.co pre-join screen
+          start_video_off:      !isOwner,
+          start_audio_off:      !isOwner,
+          start_cloud_recording: isOwner || false    // auto-start recording when host joins
         }
       })
     });
