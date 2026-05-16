@@ -80,6 +80,7 @@ export default async (request) => {
           enable_screenshare: true,
           enable_recording: "cloud",
           max_participants: 200,
+          owner_only_broadcast: true,  // only host can have camera/mic on
           exp: Math.floor(Date.now() / 1000) + 60 * 60 * 6, // expires 6h from now
         }
       })
@@ -120,8 +121,6 @@ export default async (request) => {
           is_owner: isOwner || false,
           start_video_off: !isOwner,
           start_audio_off: !isOwner,
-          enable_video: isOwner || false,       // viewers cannot enable camera
-          enable_audio: isOwner || false,       // viewers cannot enable mic
           enable_screenshare: isOwner || false,
           start_cloud_recording: false
         }
