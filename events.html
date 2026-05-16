@@ -394,6 +394,47 @@
     }
     .mux-form-row input:focus { outline: none; border-color: var(--accent); }
 
+    /* ── Cover image upload ──────────────────────────────────────────────────── */
+    .cover-upload-area {
+      width: 100%; aspect-ratio: 16/6;
+      background: var(--surface-2); border: 2px dashed var(--border);
+      border-radius: 8px; cursor: pointer; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      position: relative; transition: border-color .15s;
+    }
+    .cover-upload-area:hover { border-color: var(--accent); }
+    .cover-upload-area.has-image { border-style: solid; border-color: var(--border); }
+    #cover-placeholder {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 6px; color: var(--text-muted); font-size: 0.88rem;
+      pointer-events: none;
+    }
+    #cover-preview-wrap { width: 100%; height: 100%; }
+    #cover-upload-progress {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,.7);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 10px;
+      color: var(--text); font-size: 0.88rem;
+    }
+    .upload-spinner {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 3px solid var(--border); border-top-color: var(--accent);
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .prev-covers-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+    }
+    .prev-cover-thumb {
+      aspect-ratio: 16/7; border-radius: 6px; overflow: hidden;
+      cursor: pointer; border: 2px solid transparent;
+      transition: border-color .15s; position: relative;
+    }
+    .prev-cover-thumb:hover { border-color: var(--accent); }
+    .prev-cover-thumb.selected { border-color: var(--accent); }
+    .prev-cover-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
     /* ── Flatpickr dark theme overrides ─────────────────────────────────────── */
     .flatpickr-calendar {
       background: var(--surface-2) !important;
@@ -581,8 +622,29 @@
       <textarea id="f-desc" placeholder="What will we cover in this session?"></textarea>
     </div>
     <div class="form-field">
-      <label>Cover image URL</label>
-      <input id="f-cover" placeholder="https://…" />
+      <label>Cover Image</label>
+      <div id="cover-upload-area" class="cover-upload-area" onclick="document.getElementById('cover-file-input').click()">
+        <input id="cover-file-input" type="file" accept="image/*" style="display:none" onchange="handleCoverUpload(this)" />
+        <div id="cover-preview-wrap">
+          <div id="cover-placeholder">
+            <span style="font-size:1.8rem">🖼</span>
+            <span>Click to upload an image</span>
+            <span style="font-size:0.75rem;color:var(--text-muted)">JPG, PNG, WebP — max 5MB</span>
+          </div>
+          <img id="cover-preview" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:8px;" />
+        </div>
+        <div id="cover-upload-progress" style="display:none">
+          <div class="upload-spinner"></div>
+          <span id="cover-upload-status">Uploading…</span>
+        </div>
+      </div>
+      <input id="f-cover" type="hidden" />
+
+      <!-- Previous covers -->
+      <div id="prev-covers-section" style="margin-top:10px;display:none">
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Previous covers</div>
+        <div id="prev-covers-grid" class="prev-covers-grid"></div>
+      </div>
     </div>
     <div class="form-field">
       <label>Date &amp; Time *</label>
@@ -608,6 +670,100 @@
 </div>
 
 <script>
+// ── Cover image upload ────────────────────────────────────────────────────────
+async function handleCoverUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { alert("Image must be under 5MB."); return; }
+
+  const area     = document.getElementById("cover-upload-area");
+  const progress = document.getElementById("cover-upload-progress");
+  const status   = document.getElementById("cover-upload-status");
+
+  progress.style.display = "flex";
+  status.textContent = "Uploading…";
+
+  const ext      = file.name.split(".").pop().toLowerCase();
+  const fileName = `cover-${Date.now()}.${ext}`;
+
+  const { data, error } = await db.storage
+    .from("event-covers")
+    .upload(fileName, file, { cacheControl: "3600", upsert: false });
+
+  if (error) {
+    progress.style.display = "none";
+    alert("Upload failed: " + error.message);
+    return;
+  }
+
+  const { data: urlData } = db.storage.from("event-covers").getPublicUrl(fileName);
+  const publicUrl = urlData.publicUrl;
+
+  // Update hidden input and preview
+  document.getElementById("f-cover").value = publicUrl;
+  setCoverPreview(publicUrl);
+  progress.style.display = "none";
+
+  // Refresh previous covers list
+  loadPreviousCovers();
+}
+
+function setCoverPreview(url) {
+  const area        = document.getElementById("cover-upload-area");
+  const placeholder = document.getElementById("cover-placeholder");
+  const preview     = document.getElementById("cover-preview");
+
+  if (url) {
+    preview.src = url;
+    preview.style.display = "block";
+    placeholder.style.display = "none";
+    area.classList.add("has-image");
+  } else {
+    preview.style.display = "none";
+    placeholder.style.display = "flex";
+    area.classList.remove("has-image");
+  }
+}
+
+async function loadPreviousCovers() {
+  // Pull distinct non-null cover_urls from past events
+  const { data } = await db.from("live_events")
+    .select("cover_url")
+    .not("cover_url", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const section = document.getElementById("prev-covers-section");
+  const grid    = document.getElementById("prev-covers-grid");
+  if (!data || data.length === 0) { section.style.display = "none"; return; }
+
+  // Deduplicate
+  const seen = new Set();
+  const unique = data.filter(r => {
+    if (seen.has(r.cover_url)) return false;
+    seen.add(r.cover_url); return true;
+  });
+
+  if (unique.length === 0) { section.style.display = "none"; return; }
+
+  section.style.display = "block";
+  const current = document.getElementById("f-cover").value;
+  grid.innerHTML = unique.map(r => `
+    <div class="prev-cover-thumb ${r.cover_url === current ? "selected" : ""}"
+         onclick="selectPreviousCover('${r.cover_url}', this)">
+      <img src="${r.cover_url}" alt="" loading="lazy" />
+    </div>
+  `).join("");
+}
+
+function selectPreviousCover(url, el) {
+  document.getElementById("f-cover").value = url;
+  setCoverPreview(url);
+  // Highlight selected
+  document.querySelectorAll(".prev-cover-thumb").forEach(t => t.classList.remove("selected"));
+  el.classList.add("selected");
+}
+
 // ── Timezones ─────────────────────────────────────────────────────────────────
 const TIMEZONES = [
   { label: "London (GMT/BST)",          value: "Europe/London" },
@@ -1209,8 +1365,10 @@ function openCreateModal() {
   document.getElementById("f-cover").value    = "";
   document.getElementById("f-duration").value = "60";
   document.getElementById("date-trigger-text").innerHTML = `<span class="dt-placeholder">Pick a date and time</span>`;
+  setCoverPreview(null);
   populateTzSelect();
   if (!datePicker) initDatePicker(); else datePicker.clear();
+  loadPreviousCovers();
   document.getElementById("modal-create").style.display = "flex";
 }
 
@@ -1222,6 +1380,8 @@ function openEditModal() {
   document.getElementById("f-desc").value     = currentEvent.description || "";
   document.getElementById("f-cover").value    = currentEvent.cover_url || "";
   document.getElementById("f-duration").value = currentEvent.duration_mins || 60;
+  setCoverPreview(currentEvent.cover_url || null);
+  loadPreviousCovers();
   populateTzSelect();
   // Set the saved timezone
   const tzSel = document.getElementById("f-timezone");
