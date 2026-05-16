@@ -1239,13 +1239,16 @@ async function startStream(eventId) {
     // If room already exists (e.g. after page refresh), just rejoin
     if (latestEv?.daily_room_name) {
       currentEvent = { ...currentEvent, ...latestEv };
-      // Ensure enable_prejoin_ui:false is set on the existing room
+      // Patch the existing room to ensure recording + no prejoin UI
       const { data: { session: s } } = await db.auth.getSession();
       if (s) authToken = s.access_token;
       await fetch("/api/daily", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-        body: JSON.stringify({ action: "update-room", roomName: latestEv.daily_room_name, properties: { enable_prejoin_ui: false } })
+        body: JSON.stringify({ action: "update-room", roomName: latestEv.daily_room_name, properties: {
+          enable_prejoin_ui: false,
+          enable_recording: "cloud"
+        }})
       });
       const ok = await joinStream(eventId);
       if (!ok) btn.disabled = false;
@@ -1347,6 +1350,13 @@ async function joinStream(eventId) {
       await window._callFrame.join({
         url: ev.daily_room_url,
         token: result.token
+      });
+
+      // Explicitly start cloud recording once joined — more reliable than token property
+      window._callFrame.on("joined-meeting", async () => {
+        try { await window._callFrame.startRecording(); } catch(e) {
+          console.warn("startRecording failed:", e.message);
+        }
       });
 
       window._callFrame.on("left-meeting", () => {
