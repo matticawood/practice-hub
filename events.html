@@ -1181,10 +1181,25 @@ async function postComment(eventId) {
 // ── Start / End stream (admin) ─────────────────────────────────────────────────
 async function startStream(eventId) {
   const btn = event.target;
-  btn.textContent = "Creating room…";
   btn.disabled = true;
 
   try {
+    // Refresh event from DB first
+    const { data: latestEv } = await db.from("live_events").select("*").eq("id", eventId).single();
+
+    // If room already exists (e.g. after page refresh), just rejoin
+    if (latestEv?.daily_room_name) {
+      currentEvent = { ...currentEvent, ...latestEv };
+      await joinStream(eventId);
+      return;
+    }
+
+    btn.textContent = "Creating room…";
+
+    // Refresh auth token
+    const { data: { session } } = await db.auth.getSession();
+    if (session) authToken = session.access_token;
+
     const res = await fetch("/api/daily", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
@@ -1193,7 +1208,6 @@ async function startStream(eventId) {
     const room = await res.json();
     if (room.error) throw new Error(JSON.stringify(room.error));
 
-    // Update event in DB
     const { error } = await db.from("live_events").update({
       status: "live",
       daily_room_name: room.roomName,
