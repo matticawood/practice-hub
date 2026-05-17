@@ -87,8 +87,8 @@
       text-decoration: none; font-family: inherit; box-sizing: border-box;
     }
     .sh-tab-drop a:hover { background: var(--surface-2, #1e1e1e); color: var(--text, #e5e5e5); }
-    @media (max-width: 640px) {
-      .sh-tab { padding: 9px 8px; font-size: 0.74rem; }
+    @media (max-width: 768px) {
+      .sh-tab-bar { display: none; }
     }
 
     /* ── Notif overlay + panel ── */
