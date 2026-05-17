@@ -3618,12 +3618,13 @@ async function submitReply(parentCommentId, textarea) {
 
   // Notify the person being replied to
   if (!error && replyToEmail && replyToEmail !== myEmail) {
-    await db.from("notifications").insert({
+    const { error: notifErr } = await db.from("notifications").insert({
       email: replyToEmail,
       type:  "comment_reply",
       title: `${myName || "Someone"} replied to your comment`,
       body:  content.slice(0, 120),
     });
+    if (notifErr) console.error("Notification insert failed:", notifErr);
   }
 
   textarea.disabled = false;
@@ -3643,6 +3644,19 @@ async function submitComment() {
   input.disabled = false;
 
   if (error) { alert("Couldn't post comment: " + error.message); return; }
+
+  // Notify the post owner if it's not their own comment
+  const post = _posts.find(p => p.id === _currentPostId);
+  if (post && post.email && post.email !== myEmail) {
+    const { error: notifErr } = await db.from("notifications").insert({
+      email: post.email,
+      type:  "new_comment",
+      title: `${myName || "Someone"} commented on your post`,
+      body:  content.slice(0, 120),
+    });
+    if (notifErr) console.error("Notification insert failed:", notifErr);
+  }
+
   input.value = "";
   input.style.height = "";
   await loadComments(_currentPostId);
