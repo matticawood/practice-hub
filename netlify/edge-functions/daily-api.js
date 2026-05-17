@@ -263,7 +263,10 @@ export default async (request) => {
       })
     });
     const data = await res.json();
-    if (!res.ok) return json({ error: data }, res.status);
+    if (!res.ok) {
+      const msg = data?.error?.messages?.[0] || JSON.stringify(data);
+      return json({ error: msg }, res.status);
+    }
     return json({ uploadId: data.data.id, uploadUrl: data.data.url });
   }
 
