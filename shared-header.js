@@ -186,9 +186,9 @@
     .sh-section-btn.active { color: var(--accent, #f5c518); }
 
     /* ── User avatar button ── */
+    .sh-avatar-wrap { position: relative; flex-shrink: 0; }
     .sh-avatar-btn {
       background: none; border: none; cursor: pointer; padding: 0;
-      position: relative; flex-shrink: 0;
     }
     .sh-avatar {
       width: 30px; height: 30px; border-radius: 50%;
@@ -204,7 +204,6 @@
       text-align: left;
     }
     .sh-user-menu.open { display: flex; }
-    .sh-avatar-btn { position: relative; }
     .sh-user-menu-item {
       display: block; width: 100%; padding: 11px 16px;
       background: none; border: none; border-bottom: 1px solid #1e1e1e;
@@ -236,14 +235,16 @@ document.addEventListener("DOMContentLoaded", function() {
           </svg>
           <span class="notif-badge" id="notif-badge" style="display:none"></span>
         </button>
-        <button class="sh-avatar-btn" id="sh-avatar-btn" onclick="window._shToggleUserMenu()">
-          <div class="sh-avatar" id="sh-avatar-el"></div>
-          <div class="sh-user-menu" id="sh-user-menu" onclick="event.stopPropagation()">
+        <div class="sh-avatar-wrap">
+          <button class="sh-avatar-btn" id="sh-avatar-btn" onclick="window._shToggleUserMenu()">
+            <div class="sh-avatar" id="sh-avatar-el"></div>
+          </button>
+          <div class="sh-user-menu" id="sh-user-menu">
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
             <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
             <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
           </div>
-        </button>
+        </div>
         <button class="btn btn-ghost btn-sm" id="sh-hamburger-btn" onclick="window._shOpenSheet()"
           aria-label="Open menu" style="padding:6px 8px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -454,7 +455,7 @@ window._shToggleUserMenu = function() {
 };
 // Close user menu on outside click
 document.addEventListener("click", function(e) {
-  if (!e.target.closest(".sh-avatar-btn")) {
+  if (!e.target.closest(".sh-avatar-wrap")) {
     document.getElementById("sh-user-menu")?.classList.remove("open");
   }
 });
