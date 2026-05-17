@@ -1009,6 +1009,88 @@
     .monthly-champ-name { flex: 1; font-weight: 600; color: var(--text); }
     .monthly-champ-time { font-size: 0.75rem; color: var(--text-muted); }
     .monthly-champs-sub { font-size: 0.68rem; color: var(--text-muted); text-align: right; }
+
+    /* ── Members directory ───────────────────────────────────────────────────── */
+    #panel-members { padding-top: 4px; }
+    .members-search-wrap {
+      position: relative; margin-bottom: 20px;
+    }
+    .members-search-wrap input {
+      width: 100%; box-sizing: border-box;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; color: var(--text);
+      font-size: 0.9rem; font-family: inherit;
+      padding: 10px 14px 10px 38px;
+      transition: border-color .15s; outline: none;
+    }
+    .members-search-wrap input:focus { border-color: var(--accent); }
+    .members-search-wrap svg {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      color: var(--text-muted); pointer-events: none;
+    }
+    .members-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .member-card {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 16px 16px;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 8px; text-align: center;
+      transition: border-color .15s;
+      cursor: default;
+    }
+    .member-card:hover { border-color: rgba(245,197,24,.4); }
+    .member-avatar {
+      width: 64px; height: 64px; border-radius: 50%;
+      object-fit: cover; flex-shrink: 0;
+    }
+    .member-avatar-initials {
+      width: 64px; height: 64px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; font-weight: 800; flex-shrink: 0;
+    }
+    .member-name {
+      font-size: 0.92rem; font-weight: 700; color: #fff;
+      line-height: 1.2;
+    }
+    .member-badge {
+      font-size: 0.68rem; font-weight: 600;
+      color: var(--accent); background: rgba(245,197,24,.1);
+      border: 1px solid rgba(245,197,24,.25);
+      border-radius: 20px; padding: 2px 8px;
+    }
+    .member-headline {
+      font-size: 0.78rem; color: var(--text-muted);
+      line-height: 1.3; max-width: 100%;
+      display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .member-location {
+      font-size: 0.72rem; color: var(--text-muted);
+      display: flex; align-items: center; gap: 4px;
+    }
+    .member-instrument {
+      font-size: 0.72rem; color: var(--text-muted);
+    }
+    .members-empty {
+      text-align: center; padding: 60px 0;
+      color: var(--text-muted); font-size: 0.87rem;
+    }
+    .members-count {
+      font-size: 0.78rem; color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+    @media (max-width: 480px) {
+      .members-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+      .member-card { padding: 16px 10px 12px; }
+    }
   </style>
 </head>
 <body>
@@ -1026,6 +1108,7 @@
           <div class="comm-tabs">
             <button class="comm-tab active" id="tab-btn-posts"    onclick="switchTab('posts')">Posts</button>
             <button class="comm-tab"        id="tab-btn-activity" onclick="switchTab('activity')">Activity</button>
+            <button class="comm-tab"        id="tab-btn-members"  onclick="switchTab('members')">Members</button>
           </div>
         </div>
 
@@ -1217,6 +1300,21 @@
             <div style="text-align:center;padding:40px 0;color:var(--text-muted);font-size:0.85rem">
               <div class="loading-spinner" style="margin:0 auto 10px"></div>
               Loading activity…
+            </div>
+          </div>
+        </div>
+
+        <!-- Members panel -->
+        <div id="panel-members" style="display:none">
+          <div class="members-search-wrap">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="members-search" placeholder="Search members…" oninput="filterMembers()" />
+          </div>
+          <div class="members-count" id="members-count"></div>
+          <div class="members-grid" id="members-grid">
+            <div class="members-empty">
+              <div class="loading-spinner" style="margin:0 auto 10px"></div>
+              Loading members…
             </div>
           </div>
         </div>
@@ -1514,10 +1612,107 @@ let _cmtMap = {};
 function switchTab(tab) {
   document.getElementById("tab-btn-posts").classList.toggle("active", tab === "posts");
   document.getElementById("tab-btn-activity").classList.toggle("active", tab === "activity");
+  document.getElementById("tab-btn-members").classList.toggle("active", tab === "members");
   document.getElementById("panel-posts").style.display    = tab === "posts"    ? "" : "none";
   document.getElementById("panel-activity").style.display = tab === "activity" ? "" : "none";
+  document.getElementById("panel-members").style.display  = tab === "members"  ? "" : "none";
   if (tab !== "posts") closeComposer();
   if (tab === "activity" && !_activityLoaded) loadActivity();
+  if (tab === "members"  && !_membersLoaded)  loadMembers();
+}
+
+// ── Members directory ─────────────────────────────────────────────────────────
+let _membersLoaded = false;
+let _allMembers    = [];
+
+const _memberColours = [
+  { bg: "#2d1b4e", fg: "#c084fc" }, { bg: "#1a3a2a", fg: "#6fcf97" },
+  { bg: "#2d2010", fg: "#f5c518" }, { bg: "#1a2a3d", fg: "#60a5fa" },
+  { bg: "#3a1a1a", fg: "#f87171" }, { bg: "#1a2d2d", fg: "#34d399" },
+];
+
+function _memberColour(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return _memberColours[Math.abs(h) % _memberColours.length];
+}
+
+function _memberInitials(name) {
+  const parts = (name || "?").trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : (parts[0][0] || "?").toUpperCase();
+}
+
+async function loadMembers() {
+  _membersLoaded = true;
+  const { data, error } = await db
+    .from("allowed_emails")
+    .select("name, headline, location, instrument, avatar_url, badge")
+    .eq("subscription_status", "active")
+    .eq("onboarded", true)
+    .order("name", { ascending: true });
+
+  if (error || !data) {
+    document.getElementById("members-grid").innerHTML =
+      `<div class="members-empty">Couldn't load members.</div>`;
+    return;
+  }
+  _allMembers = data.filter(m => m.name && m.name.trim());
+  renderMembers(_allMembers);
+}
+
+function renderMembers(members) {
+  const grid  = document.getElementById("members-grid");
+  const count = document.getElementById("members-count");
+  count.textContent = `${members.length} member${members.length === 1 ? "" : "s"}`;
+  if (!members.length) {
+    grid.innerHTML = `<div class="members-empty">No members found.</div>`;
+    return;
+  }
+  grid.innerHTML = members.map(m => {
+    const name  = (m.name || "").trim();
+    const col   = _memberColour(name);
+    const avatarHTML = m.avatar_url
+      ? `<img class="member-avatar" src="${m.avatar_url}" alt="${name}" onerror="this.replaceWith(initials_el('${name}'))">`
+      : `<div class="member-avatar-initials" style="background:${col.bg};color:${col.fg}">${_memberInitials(name)}</div>`;
+    const badgeHTML    = m.badge    ? `<div class="member-badge">${m.badge}</div>` : "";
+    const headlineHTML = m.headline ? `<div class="member-headline">${m.headline}</div>` : "";
+    const locationHTML = m.location
+      ? `<div class="member-location"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>${m.location}</div>`
+      : "";
+    const instrHTML    = m.instrument ? `<div class="member-instrument">🎹 ${m.instrument}</div>` : "";
+    return `<div class="member-card">
+      ${avatarHTML}
+      <div class="member-name">${name}</div>
+      ${badgeHTML}
+      ${headlineHTML}
+      ${locationHTML}
+      ${instrHTML}
+    </div>`;
+  }).join("");
+}
+
+function filterMembers() {
+  const q = (document.getElementById("members-search").value || "").toLowerCase();
+  if (!q) { renderMembers(_allMembers); return; }
+  renderMembers(_allMembers.filter(m =>
+    (m.name       || "").toLowerCase().includes(q) ||
+    (m.headline   || "").toLowerCase().includes(q) ||
+    (m.location   || "").toLowerCase().includes(q) ||
+    (m.instrument || "").toLowerCase().includes(q)
+  ));
+}
+
+// Helper to create initials element when avatar fails to load
+function initials_el(name) {
+  const col = _memberColour(name);
+  const el = document.createElement("div");
+  el.className = "member-avatar-initials";
+  el.style.background = col.bg;
+  el.style.color = col.fg;
+  el.textContent = _memberInitials(name);
+  return el;
 }
 
 const _filterPlaceholders = {
