@@ -668,6 +668,17 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       n.read = true; _badge(); window._shRenderNotifs();
       await db.from("notifications").update({ read: true }).eq("id", id).eq("email", myEmail);
     }
+    // Navigate to the linked content
+    if (n?.link_url) {
+      window._shCloseNotif?.();
+      const url = new URL(n.link_url, window.location.origin);
+      const isSamePage = url.pathname === window.location.pathname;
+      if (isSamePage && typeof window.showDetail === "function") {
+        const postId = url.searchParams.get("post");
+        if (postId) { window.showDetail(postId); return; }
+      }
+      window.location.href = n.link_url;
+    }
   };
 
   window._shMarkAllRead = async function() {
