@@ -504,18 +504,24 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     if (!name) return "?";
     return name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
   }
-  function _avatarColor(str) {
-    const colors = ["#b5451b","#1b6bb5","#1bb56b","#b5891b","#6b1bb5","#b51b6b","#1bb5b5"];
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    return colors[Math.abs(hash) % colors.length];
+  function _avatarColour(email) {
+    const P = [
+      {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+      {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
+      {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+      {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+    ];
+    let h = 0;
+    for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
+    return P[Math.abs(h) % P.length];
   }
   const avatarEl = document.getElementById("sh-avatar-el");
   if (avatarEl) {
     const initials = _getInitials(myName || myEmail?.split("@")[0]);
-    const color = _avatarColor(myEmail || myName || "?");
+    const colour = _avatarColour(myEmail || "");
     avatarEl.textContent = initials;
-    avatarEl.style.background = color;
+    avatarEl.style.background = colour.bg;
+    avatarEl.style.color = colour.fg;
   }
 
   // Logout — user menu button (desktop) and mobile sheet button
