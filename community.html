@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/shared-header.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3/dist/mux-player.mjs"></script>
   <style>
     /* ── Layout ──────────────────────────────────────────────────────────────── */
     #community-main {
@@ -261,6 +262,16 @@
       transition: opacity .15s;
     }
     .video-choose-btn:hover { opacity: .85; }
+    .mux-upload-progress {
+      width: 80%; height: 4px;
+      background: rgba(255,255,255,.12); border-radius: 4px; overflow: hidden;
+    }
+    .mux-upload-bar {
+      height: 100%; background: var(--accent);
+      border-radius: 4px; transition: width .3s;
+      width: 0%;
+    }
+    mux-player { display: block; width: 100%; border-radius: 8px; overflow: hidden; }
     .video-embed-tab {
       display: flex; gap: 8px; align-items: center; padding: 14px 16px;
     }
@@ -1348,30 +1359,105 @@ function handleFileAttach(input) {
   _renderMediaPreview();
 }
 
+let _muxUploading = false;
+
+function _resetVideoDropzone() {
+  document.getElementById("video-dropzone").innerHTML = `
+    <div class="video-dropzone-icon">🎬</div>
+    <p class="video-dropzone-text">Drop your video files here to attach them</p>
+    <button class="video-choose-btn" onclick="document.getElementById('file-input-video').click()">Choose video</button>
+  `;
+}
+
+async function _uploadVideoToMux(file) {
+  if (!file || !file.type.startsWith("video/")) { alert("Please select a video file."); return; }
+  if (_muxUploading) { alert("A video upload is already in progress."); return; }
+
+  // Show progress UI in the dropzone
+  const dropzone = document.getElementById("video-dropzone");
+  dropzone.innerHTML = `
+    <div class="video-dropzone-icon">🎬</div>
+    <p class="video-dropzone-text" style="font-weight:600">${escHtml(file.name)}</p>
+    <div class="mux-upload-progress"><div class="mux-upload-bar" id="mux-upload-bar"></div></div>
+    <p class="video-dropzone-text" id="mux-upload-status">Getting upload URL…</p>
+  `;
+
+  _muxUploading = true;
+  try {
+    // Step 1: get a direct Mux upload URL from our edge function
+    const token = (await db.auth.getSession()).data.session?.access_token;
+    const createRes = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "create-mux-upload" })
+    });
+    const { uploadId, uploadUrl, error } = await createRes.json();
+    if (error) throw new Error(JSON.stringify(error));
+
+    // Step 2: PUT the file directly to Mux with XHR for progress
+    document.getElementById("mux-upload-status").textContent = "Uploading…";
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          const bar = document.getElementById("mux-upload-bar");
+          const status = document.getElementById("mux-upload-status");
+          if (bar) bar.style.width = pct + "%";
+          if (status) status.textContent = `Uploading… ${pct}%`;
+        }
+      };
+      xhr.onload  = () => xhr.status < 300 ? resolve() : reject(new Error("Upload failed: " + xhr.status));
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.send(file);
+    });
+
+    // Step 3: poll for Mux to finish processing
+    const statusEl = document.getElementById("mux-upload-status");
+    if (statusEl) statusEl.textContent = "Processing video…";
+
+    let playbackId = null;
+    for (let i = 0; i < 72; i++) {  // up to ~6 min
+      await new Promise(r => setTimeout(r, 5000));
+      const statusRes = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "get-mux-upload-status", uploadId })
+      });
+      const s = await statusRes.json();
+      if (s.playbackId) { playbackId = s.playbackId; break; }
+      if (s.status === "errored") throw new Error("Video processing failed in Mux");
+    }
+    if (!playbackId) throw new Error("Video processing timed out — try again");
+
+    _composerMedia.push({ type: "mux", playbackId, name: file.name });
+    _renderMediaPreview();
+
+    // Close panel
+    _videoUrlPanelOpen = false;
+    document.getElementById("composer-video-url-panel").style.display = "none";
+    document.getElementById("toolbar-video-btn").classList.remove("recording");
+
+  } catch (e) {
+    alert("Video upload failed: " + e.message);
+    _resetVideoDropzone();
+  } finally {
+    _muxUploading = false;
+  }
+}
+
 function handleVideoFile(input) {
   const file = input.files[0];
-  if (!file) return;
-  const url = URL.createObjectURL(file);
-  _composerMedia.push({ type: "video", url, name: file.name, blob: file });
   input.value = "";
-  _renderMediaPreview();
-  // Close panel after selecting
-  _videoUrlPanelOpen = false;
-  document.getElementById("composer-video-url-panel").style.display = "none";
-  document.getElementById("toolbar-video-btn").classList.remove("recording");
+  _uploadVideoToMux(file);
 }
 
 function handleVideoDrop(event) {
   event.preventDefault();
   document.getElementById("video-dropzone").classList.remove("drag-over");
   const file = event.dataTransfer.files[0];
-  if (!file || !file.type.startsWith("video/")) return;
-  const url = URL.createObjectURL(file);
-  _composerMedia.push({ type: "video", url, name: file.name, blob: file });
-  _renderMediaPreview();
-  _videoUrlPanelOpen = false;
-  document.getElementById("composer-video-url-panel").style.display = "none";
-  document.getElementById("toolbar-video-btn").classList.remove("recording");
+  _uploadVideoToMux(file);
 }
 
 function switchVideoTab(tab) {
@@ -1382,11 +1468,11 @@ function switchVideoTab(tab) {
 }
 
 function toggleVideoPanel() {
+  if (_muxUploading) return; // don't close while uploading
   _videoUrlPanelOpen = !_videoUrlPanelOpen;
   document.getElementById("composer-video-url-panel").style.display = _videoUrlPanelOpen ? "" : "none";
   document.getElementById("toolbar-video-btn").classList.toggle("recording", _videoUrlPanelOpen);
-  // Always reset to Upload tab when opening
-  if (_videoUrlPanelOpen) switchVideoTab("upload");
+  if (_videoUrlPanelOpen) { switchVideoTab("upload"); _resetVideoDropzone(); }
 }
 
 function addVideoUrl() {
@@ -1521,6 +1607,7 @@ function _renderMediaPreview() {
     let icon = "📎", label = escHtml(m.name);
     if (m.type === "audio")     { icon = "🎙️"; label = `Voice message${m.duration ? " · " + m.duration + "s" : ""}`; }
     if (m.type === "video")     { icon = "🎬"; }
+    if (m.type === "mux")       { icon = "🎬"; label = `${escHtml(m.name)} · Mux`; }
     if (m.type === "youtube")   { icon = "▶️"; label = `YouTube · ${escHtml(m.ytId)}`; }
     if (m.type === "vimeo")     { icon = "▶️"; label = `Vimeo · ${escHtml(m.vimeoId)}`; }
     if (m.type === "video-url") { icon = "🎬"; }
@@ -1537,6 +1624,7 @@ function removeMedia(idx) {
 
 // ── Submit post (rich) ────────────────────────────────────────────────────────
 async function submitPost() {
+  if (_muxUploading) { alert("Please wait for the video upload to finish."); return; }
   const title   = document.getElementById("composer-title").value.trim();
   const content = document.getElementById("composer-content").value.trim();
   if (!title)   { alert("Please add a title."); document.getElementById("composer-title").focus(); return; }
@@ -1565,7 +1653,10 @@ async function submitPost() {
   const mediaJson = [];
   try {
     for (const m of _composerMedia) {
-      if (m.blob) {
+      if (m.type === "mux") {
+        // Already uploaded to Mux — just store the playback ID
+        mediaJson.push({ type: "mux", playbackId: m.playbackId, name: m.name });
+      } else if (m.blob) {
         const publicUrl = await uploadToStorage(m.blob, m.name);
         const entry = { type: m.type, url: publicUrl, name: m.name };
         if (m.duration) entry.duration = m.duration;
@@ -1707,6 +1798,10 @@ function postCardHTML(p) {
         <div class="post-card-media-label">🎙️ Voice message${escHtml(dur)}</div>
         <audio controls src="${escHtml(m.url)}" style="width:100%"></audio>
       </div>`;
+    } else if (m.type === "mux") {
+      richMedia += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()">
+        <mux-player playback-id="${escHtml(m.playbackId)}" style="width:100%" controls></mux-player>
+      </div>`;
     } else if (m.type === "video") {
       richMedia += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()">
         <video controls src="${escHtml(m.url)}" style="width:100%;max-height:360px;border-radius:8px"></video>
@@ -1837,8 +1932,10 @@ function renderDetail(postId) {
           <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:4px">🎙️ Voice message${escHtml(dur)}</div>
           <audio controls src="${escHtml(m.url)}" style="width:100%"></audio>
         </div>`;
+      } else if (m.type === "mux") {
+        mediaHtml += `<mux-player playback-id="${escHtml(m.playbackId)}" style="width:100%;margin-bottom:8px" controls></mux-player>`;
       } else if (m.type === "video") {
-        mediaHtml += `<video controls src="${escHtml(m.url)}" style="max-height:360px"></video>`;
+        mediaHtml += `<video controls src="${escHtml(m.url)}" style="width:100%;max-height:360px;margin-bottom:8px"></video>`;
       } else if (m.type === "youtube") {
         const ytId = escHtml(m.ytId || "");
         mediaHtml += `<iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe>`;

@@ -244,6 +244,57 @@ export default async (request) => {
     return json({ message: "Webhook created", webhook: data });
   }
 
+  // ── Action: create-mux-upload ──────────────────────────────────────────────
+  // Any authenticated member can get a direct Mux upload URL.
+  // The browser PUTs the video file straight to Mux — no size limit.
+  if (action === "create-mux-upload") {
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+
+    const res = await fetch("https://api.mux.com/video/v1/uploads", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`)
+      },
+      body: JSON.stringify({
+        cors_origin: "*",
+        new_asset_settings: { playback_policy: ["public"] }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) return json({ error: data }, res.status);
+    return json({ uploadId: data.data.id, uploadUrl: data.data.url });
+  }
+
+  // ── Action: get-mux-upload-status ─────────────────────────────────────────
+  // Poll this after the browser upload finishes to get the playback ID.
+  if (action === "get-mux-upload-status") {
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+    const { uploadId } = body;
+    if (!uploadId) return json({ error: "uploadId required" }, 400);
+
+    const auth = "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`);
+    const res = await fetch(`https://api.mux.com/video/v1/uploads/${uploadId}`, {
+      headers: { "Authorization": auth }
+    });
+    const data = await res.json();
+    const upload = data.data;
+
+    if (upload.asset_id) {
+      const assetRes = await fetch(`https://api.mux.com/video/v1/assets/${upload.asset_id}`, {
+        headers: { "Authorization": auth }
+      });
+      const assetData = await assetRes.json();
+      const asset = assetData.data;
+      const playbackId = asset.playback_ids?.[0]?.id || null;
+      return json({ status: upload.status, assetId: upload.asset_id, playbackId });
+    }
+
+    return json({ status: upload.status });
+  }
+
   return json({ error: "Unknown action" }, 400);
 };
 
