@@ -2037,21 +2037,49 @@ async function loadMemberActivity() {
   const panel = document.getElementById("mm-panel-activity");
   if (!panel.querySelector(".mm-tab-loading")) return;
 
-  const { data, error } = await db
-    .from("practice_sessions")
-    .select("id, session_date, duration_minutes")
-    .eq("email", _mmEmail)
-    .order("session_date", { ascending: false })
-    .limit(30);
+  const [sessResult, achResult] = await Promise.all([
+    db.from("practice_sessions")
+      .select("id, session_date, duration_minutes")
+      .eq("email", _mmEmail)
+      .order("session_date", { ascending: false })
+      .limit(50),
+    db.from("achievement_events")
+      .select("achievement_id, earned_at")
+      .eq("email", _mmEmail)
+      .order("earned_at", { ascending: false }),
+  ]);
 
-  const sessions = data || [];
-  if (error || !sessions.length) {
-    panel.innerHTML = `<div class="mm-tab-empty">No practice sessions yet.</div>`;
+  // Normalise into a single list with a sortable date
+  const items = [
+    ...(sessResult.data || []).map(r => ({ type: "session",      date: r.session_date, data: r })),
+    ...(achResult.data  || []).map(r => ({ type: "achievement",  date: r.earned_at,    data: r })),
+  ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  if (!items.length) {
+    panel.innerHTML = `<div class="mm-tab-empty">No activity yet.</div>`;
     return;
   }
 
-  panel.innerHTML = sessions.map(row => `
-    <div class="mm-activity-item">
+  panel.innerHTML = items.map(item => {
+    if (item.type === "achievement") {
+      const row   = item.data;
+      const ach   = ACH[row.achievement_id] || {};
+      const aname = ach.name || row.achievement_id || "Achievement";
+      const adesc = ach.desc || "";
+      const cat   = ACH_CAT[row.achievement_id] || "sessions";
+      const col   = _BADGE_PALETTE[cat] || _BADGE_PALETTE.sessions;
+      const badge = achBadgeSVG(row.achievement_id, 32);
+      return `<div class="mm-activity-item">
+        <div class="mm-activity-icon" style="background:${col[0]}18;border:1px solid ${col[0]}40">${badge}</div>
+        <div class="mm-activity-body">
+          <div class="mm-activity-title" style="color:${col[0]}">${escHtml(aname)}</div>
+          ${adesc ? `<div class="mm-activity-desc">${escHtml(adesc)}</div>` : ""}
+          <div class="mm-activity-time">Achievement · ${relativeTime(row.earned_at)}</div>
+        </div>
+      </div>`;
+    }
+    const row = item.data;
+    return `<div class="mm-activity-item">
       <div class="mm-activity-icon" style="background:rgba(245,197,24,.08);border:1px solid rgba(245,197,24,.2)">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#f5c518" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       </div>
@@ -2060,7 +2088,8 @@ async function loadMemberActivity() {
         <div class="mm-activity-desc">${formatMinutes(row.duration_minutes || 0)}</div>
         <div class="mm-activity-time">${relativeTime(row.session_date)}</div>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 function closeMemberModal(e) {
