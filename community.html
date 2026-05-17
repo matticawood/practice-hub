@@ -272,6 +272,40 @@
       width: 0%;
     }
     mux-player { display: block; width: 100%; border-radius: 8px; overflow: hidden; }
+
+    /* ── Composer upload progress overlay ────────────────────────────────────── */
+    .mux-upload-overlay {
+      display: flex; align-items: center; gap: 14px;
+      background: rgba(245,197,24,.07);
+      border: 1.5px solid rgba(245,197,24,.25);
+      border-radius: 10px; padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .mux-upload-overlay-icon { font-size: 1.5rem; flex-shrink: 0; }
+    .mux-upload-overlay-body { flex: 1; min-width: 0; }
+    .mux-upload-overlay-filename {
+      font-size: 0.85rem; font-weight: 600; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 8px;
+    }
+    .mux-upload-overlay-track {
+      width: 100%; height: 5px;
+      background: rgba(255,255,255,.12); border-radius: 4px; overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .mux-upload-overlay-bar {
+      height: 100%; background: var(--accent);
+      border-radius: 4px; transition: width .25s ease;
+      width: 0%;
+    }
+    .mux-upload-overlay-status {
+      font-size: 0.75rem; color: var(--text-muted);
+    }
+    @keyframes mux-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+    .mux-upload-overlay-status.processing {
+      animation: mux-pulse 1.4s ease-in-out infinite;
+      color: var(--accent);
+    }
     .video-embed-tab {
       display: flex; gap: 8px; align-items: center; padding: 14px 16px;
     }
@@ -843,6 +877,18 @@
               <!-- Media preview area -->
               <div class="media-preview-area" id="composer-media-preview"></div>
 
+              <!-- Mux upload progress (shown during video upload) -->
+              <div id="mux-upload-overlay" style="display:none" class="mux-upload-overlay">
+                <div class="mux-upload-overlay-icon">🎬</div>
+                <div class="mux-upload-overlay-body">
+                  <div class="mux-upload-overlay-filename" id="mux-overlay-filename">Uploading video…</div>
+                  <div class="mux-upload-overlay-track">
+                    <div class="mux-upload-overlay-bar" id="mux-overlay-bar"></div>
+                  </div>
+                  <div class="mux-upload-overlay-status" id="mux-overlay-status">Starting…</div>
+                </div>
+              </div>
+
               <!-- Recording indicator -->
               <div id="composer-recording-indicator" style="display:none" class="recording-indicator">
                 <span class="recording-dot"></span>
@@ -1369,18 +1415,31 @@ function _resetVideoDropzone() {
   `;
 }
 
+function _setMuxOverlay({ show, filename, pct, status, processing }) {
+  const overlay  = document.getElementById("mux-upload-overlay");
+  const fnEl     = document.getElementById("mux-overlay-filename");
+  const barEl    = document.getElementById("mux-overlay-bar");
+  const statusEl = document.getElementById("mux-overlay-status");
+  if (!overlay) return;
+  overlay.style.display = show ? "" : "none";
+  if (!show) return;
+  if (filename !== undefined && fnEl)  fnEl.textContent  = filename;
+  if (pct      !== undefined && barEl) barEl.style.width = pct + "%";
+  if (status   !== undefined && statusEl) {
+    statusEl.textContent = status;
+    statusEl.className   = "mux-upload-overlay-status" + (processing ? " processing" : "");
+  }
+}
+
 async function _uploadVideoToMux(file) {
   if (!file || !file.type.startsWith("video/")) { alert("Please select a video file."); return; }
   if (_muxUploading) { alert("A video upload is already in progress."); return; }
 
-  // Show progress UI in the dropzone
-  const dropzone = document.getElementById("video-dropzone");
-  dropzone.innerHTML = `
-    <div class="video-dropzone-icon">🎬</div>
-    <p class="video-dropzone-text" style="font-weight:600">${escHtml(file.name)}</p>
-    <div class="mux-upload-progress"><div class="mux-upload-bar" id="mux-upload-bar"></div></div>
-    <p class="video-dropzone-text" id="mux-upload-status">Getting upload URL…</p>
-  `;
+  // Close the video panel and show the persistent overlay in the composer
+  _videoUrlPanelOpen = false;
+  document.getElementById("composer-video-url-panel").style.display = "none";
+  document.getElementById("toolbar-video-btn").classList.remove("recording");
+  _setMuxOverlay({ show: true, filename: file.name, pct: 0, status: "Getting upload URL…" });
 
   _muxUploading = true;
   try {
@@ -1395,17 +1454,14 @@ async function _uploadVideoToMux(file) {
     if (error) throw new Error(JSON.stringify(error));
 
     // Step 2: PUT the file directly to Mux with XHR for progress
-    document.getElementById("mux-upload-status").textContent = "Uploading…";
+    _setMuxOverlay({ pct: 0, status: "Uploading… 0%" });
     await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", uploadUrl);
       xhr.upload.onprogress = e => {
         if (e.lengthComputable) {
           const pct = Math.round(e.loaded / e.total * 100);
-          const bar = document.getElementById("mux-upload-bar");
-          const status = document.getElementById("mux-upload-status");
-          if (bar) bar.style.width = pct + "%";
-          if (status) status.textContent = `Uploading… ${pct}%`;
+          _setMuxOverlay({ pct, status: `Uploading… ${pct}%` });
         }
       };
       xhr.onload  = () => xhr.status < 300 ? resolve() : reject(new Error("Upload failed: " + xhr.status));
@@ -1414,8 +1470,7 @@ async function _uploadVideoToMux(file) {
     });
 
     // Step 3: poll for Mux to finish processing
-    const statusEl = document.getElementById("mux-upload-status");
-    if (statusEl) statusEl.textContent = "Processing video…";
+    _setMuxOverlay({ pct: 100, status: "Processing video — this takes about a minute…", processing: true });
 
     let playbackId = null;
     for (let i = 0; i < 72; i++) {  // up to ~6 min
@@ -1431,15 +1486,12 @@ async function _uploadVideoToMux(file) {
     }
     if (!playbackId) throw new Error("Video processing timed out — try again");
 
+    _setMuxOverlay({ show: false });
     _composerMedia.push({ type: "mux", playbackId, name: file.name });
     _renderMediaPreview();
 
-    // Close panel
-    _videoUrlPanelOpen = false;
-    document.getElementById("composer-video-url-panel").style.display = "none";
-    document.getElementById("toolbar-video-btn").classList.remove("recording");
-
   } catch (e) {
+    _setMuxOverlay({ show: false });
     alert("Video upload failed: " + e.message);
     _resetVideoDropzone();
   } finally {
