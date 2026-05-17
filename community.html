@@ -919,8 +919,23 @@
     }
     .comment-reply-btn:hover { color: var(--accent); }
     .comment-replies { margin-left: 36px; margin-top: 8px; display: flex; flex-direction: column; gap: 12px; }
-    .comment-item.is-reply { }
     .reply-to-name { color: var(--accent); font-weight: 600; margin-right: 4px; }
+    .inline-reply-composer {
+      margin-left: 36px; margin-top: 8px;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .inline-reply-composer textarea {
+      flex: 1; background: transparent; border: 1.5px solid var(--border);
+      border-radius: 16px; color: var(--text); font-size: 0.85rem;
+      font-family: inherit; padding: 7px 12px; resize: none;
+      min-height: 34px; max-height: 100px; transition: border-color .15s;
+    }
+    .inline-reply-composer textarea:focus { outline: none; border-color: var(--accent); }
+    .inline-reply-composer button {
+      background: var(--accent); border: none; border-radius: 14px;
+      padding: 6px 14px; font-size: 0.8rem; font-weight: 700;
+      font-family: inherit; cursor: pointer; color: #1a1410; white-space: nowrap;
+    }
 
     /* ── Activity feed — island cards ────────────────────────────────────────── */
     #community-feed-list { display: flex; flex-direction: column; gap: 12px; }
@@ -3506,10 +3521,10 @@ async function loadComments(postId) {
   });
 
   function commentHTML(c, isReply = false) {
-    const canDel  = isAdmin || c.email === myEmail;
+    const canDel   = isAdmin || c.email === myEmail;
     const dispName = escHtml(c.name || c.email.split("@")[0]);
     const replyPrefix = (isReply && c.reply_to_name)
-      ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span>` : "";
+      ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
     return `
       <div class="comment-item${isReply ? " is-reply" : ""}" id="comment-${c.id}">
         <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="display:contents;text-decoration:none">
@@ -3522,30 +3537,71 @@ async function loadComments(postId) {
             ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
           </div>
           <div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>
-          <button class="comment-reply-btn" onclick="startReply('${c.id}','${dispName.replace(/'/g,"\\'")}')">Reply</button>
+          ${!isReply ? `<button class="comment-reply-btn" onclick="startReply('${c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>` : ""}
         </div>
       </div>`;
   }
 
   listEl.innerHTML = topLevel.map(c => {
     const replies = repliesMap[c.id] || [];
+    const replyComposer = `
+      <div class="inline-reply-composer" id="reply-composer-${c.id}" style="display:none">
+        ${avatarHtml(myEmail, myName, 28, null)}
+        <textarea placeholder="Write a reply…" rows="1"
+          oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReply('${c.id}',this)}"
+        ></textarea>
+        <button onclick="submitReply('${c.id}',this.previousElementSibling)">Send</button>
+      </div>`;
     return commentHTML(c) +
-      (replies.length ? `<div class="comment-replies">${replies.map(r => commentHTML(r, true)).join("")}</div>` : "");
+      (replies.length ? `<div class="comment-replies">${replies.map(r => commentHTML(r, true)).join("")}</div>` : "") +
+      replyComposer;
   }).join("");
 }
 
-let _replyToCommentId   = null;
-let _replyToName        = null;
-let _replyToEmail       = null;
+function startReply(commentId, authorName, authorEmail) {
+  // Hide any other open reply composers
+  document.querySelectorAll(".inline-reply-composer").forEach(el => el.style.display = "none");
+  const composer = document.getElementById(`reply-composer-${commentId}`);
+  if (!composer) return;
+  composer.style.display = "flex";
+  composer.dataset.replyToName  = authorName;
+  composer.dataset.replyToEmail = authorEmail;
+  const ta = composer.querySelector("textarea");
+  ta.value = ""; ta.focus();
+}
 
-function startReply(commentId, authorName) {
-  _replyToCommentId = commentId;
-  _replyToName      = authorName;
-  const input = document.getElementById("comment-input");
-  input.value = `@${authorName} `;
-  input.focus();
-  input.setSelectionRange(input.value.length, input.value.length);
-  autoResize(input);
+async function submitReply(parentCommentId, textarea) {
+  const content = textarea.value.trim();
+  if (!content) return;
+  const composer     = document.getElementById(`reply-composer-${parentCommentId}`);
+  const replyToName  = composer?.dataset.replyToName  || null;
+  const replyToEmail = composer?.dataset.replyToEmail || null;
+
+  textarea.disabled = true;
+
+  const { error } = await db.from("community_post_comments").insert({
+    post_id:           _currentPostId,
+    email:             myEmail,
+    name:              myName,
+    content,
+    parent_comment_id: parentCommentId,
+    reply_to_name:     replyToName,
+  });
+
+  // Notify the person being replied to
+  if (!error && replyToEmail && replyToEmail !== myEmail) {
+    await db.from("notifications").insert({
+      email: replyToEmail,
+      type:  "comment_reply",
+      title: `${myName || "Someone"} replied to your comment`,
+      body:  content.slice(0, 120),
+    });
+  }
+
+  textarea.disabled = false;
+  if (error) { alert("Couldn't post reply: " + error.message); return; }
+  await loadComments(_currentPostId);
 }
 
 async function submitComment() {
@@ -3554,38 +3610,12 @@ async function submitComment() {
   if (!content || !_currentPostId) return;
 
   input.disabled = true;
-
-  const payload = {
-    post_id: _currentPostId, email: myEmail, name: myName, content,
-    parent_comment_id: _replyToCommentId || null,
-    reply_to_name:     _replyToName      || null,
-  };
-
-  const { error } = await db.from("community_post_comments").insert(payload);
-
-  // Notify the person being replied to
-  if (!error && _replyToCommentId) {
-    // Find the comment author's email by looking up the comment
-    const { data: parentCmt } = await db
-      .from("community_post_comments").select("email,name").eq("id", _replyToCommentId).maybeSingle();
-    if (parentCmt && parentCmt.email !== myEmail) {
-      await db.from("notifications").insert({
-        email:   parentCmt.email,
-        type:    "comment_reply",
-        title:   `${myName || "Someone"} replied to your comment`,
-        body:    content.slice(0, 120),
-        link:    `/community.html`,
-        read:    false,
-      }).then(() => {});  // fire-and-forget
-    }
-  }
-
+  const { error } = await db.from("community_post_comments").insert({
+    post_id: _currentPostId, email: myEmail, name: myName, content
+  });
   input.disabled = false;
-  _replyToCommentId = null;
-  _replyToName      = null;
 
   if (error) { alert("Couldn't post comment: " + error.message); return; }
-
   input.value = "";
   input.style.height = "";
   await loadComments(_currentPostId);
