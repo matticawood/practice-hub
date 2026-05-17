@@ -18,7 +18,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/shared-header.js"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3/dist/mux-player.mjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mux/upchunk@3/dist/upchunk.js"></script>
   <style>
     /* ── Layout ──────────────────────────────────────────────────────────────── */
     #community-main {
@@ -1461,28 +1460,25 @@ async function _uploadVideoToMux(file) {
     const { uploadId, uploadUrl } = createData;
     if (!uploadUrl) throw new Error("No upload URL returned from server");
 
-    // Step 2: Upload via UpChunk (chunked, retries, CORS-safe)
+    // Step 2: PUT the file directly to Mux with XHR for progress
     _setMuxOverlay({ pct: 0, status: "Uploading… 0%" });
-    console.log("[Mux] Starting UpChunk upload…");
+    console.log("[Mux] Starting upload…");
     await new Promise((resolve, reject) => {
-      const upload = UpChunk.createUpload({
-        endpoint: uploadUrl,
-        file,
-        chunkSize: 5120, // 5 MB chunks
-      });
-      upload.on("progress", e => {
-        const pct = Math.round(e.detail);
-        console.log("[Mux] Upload progress:", pct + "%");
-        _setMuxOverlay({ pct, status: `Uploading… ${pct}%` });
-      });
-      upload.on("success", () => {
-        console.log("[Mux] UpChunk upload complete");
-        resolve();
-      });
-      upload.on("error", e => {
-        console.error("[Mux] UpChunk error:", e.detail);
-        reject(new Error(e.detail?.message || "Upload failed"));
-      });
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          console.log("[Mux] Upload progress:", pct + "%");
+          _setMuxOverlay({ pct, status: `Uploading… ${pct}%` });
+        }
+      };
+      xhr.onload = () => {
+        console.log("[Mux] Upload complete, status:", xhr.status);
+        xhr.status < 300 ? resolve() : reject(new Error("Upload failed (" + xhr.status + ")"));
+      };
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.send(file);
     });
 
     // Step 3: poll for Mux to finish processing
