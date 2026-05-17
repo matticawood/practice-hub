@@ -17,33 +17,8 @@
 (function() {
   const s = document.createElement("style");
   s.textContent = `
-    /* ── Header ── */
-    #app-header {
-      position: sticky; top: 0; z-index: 150;
-      background: #000; border-bottom: 2px solid var(--accent, #f5c518);
-      padding: 14px 32px; display: flex; align-items: center; gap: 16px;
-    }
-    #app-header > .sh-title { flex: 1; }
-    #app-header h1 {
-      font-size: 1.4rem; font-weight: 700; color: #fff;
-      letter-spacing: -0.3px; margin: 0; line-height: 1; white-space: nowrap;
-    }
-    .header-user {
-      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-    }
-    .header-user .btn-sm {
-      display: inline-flex; align-items: center; justify-content: center;
-      gap: 5px; height: 30px; padding-top: 0; padding-bottom: 0;
-      line-height: 1; white-space: nowrap; box-sizing: border-box;
-    }
-    #header-email { font-size: 0.82rem; color: var(--text-muted, #888); }
-    @media (max-width: 768px) {
-      #app-header { padding: 12px 16px; }
-      #app-header h1 { font-size: 1rem; }
-      #header-email { display: none; }
-      #sh-admin-link { display: none !important; }
-      #sh-logout-btn { display: none; }
-    }
+    /* ── Header — base styles only (mobile layout handled by style.css) ── */
+    #app-header h1 { margin: 0; }
 
     /* ── Bell ── */
     .btn-bell { position: relative; flex-shrink: 0; }
@@ -89,10 +64,11 @@
       text-decoration: none; font-family: inherit; box-sizing: border-box;
     }
     .sh-tab-drop a:hover { background: var(--surface-2, #1e1e1e); color: var(--text, #e5e5e5); }
+    /* ── Hamburger: desktop hidden, mobile visible ── */
     #sh-hamburger-btn { display: none; }
     @media (max-width: 768px) {
       .sh-tab-bar { display: none; }
-      #sh-hamburger-btn { display: inline-flex; }
+      #sh-hamburger-btn { display: inline-flex; align-items: center; }
     }
 
     /* ── Notif overlay + panel ── */
@@ -351,7 +327,6 @@ document.addEventListener("DOMContentLoaded", function() {
 
     <a class="sh-section-btn" data-page="feedback" href="/feedback.html">Feedback</a>
     <a class="sh-section-btn" data-page="events"   href="/events.html">Events &amp; Replays</a>
-    <button class="sh-section-btn" id="sh-sheet-logout-btn" style="color:#888">Log out</button>
   `;
   document.body.appendChild(sheet);
 
@@ -471,7 +446,6 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // Logout (header button on desktop, sheet button on mobile)
   const logoutHandler = async () => { await db.auth.signOut(); window.location.href = "/practice-log.html"; };
   document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
-  document.getElementById("sh-sheet-logout-btn")?.addEventListener("click", logoutHandler);
 
   // Mark active tab + sheet item
   document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
