@@ -517,14 +517,24 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
     return P[Math.abs(h) % P.length];
   }
+  // Cache avatar state so back-navigation is instant
+  const _cacheKey = "sh_avatar_" + (myEmail || "");
+  if (avatarUrl !== null) {
+    sessionStorage.setItem(_cacheKey, JSON.stringify({ avatarUrl, myName }));
+  }
+  // Apply immediately from cache if available (prevents flicker on back)
+  const _cached = JSON.parse(sessionStorage.getItem(_cacheKey) || "null");
+  const _effectiveUrl  = avatarUrl ?? _cached?.avatarUrl ?? null;
+  const _effectiveName = myName   || _cached?.myName || myEmail?.split("@")[0];
+
   const avatarEl = document.getElementById("sh-avatar-el");
   if (avatarEl) {
-    if (avatarUrl) {
-      avatarEl.innerHTML = `<img src="${avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+    if (_effectiveUrl) {
+      avatarEl.innerHTML = `<img src="${_effectiveUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
       avatarEl.style.background = "none";
       avatarEl.style.color = "inherit";
     } else {
-      const initials = _getInitials(myName || myEmail?.split("@")[0]);
+      const initials = _getInitials(_effectiveName);
       const colour = _avatarColour(myEmail || "");
       avatarEl.textContent = initials;
       avatarEl.style.background = colour.bg;
