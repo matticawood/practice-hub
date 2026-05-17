@@ -198,9 +198,10 @@
     .sh-user-menu {
       position: absolute; top: calc(100% + 6px); right: 0;
       background: #141414; border: 1px solid #2a2a2a; border-radius: 10px;
-      min-width: 180px; z-index: 1100;
+      min-width: 190px; z-index: 1100;
       box-shadow: 0 8px 28px rgba(0,0,0,.4);
       display: none; flex-direction: column; overflow: hidden;
+      text-align: left;
     }
     .sh-user-menu.open { display: flex; }
     .sh-avatar-btn { position: relative; }
@@ -237,12 +238,12 @@ document.addEventListener("DOMContentLoaded", function() {
         </button>
         <button class="sh-avatar-btn" id="sh-avatar-btn" onclick="window._shToggleUserMenu()">
           <div class="sh-avatar" id="sh-avatar-el"></div>
+          <div class="sh-user-menu" id="sh-user-menu" onclick="event.stopPropagation()">
+            <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
+            <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
+            <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
+          </div>
         </button>
-        <div class="sh-user-menu" id="sh-user-menu">
-          <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
-          <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
-          <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
-        </div>
         <button class="btn btn-ghost btn-sm" id="sh-hamburger-btn" onclick="window._shOpenSheet()"
           aria-label="Open menu" style="padding:6px 8px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
