@@ -484,7 +484,7 @@ window.toggleNotifPanel = window._shToggleNotif;
 window.closeNotifPanel  = window._shCloseNotif;
 
 // ── Main init ─────────────────────────────────────────────────────────────────
-window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "" }) {
+window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
   window._shIsAdmin = isAdmin;
 
   // Show header
@@ -517,11 +517,17 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   }
   const avatarEl = document.getElementById("sh-avatar-el");
   if (avatarEl) {
-    const initials = _getInitials(myName || myEmail?.split("@")[0]);
-    const colour = _avatarColour(myEmail || "");
-    avatarEl.textContent = initials;
-    avatarEl.style.background = colour.bg;
-    avatarEl.style.color = colour.fg;
+    if (avatarUrl) {
+      avatarEl.innerHTML = `<img src="${avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+      avatarEl.style.background = "none";
+      avatarEl.style.color = "inherit";
+    } else {
+      const initials = _getInitials(myName || myEmail?.split("@")[0]);
+      const colour = _avatarColour(myEmail || "");
+      avatarEl.textContent = initials;
+      avatarEl.style.background = colour.bg;
+      avatarEl.style.color = colour.fg;
+    }
   }
 
   // Logout — user menu button (desktop) and mobile sheet button

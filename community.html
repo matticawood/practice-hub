@@ -1476,20 +1476,25 @@ let _cmtMap = {};
   if (!session) { window.location.href = "/practice-log.html"; return; }
 
   myEmail = session.user.email;
-  const { data: ae } = await db.from("allowed_emails").select("name").eq("email", myEmail).maybeSingle();
+  const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName  = ae?.name || myEmail.split("@")[0];
   isAdmin = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
 
-  initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "community" });
+  initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "community", avatarUrl: ae?.avatar_url || null });
 
   // Avatars
   const colour = avatarColour(myEmail);
   ["composer-avatar-el", "comment-avatar-el"].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.textContent = initials(myName);
-    el.style.background = colour.bg;
-    el.style.color = colour.fg;
+    if (ae?.avatar_url) {
+      el.innerHTML = `<img src="${ae.avatar_url}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`;
+      el.style.background = "none";
+    } else {
+      el.textContent = initials(myName);
+      el.style.background = colour.bg;
+      el.style.color = colour.fg;
+    }
   });
   // Modal composer avatar (inside modal header area not needed — handled by prompt bar)
 
@@ -2246,13 +2251,21 @@ async function loadPosts() {
     });
   }
 
+  // Fetch avatar URLs for all post authors
+  const allEmails = [...new Set(posts.map(p => p.email))];
+  const { data: avatarRows } = await db.from("allowed_emails")
+    .select("email,avatar_url").in("email", allEmails);
+  const avatarUrlMap = {};
+  (avatarRows || []).forEach(r => { if (r.avatar_url) avatarUrlMap[r.email] = r.avatar_url; });
+
   _posts = posts.map(p => ({
     ...p,
     likeCount:    likeCountMap[p.id]    || 0,
     commentCount: commentCountMap[p.id] || 0,
     iLiked:       myLikeSet.has(p.id),
     likers:       likersMap[p.id]       || [],
-    poll:         pollMap[p.id]         || null
+    poll:         pollMap[p.id]         || null,
+    avatarUrl:    avatarUrlMap[p.email] || null
   }));
 
   _renderFilteredPosts();
@@ -2260,8 +2273,6 @@ async function loadPosts() {
 
 function postCardHTML(p) {
   const pt      = POST_TYPES[p.type] || POST_TYPES.post;
-  const colour  = avatarColour(p.email);
-  const ini     = initials(p.name || p.email.split("@")[0]);
   const name    = escHtml(p.name || p.email.split("@")[0]);
   const timeAgo = relativeTime(p.created_at);
   const PREVIEW = 200;
@@ -2375,7 +2386,7 @@ function postCardHTML(p) {
       <span class="post-type-badge" style="color:${pt.color};background:${pt.bg};border-color:${pt.border}">${escHtml(pt.label)}</span>
       <div class="post-title">${escHtml(p.title)}</div>
       <div class="post-author-row">
-        <div class="post-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
+        ${avatarHtml(p.email, p.name, 28, p.avatarUrl)}
         <span class="post-author-name">${name}</span>
         <span class="post-author-time">${timeAgo}</span>
       </div>
@@ -2507,8 +2518,6 @@ function renderDetail(postId) {
   if (!p) return;
 
   const pt     = POST_TYPES[p.type] || POST_TYPES.post;
-  const colour = avatarColour(p.email);
-  const ini    = initials(p.name || p.email.split("@")[0]);
   const name   = escHtml(p.name || p.email.split("@")[0]);
 
   const deleteBtn = (isAdmin || p.email === myEmail)
@@ -2560,7 +2569,7 @@ function renderDetail(postId) {
       <span class="post-type-badge" style="color:${pt.color};background:${pt.bg};border-color:${pt.border}">${escHtml(pt.label)}</span>
       <div class="detail-title">${escHtml(p.title)}</div>
       <div class="post-author-row" style="margin-bottom:14px">
-        <div class="post-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
+        ${avatarHtml(p.email, p.name, 28, p.avatarUrl)}
         <span class="post-author-name">${name}</span>
         <span class="post-author-time">${relativeTime(p.created_at)}</span>
       </div>
@@ -2739,13 +2748,18 @@ async function loadComments(postId) {
 
   if (!count) { listEl.innerHTML = '<div class="comments-empty">No comments yet — be the first!</div>'; return; }
 
+  // Fetch avatar URLs for comment authors
+  const commentEmails = [...new Set(comments.map(c => c.email))];
+  const { data: cmtAvatarRows } = await db.from("allowed_emails")
+    .select("email,avatar_url").in("email", commentEmails);
+  const cmtAvatarMap = {};
+  (cmtAvatarRows || []).forEach(r => { if (r.avatar_url) cmtAvatarMap[r.email] = r.avatar_url; });
+
   listEl.innerHTML = comments.map(c => {
-    const colour = avatarColour(c.email);
-    const ini    = initials(c.name || c.email.split("@")[0]);
     const canDel = isAdmin || c.email === myEmail;
     return `
       <div class="comment-item" id="comment-${c.id}">
-        <div class="comment-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
+        ${avatarHtml(c.email, c.name, 28, cmtAvatarMap[c.email] || null)}
         <div class="comment-body">
           <div class="comment-meta">
             <span class="comment-name">${escHtml(c.name || c.email.split("@")[0])}</span>
@@ -3179,6 +3193,17 @@ function avatarColour(email) {
   let h = 0;
   for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
   return P[Math.abs(h) % P.length];
+}
+
+function avatarHtml(email, name, size = 32, avatarUrl = null) {
+  const style = `width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;`;
+  if (avatarUrl) {
+    return `<div style="${style}overflow:hidden"><img src="${escHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" /></div>`;
+  }
+  const c = avatarColour(email);
+  const ini = initials(name || email?.split("@")[0] || "?");
+  const fontSize = Math.round(size * 0.34);
+  return `<div style="${style}background:${c.bg};color:${c.fg};display:flex;align-items:center;justify-content:center;font-size:${fontSize}px;font-weight:800">${ini}</div>`;
 }
 
 function relativeTime(ts) {

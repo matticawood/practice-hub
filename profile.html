@@ -79,6 +79,21 @@
       text-align: center; font-size: 0.82rem;
       color: #10b981; margin-top: 10px; min-height: 20px;
     }
+    .profile-avatar-wrap {
+      position: relative; cursor: pointer;
+    }
+    .profile-avatar-wrap:hover .profile-avatar-overlay {
+      opacity: 1;
+    }
+    .profile-avatar-overlay {
+      position: absolute; inset: 0; border-radius: 50%;
+      background: rgba(0,0,0,.5); display: flex; align-items: center;
+      justify-content: center; opacity: 0; transition: opacity .2s;
+      font-size: 0.7rem; color: #fff; font-weight: 600;
+    }
+    .profile-avatar-lg img {
+      width: 80px; height: 80px; border-radius: 50%; object-fit: cover;
+    }
   </style>
 </head>
 <body>
@@ -86,7 +101,12 @@
 
   <main id="profile-main">
     <div class="profile-avatar-section">
-      <div class="profile-avatar-lg" id="profile-avatar-lg"></div>
+      <div class="profile-avatar-wrap" onclick="document.getElementById('avatar-file-input').click()">
+        <div class="profile-avatar-lg" id="profile-avatar-lg"></div>
+        <div class="profile-avatar-overlay">Change photo</div>
+      </div>
+      <input type="file" id="avatar-file-input" accept="image/*" style="display:none" onchange="uploadAvatar(this.files[0])">
+      <div id="avatar-upload-status" style="font-size:0.78rem;color:var(--text-muted);margin-top:4px"></div>
       <div class="profile-email-label" id="profile-email-label"></div>
     </div>
 
@@ -141,12 +161,12 @@ let myEmail = null;
 
   myEmail = session.user.email;
   const { data: ae } = await db.from("allowed_emails")
-    .select("name,instrument,bio").eq("email", myEmail).maybeSingle();
+    .select("name,instrument,bio,avatar_url").eq("email", myEmail).maybeSingle();
 
   const myName = ae?.name || myEmail.split("@")[0];
   const isAdmin = false;
 
-  initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "profile" });
+  initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "profile", avatarUrl: ae?.avatar_url || null });
 
   // Big avatar
   const colour = avatarColour(myEmail);
@@ -154,6 +174,10 @@ let myEmail = null;
   av.textContent = initials(myName);
   av.style.background = colour.bg;
   av.style.color = colour.fg;
+  if (ae?.avatar_url) {
+    av.innerHTML = `<img src="${ae.avatar_url}" alt="Profile photo" />`;
+    av.style.background = "none";
+  }
 
   document.getElementById("profile-email-label").textContent = myEmail;
 
@@ -164,6 +188,34 @@ let myEmail = null;
 
   document.getElementById("profile-main").style.display = "";
 })();
+
+async function uploadAvatar(file) {
+  if (!file) return;
+  const statusEl = document.getElementById("avatar-upload-status");
+  statusEl.textContent = "Uploading…";
+
+  const ext = file.name.split(".").pop();
+  const path = `${myEmail.replace("@","_at_")}.${ext}`;
+
+  const { data, error } = await db.storage
+    .from("avatars")
+    .upload(path, file, { upsert: true });
+
+  if (error) { statusEl.textContent = "Upload failed: " + error.message; return; }
+
+  const { data: urlData } = db.storage.from("avatars").getPublicUrl(data.path);
+  const url = urlData.publicUrl;
+
+  // Save to allowed_emails
+  await db.from("allowed_emails").update({ avatar_url: url }).eq("email", myEmail);
+
+  // Update UI
+  const av = document.getElementById("profile-avatar-lg");
+  av.innerHTML = `<img src="${url}" alt="Profile photo" />`;
+  av.style.background = "none";
+  statusEl.textContent = "✓ Photo updated";
+  setTimeout(() => statusEl.textContent = "", 3000);
+}
 
 async function saveProfile() {
   const btn = document.getElementById("profile-save-btn");
