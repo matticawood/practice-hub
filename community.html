@@ -338,16 +338,63 @@
     .feed-ach-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.1rem; }
     .feed-ach-name { font-size: 0.78rem; font-weight: 700; line-height: 1.2; }
     .feed-ach-desc { font-size: 0.68rem; color: var(--text-muted); margin-top: 1px; }
-    .feed-react-btn {
-      display: inline-flex; align-items: center; gap: 4px;
-      background: none; border: 1px solid transparent;
-      border-radius: 20px; padding: 3px 8px;
-      font-size: 0.78rem; color: var(--text-muted);
-      cursor: pointer; transition: border-color .15s, color .15s, background .15s;
-      margin-top: 4px; line-height: 1; font-family: inherit;
+    /* ── Activity reactions & comments ───────────────────────────────────────── */
+    .activity-footer { margin-top: 6px; }
+    .activity-react-row {
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
     }
-    .feed-react-btn:hover { border-color: var(--border); color: #e879a0; }
-    .feed-react-btn.reacted { color: #e879a0; border-color: rgba(232,121,160,.3); background: rgba(232,121,160,.08); }
+    .activity-react-btn {
+      display: inline-flex; align-items: center; gap: 3px;
+      background: none; border: 1px solid transparent;
+      border-radius: 16px; padding: 3px 7px;
+      font-size: 0.9rem; cursor: pointer;
+      transition: border-color .15s, background .15s;
+      font-family: inherit; line-height: 1; color: var(--text);
+    }
+    .activity-react-btn span { font-size: 0.72rem; color: var(--text-muted); }
+    .activity-react-btn:hover { border-color: var(--border); background: rgba(255,255,255,.04); }
+    .activity-react-btn.reacted { border-color: rgba(255,255,255,.2); background: rgba(255,255,255,.08); }
+    .activity-react-btn.reacted span { color: var(--text); }
+    .activity-cmt-btn {
+      display: inline-flex; align-items: center; gap: 3px;
+      background: none; border: 1px solid transparent;
+      border-radius: 16px; padding: 3px 8px;
+      font-size: 0.82rem; cursor: pointer;
+      transition: border-color .15s, background .15s;
+      font-family: inherit; line-height: 1; color: var(--text-muted);
+      margin-left: 4px;
+    }
+    .activity-cmt-btn span { font-size: 0.72rem; }
+    .activity-cmt-btn:hover { border-color: var(--border); background: rgba(255,255,255,.04); color: var(--text); }
+    .activity-cmt-btn.open { border-color: rgba(255,255,255,.15); color: var(--text); }
+    .activity-cmt-section {
+      margin-top: 10px; padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .activity-cmt-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .activity-cmt-item { display: flex; align-items: flex-start; gap: 8px; }
+    .activity-cmt-content { flex: 1; min-width: 0; }
+    .activity-cmt-meta {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.75rem; margin-bottom: 2px;
+    }
+    .activity-cmt-time { color: var(--text-muted); }
+    .activity-cmt-del {
+      margin-left: auto; background: none; border: none;
+      color: var(--text-muted); cursor: pointer;
+      font-size: 1rem; padding: 0 2px; line-height: 1;
+    }
+    .activity-cmt-del:hover { color: #f87171; }
+    .activity-cmt-text { font-size: 0.83rem; color: var(--text); line-height: 1.45; word-break: break-word; }
+    .activity-cmt-composer { display: flex; align-items: flex-start; gap: 8px; }
+    .activity-cmt-submit {
+      flex-shrink: 0; padding: 7px 14px;
+      background: var(--accent); color: #000;
+      border: none; border-radius: 8px; font-size: 0.8rem;
+      font-weight: 700; cursor: pointer; font-family: inherit;
+      transition: opacity .15s;
+    }
+    .activity-cmt-submit:disabled { opacity: .5; cursor: default; }
     .see-more-btn {
       display: block; width: 100%; margin: 4px 0 8px;
       padding: 10px; background: transparent;
@@ -671,6 +718,11 @@ let _posts         = [];
 let _feedRows = [], _feedPage = 1;
 const FEED_PER_PAGE = 20;
 let _activityLoaded = false;
+const ACTIVITY_EMOJIS = ["❤️","👏","🔥","🎉","💪"];
+// _rxMap[`${event_type}:${item_id}`][emoji] = { count, mine }
+let _rxMap = {};
+// _cmtMap[`${event_type}:${item_id}`] = count
+let _cmtMap = {};
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 (async () => {
@@ -1064,6 +1116,29 @@ async function loadActivity() {
   }
 
   _feedRows = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+
+  // Bulk-load reactions + comment counts for all feed items that have an item_id
+  _rxMap = {}; _cmtMap = {};
+  const validRows = _feedRows.filter(r => r.item_id != null);
+  if (validRows.length) {
+    const itemIds = [...new Set(validRows.map(r => String(r.item_id)))];
+    const [rxRes, cmtRes] = await Promise.all([
+      db.from("activity_reactions").select("event_type,item_id,email,emoji").in("item_id", itemIds),
+      db.from("activity_comments").select("event_type,item_id,id").in("item_id", itemIds),
+    ]);
+    for (const rx of (rxRes.data || [])) {
+      const key = `${rx.event_type}:${rx.item_id}`;
+      if (!_rxMap[key]) _rxMap[key] = {};
+      if (!_rxMap[key][rx.emoji]) _rxMap[key][rx.emoji] = { count: 0, mine: false };
+      _rxMap[key][rx.emoji].count++;
+      if (rx.email === myEmail) _rxMap[key][rx.emoji].mine = true;
+    }
+    for (const c of (cmtRes.data || [])) {
+      const key = `${c.event_type}:${c.item_id}`;
+      _cmtMap[key] = (_cmtMap[key] || 0) + 1;
+    }
+  }
+
   _feedPage = 1;
   renderFeedPage(list, champHTML);
 }
@@ -1089,14 +1164,38 @@ function feedItemHTML(row) {
   const ini     = initials(name);
   const colour  = avatarColour(row.email);
   const timeAgo = relativeTime(row.created_at || row.session_date);
-  const count   = row.reaction_count || 0;
-  const reacted = row.i_reacted || false;
 
-  const reactBtn = row.item_id != null
-    ? `<button class="feed-react-btn${reacted?" reacted":""}" data-count="${count}"
-         onclick="toggleFeedReaction(this,'${row.event_type}',${row.item_id})"
-       ><svg viewBox="0 0 24 24" width="14" height="14" fill="${reacted?"currentColor":"none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span>${count>0?count:""}</span></button>`
-    : "";
+  // Build per-item reaction + comment footer
+  const itemKey  = row.item_id != null ? `${row.event_type}:${String(row.item_id)}` : null;
+  const rxData   = itemKey ? (_rxMap[itemKey] || {}) : {};
+  const cmtCount = itemKey ? (_cmtMap[itemKey] || 0) : 0;
+  const safeKey  = itemKey ? itemKey.replace(/[^a-z0-9]/gi, "_") : null;
+
+  const footer = itemKey ? `
+    <div class="activity-footer">
+      <div class="feed-time" style="margin-bottom:5px">${timeAgo}</div>
+      <div class="activity-react-row">
+        ${ACTIVITY_EMOJIS.map(e => {
+          const d = rxData[e] || { count: 0, mine: false };
+          return `<button class="activity-react-btn${d.mine ? " reacted" : ""}"
+            data-count="${d.count}"
+            onclick="toggleActivityReaction(this,'${row.event_type}','${String(row.item_id)}','${e}')"
+          >${e}${d.count > 0 ? `<span>${d.count}</span>` : ""}</button>`;
+        }).join("")}
+        <button class="activity-cmt-btn" id="cmt-btn-${safeKey}"
+          onclick="toggleActivityComments(this,'${row.event_type}','${String(row.item_id)}')"
+        >💬${cmtCount > 0 ? `<span>${cmtCount}</span>` : ""}</button>
+      </div>
+      <div class="activity-cmt-section" id="cmt-${safeKey}" style="display:none">
+        <div class="activity-cmt-list"></div>
+        <div class="activity-cmt-composer">
+          <textarea class="comment-input" placeholder="Write a comment…" rows="1"
+            oninput="autoResize(this)"></textarea>
+          <button class="activity-cmt-submit"
+            onclick="submitActivityComment(this,'${row.event_type}','${String(row.item_id)}')">Post</button>
+        </div>
+      </div>
+    </div>` : `<div class="feed-time" style="margin-top:4px">${timeAgo}</div>`;
 
   if (row.event_type === "achievement") {
     const ach   = ACH[row.achievement_id] || {};
@@ -1116,9 +1215,7 @@ function feedItemHTML(row) {
             ${adesc ? `<div class="feed-ach-desc">${escHtml(adesc)}</div>` : ""}
           </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px">
-          <div class="feed-time">${timeAgo}</div>${reactBtn}
-        </div>
+        ${footer}
       </div>
     </div>`;
   }
@@ -1127,25 +1224,134 @@ function feedItemHTML(row) {
     <div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
     <div class="feed-body">
       <div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> logged <span class="feed-duration">${formatMinutes(row.duration_minutes||0)}</span></div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px">
-        <div class="feed-time">${timeAgo}</div>${reactBtn}
-      </div>
+      ${footer}
     </div>
   </div>`;
 }
 
-async function toggleFeedReaction(btn, eventType, itemId) {
+// ── Activity reactions ────────────────────────────────────────────────────────
+async function toggleActivityReaction(btn, eventType, itemId, emoji) {
   const wasReacted = btn.classList.contains("reacted");
-  let count = parseInt(btn.dataset.count) || 0;
-  const newCount = wasReacted ? Math.max(0, count-1) : count+1;
+  const count = parseInt(btn.dataset.count) || 0;
+  const newCount = wasReacted ? Math.max(0, count - 1) : count + 1;
+
+  // Optimistic update
   btn.classList.toggle("reacted", !wasReacted);
   btn.dataset.count = newCount;
-  btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="${!wasReacted?"currentColor":"none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span>${newCount>0?newCount:""}</span>`;
-  const { error } = await db.rpc("toggle_feed_reaction", { p_reactor: myEmail, p_event_type: eventType, p_item_id: itemId });
-  if (error) {
-    btn.classList.toggle("reacted", wasReacted); btn.dataset.count = count;
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="${wasReacted?"currentColor":"none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span>${count>0?count:""}</span>`;
+  btn.innerHTML = `${emoji}${newCount > 0 ? `<span>${newCount}</span>` : ""}`;
+
+  if (wasReacted) {
+    const { error } = await db.from("activity_reactions").delete()
+      .eq("email", myEmail).eq("event_type", eventType)
+      .eq("item_id", String(itemId)).eq("emoji", emoji);
+    if (error) {
+      btn.classList.toggle("reacted", true); btn.dataset.count = count;
+      btn.innerHTML = `${emoji}${count > 0 ? `<span>${count}</span>` : ""}`;
+    }
+  } else {
+    const { error } = await db.from("activity_reactions")
+      .insert({ email: myEmail, event_type: eventType, item_id: String(itemId), emoji });
+    if (error) {
+      btn.classList.toggle("reacted", false); btn.dataset.count = count;
+      btn.innerHTML = `${emoji}${count > 0 ? `<span>${count}</span>` : ""}`;
+    }
   }
+
+  // Keep local map in sync
+  const key = `${eventType}:${String(itemId)}`;
+  if (!_rxMap[key]) _rxMap[key] = {};
+  if (!_rxMap[key][emoji]) _rxMap[key][emoji] = { count: 0, mine: false };
+  _rxMap[key][emoji].count = newCount;
+  _rxMap[key][emoji].mine  = !wasReacted;
+}
+
+// ── Activity comments ─────────────────────────────────────────────────────────
+async function toggleActivityComments(btn, eventType, itemId) {
+  const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
+  const section = document.getElementById(`cmt-${safeKey}`);
+  if (!section) return;
+
+  const isOpen = section.style.display !== "none";
+  section.style.display = isOpen ? "none" : "";
+  btn.classList.toggle("open", !isOpen);
+
+  if (!isOpen) {
+    await loadActivityComments(section, eventType, String(itemId));
+  }
+}
+
+async function loadActivityComments(section, eventType, itemId) {
+  const listEl = section.querySelector(".activity-cmt-list");
+  listEl.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:4px 0">Loading…</div>`;
+
+  const { data, error } = await db.from("activity_comments")
+    .select("id,email,name,content,created_at")
+    .eq("event_type", eventType).eq("item_id", itemId)
+    .order("created_at", { ascending: true });
+
+  if (error) { listEl.innerHTML = ""; return; }
+
+  if (!data.length) {
+    listEl.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:2px 0">No comments yet — be the first!</div>`;
+    return;
+  }
+
+  listEl.innerHTML = data.map(c => {
+    const n   = c.name || c.email.split("@")[0];
+    const col = avatarColour(c.email);
+    const canDel = c.email === myEmail || isAdmin;
+    return `<div class="activity-cmt-item" id="acmt-${c.id}">
+      <div class="feed-avatar" style="width:26px;height:26px;min-width:26px;font-size:.65rem;background:${col.bg};color:${col.fg}">${initials(n)}</div>
+      <div class="activity-cmt-content">
+        <div class="activity-cmt-meta">
+          <strong style="color:${col.fg}">${escHtml(n)}</strong>
+          <span class="activity-cmt-time">${relativeTime(c.created_at)}</span>
+          ${canDel ? `<button class="activity-cmt-del" title="Delete" onclick="deleteActivityComment('${c.id}','${eventType}','${itemId}')">×</button>` : ""}
+        </div>
+        <div class="activity-cmt-text">${escHtml(c.content)}</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  // Keep count in sync
+  const key = `${eventType}:${itemId}`;
+  _cmtMap[key] = data.length;
+  _updateCmtBtn(eventType, itemId, data.length);
+}
+
+async function submitActivityComment(btn, eventType, itemId) {
+  const section = btn.closest(".activity-cmt-section");
+  const textarea = section.querySelector(".comment-input");
+  const content  = textarea.value.trim();
+  if (!content) return;
+
+  btn.disabled = true;
+  const { error } = await db.from("activity_comments").insert({
+    event_type: eventType, item_id: String(itemId),
+    email: myEmail, name: myName, content,
+  });
+  btn.disabled = false;
+  if (error) { alert("Couldn't post comment — please try again."); return; }
+
+  textarea.value = ""; textarea.style.height = "";
+  await loadActivityComments(section, eventType, String(itemId));
+}
+
+async function deleteActivityComment(commentId, eventType, itemId) {
+  const el = document.getElementById(`acmt-${commentId}`);
+  if (el) el.style.opacity = "0.4";
+  const { error } = await db.from("activity_comments").delete().eq("id", commentId);
+  if (error) { if (el) el.style.opacity = ""; return; }
+  if (el) el.remove();
+  const key = `${eventType}:${String(itemId)}`;
+  _cmtMap[key] = Math.max(0, (_cmtMap[key] || 1) - 1);
+  _updateCmtBtn(eventType, itemId, _cmtMap[key]);
+}
+
+function _updateCmtBtn(eventType, itemId, count) {
+  const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
+  const btn = document.getElementById(`cmt-btn-${safeKey}`);
+  if (btn) btn.innerHTML = `💬${count > 0 ? `<span>${count}</span>` : ""}`;
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
