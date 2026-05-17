@@ -74,6 +74,7 @@
       text-decoration: none; font-family: inherit; box-sizing: border-box;
     }
     .sh-tab-drop a:hover { background: var(--surface-2, #1e1e1e); color: var(--text, #e5e5e5); }
+    .sh-tab-drop a.active { background: rgba(245,197,24,.12); color: var(--accent, #f5c518); }
     /* ── Hamburger: desktop hidden, mobile visible ── */
     #sh-hamburger-btn { display: none; }
     @media (max-width: 768px) {
