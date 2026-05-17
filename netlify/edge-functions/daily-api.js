@@ -289,7 +289,14 @@ export default async (request) => {
       const assetData = await assetRes.json();
       const asset = assetData.data;
       const playbackId = asset.playback_ids?.[0]?.id || null;
-      return json({ status: upload.status, assetId: upload.asset_id, playbackId });
+      const assetStatus = asset.status; // "preparing" | "ready" | "errored"
+      // Only return playbackId once the asset is fully ready to stream
+      return json({
+        status: upload.status,
+        assetId: upload.asset_id,
+        assetStatus,
+        playbackId: assetStatus === "ready" ? playbackId : null
+      });
     }
 
     return json({ status: upload.status });
