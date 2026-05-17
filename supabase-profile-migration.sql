@@ -9,6 +9,9 @@ ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS instagram  text;
 ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS youtube    text;
 ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS twitter    text;
 
+-- Member badges (shown next to name in community feed)
+ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS badge text;
+
 -- STORAGE: Create a public bucket called "avatars" in the Supabase dashboard.
 -- Storage > New bucket > Name: avatars > Public: ON
 -- Then add this storage policy in Storage > Policies:

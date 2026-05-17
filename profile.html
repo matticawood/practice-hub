@@ -45,6 +45,13 @@
       border-radius: 99px; padding: 4px 10px;
       font-size: 0.75rem; color: var(--text-muted, #888);
     }
+    .pv-badge {
+      display: inline-flex; align-items: center;
+      background: rgba(245,197,24,.13); border: 1px solid rgba(245,197,24,.25);
+      color: var(--accent, #f5c518);
+      padding: 2px 10px; border-radius: 99px;
+      font-size: 0.72rem; font-weight: 700; white-space: nowrap;
+    }
     .pv-edit-btn {
       background: none; border: 1.5px solid var(--border, #333); border-radius: 20px;
       color: var(--text-muted, #888); font-size: 0.8rem; font-weight: 600;
@@ -262,11 +269,27 @@
   <div class="pv-hero" id="pv-hero">
     <div class="pv-avatar" id="pv-avatar"></div>
     <div class="pv-info">
-      <div class="pv-name"    id="pv-name"></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <div class="pv-name" id="pv-name"></div>
+        <span class="pv-badge" id="pv-badge" style="display:none"></span>
+      </div>
       <div class="pv-headline" id="pv-headline" style="display:none"></div>
       <div class="pv-chips"   id="pv-chips"></div>
     </div>
     <a class="pv-edit-btn" href="/profile.html" id="pv-edit-btn" style="display:none">Edit Profile</a>
+  </div>
+
+  <!-- Admin: badge editor -->
+  <div id="pv-badge-admin" style="display:none">
+    <div class="pv-card" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:0.75rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap">Badge</span>
+      <input id="pv-badge-input" type="text" placeholder="e.g. ⭐ Founding Member"
+        style="flex:1;min-width:160px;background:#1a1a1a;border:1.5px solid #2a2a2a;border-radius:8px;
+               color:#e5e5e5;padding:7px 11px;font-size:0.85rem;font-family:inherit;outline:none"
+        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='#2a2a2a'" />
+      <button onclick="saveBadge()" class="btn btn-sm">Save</button>
+      <button onclick="clearBadge()" class="btn btn-ghost btn-sm">Clear</button>
+    </div>
   </div>
 
   <div class="pv-card" id="pv-bio-card" style="display:none">
@@ -444,10 +467,13 @@ let myName  = null;
 // ══════════════════════════════════════════════════════════════════════
 // PUBLIC VIEW MODE
 // ══════════════════════════════════════════════════════════════════════
+let _viewingEmail = null; // used by badge save/clear
+
 async function _loadViewMode(email) {
+  _viewingEmail = email;
   // Load profile data
   const { data: ae } = await db.from("allowed_emails")
-    .select("name,headline,instrument,location,bio,website,instagram,youtube,twitter,avatar_url")
+    .select("name,headline,instrument,location,bio,website,instagram,youtube,twitter,avatar_url,badge")
     .eq("email", email).maybeSingle();
 
   const name = ae?.name || email.split("@")[0];
@@ -478,9 +504,23 @@ async function _loadViewMode(email) {
   if (ae?.location)   chips.push(`<span class="pv-chip">📍 ${escHtml(ae.location)}</span>`);
   if (chips.length) document.getElementById("pv-chips").innerHTML = chips.join("");
 
+  // ── Badge ──
+  if (ae?.badge) {
+    const badgeEl = document.getElementById("pv-badge");
+    badgeEl.textContent = ae.badge;
+    badgeEl.style.display = "";
+  }
+
   // ── Edit button (own profile) ──
   if (email.toLowerCase() === myEmail.toLowerCase()) {
     document.getElementById("pv-edit-btn").style.display = "";
+  }
+
+  // ── Admin badge editor ──
+  if (myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+    const adminEl = document.getElementById("pv-badge-admin");
+    adminEl.style.display = "";
+    document.getElementById("pv-badge-input").value = ae?.badge || "";
   }
 
   // ── Bio ──
@@ -629,6 +669,28 @@ async function saveProfile() {
     );
     setTimeout(() => status.textContent = "", 3000);
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// BADGE MANAGEMENT  (admin only)
+// ══════════════════════════════════════════════════════════════════════
+async function saveBadge() {
+  const badge = document.getElementById("pv-badge-input")?.value.trim() || null;
+  const { error } = await db.from("allowed_emails")
+    .update({ badge }).eq("email", _viewingEmail);
+  if (error) { alert("Error: " + error.message); return; }
+  const badgeEl = document.getElementById("pv-badge");
+  if (badge) {
+    badgeEl.textContent = badge;
+    badgeEl.style.display = "";
+  } else {
+    badgeEl.style.display = "none";
+  }
+}
+
+async function clearBadge() {
+  document.getElementById("pv-badge-input").value = "";
+  await saveBadge();
 }
 
 // ══════════════════════════════════════════════════════════════════════
