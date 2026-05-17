@@ -27,7 +27,7 @@ serve(async (req) => {
     event = stripe.webhooks.constructEvent(
       body,
       sig,
-      Deno.env.get("STRIPE_WEBHOOK_SECRET")!,
+      Deno.env.get("STRIPE_MEMBERSHIP_WEBHOOK_SECRET")!,
     );
   } catch (err) {
     console.error("Webhook signature verification failed:", err.message);
