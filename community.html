@@ -212,10 +212,47 @@
       background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
       border-radius: 20px; padding: 4px 12px; margin-top: 8px;
     }
+    .recording-stop-btn {
+      background: rgba(239,68,68,.2); border: 1px solid rgba(239,68,68,.4);
+      border-radius: 12px; color: #ef4444; cursor: pointer;
+      font-size: 0.75rem; font-weight: 700; padding: 2px 10px; margin-left: 4px;
+    }
     .recording-dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: #ef4444;
       animation: pulse-red 1s ease-in-out infinite;
+    }
+    /* ── Video recording preview panel ──────────────────────────────────────── */
+    .video-rec-panel {
+      background: #0d0d0d; border: 1.5px solid var(--border);
+      border-radius: 12px; overflow: hidden; margin-top: 10px;
+    }
+    .video-rec-preview {
+      display: block; width: 100%; max-height: 280px;
+      object-fit: cover; background: #000;
+    }
+    .video-rec-devices {
+      display: flex; gap: 8px; padding: 10px 12px 0;
+    }
+    .video-rec-select {
+      flex: 1; background: rgba(255,255,255,.06);
+      border: 1.5px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 0.78rem; padding: 6px 8px;
+      font-family: inherit; outline: none;
+    }
+    .video-rec-actions {
+      display: flex; gap: 8px; padding: 10px 12px 12px;
+    }
+    .video-rec-start-btn {
+      flex: 1; background: #ef4444; color: #fff; border: none;
+      border-radius: 8px; font-weight: 700; font-size: 0.87rem;
+      padding: 10px; cursor: pointer; transition: opacity .15s;
+    }
+    .video-rec-start-btn:hover { opacity: .85; }
+    .video-rec-cancel-btn {
+      background: rgba(255,255,255,.06); border: 1.5px solid var(--border);
+      border-radius: 8px; color: var(--text-muted); cursor: pointer;
+      font-size: 0.85rem; padding: 10px 16px;
     }
 
     /* ── Video URL inline panel ───────────────────────────────────────────────── */
@@ -545,6 +582,40 @@
     }
     .poll-bar-fill.mine { background: #10b981; }
     .poll-total { font-size: 0.75rem; color: var(--text-muted); margin-top: 10px; }
+
+    /* ── Inline poll in post cards ───────────────────────────────────────────── */
+    .card-poll {
+      margin: 0 -20px; padding: 14px 20px 10px;
+      border-top: 1px solid var(--border);
+    }
+    .card-poll-question {
+      font-size: 0.9rem; font-weight: 700; color: #fff; margin-bottom: 10px;
+    }
+    .card-poll-btn {
+      display: block; width: 100%; text-align: left;
+      background: rgba(255,255,255,.04); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; font-size: 0.85rem;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      margin-bottom: 6px; transition: border-color .15s, background .15s;
+    }
+    .card-poll-btn:hover { border-color: var(--accent); background: rgba(245,197,24,.07); }
+    .card-poll-bar-row { margin-bottom: 7px; }
+    .card-poll-bar-track {
+      position: relative; background: rgba(255,255,255,.08);
+      border-radius: 4px; height: 7px; margin-bottom: 3px;
+    }
+    .card-poll-bar-fill {
+      height: 100%; border-radius: 4px;
+      background: rgba(255,255,255,.2); transition: width .4s ease;
+    }
+    .card-poll-bar-fill.mine { background: #10b981; }
+    .card-poll-bar-meta {
+      display: flex; justify-content: space-between;
+      font-size: 0.78rem; color: var(--text-muted);
+    }
+    .card-poll-mine-dot { color: #10b981; }
+    .card-poll-pct { font-weight: 600; }
+    .card-poll-total { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
 
     /* ── Post cards ───────────────────────────────────────────────────────────── */
     .post-card {
@@ -938,11 +1009,29 @@
                 </div>
               </div>
 
+              <!-- Video recording preview panel -->
+              <div id="video-rec-panel" style="display:none" class="video-rec-panel">
+                <video id="video-rec-preview" autoplay muted playsinline class="video-rec-preview"></video>
+                <div class="video-rec-devices">
+                  <select id="video-rec-camera" class="video-rec-select" onchange="switchCamera()">
+                    <option>Loading cameras…</option>
+                  </select>
+                  <select id="video-rec-mic" class="video-rec-select" onchange="switchCamera()">
+                    <option>Loading mics…</option>
+                  </select>
+                </div>
+                <div class="video-rec-actions">
+                  <button class="video-rec-start-btn" id="video-rec-start-btn" onclick="startVideoRecordingFromPreview()">⏺ Start Recording</button>
+                  <button class="video-rec-cancel-btn" onclick="cancelVideoPreview()">Cancel</button>
+                </div>
+              </div>
+
               <!-- Recording indicator -->
               <div id="composer-recording-indicator" style="display:none" class="recording-indicator">
                 <span class="recording-dot"></span>
                 <span id="composer-recording-label">Recording…</span>
                 <span id="composer-recording-time" style="margin-left:4px;font-weight:400;opacity:.8">0:00</span>
+                <button class="recording-stop-btn" onclick="toggleVideoRecording()">■ Stop</button>
               </div>
 
               <!-- Video attach panel (toggled) -->
@@ -1395,6 +1484,12 @@ function _resetComposer() {
   if (_videoRecorder && _videoRecorder.state !== "inactive") _videoRecorder.stop();
   _voiceRecorder = null; _videoRecorder = null; _recordingType = null;
   clearInterval(_recordingTimer); _recordingTimer = null;
+  // Clean up video preview stream if composer closed mid-preview
+  if (_previewStream) { _previewStream.getTracks().forEach(t => t.stop()); _previewStream = null; }
+  const recPreview = document.getElementById("video-rec-preview");
+  if (recPreview) recPreview.srcObject = null;
+  const recPanel = document.getElementById("video-rec-panel");
+  if (recPanel) recPanel.style.display = "none";
 }
 
 function handleBackdropClick(e) {
@@ -1650,15 +1745,90 @@ async function toggleVoiceRecording() {
   } catch (e) { alert("Could not access microphone: " + e.message); }
 }
 
+let _previewStream = null;
+
 async function toggleVideoRecording() {
-  if (_recordingType === "video") {
-    _stopRecording(); return;
-  }
+  // If already recording video, stop it
+  if (_recordingType === "video") { _stopRecording(); return; }
   if (_recordingType) { alert("Already recording. Stop the current recording first."); return; }
+
+  // If preview panel is already open, close it
+  const panel = document.getElementById("video-rec-panel");
+  if (panel.style.display !== "none") { cancelVideoPreview(); return; }
+
   try {
+    // Get initial stream with defaults
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-    _startRecording(stream, "video");
-  } catch (e) { alert("Could not access camera/mic: " + e.message); }
+    _previewStream = stream;
+
+    // Show live preview
+    const preview = document.getElementById("video-rec-preview");
+    preview.srcObject = stream;
+    panel.style.display = "";
+    document.getElementById("toolbar-videorec-btn").classList.add("recording");
+
+    // Enumerate devices now that we have permission
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+    const mics    = devices.filter(d => d.kind === "audioinput");
+
+    const camSel = document.getElementById("video-rec-camera");
+    const micSel = document.getElementById("video-rec-mic");
+
+    // Get current track labels to pre-select
+    const activeVideoLabel = stream.getVideoTracks()[0]?.label || "";
+    const activeAudioLabel = stream.getAudioTracks()[0]?.label || "";
+
+    camSel.innerHTML = cameras.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeVideoLabel ? "selected" : ""}>${d.label || "Camera " + (cameras.indexOf(d)+1)}</option>`
+    ).join("");
+    micSel.innerHTML = mics.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeAudioLabel ? "selected" : ""}>${d.label || "Mic " + (mics.indexOf(d)+1)}</option>`
+    ).join("");
+
+  } catch (e) {
+    alert("Could not access camera/mic: " + e.message);
+    document.getElementById("toolbar-videorec-btn").classList.remove("recording");
+  }
+}
+
+async function switchCamera() {
+  if (!_previewStream) return;
+  const camSel = document.getElementById("video-rec-camera");
+  const micSel = document.getElementById("video-rec-mic");
+  const videoId = camSel.value;
+  const audioId = micSel.value;
+
+  // Stop existing tracks
+  _previewStream.getTracks().forEach(t => t.stop());
+
+  try {
+    const constraints = {
+      video: videoId ? { deviceId: { exact: videoId } } : true,
+      audio: audioId ? { deviceId: { exact: audioId } } : true
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    _previewStream = stream;
+    document.getElementById("video-rec-preview").srcObject = stream;
+  } catch (e) {
+    alert("Could not switch device: " + e.message);
+  }
+}
+
+function startVideoRecordingFromPreview() {
+  if (!_previewStream) return;
+  const panel = document.getElementById("video-rec-panel");
+  panel.style.display = "none";
+  _startRecording(_previewStream, "video");
+  _previewStream = null; // ownership transferred to recorder
+}
+
+function cancelVideoPreview() {
+  if (_previewStream) { _previewStream.getTracks().forEach(t => t.stop()); _previewStream = null; }
+  const preview = document.getElementById("video-rec-preview");
+  preview.srcObject = null;
+  document.getElementById("video-rec-panel").style.display = "none";
+  document.getElementById("toolbar-videorec-btn").classList.remove("recording");
 }
 
 function _startRecording(stream, type) {
@@ -1914,13 +2084,28 @@ async function loadPosts() {
   (commentCounts|| []).forEach(c => commentCountMap[c.post_id] = (commentCountMap[c.post_id] || 0) + 1);
   (polls        || []).forEach(p => pollMap[p.post_id]         = { id: p.id, question: p.question });
 
-  // Fetch option counts for polls
+  // Fetch full poll data (options + votes) for inline rendering
   const pollIds = (polls || []).map(p => p.id);
   if (pollIds.length) {
-    const { data: optRows } = await db.from("community_post_poll_options").select("poll_id").in("poll_id", pollIds);
-    (optRows || []).forEach(o => {
-      const entry = Object.values(pollMap).find(pm => pm.id === o.poll_id);
-      if (entry) entry.optionCount = (entry.optionCount || 0) + 1;
+    const [{ data: optRows }, { data: voteRows }, { data: myVoteRows }] = await Promise.all([
+      db.from("community_post_poll_options").select("id,poll_id,label,position").in("poll_id", pollIds).order("position"),
+      db.from("community_post_poll_votes").select("poll_id,option_id").in("poll_id", pollIds),
+      db.from("community_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", pollIds)
+    ]);
+    const optsByPoll = {}, voteCountsByPoll = {}, totalByPoll = {}, myVoteByPoll = {};
+    (optRows     || []).forEach(o => { (optsByPoll[o.poll_id] = optsByPoll[o.poll_id] || []).push(o); });
+    (voteRows    || []).forEach(v => {
+      if (!voteCountsByPoll[v.poll_id]) voteCountsByPoll[v.poll_id] = {};
+      voteCountsByPoll[v.poll_id][v.option_id] = (voteCountsByPoll[v.poll_id][v.option_id] || 0) + 1;
+      totalByPoll[v.poll_id] = (totalByPoll[v.poll_id] || 0) + 1;
+    });
+    (myVoteRows  || []).forEach(v => { myVoteByPoll[v.poll_id] = v.option_id; });
+    Object.values(pollMap).forEach(pm => {
+      pm.options     = optsByPoll[pm.id]      || [];
+      pm.voteCounts  = voteCountsByPoll[pm.id] || {};
+      pm.totalVotes  = totalByPoll[pm.id]      || 0;
+      pm.myVote      = myVoteByPoll[pm.id]     || null;
+      pm.optionCount = pm.options.length;
     });
   }
 
@@ -2007,12 +2192,39 @@ function postCardHTML(p) {
     }
   });
   if (richMedia) mediaHtml += richMedia;
-  const chips = [...fileChips];
-  if (p.poll) {
-    const oCount = p.poll.optionCount || 0;
-    chips.push(`<span class="post-media-chip" onclick="event.stopPropagation()">📊 Poll · ${oCount} option${oCount !== 1 ? "s" : ""} · tap to vote</span>`);
+  if (fileChips.length) mediaHtml += `<div style="margin-bottom:8px">${fileChips.join("")}</div>`;
+
+  // Inline poll
+  if (p.poll && p.poll.options?.length) {
+    const poll = p.poll;
+    const hasVoted = !!poll.myVote;
+    let pollHtml = `<div class="card-poll" onclick="event.stopPropagation()">
+      <div class="card-poll-question">${escHtml(poll.question)}</div>`;
+    if (!hasVoted) {
+      pollHtml += poll.options.map(o =>
+        `<button class="card-poll-btn" onclick="castCardVote('${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">
+          ${escHtml(o.label)}</button>`
+      ).join("");
+    } else {
+      pollHtml += poll.options.map(o => {
+        const count = poll.voteCounts[o.id] || 0;
+        const pct   = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
+        const isMine = o.id === poll.myVote;
+        return `<div class="card-poll-bar-row${isMine ? " mine" : ""}">
+          <div class="card-poll-bar-track">
+            <div class="card-poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div>
+          </div>
+          <div class="card-poll-bar-meta">
+            <span>${escHtml(o.label)}${isMine ? " <span class='card-poll-mine-dot'>●</span>" : ""}</span>
+            <span class="card-poll-pct">${pct}%</span>
+          </div>
+        </div>`;
+      }).join("");
+      pollHtml += `<div class="card-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</div>`;
+    }
+    pollHtml += `</div>`;
+    mediaHtml += pollHtml;
   }
-  if (chips.length) mediaHtml += `<div style="margin-bottom:8px">${chips.join("")}</div>`;
 
   const hasMedia    = !!(images.length || richMedia);
   const clampClass  = hasMedia ? "clamp-short" : "clamp-long";
@@ -2228,7 +2440,7 @@ function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, tota
       const isMine = o.id === myOptId;
       return `<div class="poll-bar-row">
         <div class="poll-bar-label">
-          <span>${escHtml(o.label)}${isMine ? " ✓" : ""}</span>
+          <span>${escHtml(o.label)}${isMine ? " <span style='color:#10b981;font-size:.7em'>●</span>" : ""}</span>
           <span>${pct}%</span>
         </div>
         <div class="poll-bar-track">
@@ -2243,13 +2455,31 @@ function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, tota
 }
 
 async function castVote(pollId, optionId) {
-  // Upsert vote
   const { error } = await db.from("community_post_poll_votes").upsert({
     poll_id: pollId, option_id: optionId, email: myEmail
   }, { onConflict: "poll_id,email" });
   if (error) { alert("Couldn't cast vote: " + error.message); return; }
-  // Reload poll
   await loadPollDetail(pollId);
+}
+
+async function castCardVote(pollId, optionId, postId) {
+  const { error } = await db.from("community_post_poll_votes").upsert({
+    poll_id: pollId, option_id: optionId, email: myEmail
+  }, { onConflict: "poll_id,email" });
+  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  // Refresh vote counts for this post's poll
+  const post = _posts.find(p => p.id === postId);
+  if (post?.poll) {
+    const { data: votes } = await db.from("community_post_poll_votes").select("poll_id,option_id").eq("poll_id", pollId);
+    const voteCounts = {};
+    (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
+    post.poll.voteCounts  = voteCounts;
+    post.poll.totalVotes  = (votes || []).length;
+    post.poll.myVote      = optionId;
+    // Re-render just this card
+    const cardEl = document.querySelector(`[onclick*="showDetail('${postId}')"]`);
+    if (cardEl) cardEl.outerHTML = postCardHTML(post);
+  }
 }
 
 function _updateDetailLikeBtn(btn, liked, count, postId) {
