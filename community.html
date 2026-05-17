@@ -922,19 +922,19 @@
     .reply-to-name { color: var(--accent); font-weight: 600; margin-right: 4px; }
     .inline-reply-composer {
       margin-left: 36px; margin-top: 8px;
-      display: flex; gap: 8px; align-items: flex-start;
+      display: flex; gap: 8px; align-items: center;
     }
     .inline-reply-composer textarea {
-      flex: 1; background: transparent; border: 1.5px solid var(--border);
+      flex: 1; background: transparent; border: 1.5px solid var(--accent);
       border-radius: 16px; color: var(--text); font-size: 0.85rem;
       font-family: inherit; padding: 7px 12px; resize: none;
-      min-height: 34px; max-height: 100px; transition: border-color .15s;
+      min-height: 34px; max-height: 100px;
     }
-    .inline-reply-composer textarea:focus { outline: none; border-color: var(--accent); }
+    .inline-reply-composer textarea:focus { outline: none; }
     .inline-reply-composer button {
-      background: var(--accent); border: none; border-radius: 14px;
-      padding: 6px 14px; font-size: 0.8rem; font-weight: 700;
-      font-family: inherit; cursor: pointer; color: #1a1410; white-space: nowrap;
+      background: none; border: none; font-family: inherit;
+      font-size: 0.8rem; font-weight: 700; cursor: pointer;
+      color: var(--accent); white-space: nowrap; padding: 0 4px;
     }
 
     /* ── Activity feed — island cards ────────────────────────────────────────── */
@@ -3520,9 +3520,10 @@ async function loadComments(postId) {
     repliesMap[c.parent_comment_id].push(c);
   });
 
-  function commentHTML(c, isReply = false) {
+  function commentHTML(c, isReply = false, threadId = null) {
     const canDel   = isAdmin || c.email === myEmail;
     const dispName = escHtml(c.name || c.email.split("@")[0]);
+    const rootId   = threadId || c.id;
     const replyPrefix = (isReply && c.reply_to_name)
       ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
     return `
@@ -3537,7 +3538,7 @@ async function loadComments(postId) {
             ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
           </div>
           <div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>
-          ${!isReply ? `<button class="comment-reply-btn" onclick="startReply('${c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>` : ""}
+          <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
         </div>
       </div>`;
   }
@@ -3546,7 +3547,6 @@ async function loadComments(postId) {
     const replies = repliesMap[c.id] || [];
     const replyComposer = `
       <div class="inline-reply-composer" id="reply-composer-${c.id}" style="display:none">
-        ${avatarHtml(myEmail, myName, 28, null)}
         <textarea placeholder="Write a reply…" rows="1"
           oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReply('${c.id}',this)}"
@@ -3554,7 +3554,7 @@ async function loadComments(postId) {
         <button onclick="submitReply('${c.id}',this.previousElementSibling)">Send</button>
       </div>`;
     return commentHTML(c) +
-      (replies.length ? `<div class="comment-replies">${replies.map(r => commentHTML(r, true)).join("")}</div>` : "") +
+      (replies.length ? `<div class="comment-replies">${replies.map(r => commentHTML(r, true, c.id)).join("")}</div>` : "") +
       replyComposer;
   }).join("");
 }
@@ -3572,10 +3572,15 @@ function startReply(commentId, authorName, authorEmail) {
 }
 
 async function submitReply(parentCommentId, textarea) {
-  const content = textarea.value.trim();
+  let content = textarea.value.trim();
   if (!content) return;
-  const composer     = document.getElementById(`reply-composer-${parentCommentId}`);
-  const replyToName  = composer?.dataset.replyToName  || null;
+  // Strip any @Name prefix the user may have typed (we store it separately)
+  const composer    = document.getElementById(`reply-composer-${parentCommentId}`);
+  const replyToName = composer?.dataset.replyToName || null;
+  if (replyToName && content.startsWith(`@${replyToName}`)) {
+    content = content.slice(replyToName.length + 1).trimStart();
+  }
+  if (!content) return;
   const replyToEmail = composer?.dataset.replyToEmail || null;
 
   textarea.disabled = true;
