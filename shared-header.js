@@ -284,7 +284,7 @@ document.addEventListener("DOMContentLoaded", function() {
     header.innerHTML = `
       <div style="flex:1"><h1>Practice Hub</h1></div>
       <div class="header-user">
-        <span id="header-email"></span>
+        <span id="header-email" style="display:none"></span>
         <button class="btn btn-ghost btn-sm btn-bell" id="notif-bell-btn"
           onclick="window._shToggleNotif()" title="Notifications" aria-label="Notifications" style="display:none">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
