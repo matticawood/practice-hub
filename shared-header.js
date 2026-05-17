@@ -336,19 +336,19 @@ document.addEventListener("DOMContentLoaded", function() {
       <a class="sh-tab" data-page="hub" href="/practice-log.html">Practice Hub</a>
       <div class="sh-tab-drop">
         <a href="/practice-log.html">Dashboard</a>
-        <a href="/practice-log.html#stats">Stats</a>
-        <a href="/practice-log.html#goals">Goals</a>
-        <a href="/practice-log.html#history">History</a>
-        <a href="/practice-log.html#leaderboard">Leaderboard</a>
+        <a href="/practice-log.html?goto=stats">Stats</a>
+        <a href="/practice-log.html?goto=goals">Goals</a>
+        <a href="/practice-log.html?goto=history">History</a>
+        <a href="/practice-log.html?goto=leaderboard">Leaderboard</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="resources" href="/index.html">Resources</a>
+      <a class="sh-tab" data-page="resources" href="/practice-log.html#library">Resources</a>
       <div class="sh-tab-drop">
-        <a href="/index.html">Pieces Library</a>
-        <a href="/practice-log.html#ppd">Piano Practice Daily</a>
-        <a href="/practice-log.html#glossary">Glossary</a>
-        <a href="/practice-log.html#key">Key Explorer</a>
+        <a href="/practice-log.html#library">Pieces Library</a>
+        <a href="/practice-log.html#theory">Piano Practice Daily</a>
+        <a href="/practice-log.html?goto=glossary">Glossary</a>
+        <a href="/practice-log.html?goto=key">Key Explorer</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
@@ -356,7 +356,6 @@ document.addEventListener("DOMContentLoaded", function() {
       <div class="sh-tab-drop">
         <a href="/practice-tools.html">Passage Fixer</a>
         <a href="/practice-tools.html#metro">Metronome</a>
-        <a href="/practice-tools.html#note">Note Recognition</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
@@ -396,10 +395,10 @@ document.addEventListener("DOMContentLoaded", function() {
       </button>
       <div class="sh-group-items">
         <a class="sh-item" data-page="hub" href="/practice-log.html">Dashboard</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html#stats">Stats</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html#goals">Goals</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html#history">History</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html#leaderboard">Leaderboard</a>
+        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=stats">Stats</a>
+        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=goals">Goals</a>
+        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=history">History</a>
+        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=leaderboard">Leaderboard</a>
       </div>
     </div>
 
@@ -409,10 +408,10 @@ document.addEventListener("DOMContentLoaded", function() {
         <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sh-group-items">
-        <a class="sh-item" data-page="resources" href="/index.html">Pieces Library</a>
-        <a class="sh-item" data-page="resources" href="/practice-log.html#ppd">Piano Practice Daily</a>
-        <a class="sh-item" data-page="resources" href="/practice-log.html#glossary">Glossary</a>
-        <a class="sh-item" data-page="resources" href="/practice-log.html#key">Key Explorer</a>
+        <a class="sh-item" data-page="resources" href="/practice-log.html#library">Pieces Library</a>
+        <a class="sh-item" data-page="resources" href="/practice-log.html#theory">Piano Practice Daily</a>
+        <a class="sh-item" data-page="resources" href="/practice-log.html?goto=glossary">Glossary</a>
+        <a class="sh-item" data-page="resources" href="/practice-log.html?goto=key">Key Explorer</a>
       </div>
     </div>
 
@@ -424,7 +423,6 @@ document.addEventListener("DOMContentLoaded", function() {
       <div class="sh-group-items">
         <a class="sh-item" data-page="tools" href="/practice-tools.html">Passage Fixer</a>
         <a class="sh-item" data-page="tools" href="/practice-tools.html#metro">Metronome</a>
-        <a class="sh-item" data-page="tools" href="/practice-tools.html#note">Note Recognition</a>
       </div>
     </div>
 
@@ -687,9 +685,26 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       window._shCloseNotif?.();
       const url = new URL(dest, window.location.origin);
       const isSamePage = url.pathname === window.location.pathname;
-      if (isSamePage && typeof window.showDetail === "function") {
+      if (isSamePage) {
+        // community.html: deep-link to a post
         const postId = url.searchParams.get("post");
-        if (postId) { window.showDetail(postId); return; }
+        if (postId && typeof window.showDetail === "function") { window.showDetail(postId); return; }
+        // practice-log.html: navigate to a section via ?goto=
+        const gotoVal = url.searchParams.get("goto");
+        if (gotoVal && typeof window.ddTab === "function") {
+          const gotoMap = {
+            stats:"log",goals:"log",history:"log",leaderboard:"log",achievements:"log",
+            glossary:"theory",key:"theory",ppd:"theory",
+            collection:"library",books:"library",
+          };
+          if (gotoMap[gotoVal]) { window.ddTab(gotoMap[gotoVal], gotoVal); return; }
+        }
+        // practice-log.html: switch main tab via hash
+        const hash = url.hash.replace("#","").trim();
+        if (hash) {
+          const tabBtn = document.querySelector(`.main-tab[data-main-tab="${hash}"]`);
+          if (tabBtn) { tabBtn.click(); return; }
+        }
       }
       window.location.href = dest;
     }
