@@ -298,6 +298,20 @@
       border-radius: 4px; transition: width .25s ease;
       width: 0%;
     }
+    @keyframes mux-stripe {
+      0%   { background-position: 0 0; }
+      100% { background-position: 40px 0; }
+    }
+    .mux-upload-overlay-bar.processing {
+      background-color: var(--accent);
+      background-image: repeating-linear-gradient(
+        45deg,
+        rgba(255,255,255,.18) 0px, rgba(255,255,255,.18) 10px,
+        transparent 10px, transparent 20px
+      );
+      background-size: 40px 100%;
+      animation: mux-stripe 0.8s linear infinite;
+    }
     .mux-upload-overlay-status {
       font-size: 0.75rem; color: var(--text-muted);
     }
@@ -1492,29 +1506,45 @@ async function _uploadVideoToMux(file) {
     });
 
     // Step 3: poll for Mux to finish processing
-    _setMuxOverlay({ pct: 100, status: "Processing video — this takes about a minute…", processing: true });
+    const barEl = document.getElementById("mux-overlay-bar");
+    if (barEl) barEl.classList.add("processing");
+    _setMuxOverlay({ pct: 100, status: "Queuing for processing…" });
     console.log("[Mux] Upload done, polling for processing completion. uploadId:", uploadId);
 
+    const processingMessages = [
+      { after: 0,   msg: "Queuing for processing…" },
+      { after: 10,  msg: "Encoding video…" },
+      { after: 30,  msg: "Still encoding — larger videos take a minute or two…" },
+      { after: 60,  msg: "Almost there, finishing up…" },
+      { after: 120, msg: "This is taking longer than usual, but it's still going…" },
+    ];
+
     let playbackId = null;
+    const pollStart = Date.now();
     for (let i = 0; i < 72; i++) {  // up to ~6 min
       await new Promise(r => setTimeout(r, 5000));
+      const elapsed = Math.round((Date.now() - pollStart) / 1000);
+
+      // Pick the most relevant message for how long we've been waiting
+      const msg = processingMessages.filter(m => elapsed >= m.after).pop()?.msg;
+      if (msg) _setMuxOverlay({ status: msg });
+
       const statusRes = await fetch("/api/daily", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({ action: "get-mux-upload-status", uploadId })
       });
       const s = await statusRes.json();
-      console.log(`[Mux] Poll ${i + 1}: uploadStatus=${s.status} assetStatus=${s.assetStatus} playbackId=${s.playbackId}`);
+      console.log(`[Mux] Poll ${i + 1} (${elapsed}s): uploadStatus=${s.status} assetStatus=${s.assetStatus} playbackId=${s.playbackId}`);
       if (s.playbackId) { playbackId = s.playbackId; break; }
       if (s.status === "errored" || s.assetStatus === "errored") throw new Error("Mux reported an error processing the video");
     }
     if (!playbackId) throw new Error("Video processing timed out after 6 minutes — try again");
 
     console.log("[Mux] Done! playbackId:", playbackId);
-    // Show success state briefly before hiding
-    const barEl = document.getElementById("mux-overlay-bar");
-    if (barEl) barEl.style.background = "#10b981";
-    _setMuxOverlay({ pct: 100, status: "✓ Video ready!", processing: false, filename: file.name });
+    // Success state
+    if (barEl) { barEl.classList.remove("processing"); barEl.style.background = "#10b981"; }
+    _setMuxOverlay({ pct: 100, status: "✓ Video ready!", filename: file.name });
     await new Promise(r => setTimeout(r, 1500));
     _setMuxOverlay({ show: false });
     _composerMedia.push({ type: "mux", playbackId, name: file.name });
