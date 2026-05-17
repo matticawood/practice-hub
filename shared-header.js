@@ -356,6 +356,7 @@ document.addEventListener("DOMContentLoaded", function() {
       <div class="sh-tab-drop">
         <a href="/practice-tools.html">Passage Fixer</a>
         <a href="/practice-tools.html#metro">Metronome</a>
+        <a href="/practice-log.html?goto=note">Note Recognition</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
@@ -423,6 +424,7 @@ document.addEventListener("DOMContentLoaded", function() {
       <div class="sh-group-items">
         <a class="sh-item" data-page="tools" href="/practice-tools.html">Passage Fixer</a>
         <a class="sh-item" data-page="tools" href="/practice-tools.html#metro">Metronome</a>
+        <a class="sh-item" data-page="tools" href="/practice-log.html?goto=note">Note Recognition</a>
       </div>
     </div>
 
