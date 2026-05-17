@@ -1,0 +1,85 @@
+// ── Payment links per currency ─────────────────────────────────────────────
+const LINKS: Record<string, string> = {
+  GBP: "https://buy.stripe.com/28EeV61nA9Z0fxJaAB5EY00",
+  USD: "https://buy.stripe.com/eVq8wI4zMefg85haAB5EY01",
+  CAD: "https://buy.stripe.com/bJe4gseam8UWbht8st5EY02",
+  EUR: "https://buy.stripe.com/bJe28k0jw7QSbhtcIJ5EY03",
+  AUD: "https://buy.stripe.com/28E5kw6HU0oqadpaAB5EY04",
+  SEK: "https://buy.stripe.com/14A5kw7LY7QSfxJ2455EY05",
+  NOK: "https://buy.stripe.com/9B65kw3vIc78bhtaAB5EY06",
+  DKK: "https://buy.stripe.com/28E28keam7QS5X91015EY07",
+  SGD: "https://buy.stripe.com/6oU8wIgiub341GT8st5EY09",
+  NZD: "https://buy.stripe.com/00w00c0jw9Z099laAB5EY0a",
+};
+
+// ── Country → currency ─────────────────────────────────────────────────────
+const COUNTRY_CURRENCY: Record<string, string> = {
+  // GBP
+  GB: "GBP", JE: "GBP", GG: "GBP", IM: "GBP",
+  // EUR
+  DE: "EUR", FR: "EUR", IT: "EUR", ES: "EUR", NL: "EUR",
+  PT: "EUR", BE: "EUR", AT: "EUR", IE: "EUR", FI: "EUR",
+  GR: "EUR", LU: "EUR", SK: "EUR", SI: "EUR", EE: "EUR",
+  LV: "EUR", LT: "EUR", CY: "EUR", MT: "EUR", HR: "EUR",
+  // USD
+  US: "USD",
+  // CAD
+  CA: "CAD",
+  // AUD
+  AU: "AUD",
+  // NZD
+  NZ: "NZD",
+  // SEK
+  SE: "SEK",
+  // NOK
+  NO: "NOK",
+  // DKK
+  DK: "DKK",
+  // SGD
+  SG: "SGD",
+};
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+  let country: string | null = null;
+
+  // 1. Cloudflare provides this header automatically on Supabase Edge Functions
+  country = req.headers.get("cf-ipcountry");
+
+  // 2. Fallback: look up the IP via a free geolocation API
+  if (!country || country === "XX") {
+    try {
+      const ip =
+        req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+        req.headers.get("x-real-ip");
+
+      if (ip) {
+        const geo = await fetch(`https://ipapi.co/${ip}/country/`, {
+          headers: { "User-Agent": "practicehub-redirect/1.0" },
+        });
+        if (geo.ok) country = (await geo.text()).trim();
+      }
+    } catch (e) {
+      console.warn("IP geolocation failed:", e);
+    }
+  }
+
+  const currency = (country && COUNTRY_CURRENCY[country]) ? COUNTRY_CURRENCY[country] : "GBP";
+  const url = LINKS[currency] ?? LINKS["GBP"];
+
+  console.log(`country=${country} → currency=${currency}`);
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      ...cors,
+      "Location": url,
+    },
+  });
+});
