@@ -198,8 +198,8 @@
   document.head.appendChild(s);
 })();
 
-// ── Inject static HTML ────────────────────────────────────────────────────────
-(function() {
+// ── Inject static HTML (after DOM is ready) ───────────────────────────────────
+document.addEventListener("DOMContentLoaded", function() {
   // Populate the header element
   const header = document.getElementById("app-header");
   if (header) {
@@ -394,7 +394,7 @@
     </div>
   `;
   document.body.appendChild(panel);
-})();
+}); // end DOMContentLoaded
 
 // ── Sheet helpers ─────────────────────────────────────────────────────────────
 window._shOpenSheet  = () => { document.getElementById("sh-mob-sheet")?.classList.add("open"); document.getElementById("sh-mob-backdrop")?.classList.add("open"); };
