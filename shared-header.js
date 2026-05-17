@@ -37,11 +37,12 @@
       line-height: 1; white-space: nowrap; box-sizing: border-box;
     }
     #header-email { font-size: 0.82rem; color: var(--text-muted, #888); }
-    @media (max-width: 600px) {
+    @media (max-width: 768px) {
       #app-header { padding: 12px 16px; }
       #app-header h1 { font-size: 1rem; }
       #header-email { display: none; }
       #sh-admin-link { display: none !important; }
+      #sh-logout-btn { display: none; }
     }
 
     /* ── Bell ── */
@@ -350,6 +351,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
     <a class="sh-section-btn" data-page="feedback" href="/feedback.html">Feedback</a>
     <a class="sh-section-btn" data-page="events"   href="/events.html">Events &amp; Replays</a>
+    <button class="sh-section-btn" id="sh-sheet-logout-btn" style="color:#888">Log out</button>
   `;
   document.body.appendChild(sheet);
 
@@ -466,11 +468,10 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   const bell = document.getElementById("notif-bell-btn");
   if (bell) bell.style.display = "";
 
-  // Logout
-  document.getElementById("sh-logout-btn")?.addEventListener("click", async () => {
-    await db.auth.signOut();
-    window.location.href = "/practice-log.html";
-  });
+  // Logout (header button on desktop, sheet button on mobile)
+  const logoutHandler = async () => { await db.auth.signOut(); window.location.href = "/practice-log.html"; };
+  document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
+  document.getElementById("sh-sheet-logout-btn")?.addEventListener("click", logoutHandler);
 
   // Mark active tab + sheet item
   document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
