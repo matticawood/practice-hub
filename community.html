@@ -904,14 +904,23 @@
       border-top: 1px solid var(--border);
     }
     .comment-input {
-      flex: 1; background: var(--surface-2);
+      flex: 1; background: transparent;
       border: 1.5px solid var(--border);
-      border-radius: 8px; color: var(--text);
+      border-radius: 20px; color: var(--text);
       font-size: 0.87rem; font-family: inherit;
-      padding: 9px 12px; resize: none; min-height: 38px; max-height: 120px;
+      padding: 9px 14px; resize: none; min-height: 38px; max-height: 120px;
       transition: border-color .15s;
     }
     .comment-input:focus { outline: none; border-color: var(--accent); }
+    .comment-reply-btn {
+      background: none; border: none; cursor: pointer; font-family: inherit;
+      font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+      padding: 2px 0; transition: color .15s;
+    }
+    .comment-reply-btn:hover { color: var(--accent); }
+    .comment-replies { margin-left: 36px; margin-top: 8px; display: flex; flex-direction: column; gap: 12px; }
+    .comment-item.is-reply { }
+    .reply-to-name { color: var(--accent); font-weight: 600; margin-right: 4px; }
 
     /* ── Activity feed — island cards ────────────────────────────────────────── */
     #community-feed-list { display: flex; flex-direction: column; gap: 12px; }
@@ -3293,16 +3302,18 @@ function renderDetail(postId) {
 
   document.getElementById("detail-post-area").innerHTML = `
     <div class="detail-card">
-      <span class="post-type-badge" style="color:${pt.color};background:${pt.bg};border-color:${pt.border}">${escHtml(pt.label)}</span>
-      <div class="detail-title">${escHtml(p.title)}</div>
-      <div class="post-author-row" style="margin-bottom:14px">
+      <div class="post-author-row" style="margin-bottom:12px">
         <a href="/profile.html?u=${encodeURIComponent(p.email)}" onclick="event.stopPropagation()" style="display:contents;text-decoration:none">
           ${avatarHtml(p.email, p.name, 28, p.avatarUrl)}
           <span class="post-author-name" style="cursor:pointer">${name}</span>
         </a>
         ${p.badge ? `<span class="author-badge">${escHtml(p.badge)}</span>` : ""}
-        <span class="post-author-time">${relativeTime(p.created_at)}</span>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span class="post-type-badge" style="color:${pt.color};background:${pt.bg};border-color:${pt.border}">${escHtml(pt.label)}</span>
+          <span class="post-author-time">${relativeTime(p.created_at)}</span>
+        </div>
       </div>
+      <div class="detail-title">${escHtml(p.title)}</div>
       ${mediaHtml}
       <div class="detail-content">${escHtml(p.content)}</div>
       ${pollPlaceholder}
@@ -3486,23 +3497,55 @@ async function loadComments(postId) {
   const cmtAvatarMap = {};
   (cmtAvatarRows || []).forEach(r => { if (r.avatar_url) cmtAvatarMap[r.email] = r.avatar_url; });
 
-  listEl.innerHTML = comments.map(c => {
-    const canDel = isAdmin || c.email === myEmail;
+  // Build threaded structure: top-level comments + their replies
+  const topLevel = comments.filter(c => !c.parent_comment_id);
+  const repliesMap = {};
+  comments.filter(c => c.parent_comment_id).forEach(c => {
+    if (!repliesMap[c.parent_comment_id]) repliesMap[c.parent_comment_id] = [];
+    repliesMap[c.parent_comment_id].push(c);
+  });
+
+  function commentHTML(c, isReply = false) {
+    const canDel  = isAdmin || c.email === myEmail;
+    const dispName = escHtml(c.name || c.email.split("@")[0]);
+    const replyPrefix = (isReply && c.reply_to_name)
+      ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span>` : "";
     return `
-      <div class="comment-item" id="comment-${c.id}">
+      <div class="comment-item${isReply ? " is-reply" : ""}" id="comment-${c.id}">
         <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="display:contents;text-decoration:none">
           ${avatarHtml(c.email, c.name, 28, cmtAvatarMap[c.email] || null)}
         </a>
         <div class="comment-body">
           <div class="comment-meta">
-            <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${escHtml(c.name || c.email.split("@")[0])}</span></a>
+            <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
             <span class="comment-time">${relativeTime(c.created_at)}</span>
-            ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:#333;padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#333'">Delete</button>` : ""}
+            ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
           </div>
-          <div class="comment-text">${escHtml(c.content)}</div>
+          <div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>
+          <button class="comment-reply-btn" onclick="startReply('${c.id}','${dispName.replace(/'/g,"\\'")}')">Reply</button>
         </div>
       </div>`;
+  }
+
+  listEl.innerHTML = topLevel.map(c => {
+    const replies = repliesMap[c.id] || [];
+    return commentHTML(c) +
+      (replies.length ? `<div class="comment-replies">${replies.map(r => commentHTML(r, true)).join("")}</div>` : "");
   }).join("");
+}
+
+let _replyToCommentId   = null;
+let _replyToName        = null;
+let _replyToEmail       = null;
+
+function startReply(commentId, authorName) {
+  _replyToCommentId = commentId;
+  _replyToName      = authorName;
+  const input = document.getElementById("comment-input");
+  input.value = `@${authorName} `;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  autoResize(input);
 }
 
 async function submitComment() {
@@ -3512,11 +3555,34 @@ async function submitComment() {
 
   input.disabled = true;
 
-  const { error } = await db.from("community_post_comments").insert({
-    post_id: _currentPostId, email: myEmail, name: myName, content
-  });
+  const payload = {
+    post_id: _currentPostId, email: myEmail, name: myName, content,
+    parent_comment_id: _replyToCommentId || null,
+    reply_to_name:     _replyToName      || null,
+  };
+
+  const { error } = await db.from("community_post_comments").insert(payload);
+
+  // Notify the person being replied to
+  if (!error && _replyToCommentId) {
+    // Find the comment author's email by looking up the comment
+    const { data: parentCmt } = await db
+      .from("community_post_comments").select("email,name").eq("id", _replyToCommentId).maybeSingle();
+    if (parentCmt && parentCmt.email !== myEmail) {
+      await db.from("notifications").insert({
+        email:   parentCmt.email,
+        type:    "comment_reply",
+        title:   `${myName || "Someone"} replied to your comment`,
+        body:    content.slice(0, 120),
+        link:    `/community.html`,
+        read:    false,
+      }).then(() => {});  // fire-and-forget
+    }
+  }
 
   input.disabled = false;
+  _replyToCommentId = null;
+  _replyToName      = null;
 
   if (error) { alert("Couldn't post comment: " + error.message); return; }
 
