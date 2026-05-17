@@ -178,6 +178,7 @@
       text-decoration: none; -webkit-tap-highlight-color: transparent; font-family: inherit;
     }
     .sh-item.active { color: var(--accent, #f5c518); font-weight: 700; }
+    .sh-group-toggle.active { color: var(--accent, #f5c518); }
     .sh-section-btn {
       display: flex; align-items: center; width: 100%; background: none; border: none;
       border-top: 1px solid rgba(255,255,255,.08); padding: 16px 20px;
@@ -617,13 +618,20 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
   document.getElementById("sh-mob-logout-btn")?.addEventListener("click", logoutHandler);
 
-  // Mark active tab + sheet item
+  // Mark active tab (desktop)
   document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
     t.classList.toggle("active", t.dataset.page === activePage)
   );
-  document.querySelectorAll(".sh-item[data-page], .sh-section-btn[data-page]").forEach(t =>
+  // Mark active section button (top-level items like Community)
+  document.querySelectorAll(".sh-section-btn[data-page]").forEach(t =>
     t.classList.toggle("active", t.dataset.page === activePage)
   );
+  // For grouped sub-items, only highlight the group toggle — not every sub-item
+  document.querySelectorAll(".sh-group-toggle").forEach(toggle => {
+    const items = toggle.closest(".sh-group")?.querySelectorAll(".sh-item[data-page]");
+    const groupPage = items?.[0]?.dataset?.page;
+    toggle.classList.toggle("active", groupPage === activePage);
+  });
 
   // ── Notifications ──────────────────────────────────────────────────────────
   let _notifs = [];
