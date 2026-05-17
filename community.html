@@ -603,20 +603,37 @@
     }
 
     .post-footer {
-      display: flex; align-items: center; gap: 16px;
+      display: flex; align-items: center;
       border-top: 1px solid var(--border); padding-top: 10px;
-      margin-top: 4px;
+      margin-top: 4px; gap: 8px;
     }
     .post-footer-btn {
       display: inline-flex; align-items: center; gap: 5px;
       background: none; border: none; cursor: pointer;
       font-size: 0.82rem; color: var(--text-muted);
-      font-family: inherit; padding: 4px 0;
-      transition: color .15s;
+      font-family: inherit; padding: 4px 6px;
+      transition: color .15s; border-radius: 6px;
     }
-    .post-footer-btn:hover { color: var(--text); }
+    .post-footer-btn:hover { color: var(--text); background: rgba(255,255,255,.05); }
     .post-footer-btn.liked { color: #e879a0; }
     .post-footer-btn svg { flex-shrink: 0; }
+    .post-footer-right {
+      margin-left: auto; display: flex; align-items: center; gap: 8px;
+    }
+    .post-footer-avatars {
+      display: flex; align-items: center;
+    }
+    .post-footer-avatar {
+      width: 22px; height: 22px; border-radius: 50%;
+      border: 2px solid var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.52rem; font-weight: 800;
+      margin-left: -6px; flex-shrink: 0;
+    }
+    .post-footer-avatar:first-child { margin-left: 0; }
+    .post-footer-meta {
+      font-size: 0.78rem; color: var(--text-muted); white-space: nowrap;
+    }
 
     .posts-empty {
       text-align: center; padding: 48px 0;
@@ -1877,18 +1894,23 @@ async function loadPosts() {
   // Fetch like counts, comment counts, poll info in parallel
   const ids = posts.map(p => p.id);
   const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }] = await Promise.all([
-    db.from("community_post_likes").select("post_id").in("post_id", ids),
+    db.from("community_post_likes").select("post_id,email").in("post_id", ids),
     db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", ids),
     db.from("community_post_comments").select("post_id").in("post_id", ids),
     db.from("community_post_polls").select("post_id,question,id").in("post_id", ids)
   ]);
 
   const likeCountMap    = {};
+  const likersMap       = {}; // post_id → [email, ...]  (up to 3)
   const commentCountMap = {};
-  const pollMap         = {}; // post_id → {id, question, optionCount}
+  const pollMap         = {};
   const myLikeSet       = new Set((myLikes || []).map(l => l.post_id));
 
-  (allLikes     || []).forEach(l => likeCountMap[l.post_id]    = (likeCountMap[l.post_id]    || 0) + 1);
+  (allLikes || []).forEach(l => {
+    likeCountMap[l.post_id] = (likeCountMap[l.post_id] || 0) + 1;
+    if (!likersMap[l.post_id]) likersMap[l.post_id] = [];
+    if (likersMap[l.post_id].length < 3) likersMap[l.post_id].push(l.email);
+  });
   (commentCounts|| []).forEach(c => commentCountMap[c.post_id] = (commentCountMap[c.post_id] || 0) + 1);
   (polls        || []).forEach(p => pollMap[p.post_id]         = { id: p.id, question: p.question });
 
@@ -1907,6 +1929,7 @@ async function loadPosts() {
     likeCount:    likeCountMap[p.id]    || 0,
     commentCount: commentCountMap[p.id] || 0,
     iLiked:       myLikeSet.has(p.id),
+    likers:       likersMap[p.id]       || [],
     poll:         pollMap[p.id]         || null
   }));
 
@@ -2011,12 +2034,22 @@ function postCardHTML(p) {
       <div class="post-footer" onclick="event.stopPropagation()">
         <button class="post-footer-btn ${p.iLiked ? "liked" : ""}" data-post-id="${p.id}" onclick="toggleLike(this,'${p.id}')">
           ${likeIcon}
-          <span class="like-count-${p.id}">${p.likeCount || ""}</span>
         </button>
         <button class="post-footer-btn" onclick="showDetail('${p.id}')">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span class="comment-count-${p.id}">${p.commentCount || ""}</span>
         </button>
+        <div class="post-footer-right">
+          ${p.likers.length ? `<div class="post-footer-avatars">${p.likers.map(e => {
+            const c = nameColour(e);
+            const ini = e[0].toUpperCase();
+            return `<div class="post-footer-avatar" style="background:${c.bg};color:${c.fg}">${ini}</div>`;
+          }).join("")}</div>` : ""}
+          <span class="post-footer-meta like-count-${p.id}">${
+            [p.likeCount ? p.likeCount + " like" + (p.likeCount !== 1 ? "s" : "") : "",
+             p.commentCount ? p.commentCount + " comment" + (p.commentCount !== 1 ? "s" : "") : ""]
+            .filter(Boolean).join(" · ")
+          }</span>
+        </div>
       </div>
     </div>`;
 }
@@ -2052,13 +2085,22 @@ function _updateLikeUI(btn, liked, count, postId) {
   const svg = liked
     ? `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`
     : `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
-  btn.innerHTML = svg + `<span class="like-count-${postId}">${count || ""}</span>`;
+  btn.innerHTML = svg;
+  // Update the meta text (likes · comments)
+  const post = _posts.find(p => p.id === postId);
+  const commentCount = post?.commentCount || 0;
+  const metaEl = document.querySelector(`.like-count-${postId}`);
+  if (metaEl) {
+    metaEl.textContent = [
+      count ? count + " like" + (count !== 1 ? "s" : "") : "",
+      commentCount ? commentCount + " comment" + (commentCount !== 1 ? "s" : "") : ""
+    ].filter(Boolean).join(" · ");
+  }
   // Also update detail view like button if open
   const detailBtn = document.getElementById(`detail-like-btn`);
   if (detailBtn && detailBtn.dataset.postId === postId) {
     _updateDetailLikeBtn(detailBtn, liked, count, postId);
   }
-  document.querySelectorAll(`.like-count-${postId}`).forEach(el => el.textContent = count || "");
 }
 
 // ── Detail view ───────────────────────────────────────────────────────────────
