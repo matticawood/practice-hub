@@ -16,11 +16,14 @@ const LINKS: Record<string, string> = {
 const COUNTRY_CURRENCY: Record<string, string> = {
   // GBP
   GB: "GBP", JE: "GBP", GG: "GBP", IM: "GBP",
-  // EUR
+  // EUR — Eurozone
   DE: "EUR", FR: "EUR", IT: "EUR", ES: "EUR", NL: "EUR",
   PT: "EUR", BE: "EUR", AT: "EUR", IE: "EUR", FI: "EUR",
   GR: "EUR", LU: "EUR", SK: "EUR", SI: "EUR", EE: "EUR",
   LV: "EUR", LT: "EUR", CY: "EUR", MT: "EUR", HR: "EUR",
+  // EUR — non-Eurozone European countries (best available option)
+  CH: "EUR", IS: "EUR", LI: "EUR", PL: "EUR",
+  CZ: "EUR", HU: "EUR", RO: "EUR", BG: "EUR",
   // USD
   US: "USD",
   // CAD
