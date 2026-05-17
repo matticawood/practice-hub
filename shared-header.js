@@ -256,13 +256,21 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="events" href="/events.html">Events</a>
+      <a class="sh-tab" data-page="theory" href="/practice-log.html#theory">Theory</a>
+      <div class="sh-tab-drop">
+        <a href="/practice-log.html#ppd">Piano Practice Daily</a>
+        <a href="/practice-log.html#glossary">Glossary</a>
+        <a href="/practice-log.html#key">Key Explorer</a>
+      </div>
     </div>
     <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="tools" href="/practice-tools.html">Practice Tools</a>
     </div>
     <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="feedback" href="/feedback.html">Feedback</a>
+    </div>
+    <div class="sh-tab-wrap">
+      <a class="sh-tab" data-page="events" href="/events.html">Events</a>
     </div>
   `;
   // Insert after header, before main
