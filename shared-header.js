@@ -679,15 +679,19 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       await db.from("notifications").update({ read: true }).eq("id", id).eq("email", myEmail);
     }
     // Navigate to the linked content
-    if (n?.link_url) {
+    // Derive a destination: prefer stored link_url, fall back to community page for comment notifications
+    const dest = n?.link_url ||
+      (n?.type === "comment_reply" || n?.type === "new_comment" ? "/community.html" : null);
+
+    if (dest) {
       window._shCloseNotif?.();
-      const url = new URL(n.link_url, window.location.origin);
+      const url = new URL(dest, window.location.origin);
       const isSamePage = url.pathname === window.location.pathname;
       if (isSamePage && typeof window.showDetail === "function") {
         const postId = url.searchParams.get("post");
         if (postId) { window.showDetail(postId); return; }
       }
-      window.location.href = n.link_url;
+      window.location.href = dest;
     }
   };
 
