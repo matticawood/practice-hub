@@ -185,6 +185,16 @@
     }
     .sh-section-btn.active { color: var(--accent, #f5c518); }
 
+    /* ── Bell button: force visible on dark header ── */
+    #notif-bell-btn.btn-ghost {
+      border-color: rgba(255,255,255,.18);
+      color: rgba(255,255,255,.75);
+    }
+    #notif-bell-btn.btn-ghost:hover {
+      border-color: #f5c518;
+      color: #f5c518;
+    }
+
     /* ── User avatar button ── */
     .sh-avatar-wrap { position: relative; flex-shrink: 0; }
     .sh-avatar-btn {
