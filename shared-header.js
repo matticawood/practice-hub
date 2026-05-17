@@ -184,6 +184,35 @@
       text-decoration: none; -webkit-tap-highlight-color: transparent; font-family: inherit;
     }
     .sh-section-btn.active { color: var(--accent, #f5c518); }
+
+    /* ── User avatar button ── */
+    .sh-avatar-btn {
+      background: none; border: none; cursor: pointer; padding: 0;
+      position: relative; flex-shrink: 0;
+    }
+    .sh-avatar {
+      width: 30px; height: 30px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700; color: #fff; font-family: inherit;
+    }
+    .sh-user-menu {
+      position: absolute; top: calc(100% + 6px); right: 0;
+      background: #141414; border: 1px solid #2a2a2a; border-radius: 10px;
+      min-width: 180px; z-index: 1100;
+      box-shadow: 0 8px 28px rgba(0,0,0,.4);
+      display: none; flex-direction: column; overflow: hidden;
+    }
+    .sh-user-menu.open { display: flex; }
+    .sh-avatar-btn { position: relative; }
+    .sh-user-menu-item {
+      display: block; width: 100%; padding: 11px 16px;
+      background: none; border: none; border-bottom: 1px solid #1e1e1e;
+      font-size: 0.85rem; color: #e0e0e0; text-align: left;
+      cursor: pointer; text-decoration: none; font-family: inherit;
+      transition: background .12s;
+    }
+    .sh-user-menu-item:last-child { border-bottom: none; }
+    .sh-user-menu-item:hover { background: #1e1e1e; }
   `;
   document.head.appendChild(s);
 })();
@@ -206,8 +235,14 @@ document.addEventListener("DOMContentLoaded", function() {
           </svg>
           <span class="notif-badge" id="notif-badge" style="display:none"></span>
         </button>
-        <a class="btn btn-ghost btn-sm" id="sh-admin-link" href="/index.html" style="display:none">Admin</a>
-        <button class="btn btn-ghost btn-sm" id="sh-logout-btn">Log out</button>
+        <button class="sh-avatar-btn" id="sh-avatar-btn" onclick="window._shToggleUserMenu()">
+          <div class="sh-avatar" id="sh-avatar-el"></div>
+        </button>
+        <div class="sh-user-menu" id="sh-user-menu">
+          <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
+          <a class="sh-user-menu-item" href="/feedback.html">Feedback &amp; Bug Reports</a>
+          <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
+        </div>
         <button class="btn btn-ghost btn-sm" id="sh-hamburger-btn" onclick="window._shOpenSheet()"
           aria-label="Open menu" style="padding:6px 8px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -234,20 +269,12 @@ document.addEventListener("DOMContentLoaded", function() {
         <a href="/practice-log.html#goals">Goals</a>
         <a href="/practice-log.html#history">History</a>
         <a href="/practice-log.html#leaderboard">Leaderboard</a>
-        <a href="/practice-log.html#community">Community Feed</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="library" href="/index.html">Pieces Library</a>
+      <a class="sh-tab" data-page="resources" href="/index.html">Resources</a>
       <div class="sh-tab-drop">
-        <a href="/index.html">All Pieces</a>
-        <a href="/index.html#books">Books</a>
-        <a href="/index.html#collection">My Collection</a>
-      </div>
-    </div>
-    <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="theory" href="/practice-log.html#theory">Theory</a>
-      <div class="sh-tab-drop">
+        <a href="/index.html">Pieces Library</a>
         <a href="/practice-log.html#ppd">Piano Practice Daily</a>
         <a href="/practice-log.html#glossary">Glossary</a>
         <a href="/practice-log.html#key">Key Explorer</a>
@@ -262,10 +289,18 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="feedback" href="/feedback.html">Feedback</a>
+      <a class="sh-tab" data-page="studio" href="/events.html">Matt's Studio</a>
+      <div class="sh-tab-drop">
+        <a href="#">Weekly Practice Focus</a>
+        <a href="#">Content Feed</a>
+        <a href="/events.html">Events &amp; Replays</a>
+        <a href="/clinic-booking.html">Live Practice Clinics</a>
+        <a href="#">One-to-One Clinics</a>
+        <a href="#">Practice Room Updates</a>
+      </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="events" href="/events.html">Events</a>
+      <a class="sh-tab" data-page="community" href="#">Community</a>
     </div>
   `;
   // Insert after header, before main
@@ -295,31 +330,19 @@ document.addEventListener("DOMContentLoaded", function() {
         <a class="sh-item" data-page="hub" href="/practice-log.html#goals">Goals</a>
         <a class="sh-item" data-page="hub" href="/practice-log.html#history">History</a>
         <a class="sh-item" data-page="hub" href="/practice-log.html#leaderboard">Leaderboard</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html#community">Community Feed</a>
       </div>
     </div>
 
     <div class="sh-group">
       <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
-        Pieces Library
+        Resources
         <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sh-group-items">
-        <a class="sh-item" data-page="library" href="/index.html">All Pieces</a>
-        <a class="sh-item" data-page="library" href="/index.html#books">Books</a>
-        <a class="sh-item" data-page="library" href="/index.html#collection">My Collection</a>
-      </div>
-    </div>
-
-    <div class="sh-group">
-      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
-        Theory
-        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      <div class="sh-group-items">
-        <a class="sh-item" href="/practice-log.html#ppd">Piano Practice Daily</a>
-        <a class="sh-item" href="/practice-log.html#glossary">Glossary</a>
-        <a class="sh-item" href="/practice-log.html#key">Key Explorer</a>
+        <a class="sh-item" data-page="resources" href="/index.html">Pieces Library</a>
+        <a class="sh-item" data-page="resources" href="/practice-log.html#ppd">Piano Practice Daily</a>
+        <a class="sh-item" data-page="resources" href="/practice-log.html#glossary">Glossary</a>
+        <a class="sh-item" data-page="resources" href="/practice-log.html#key">Key Explorer</a>
       </div>
     </div>
 
@@ -335,8 +358,27 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
 
-    <a class="sh-section-btn" data-page="feedback" href="/feedback.html">Feedback</a>
-    <a class="sh-section-btn" data-page="events"   href="/events.html">Events &amp; Replays</a>
+    <div class="sh-group">
+      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
+        Matt's Studio
+        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sh-group-items">
+        <a class="sh-item" data-page="studio" href="#">Weekly Practice Focus</a>
+        <a class="sh-item" data-page="studio" href="#">Content Feed</a>
+        <a class="sh-item" data-page="studio" href="/events.html">Events &amp; Replays</a>
+        <a class="sh-item" data-page="studio" href="/clinic-booking.html">Live Practice Clinics</a>
+        <a class="sh-item" data-page="studio" href="#">One-to-One Clinics</a>
+        <a class="sh-item" data-page="studio" href="#">Practice Room Updates</a>
+      </div>
+    </div>
+
+    <a class="sh-section-btn" data-page="community" href="#">Community</a>
+
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,.1);margin:8px 20px;">
+    <a class="sh-section-btn" href="/profile.html">Edit Profile</a>
+    <a class="sh-section-btn" href="/feedback.html">Feedback &amp; Bug Reports</a>
+    <button class="sh-section-btn" id="sh-mob-logout-btn">Log out</button>
   `;
   document.body.appendChild(sheet);
 
@@ -406,6 +448,18 @@ window.openMobSheet  = window._shOpenSheet;
 window.closeMobSheet = window._shCloseSheet;
 window._shToggleGroup = btn => btn.closest(".sh-group").classList.toggle("open");
 
+// ── User menu helpers ─────────────────────────────────────────────────────────
+window._shToggleUserMenu = function() {
+  const menu = document.getElementById("sh-user-menu");
+  menu?.classList.toggle("open");
+};
+// Close user menu on outside click
+document.addEventListener("click", function(e) {
+  if (!e.target.closest(".sh-avatar-btn")) {
+    document.getElementById("sh-user-menu")?.classList.remove("open");
+  }
+});
+
 // ── Notif helpers ─────────────────────────────────────────────────────────────
 window._shCloseNotif = () => {
   document.getElementById("notif-panel")?.classList.remove("open");
@@ -443,19 +497,33 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   const emailEl = document.getElementById("header-email");
   if (emailEl) emailEl.textContent = myName || myEmail;
 
-  // Admin link
-  if (isAdmin) {
-    const al = document.getElementById("sh-admin-link");
-    if (al) al.style.display = "inline-flex";
-  }
-
   // Show bell
   const bell = document.getElementById("notif-bell-btn");
   if (bell) bell.style.display = "";
 
-  // Logout (header button on desktop, sheet button on mobile)
+  // Generate initials avatar
+  function _getInitials(name) {
+    if (!name) return "?";
+    return name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
+  }
+  function _avatarColor(str) {
+    const colors = ["#b5451b","#1b6bb5","#1bb56b","#b5891b","#6b1bb5","#b51b6b","#1bb5b5"];
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  }
+  const avatarEl = document.getElementById("sh-avatar-el");
+  if (avatarEl) {
+    const initials = _getInitials(myName || myEmail?.split("@")[0]);
+    const color = _avatarColor(myEmail || myName || "?");
+    avatarEl.textContent = initials;
+    avatarEl.style.background = color;
+  }
+
+  // Logout — user menu button (desktop) and mobile sheet button
   const logoutHandler = async () => { await db.auth.signOut(); window.location.href = "/practice-log.html"; };
   document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
+  document.getElementById("sh-mob-logout-btn")?.addEventListener("click", logoutHandler);
 
   // Mark active tab + sheet item
   document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
