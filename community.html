@@ -1465,7 +1465,7 @@ async function _uploadVideoToMux(file) {
     await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", uploadUrl);
-      xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+      // Do NOT set Content-Type — it triggers a CORS preflight that Mux's signed URL rejects
       xhr.upload.onprogress = e => {
         if (e.lengthComputable) {
           const pct = Math.round(e.loaded / e.total * 100);
@@ -1473,10 +1473,13 @@ async function _uploadVideoToMux(file) {
         }
       };
       xhr.onload = () => {
-        console.log("[Mux] XHR onload status:", xhr.status);
-        xhr.status < 300 ? resolve() : reject(new Error("Upload to Mux failed with status " + xhr.status + ": " + xhr.responseText));
+        console.log("[Mux] XHR onload status:", xhr.status, xhr.responseText?.slice(0, 200));
+        xhr.status < 300 ? resolve() : reject(new Error("Upload to Mux failed (" + xhr.status + "): " + xhr.responseText));
       };
-      xhr.onerror = () => reject(new Error("Network error during upload — check your connection"));
+      xhr.onerror = e => {
+        console.error("[Mux] XHR onerror:", e);
+        reject(new Error("Network error — CORS may have blocked the upload"));
+      };
       xhr.send(file);
     });
 
@@ -1506,15 +1509,10 @@ async function _uploadVideoToMux(file) {
 
   } catch (e) {
     console.error("[Mux] Upload error:", e);
-    // Show error in the overlay instead of hiding it
-    _setMuxOverlay({
-      show: true,
-      filename: "Upload failed",
-      pct: 0,
-      status: e.message,
-      processing: false
-    });
-    document.getElementById("mux-overlay-bar").style.background = "#ef4444";
+    // Show error in the overlay — keep bar where it was, turn it red
+    _setMuxOverlay({ show: true, filename: "❌ Upload failed", status: e.message, processing: false });
+    const barEl = document.getElementById("mux-overlay-bar");
+    if (barEl) barEl.style.background = "#ef4444";
     // Add a dismiss button
     const statusEl = document.getElementById("mux-overlay-status");
     if (statusEl) statusEl.innerHTML =
