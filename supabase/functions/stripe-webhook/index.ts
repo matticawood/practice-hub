@@ -86,14 +86,64 @@ Deno.serve(async (req) => {
     });
 
     if (inviteError) {
-      console.warn("Invite failed, sending magic link:", inviteError.message);
-      const { error: magicError } = await supabase.auth.admin.generateLink({
+      // User already exists in Auth — generate a magic link and send via Resend
+      console.warn("Invite failed (user exists), sending magic link via Resend:", inviteError.message);
+      const { data: linkData, error: magicError } = await supabase.auth.admin.generateLink({
         type: "magiclink",
         email,
         options: { redirectTo: `${APP_URL}/onboarding.html` },
       });
-      if (magicError) console.error("Magic link also failed:", magicError.message);
-      else console.log("Magic link sent to:", email);
+
+      if (magicError) {
+        console.error("Magic link generation failed:", magicError.message);
+      } else {
+        const magicUrl = linkData?.properties?.action_link;
+        const resendKey = Deno.env.get("RESEND_API_KEY")!;
+        const res = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${resendKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: "The Practice Room <noreply@matthewcawood.com>",
+            to: [email],
+            subject: "Welcome back to The Practice Room 🎹",
+            html: `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0f0f0f;font-family:system-ui,-apple-system,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f0f0f;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
+        <tr><td style="padding-bottom:32px;text-align:center;">
+          <p style="margin:0;font-size:13px;letter-spacing:0.15em;text-transform:uppercase;color:#888;">The Practice Room</p>
+        </td></tr>
+        <tr><td style="background:#1a1a1a;border-radius:12px;padding:40px 36px;">
+          <h1 style="margin:0 0 16px;font-size:24px;font-weight:600;color:#ffffff;line-height:1.3;">Welcome back 🎹</h1>
+          <p style="margin:0 0 16px;font-size:15px;color:#aaaaaa;line-height:1.7;">Thank you for rejoining The Practice Room. We're glad to have you back.</p>
+          <p style="margin:0 0 32px;font-size:15px;color:#aaaaaa;line-height:1.7;">Click the button below to access your account.</p>
+          <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
+            <tr><td style="background:#ffffff;border-radius:8px;padding:14px 32px;text-align:center;">
+              <a href="${magicUrl}" style="color:#0f0f0f;font-size:15px;font-weight:600;text-decoration:none;">Access your account →</a>
+            </td></tr>
+          </table>
+          <p style="margin:0;font-size:13px;color:#555555;line-height:1.6;text-align:center;">
+            If the button doesn't work, copy and paste this link:<br>
+            <a href="${magicUrl}" style="color:#888;word-break:break-all;">${magicUrl}</a>
+          </p>
+        </td></tr>
+        <tr><td style="padding-top:24px;text-align:center;">
+          <p style="margin:0;font-size:12px;color:#444444;">The Practice Room · <a href="https://practicehub.matthewcawood.com" style="color:#444;text-decoration:none;">practicehub.matthewcawood.com</a></p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`,
+          }),
+        });
+        const result = await res.json();
+        console.log("Resend magic link email result:", JSON.stringify(result));
+      }
     } else {
       console.log("Invite email sent to:", email);
     }
