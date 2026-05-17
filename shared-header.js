@@ -641,18 +641,35 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
 
   // Auto-highlight the exact sh-item whose href matches the current page,
   // and auto-open its parent group (accordion: close all others).
-  const currentPath = window.location.pathname;
+  // We match the full href (pathname + ?goto + #hash) so that pages like
+  // practice-log.html — where many items share the same pathname — only
+  // highlight the one item that actually corresponds to the current URL.
+  const _currPath   = window.location.pathname;
+  const _currGoto   = new URLSearchParams(window.location.search).get("goto") || "";
+  const _currHash   = window.location.hash; // e.g. "#library"
   let activeGroup = null;
+
   document.querySelectorAll(".sh-item").forEach(item => {
     try {
-      const itemPath = new URL(item.getAttribute("href") || "", window.location.origin).pathname;
-      if (itemPath && itemPath === currentPath) {
-        item.classList.add("active");
-        activeGroup = item.closest(".sh-group");
-      }
+      const raw  = item.getAttribute("href") || "";
+      const iUrl = new URL(raw, window.location.origin);
+      if (iUrl.pathname !== _currPath) return;           // different page → skip
+
+      const iGoto = iUrl.searchParams.get("goto") || "";
+      const iHash = iUrl.hash;                            // e.g. "#library"
+
+      // Require exact goto match (empty matches empty)
+      if (iGoto !== _currGoto) return;
+      // Require exact hash match (empty matches empty)
+      if (iHash !== _currHash) return;
+
+      item.classList.add("active");
+      activeGroup = item.closest(".sh-group");
     } catch(e) {}
   });
-  // If no URL match, fall back to opening the group for the activePage
+
+  // If no URL match (e.g. community.html, or a hash-only tab on practice-log),
+  // fall back to opening the group whose items belong to activePage.
   if (!activeGroup && activePage) {
     document.querySelectorAll(".sh-group").forEach(g => {
       const firstItem = g.querySelector(".sh-item[data-page]");
