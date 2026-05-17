@@ -709,7 +709,7 @@
       margin-left: auto; display: flex; align-items: center; gap: 8px;
     }
     .post-footer-avatars {
-      display: flex; align-items: center;
+      display: flex; align-items: center; cursor: pointer;
     }
     .post-footer-avatar {
       width: 22px; height: 22px; border-radius: 50%;
@@ -719,6 +719,17 @@
       margin-left: -6px; flex-shrink: 0;
     }
     .post-footer-avatar:first-child { margin-left: 0; }
+    .likers-popover {
+      position: fixed; z-index: 9999;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+      min-width: 140px; max-width: 220px;
+    }
+    .likers-popover-title { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+    .likers-popover-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .likers-popover-row:last-child { margin-bottom: 0; }
+    .likers-popover-avatar { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; font-weight: 800; flex-shrink: 0; }
+    .likers-popover-name { font-size: 0.82rem; color: var(--text); }
     .post-footer-meta {
       font-size: 0.78rem; color: var(--text-muted); white-space: nowrap;
     }
@@ -2297,12 +2308,12 @@ function postCardHTML(p) {
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         </button>
         <div class="post-footer-right">
-          ${p.likers.length ? `<div class="post-footer-avatars">${p.likers.map(e => {
+          ${p.likers.length ? `<div class="post-footer-avatars" onclick="showLikersPopover('${p.id}',event)">${p.likers.map(e => {
             const c = avatarColour(e);
             const ini = e[0].toUpperCase();
             return `<div class="post-footer-avatar" style="background:${c.bg};color:${c.fg}">${ini}</div>`;
           }).join("")}</div>` : ""}
-          <span class="post-footer-meta like-count-${p.id}">${
+          <span class="post-footer-meta like-count-${p.id}" ${p.likeCount ? `onclick="showLikersPopover('${p.id}',event)" style="cursor:pointer"` : ""}>${
             [p.likeCount ? p.likeCount + " like" + (p.likeCount !== 1 ? "s" : "") : "",
              p.commentCount ? p.commentCount + " comment" + (p.commentCount !== 1 ? "s" : "") : ""]
             .filter(Boolean).join(" · ")
@@ -2313,6 +2324,53 @@ function postCardHTML(p) {
 }
 
 // ── Like toggle ───────────────────────────────────────────────────────────────
+let _likersPopover = null;
+
+async function showLikersPopover(postId, event) {
+  event.stopPropagation();
+  _dismissLikersPopover();
+
+  // Fetch all likers + their names
+  const { data: likes } = await db.from("community_post_likes")
+    .select("email").eq("post_id", postId);
+  if (!likes?.length) return;
+
+  const emails = likes.map(l => l.email);
+  const { data: nameRows } = await db.from("allowed_emails")
+    .select("email,name").in("email", emails);
+  const nameMap = {};
+  (nameRows || []).forEach(r => { nameMap[r.email] = r.name; });
+
+  const rows = emails.map(e => {
+    const name = nameMap[e] || e.split("@")[0];
+    const c = avatarColour(e);
+    return `<div class="likers-popover-row">
+      <div class="likers-popover-avatar" style="background:${c.bg};color:${c.fg}">${name[0].toUpperCase()}</div>
+      <span class="likers-popover-name">${escHtml(name)}</span>
+    </div>`;
+  }).join("");
+
+  const pop = document.createElement("div");
+  pop.className = "likers-popover";
+  pop.innerHTML = `<div class="likers-popover-title">Liked by</div>${rows}`;
+  document.body.appendChild(pop);
+  _likersPopover = pop;
+
+  // Position near the click, keeping it on screen
+  const { clientX: x, clientY: y } = event;
+  const pw = 220, ph = 48 + emails.length * 38;
+  const left = Math.min(x, window.innerWidth  - pw - 12);
+  const top  = Math.min(y + 8, window.innerHeight - ph - 12);
+  pop.style.left = left + "px";
+  pop.style.top  = top  + "px";
+
+  setTimeout(() => document.addEventListener("click", _dismissLikersPopover, { once: true }), 0);
+}
+
+function _dismissLikersPopover() {
+  if (_likersPopover) { _likersPopover.remove(); _likersPopover = null; }
+}
+
 async function toggleLike(btn, postId) {
   const isLiked  = btn.classList.contains("liked");
   const post     = _posts.find(p => p.id === postId);
