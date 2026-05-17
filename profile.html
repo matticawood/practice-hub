@@ -219,6 +219,20 @@
       font-family: inherit; min-width: 0;
     }
 
+    /* ── Location autocomplete dropdown ── */
+    .location-dropdown {
+      position: absolute; top: 100%; left: 0; right: 0; z-index: 500;
+      background: #1a1a1a; border: 1px solid #333; border-top: none;
+      border-radius: 0 0 10px 10px; overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    }
+    .location-option {
+      padding: 10px 13px; font-size: 0.85rem; color: #ccc; cursor: pointer;
+      border-bottom: 1px solid #222; transition: background .12s;
+    }
+    .location-option:last-child { border-bottom: none; }
+    .location-option:hover, .location-option.focused { background: #252525; color: #fff; }
+
     .profile-save-bar {
       position: fixed; bottom: 0; left: 0; right: 0;
       background: var(--surface); border-top: 1px solid var(--border);
@@ -299,19 +313,24 @@
     </div>
     <div class="profile-field">
       <label class="profile-label" for="profile-headline-input">Headline</label>
-      <input id="profile-headline-input" class="profile-input" type="text" placeholder="e.g. Pianist · Music teacher · Grade 8 student" />
+      <input id="profile-headline-input" class="profile-input" type="text" placeholder="e.g. Beginner pianist · Music enthusiast · Working towards Grade 4" />
     </div>
     <div class="profile-field">
-      <label class="profile-label" for="profile-instrument-input">Instrument</label>
-      <input id="profile-instrument-input" class="profile-input" type="text" placeholder="e.g. Piano, Violin" />
+      <label class="profile-label" for="profile-instrument-input">Instruments</label>
+      <input id="profile-instrument-input" class="profile-input" type="text" placeholder="e.g. Piano, Guitar, Violin" />
     </div>
     <div class="profile-field">
       <label class="profile-label" for="profile-bio-input">Bio</label>
       <textarea id="profile-bio-input" class="profile-input" placeholder="Tell the community a little about yourself…"></textarea>
     </div>
-    <div class="profile-field">
+    <div class="profile-field" style="position:relative">
       <label class="profile-label" for="profile-location-input">Location</label>
-      <input id="profile-location-input" class="profile-input" type="text" placeholder="e.g. London, UK" />
+      <input id="profile-location-input" class="profile-input" type="text"
+             placeholder="Start typing your city…"
+             autocomplete="off"
+             oninput="onLocationInput(this.value)"
+             onblur="setTimeout(closeLocationDropdown, 150)" />
+      <div id="location-dropdown" class="location-dropdown" style="display:none"></div>
     </div>
   </div>
 
@@ -602,6 +621,47 @@ async function saveProfile() {
     );
     setTimeout(() => status.textContent = "", 3000);
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// LOCATION AUTOCOMPLETE  (OpenStreetMap Nominatim — no API key needed)
+// ══════════════════════════════════════════════════════════════════════
+let _locationTimer = null;
+
+async function onLocationInput(value) {
+  clearTimeout(_locationTimer);
+  const dd = document.getElementById("location-dropdown");
+  if (!value || value.trim().length < 2) { dd.style.display = "none"; return; }
+  _locationTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(value)}&format=json&addressdetails=1&limit=6`,
+        { headers: { "Accept-Language": "en" } }
+      );
+      const results = await res.json();
+      if (!results.length) { dd.style.display = "none"; return; }
+
+      dd.innerHTML = results.map((r, i) => {
+        // Build a clean "City, Country" label
+        const a   = r.address || {};
+        const city = a.city || a.town || a.village || a.county || a.state_district || r.display_name.split(",")[0];
+        const country = a.country || "";
+        const label = city + (country ? ", " + country : "");
+        return `<div class="location-option" data-index="${i}" onmousedown="pickLocation('${escHtml(label)}')">${escHtml(label)}</div>`;
+      }).join("");
+      dd.style.display = "block";
+    } catch { dd.style.display = "none"; }
+  }, 350); // debounce 350ms
+}
+
+function pickLocation(label) {
+  document.getElementById("profile-location-input").value = label;
+  closeLocationDropdown();
+}
+
+function closeLocationDropdown() {
+  const dd = document.getElementById("location-dropdown");
+  if (dd) dd.style.display = "none";
 }
 
 // ══════════════════════════════════════════════════════════════════════
