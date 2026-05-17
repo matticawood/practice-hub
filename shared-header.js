@@ -26,7 +26,7 @@
     #app-header > .sh-title { flex: 1; }
     #app-header h1 {
       font-size: 1.4rem; font-weight: 700; color: #fff;
-      letter-spacing: -0.3px; margin: 0; line-height: 1;
+      letter-spacing: -0.3px; margin: 0; line-height: 1; white-space: nowrap;
     }
     .header-user {
       display: flex; align-items: center; gap: 8px; flex-shrink: 0;
@@ -39,8 +39,9 @@
     #header-email { font-size: 0.82rem; color: var(--text-muted, #888); }
     @media (max-width: 600px) {
       #app-header { padding: 12px 16px; }
-      #app-header h1 { font-size: 1.1rem; }
+      #app-header h1 { font-size: 1rem; }
       #header-email { display: none; }
+      #sh-admin-link { display: none !important; }
     }
 
     /* ── Bell ── */
