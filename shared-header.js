@@ -17,8 +17,18 @@
 (function() {
   const s = document.createElement("style");
   s.textContent = `
-    /* ── Header — base styles only (mobile layout handled by style.css) ── */
+    /* ── Header ── */
     #app-header h1 { margin: 0; }
+    /* Mobile: override style.css so user row has no border-top and stays auto-width
+       (matches practice-log.html behaviour exactly) */
+    @media (max-width: 640px) {
+      #app-header { flex-wrap: wrap; row-gap: 8px; align-items: center; }
+      #app-header > div:first-child { order: 1; width: 100%; flex: none; }
+      #app-header .header-user {
+        order: 2; width: auto !important; flex: 1; margin-left: 0;
+        border-top: none !important; padding-top: 0 !important; justify-content: flex-end;
+      }
+    }
 
     /* ── Bell ── */
     .btn-bell { position: relative; flex-shrink: 0; }
@@ -184,10 +194,9 @@ document.addEventListener("DOMContentLoaded", function() {
   const header = document.getElementById("app-header");
   if (header) {
     header.innerHTML = `
-      <div class="sh-title"><h1>Practice Hub</h1></div>
+      <div style="flex:1"><h1>Practice Hub</h1></div>
       <div class="header-user">
         <span id="header-email"></span>
-        <a class="btn btn-ghost btn-sm" id="sh-admin-link" href="/index.html" style="display:none">Admin</a>
         <button class="btn btn-ghost btn-sm btn-bell" id="notif-bell-btn"
           onclick="window._shToggleNotif()" title="Notifications" aria-label="Notifications" style="display:none">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
@@ -197,6 +206,7 @@ document.addEventListener("DOMContentLoaded", function() {
           </svg>
           <span class="notif-badge" id="notif-badge" style="display:none"></span>
         </button>
+        <a class="btn btn-ghost btn-sm" id="sh-admin-link" href="/index.html" style="display:none">Admin</a>
         <button class="btn btn-ghost btn-sm" id="sh-logout-btn">Log out</button>
         <button class="btn btn-ghost btn-sm" id="sh-hamburger-btn" onclick="window._shOpenSheet()"
           aria-label="Open menu" style="padding:6px 8px">
