@@ -228,8 +228,8 @@
       border-radius: 12px; overflow: hidden; margin-top: 10px;
     }
     .video-rec-preview {
-      display: block; width: 100%; max-height: 280px;
-      object-fit: cover; background: #000;
+      display: block; width: 100%;
+      aspect-ratio: 4/3; object-fit: contain; background: #000;
     }
     .video-rec-devices {
       display: flex; gap: 8px; padding: 10px 12px 0;
@@ -253,6 +253,19 @@
       background: rgba(255,255,255,.06); border: 1.5px solid var(--border);
       border-radius: 8px; color: var(--text-muted); cursor: pointer;
       font-size: 0.85rem; padding: 10px 16px;
+    }
+    .video-rec-recording-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px 12px; background: rgba(239,68,68,.08);
+    }
+    .video-rec-recording-bar .recording-dot {
+      width: 9px; height: 9px; border-radius: 50%; background: #ef4444;
+      animation: blink 1s ease-in-out infinite; flex-shrink: 0;
+    }
+    #video-rec-timer { font-size: 0.88rem; font-weight: 600; color: var(--text); flex: 1; }
+    .video-rec-stop-btn {
+      background: #ef4444; color: #fff; border: none; border-radius: 8px;
+      font-weight: 700; font-size: 0.82rem; padding: 8px 14px; cursor: pointer;
     }
 
     /* ── Video URL inline panel ───────────────────────────────────────────────── */
@@ -1016,7 +1029,8 @@
               <!-- Video recording preview panel -->
               <div id="video-rec-panel" style="display:none" class="video-rec-panel">
                 <video id="video-rec-preview" autoplay muted playsinline class="video-rec-preview"></video>
-                <div class="video-rec-devices">
+                <!-- Device selectors (hidden while recording) -->
+                <div class="video-rec-devices" id="video-rec-devices">
                   <select id="video-rec-camera" class="video-rec-select" onchange="switchCamera()">
                     <option>Loading cameras…</option>
                   </select>
@@ -1024,9 +1038,16 @@
                     <option>Loading mics…</option>
                   </select>
                 </div>
-                <div class="video-rec-actions">
+                <!-- Pre-recording actions -->
+                <div class="video-rec-actions" id="video-rec-actions">
                   <button class="video-rec-start-btn" id="video-rec-start-btn" onclick="startVideoRecordingFromPreview()">⏺ Start Recording</button>
                   <button class="video-rec-cancel-btn" onclick="cancelVideoPreview()">Cancel</button>
+                </div>
+                <!-- Active recording bar (shown while recording) -->
+                <div class="video-rec-recording-bar" id="video-rec-recording-bar" style="display:none">
+                  <span class="recording-dot"></span>
+                  <span id="video-rec-timer">0:00</span>
+                  <button class="video-rec-stop-btn" onclick="_stopRecording()">■ Stop & Upload</button>
                 </div>
               </div>
 
@@ -1821,8 +1842,10 @@ async function switchCamera() {
 
 function startVideoRecordingFromPreview() {
   if (!_previewStream) return;
-  const panel = document.getElementById("video-rec-panel");
-  panel.style.display = "none";
+  // Keep the preview panel open so they can see themselves while recording
+  document.getElementById("video-rec-devices").style.display = "none";
+  document.getElementById("video-rec-actions").style.display  = "none";
+  document.getElementById("video-rec-recording-bar").style.display = "";
   _startRecording(_previewStream, "video");
   _previewStream = null; // ownership transferred to recorder
 }
@@ -1853,6 +1876,13 @@ function _startRecording(stream, type) {
     _recordingType = null; _voiceRecorder = null; _videoRecorder = null;
 
     if (type === "video") {
+      // Hide and reset the preview panel
+      const panel = document.getElementById("video-rec-panel");
+      panel.style.display = "none";
+      document.getElementById("video-rec-devices").style.display      = "";
+      document.getElementById("video-rec-actions").style.display       = "";
+      document.getElementById("video-rec-recording-bar").style.display = "none";
+      document.getElementById("video-rec-preview").srcObject = null;
       // Route through Mux so large recordings are handled properly
       const file = new File([blob], name, { type: mime });
       _uploadVideoToMux(file);
@@ -1875,7 +1905,10 @@ function _startRecording(stream, type) {
   _recordingTimer = setInterval(() => {
     const secs = Math.round((Date.now() - _recordingStart) / 1000);
     const m = Math.floor(secs / 60), s = secs % 60;
-    document.getElementById("composer-recording-time").textContent = `${m}:${String(s).padStart(2,"0")}`;
+    const ts = `${m}:${String(s).padStart(2,"0")}`;
+    document.getElementById("composer-recording-time").textContent = ts;
+    const inPanel = document.getElementById("video-rec-timer");
+    if (inPanel) inPanel.textContent = ts;
   }, 1000);
 }
 
