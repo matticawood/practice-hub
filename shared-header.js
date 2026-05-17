@@ -87,8 +87,10 @@
       text-decoration: none; font-family: inherit; box-sizing: border-box;
     }
     .sh-tab-drop a:hover { background: var(--surface-2, #1e1e1e); color: var(--text, #e5e5e5); }
+    #sh-hamburger-btn { display: none; }
     @media (max-width: 768px) {
       .sh-tab-bar { display: none; }
+      #sh-hamburger-btn { display: inline-flex; }
     }
 
     /* ── Notif overlay + panel ── */
@@ -218,7 +220,7 @@ document.addEventListener("DOMContentLoaded", function() {
           <span class="notif-badge" id="notif-badge" style="display:none"></span>
         </button>
         <button class="btn btn-ghost btn-sm" id="sh-logout-btn">Log out</button>
-        <button class="btn btn-ghost btn-sm" onclick="window._shOpenSheet()"
+        <button class="btn btn-ghost btn-sm" id="sh-hamburger-btn" onclick="window._shOpenSheet()"
           aria-label="Open menu" style="padding:6px 8px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
