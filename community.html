@@ -1445,32 +1445,44 @@ async function _uploadVideoToMux(file) {
   try {
     // Step 1: get a direct Mux upload URL from our edge function
     const token = (await db.auth.getSession()).data.session?.access_token;
+    console.log("[Mux] Requesting upload URL…");
     const createRes = await fetch("/api/daily", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ action: "create-mux-upload" })
     });
-    const { uploadId, uploadUrl, error } = await createRes.json();
-    if (error) throw new Error(JSON.stringify(error));
+    const createText = await createRes.text();
+    console.log("[Mux] create-mux-upload response:", createRes.status, createText);
+    let createData;
+    try { createData = JSON.parse(createText); } catch { throw new Error("Bad response from server: " + createText); }
+    if (createData.error) throw new Error(JSON.stringify(createData.error));
+    const { uploadId, uploadUrl } = createData;
+    if (!uploadUrl) throw new Error("No upload URL returned from server");
 
     // Step 2: PUT the file directly to Mux with XHR for progress
     _setMuxOverlay({ pct: 0, status: "Uploading… 0%" });
+    console.log("[Mux] Starting XHR upload to:", uploadUrl.slice(0, 60) + "…");
     await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", uploadUrl);
+      xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
       xhr.upload.onprogress = e => {
         if (e.lengthComputable) {
           const pct = Math.round(e.loaded / e.total * 100);
           _setMuxOverlay({ pct, status: `Uploading… ${pct}%` });
         }
       };
-      xhr.onload  = () => xhr.status < 300 ? resolve() : reject(new Error("Upload failed: " + xhr.status));
-      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.onload = () => {
+        console.log("[Mux] XHR onload status:", xhr.status);
+        xhr.status < 300 ? resolve() : reject(new Error("Upload to Mux failed with status " + xhr.status + ": " + xhr.responseText));
+      };
+      xhr.onerror = () => reject(new Error("Network error during upload — check your connection"));
       xhr.send(file);
     });
 
     // Step 3: poll for Mux to finish processing
     _setMuxOverlay({ pct: 100, status: "Processing video — this takes about a minute…", processing: true });
+    console.log("[Mux] Upload done, polling for processing completion. uploadId:", uploadId);
 
     let playbackId = null;
     for (let i = 0; i < 72; i++) {  // up to ~6 min
@@ -1481,19 +1493,36 @@ async function _uploadVideoToMux(file) {
         body: JSON.stringify({ action: "get-mux-upload-status", uploadId })
       });
       const s = await statusRes.json();
+      console.log(`[Mux] Poll ${i + 1}: status=${s.status} playbackId=${s.playbackId}`);
       if (s.playbackId) { playbackId = s.playbackId; break; }
-      if (s.status === "errored") throw new Error("Video processing failed in Mux");
+      if (s.status === "errored") throw new Error("Mux reported an error processing the video");
     }
-    if (!playbackId) throw new Error("Video processing timed out — try again");
+    if (!playbackId) throw new Error("Video processing timed out after 6 minutes — try again");
 
+    console.log("[Mux] Done! playbackId:", playbackId);
     _setMuxOverlay({ show: false });
     _composerMedia.push({ type: "mux", playbackId, name: file.name });
     _renderMediaPreview();
 
   } catch (e) {
-    _setMuxOverlay({ show: false });
-    alert("Video upload failed: " + e.message);
-    _resetVideoDropzone();
+    console.error("[Mux] Upload error:", e);
+    // Show error in the overlay instead of hiding it
+    _setMuxOverlay({
+      show: true,
+      filename: "Upload failed",
+      pct: 0,
+      status: e.message,
+      processing: false
+    });
+    document.getElementById("mux-overlay-bar").style.background = "#ef4444";
+    // Add a dismiss button
+    const statusEl = document.getElementById("mux-overlay-status");
+    if (statusEl) statusEl.innerHTML =
+      escHtml(e.message) +
+      `<br><button onclick="_setMuxOverlay({show:false});_muxUploading=false;_resetVideoDropzone()"
+        style="margin-top:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);
+        border-radius:6px;color:#fff;cursor:pointer;font-size:.75rem;padding:4px 10px">Dismiss</button>`;
+    return; // don't run finally's _muxUploading = false yet — dismiss button handles it
   } finally {
     _muxUploading = false;
   }
