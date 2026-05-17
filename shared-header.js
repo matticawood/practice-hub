@@ -517,7 +517,13 @@ window._shOpenSheet  = () => { document.getElementById("sh-mob-sheet")?.classLis
 window._shCloseSheet = () => { document.getElementById("sh-mob-sheet")?.classList.remove("open"); document.getElementById("sh-mob-backdrop")?.classList.remove("open"); };
 window.openMobSheet  = window._shOpenSheet;
 window.closeMobSheet = window._shCloseSheet;
-window._shToggleGroup = btn => btn.closest(".sh-group").classList.toggle("open");
+window._shToggleGroup = function(btn) {
+  const group = btn.closest(".sh-group");
+  const isOpen = group.classList.contains("open");
+  // Accordion: close all groups, then open this one if it was closed
+  document.querySelectorAll(".sh-group").forEach(g => g.classList.remove("open"));
+  if (!isOpen) group.classList.add("open");
+};
 
 // ── User menu helpers ─────────────────────────────────────────────────────────
 window._shToggleUserMenu = function() {
@@ -631,6 +637,31 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     const items = toggle.closest(".sh-group")?.querySelectorAll(".sh-item[data-page]");
     const groupPage = items?.[0]?.dataset?.page;
     toggle.classList.toggle("active", groupPage === activePage);
+  });
+
+  // Auto-highlight the exact sh-item whose href matches the current page,
+  // and auto-open its parent group (accordion: close all others).
+  const currentPath = window.location.pathname;
+  let activeGroup = null;
+  document.querySelectorAll(".sh-item").forEach(item => {
+    try {
+      const itemPath = new URL(item.getAttribute("href") || "", window.location.origin).pathname;
+      if (itemPath && itemPath === currentPath) {
+        item.classList.add("active");
+        activeGroup = item.closest(".sh-group");
+      }
+    } catch(e) {}
+  });
+  // If no URL match, fall back to opening the group for the activePage
+  if (!activeGroup && activePage) {
+    document.querySelectorAll(".sh-group").forEach(g => {
+      const firstItem = g.querySelector(".sh-item[data-page]");
+      if (firstItem?.dataset?.page === activePage) activeGroup = g;
+    });
+  }
+  // Apply accordion: only the matched group is open
+  document.querySelectorAll(".sh-group").forEach(g => {
+    g.classList.toggle("open", g === activeGroup);
   });
 
   // ── Notifications ──────────────────────────────────────────────────────────
