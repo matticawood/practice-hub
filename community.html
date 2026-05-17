@@ -18,6 +18,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/shared-header.js"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3/dist/mux-player.mjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mux/upchunk@3/dist/upchunk.js"></script>
   <style>
     /* ── Layout ──────────────────────────────────────────────────────────────── */
     #community-main {
@@ -1459,28 +1460,28 @@ async function _uploadVideoToMux(file) {
     const { uploadId, uploadUrl } = createData;
     if (!uploadUrl) throw new Error("No upload URL returned from server");
 
-    // Step 2: PUT the file directly to Mux with XHR for progress
+    // Step 2: Upload via UpChunk (chunked, retries, CORS-safe)
     _setMuxOverlay({ pct: 0, status: "Uploading… 0%" });
-    console.log("[Mux] Starting XHR upload to:", uploadUrl.slice(0, 60) + "…");
+    console.log("[Mux] Starting UpChunk upload…");
     await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("PUT", uploadUrl);
-      // Do NOT set Content-Type — it triggers a CORS preflight that Mux's signed URL rejects
-      xhr.upload.onprogress = e => {
-        if (e.lengthComputable) {
-          const pct = Math.round(e.loaded / e.total * 100);
-          _setMuxOverlay({ pct, status: `Uploading… ${pct}%` });
-        }
-      };
-      xhr.onload = () => {
-        console.log("[Mux] XHR onload status:", xhr.status, xhr.responseText?.slice(0, 200));
-        xhr.status < 300 ? resolve() : reject(new Error("Upload to Mux failed (" + xhr.status + "): " + xhr.responseText));
-      };
-      xhr.onerror = e => {
-        console.error("[Mux] XHR onerror:", e);
-        reject(new Error("Network error — CORS may have blocked the upload"));
-      };
-      xhr.send(file);
+      const upload = UpChunk.createUpload({
+        endpoint: uploadUrl,
+        file,
+        chunkSize: 5120, // 5 MB chunks
+      });
+      upload.on("progress", e => {
+        const pct = Math.round(e.detail);
+        console.log("[Mux] Upload progress:", pct + "%");
+        _setMuxOverlay({ pct, status: `Uploading… ${pct}%` });
+      });
+      upload.on("success", () => {
+        console.log("[Mux] UpChunk upload complete");
+        resolve();
+      });
+      upload.on("error", e => {
+        console.error("[Mux] UpChunk error:", e.detail);
+        reject(new Error(e.detail?.message || "Upload failed"));
+      });
     });
 
     // Step 3: poll for Mux to finish processing
