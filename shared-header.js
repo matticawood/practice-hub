@@ -241,7 +241,7 @@ document.addEventListener("DOMContentLoaded", function() {
           </button>
           <div class="sh-user-menu" id="sh-user-menu">
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
-            <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
+            <a class="sh-user-menu-item" href="/practice-log.html#feedback">Report Bug / Request Feature</a>
             <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
           </div>
         </div>
@@ -377,7 +377,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
     <hr style="border:none;border-top:1px solid rgba(255,255,255,.1);margin:8px 20px;">
     <a class="sh-section-btn" href="/profile.html">Edit Profile</a>
-    <a class="sh-section-btn" href="/feedback.html">Report Bug / Request Feature</a>
+    <a class="sh-section-btn" href="/practice-log.html#feedback">Report Bug / Request Feature</a>
     <button class="sh-section-btn" id="sh-mob-logout-btn">Log out</button>
   `;
   document.body.appendChild(sheet);
