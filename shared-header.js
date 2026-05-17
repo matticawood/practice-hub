@@ -10,7 +10,7 @@
  * After auth, call:
  *   initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "events" });
  *
- * activePage values: "hub" | "library" | "events" | "tools" | "feedback"
+ * activePage values: "hub" | "resources" | "tools" | "studio" | "community" | "events"
  */
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
@@ -299,7 +299,7 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="community" href="/practice-log.html#community">Community</a>
+      <a class="sh-tab" data-page="community" href="/community.html">Community</a>
     </div>
   `;
   // Insert after header, before main
@@ -371,7 +371,7 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
 
-    <a class="sh-section-btn" data-page="community" href="/practice-log.html#community">Community</a>
+    <a class="sh-section-btn" data-page="community" href="/community.html">Community</a>
 
     <hr style="border:none;border-top:1px solid rgba(255,255,255,.1);margin:8px 20px;">
     <a class="sh-section-btn" href="/profile.html">Edit Profile</a>
