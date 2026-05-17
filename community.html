@@ -1519,7 +1519,7 @@ async function _uploadVideoToMux(file) {
       { after: 120, msg: "This is taking longer than usual, but it's still going…" },
     ];
 
-    let playbackId = null;
+    let playbackId = null, muxAssetId = null;
     const pollStart = Date.now();
     for (let i = 0; i < 72; i++) {  // up to ~6 min
       await new Promise(r => setTimeout(r, 5000));
@@ -1536,7 +1536,7 @@ async function _uploadVideoToMux(file) {
       });
       const s = await statusRes.json();
       console.log(`[Mux] Poll ${i + 1} (${elapsed}s): uploadStatus=${s.status} assetStatus=${s.assetStatus} playbackId=${s.playbackId}`);
-      if (s.playbackId) { playbackId = s.playbackId; break; }
+      if (s.playbackId) { playbackId = s.playbackId; muxAssetId = s.assetId; break; }
       if (s.status === "errored" || s.assetStatus === "errored") throw new Error("Mux reported an error processing the video");
     }
     if (!playbackId) throw new Error("Video processing timed out after 6 minutes — try again");
@@ -1547,7 +1547,7 @@ async function _uploadVideoToMux(file) {
     _setMuxOverlay({ pct: 100, status: "✓ Video ready!", filename: file.name });
     await new Promise(r => setTimeout(r, 1500));
     _setMuxOverlay({ show: false });
-    _composerMedia.push({ type: "mux", playbackId, name: file.name });
+    _composerMedia.push({ type: "mux", playbackId, assetId: muxAssetId, name: file.name });
     _renderMediaPreview();
 
   } catch (e) {
@@ -1746,7 +1746,21 @@ function _renderMediaPreview() {
   area.innerHTML = html;
 }
 
+async function _deleteMuxAsset(assetId) {
+  if (!assetId) return;
+  try {
+    const token = (await db.auth.getSession()).data.session?.access_token;
+    await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "delete-mux-asset", assetId })
+    });
+  } catch (e) { console.warn("Mux asset delete failed:", e); }
+}
+
 function removeMedia(idx) {
+  const m = _composerMedia[idx];
+  if (m?.type === "mux" && m.assetId) _deleteMuxAsset(m.assetId);
   _composerMedia.splice(idx, 1);
   _renderMediaPreview();
 }
@@ -1784,7 +1798,7 @@ async function submitPost() {
     for (const m of _composerMedia) {
       if (m.type === "mux") {
         // Already uploaded to Mux — just store the playback ID
-        mediaJson.push({ type: "mux", playbackId: m.playbackId, name: m.name });
+        mediaJson.push({ type: "mux", playbackId: m.playbackId, assetId: m.assetId, name: m.name });
       } else if (m.blob) {
         const publicUrl = await uploadToStorage(m.blob, m.name);
         const entry = { type: m.type, url: publicUrl, name: m.name };
@@ -2192,6 +2206,12 @@ function _updateDetailLikeBtn(btn, liked, count, postId) {
 
 async function deletePost(postId) {
   if (!confirm("Delete this post? This can't be undone.")) return;
+  // Clean up any Mux assets before deleting the post
+  const post = _posts.find(p => p.id === postId);
+  if (post?.media) {
+    const muxItems = post.media.filter(m => m.type === "mux" && m.assetId);
+    await Promise.all(muxItems.map(m => _deleteMuxAsset(m.assetId)));
+  }
   const { error } = await db.from("community_posts").delete().eq("id", postId);
   if (error) { alert("Couldn't delete: " + error.message); return; }
   showList();

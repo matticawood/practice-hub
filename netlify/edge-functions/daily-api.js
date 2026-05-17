@@ -244,6 +244,26 @@ export default async (request) => {
     return json({ message: "Webhook created", webhook: data });
   }
 
+  // ── Action: delete-mux-asset ──────────────────────────────────────────────
+  // Any authenticated member can delete their own Mux asset.
+  // Admin can delete any asset.
+  if (action === "delete-mux-asset") {
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+    const { assetId } = body;
+    if (!assetId) return json({ error: "assetId required" }, 400);
+
+    const res = await fetch(`https://api.mux.com/video/v1/assets/${assetId}`, {
+      method: "DELETE",
+      headers: { "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`) }
+    });
+    if (!res.ok && res.status !== 404) {
+      const data = await res.json().catch(() => ({}));
+      return json({ error: data }, res.status);
+    }
+    return json({ ok: true });
+  }
+
   // ── Action: create-mux-upload ──────────────────────────────────────────────
   // Any authenticated member can get a direct Mux upload URL.
   // The browser PUTs the video file straight to Mux — no size limit.
