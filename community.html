@@ -1844,17 +1844,24 @@ function _startRecording(stream, type) {
     stream.getTracks().forEach(t => t.stop());
     const mime = mr.mimeType || (type === "voice" ? "audio/webm" : "video/webm");
     const blob = new Blob(chunks, { type: mime });
-    const ext  = type === "voice" ? "webm" : "webm";
-    const name = `${type}-${Date.now()}.${ext}`;
-    const url  = URL.createObjectURL(blob);
+    const name = `${type}-${Date.now()}.webm`;
     const duration = _recordingStart ? Math.round((Date.now() - _recordingStart) / 1000) : 0;
-    _composerMedia.push({ type: type === "voice" ? "audio" : "video", url, name, blob, duration });
-    _renderMediaPreview();
     clearInterval(_recordingTimer); _recordingTimer = null;
     document.getElementById("composer-recording-indicator").style.display = "none";
     const btnId = type === "voice" ? "toolbar-voice-btn" : "toolbar-videorec-btn";
     document.getElementById(btnId)?.classList.remove("recording");
     _recordingType = null; _voiceRecorder = null; _videoRecorder = null;
+
+    if (type === "video") {
+      // Route through Mux so large recordings are handled properly
+      const file = new File([blob], name, { type: mime });
+      _uploadVideoToMux(file);
+    } else {
+      // Voice recordings are small — store in Supabase Storage as before
+      const url = URL.createObjectURL(blob);
+      _composerMedia.push({ type: "audio", url, name, blob, duration });
+      _renderMediaPreview();
+    }
   };
   if (type === "voice") _voiceRecorder = mr; else _videoRecorder = mr;
   mr.start();
