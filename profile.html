@@ -99,6 +99,60 @@
 
     .pv-empty { text-align: center; padding: 40px 20px; color: #444; font-size: 0.85rem; }
 
+    /* ══════════════════════════════════════════════════
+       CROP MODAL
+    ══════════════════════════════════════════════════ */
+    #crop-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.82); z-index: 9000;
+      display: none; align-items: center; justify-content: center; padding: 16px;
+    }
+    #crop-modal.open { display: flex; }
+    .crop-sheet {
+      background: #141414; border: 1px solid #2a2a2a; border-radius: 18px;
+      padding: 22px; width: 100%; max-width: 360px;
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+    }
+    .crop-sheet h3 { font-size: 0.95rem; font-weight: 700; color: #e5e5e5; margin: 0; }
+    .crop-hint { font-size: 0.75rem; color: #555; margin-top: -10px; text-align: center; }
+    #crop-canvas {
+      border-radius: 12px; cursor: grab; touch-action: none;
+      display: block; width: 300px; height: 300px;
+    }
+    #crop-canvas:active { cursor: grabbing; }
+    .crop-zoom-row {
+      width: 100%; display: flex; align-items: center; gap: 10px;
+    }
+    .crop-zoom-row span { font-size: 0.8rem; color: #555; }
+    #crop-zoom-slider {
+      flex: 1; -webkit-appearance: none; appearance: none;
+      height: 4px; background: #2a2a2a; border-radius: 2px; outline: none; cursor: pointer;
+    }
+    #crop-zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--accent, #f5c518); cursor: pointer; border: none;
+    }
+    #crop-zoom-slider::-moz-range-thumb {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--accent, #f5c518); cursor: pointer; border: none;
+    }
+    .crop-actions { display: flex; gap: 10px; width: 100%; }
+    .crop-cancel-btn {
+      flex: 1; padding: 11px; background: none;
+      border: 1.5px solid #2a2a2a; border-radius: 10px;
+      color: #888; font-size: 0.9rem; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: border-color .15s;
+    }
+    .crop-cancel-btn:hover { border-color: #444; color: #e5e5e5; }
+    .crop-apply-btn {
+      flex: 2; padding: 11px;
+      background: var(--accent, #f5c518); color: #1a1410;
+      border: none; border-radius: 10px;
+      font-size: 0.9rem; font-weight: 700;
+      cursor: pointer; font-family: inherit; transition: opacity .15s;
+    }
+    .crop-apply-btn:hover { opacity: .88; }
+    .crop-apply-btn:disabled { opacity: .5; cursor: default; }
 
     /* ══════════════════════════════════════════════════
        EDIT MODE  (mirrors old profile.html)
@@ -186,7 +240,7 @@
 <body>
 
 <header id="app-header" style="display:none"></header>
-<input type="file" id="avatar-file-input" accept="image/*" style="display:none" onchange="uploadAvatar(this.files[0])">
+<input type="file" id="avatar-file-input" accept="image/*" style="display:none" onchange="openCropModal(this.files[0]); this.value=''">
 
 <!-- ══════════ PUBLIC VIEW MODE ══════════ -->
 <main id="view-main" style="display:none">
@@ -549,6 +603,247 @@ async function saveProfile() {
     setTimeout(() => status.textContent = "", 3000);
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// CROP MODAL
+// ══════════════════════════════════════════════════════════════════════
+let _cropImg    = null;
+let _cropScale  = 1;
+let _cropMinScale = 1;
+let _cropOffX   = 0;
+let _cropOffY   = 0;
+let _cropDragging = false;
+let _cropLastX  = 0;
+let _cropLastY  = 0;
+let _cropPinchDist = null;
+
+const CROP_R = 130; // circle radius in CSS px
+
+function openCropModal(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      _cropImg = img;
+      // Scale so the shorter side exactly fills the circle
+      _cropMinScale = (CROP_R * 2) / Math.min(img.width, img.height);
+      _cropScale    = _cropMinScale;
+      _cropOffX = 0;
+      _cropOffY = 0;
+      // Sync slider to 0
+      const sl = document.getElementById("crop-zoom-slider");
+      if (sl) sl.value = 0;
+      document.getElementById("crop-modal").classList.add("open");
+      _drawCrop();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function closeCropModal() {
+  document.getElementById("crop-modal").classList.remove("open");
+  _cropImg = null;
+}
+
+function _drawCrop() {
+  const canvas = document.getElementById("crop-canvas");
+  const ctx    = canvas.getContext("2d");
+  const W = canvas.width;   // internal pixels (= CSS px × dpr)
+  const H = canvas.height;
+  const dpr = window.devicePixelRatio || 1;
+  const r   = CROP_R * dpr;
+  const cx  = W / 2;
+  const cy  = H / 2;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 1. Draw image clipped to circle so we can see it through the overlay
+  const iw = _cropImg.width  * _cropScale * dpr;
+  const ih = _cropImg.height * _cropScale * dpr;
+  const ix = cx + _cropOffX * dpr - iw / 2;
+  const iy = cy + _cropOffY * dpr - ih / 2;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(_cropImg, ix, iy, iw, ih);
+  ctx.restore();
+
+  // 2. Draw image outside circle (dimmed)
+  ctx.save();
+  ctx.globalAlpha = 0.28;
+  ctx.drawImage(_cropImg, ix, iy, iw, ih);
+  ctx.restore();
+
+  // 3. Circle border
+  ctx.strokeStyle = "rgba(255,255,255,.7)";
+  ctx.lineWidth   = 2 * dpr;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function _constrainCrop() {
+  if (!_cropImg) return;
+  const iw = _cropImg.width  * _cropScale;
+  const ih = _cropImg.height * _cropScale;
+  const maxX = Math.max(0, iw / 2 - CROP_R);
+  const maxY = Math.max(0, ih / 2 - CROP_R);
+  _cropOffX = Math.max(-maxX, Math.min(maxX, _cropOffX));
+  _cropOffY = Math.max(-maxY, Math.min(maxY, _cropOffY));
+}
+
+function onCropZoom(sliderValue) {
+  const t = sliderValue / 100; // 0 → 1
+  _cropScale = _cropMinScale * (1 + t * 3); // 1× → 4× min scale
+  _constrainCrop();
+  _drawCrop();
+}
+
+async function applyCrop() {
+  const btn = document.getElementById("crop-apply-btn");
+  btn.disabled = true; btn.textContent = "Applying…";
+
+  const outputSize = 400;
+  const off = document.createElement("canvas");
+  off.width  = outputSize;
+  off.height = outputSize;
+  const ctx  = off.getContext("2d");
+
+  // Clip to circle
+  ctx.beginPath();
+  ctx.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+  ctx.clip();
+
+  // Map circle region back to source image coordinates
+  const sourceRadius  = CROP_R / _cropScale;
+  const sourceCenterX = _cropImg.width  / 2 - _cropOffX / _cropScale;
+  const sourceCenterY = _cropImg.height / 2 - _cropOffY / _cropScale;
+
+  ctx.drawImage(
+    _cropImg,
+    sourceCenterX - sourceRadius, sourceCenterY - sourceRadius,
+    sourceRadius * 2,             sourceRadius * 2,
+    0, 0, outputSize, outputSize
+  );
+
+  off.toBlob(async blob => {
+    const file = new File([blob], "avatar.jpg", { type: "image/jpeg" });
+    closeCropModal();
+    btn.disabled = false; btn.textContent = "Apply";
+    await uploadAvatar(file);
+  }, "image/jpeg", 0.92);
+}
+
+// ── Wire up events once DOM is ready ─────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  const canvas = document.getElementById("crop-canvas");
+  if (!canvas) return;
+
+  // Hi-DPI setup
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = 300 * dpr;
+  canvas.height = 300 * dpr;
+  canvas.style.width  = "300px";
+  canvas.style.height = "300px";
+
+  // Mouse events
+  canvas.addEventListener("mousedown", e => {
+    _cropDragging = true;
+    _cropLastX = e.clientX;
+    _cropLastY = e.clientY;
+  });
+  window.addEventListener("mousemove", e => {
+    if (!_cropDragging) return;
+    _cropOffX += e.clientX - _cropLastX;
+    _cropOffY += e.clientY - _cropLastY;
+    _cropLastX = e.clientX;
+    _cropLastY = e.clientY;
+    _constrainCrop();
+    _drawCrop();
+  });
+  window.addEventListener("mouseup", () => { _cropDragging = false; });
+
+  // Scroll to zoom
+  canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.08 : 0.93;
+    _cropScale = Math.max(_cropMinScale, Math.min(_cropMinScale * 4, _cropScale * factor));
+    _constrainCrop();
+    _drawCrop();
+    // Sync slider
+    const sl = document.getElementById("crop-zoom-slider");
+    if (sl) sl.value = Math.round((_cropScale / _cropMinScale - 1) / 3 * 100);
+  }, { passive: false });
+
+  // Touch: drag + pinch
+  canvas.addEventListener("touchstart", e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      _cropDragging  = true;
+      _cropLastX = e.touches[0].clientX;
+      _cropLastY = e.touches[0].clientY;
+      _cropPinchDist = null;
+    } else if (e.touches.length === 2) {
+      _cropDragging  = false;
+      _cropPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+  }, { passive: false });
+
+  canvas.addEventListener("touchmove", e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && _cropDragging) {
+      _cropOffX += e.touches[0].clientX - _cropLastX;
+      _cropOffY += e.touches[0].clientY - _cropLastY;
+      _cropLastX = e.touches[0].clientX;
+      _cropLastY = e.touches[0].clientY;
+      _constrainCrop();
+      _drawCrop();
+    } else if (e.touches.length === 2 && _cropPinchDist !== null) {
+      const newDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      _cropScale = Math.max(_cropMinScale, Math.min(_cropMinScale * 4, _cropScale * (newDist / _cropPinchDist)));
+      _cropPinchDist = newDist;
+      _constrainCrop();
+      _drawCrop();
+      const sl = document.getElementById("crop-zoom-slider");
+      if (sl) sl.value = Math.round((_cropScale / _cropMinScale - 1) / 3 * 100);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener("touchend", () => {
+    _cropDragging  = false;
+    _cropPinchDist = null;
+  });
+});
 </script>
+
+<!-- ── Crop modal ── -->
+<div id="crop-modal">
+  <div class="crop-sheet">
+    <h3>Position your photo</h3>
+    <p class="crop-hint">Drag to reposition · Scroll or pinch to zoom</p>
+    <canvas id="crop-canvas"></canvas>
+    <div class="crop-zoom-row">
+      <span>🔍</span>
+      <input id="crop-zoom-slider" type="range" min="0" max="100" value="0"
+             oninput="onCropZoom(this.value)" />
+      <span>🔎</span>
+    </div>
+    <div class="crop-actions">
+      <button class="crop-cancel-btn" onclick="closeCropModal()">Cancel</button>
+      <button class="crop-apply-btn" id="crop-apply-btn" onclick="applyCrop()">Apply</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
