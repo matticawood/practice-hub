@@ -265,6 +265,11 @@ document.addEventListener("DOMContentLoaded", function() {
     </div>
     <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="tools" href="/practice-tools.html">Practice Tools</a>
+      <div class="sh-tab-drop">
+        <a href="/practice-tools.html">Passage Fixer</a>
+        <a href="/practice-tools.html#metro">Metronome</a>
+        <a href="/practice-tools.html#note">Note Recognition</a>
+      </div>
     </div>
     <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="feedback" href="/feedback.html">Feedback</a>
