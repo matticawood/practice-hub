@@ -217,6 +217,65 @@
   document.head.appendChild(s);
 })();
 
+// ── Early avatar paint (synchronous, before any async call) ──────────────────
+// Reads the Supabase session from localStorage and applies cached avatar
+// colours immediately so the avatar never flickers on back navigation.
+(function _shEarlyAvatar() {
+  try {
+    const SB_KEY = "sb-gyskfutmncprqxazgatv-auth-token";
+    const raw = localStorage.getItem(SB_KEY);
+    if (!raw) return;
+    const session = JSON.parse(raw);
+    const email = session?.user?.email || session?.[0]?.user?.email;
+    if (!email) return;
+
+    const cached = JSON.parse(sessionStorage.getItem("sh_avatar_" + email) || "null");
+    if (!cached) return; // nothing in cache yet — wait for initSharedHeader
+
+    // Inline helpers (identical to the ones inside initSharedHeader)
+    const P = [
+      {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+      {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
+      {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+      {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+    ];
+    function _colour(e) {
+      let h = 0;
+      for (const c of (e||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
+      return P[Math.abs(h) % P.length];
+    }
+    function _ini(name) {
+      if (!name) return "?";
+      return name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
+    }
+
+    // Apply as soon as the DOM is ready
+    function _paint() {
+      const header = document.getElementById("app-header");
+      const avatarEl = document.getElementById("sh-avatar-el");
+      if (!avatarEl) return;
+      if (header) header.style.display = "";
+
+      if (cached.avatarUrl) {
+        avatarEl.innerHTML = `<img src="${cached.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+        avatarEl.style.background = "none";
+        avatarEl.style.color = "inherit";
+      } else {
+        const colour = _colour(email);
+        avatarEl.textContent = _ini(cached.myName || email.split("@")[0]);
+        avatarEl.style.background = colour.bg;
+        avatarEl.style.color = colour.fg;
+      }
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", _paint);
+    } else {
+      _paint();
+    }
+  } catch (e) { /* silent — early paint is best-effort */ }
+})();
+
 // ── Inject static HTML (after DOM is ready) ───────────────────────────────────
 document.addEventListener("DOMContentLoaded", function() {
   // Populate the header element
@@ -517,11 +576,11 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
     return P[Math.abs(h) % P.length];
   }
-  // Cache avatar state so back-navigation is instant
+  // Cache avatar state so back-navigation is instant.
+  // Always write — even when avatarUrl is null (initials-only users need the
+  // name in cache so the early-paint function can render the correct colour).
   const _cacheKey = "sh_avatar_" + (myEmail || "");
-  if (avatarUrl !== null) {
-    sessionStorage.setItem(_cacheKey, JSON.stringify({ avatarUrl, myName }));
-  }
+  sessionStorage.setItem(_cacheKey, JSON.stringify({ avatarUrl: avatarUrl ?? null, myName }));
   // Apply immediately from cache if available (prevents flicker on back)
   const _cached = JSON.parse(sessionStorage.getItem(_cacheKey) || "null");
   const _effectiveUrl  = avatarUrl ?? _cached?.avatarUrl ?? null;
