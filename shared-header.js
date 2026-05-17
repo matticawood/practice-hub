@@ -293,9 +293,8 @@ document.addEventListener("DOMContentLoaded", function() {
       <div class="sh-tab-drop">
         <a href="#">Weekly Practice Focus</a>
         <a href="#">Content Feed</a>
-        <a href="/events.html">Events &amp; Replays</a>
-        <a href="/clinic-booking.html">Live Practice Clinics</a>
-        <a href="#">One-to-One Clinics</a>
+        <a href="/events.html">Live Practice Clinics</a>
+        <a href="/clinic-booking.html">One-to-One Clinics</a>
         <a href="#">Practice Room Updates</a>
       </div>
     </div>
@@ -366,9 +365,8 @@ document.addEventListener("DOMContentLoaded", function() {
       <div class="sh-group-items">
         <a class="sh-item" data-page="studio" href="#">Weekly Practice Focus</a>
         <a class="sh-item" data-page="studio" href="#">Content Feed</a>
-        <a class="sh-item" data-page="studio" href="/events.html">Events &amp; Replays</a>
-        <a class="sh-item" data-page="studio" href="/clinic-booking.html">Live Practice Clinics</a>
-        <a class="sh-item" data-page="studio" href="#">One-to-One Clinics</a>
+        <a class="sh-item" data-page="studio" href="/events.html">Live Practice Clinics</a>
+        <a class="sh-item" data-page="studio" href="/clinic-booking.html">One-to-One Clinics</a>
         <a class="sh-item" data-page="studio" href="#">Practice Room Updates</a>
       </div>
     </div>
