@@ -352,10 +352,10 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="tools" href="/practice-tools.html">Practice Tools</a>
+      <a class="sh-tab" data-page="tools" href="/practice-log.html#tools">Practice Tools</a>
       <div class="sh-tab-drop">
-        <a href="/practice-tools.html">Passage Fixer</a>
-        <a href="/practice-tools.html#metro">Metronome</a>
+        <a href="/practice-log.html?goto=game">Passage Fixer</a>
+        <a href="/practice-log.html?goto=metro">Metronome</a>
         <a href="/practice-log.html?goto=note">Note Recognition</a>
       </div>
     </div>
@@ -422,8 +422,8 @@ document.addEventListener("DOMContentLoaded", function() {
         <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sh-group-items">
-        <a class="sh-item" data-page="tools" href="/practice-tools.html">Passage Fixer</a>
-        <a class="sh-item" data-page="tools" href="/practice-tools.html#metro">Metronome</a>
+        <a class="sh-item" data-page="tools" href="/practice-log.html?goto=game">Passage Fixer</a>
+        <a class="sh-item" data-page="tools" href="/practice-log.html?goto=metro">Metronome</a>
         <a class="sh-item" data-page="tools" href="/practice-log.html?goto=note">Note Recognition</a>
       </div>
     </div>
