@@ -1,44 +1,58 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import Stripe from "https://esm.sh/stripe@14.0.0?target=deno&no-check";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// ── Clients ────────────────────────────────────────────────────────────────────
-const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, {
-  apiVersion: "2023-10-16",
-  httpClient: Stripe.createFetchHttpClient(),
-});
-
-// Service-role client — can bypass RLS
+// ── Supabase client (service role) ─────────────────────────────────────────
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-const APP_URL = Deno.env.get("APP_URL") ?? "https://practicehub.app";
+const APP_URL = Deno.env.get("APP_URL") ?? "https://practicehub.matthewcawood.com";
+const WEBHOOK_SECRET = Deno.env.get("STRIPE_MEMBERSHIP_WEBHOOK_SECRET") ?? "";
 
-// ── Handler ────────────────────────────────────────────────────────────────────
-serve(async (req) => {
+// ── Stripe signature verification (HMAC-SHA256) ───────────────────────────
+async function verifyStripeSignature(payload: string, sigHeader: string, secret: string): Promise<boolean> {
+  if (!secret) return true;
+  const parts     = sigHeader.split(",");
+  const timestamp = parts.find(p => p.startsWith("t="))?.split("=")[1];
+  const v1        = parts.find(p => p.startsWith("v1="))?.split("=")[1];
+  if (!timestamp || !v1) return false;
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${timestamp}.${payload}`)
+  );
+  const hex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return hex === v1;
+}
+
+// ── Handler ────────────────────────────────────────────────────────────────
+Deno.serve(async (req) => {
   const body = await req.text();
   const sig  = req.headers.get("stripe-signature") ?? "";
 
-  // Verify the webhook came from Stripe
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      sig,
-      Deno.env.get("STRIPE_MEMBERSHIP_WEBHOOK_SECRET")!,
-    );
-  } catch (err) {
-    console.error("Webhook signature verification failed:", err.message);
-    return new Response(`Webhook Error: ${err.message}`, { status: 400 });
+  const valid = await verifyStripeSignature(body, sig, WEBHOOK_SECRET);
+  if (!valid) {
+    console.error("Invalid Stripe webhook signature");
+    return new Response("Invalid signature", { status: 400 });
   }
+
+  let event: any;
+  try { event = JSON.parse(body); }
+  catch { return new Response("Bad JSON", { status: 400 }); }
 
   console.log("Received Stripe event:", event.type);
 
-  // ── New subscription created / payment succeeded ───────────────────────────
+  // ── New subscription / payment ────────────────────────────────────────────
   if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
+    const session    = event.data.object;
     const email      = session.customer_details?.email ?? session.customer_email;
     const customerId = typeof session.customer === "string" ? session.customer : null;
     const subId      = typeof session.subscription === "string" ? session.subscription : null;
@@ -50,15 +64,14 @@ serve(async (req) => {
 
     console.log("New subscriber:", email);
 
-    // Add (or re-activate) in allowed_emails
     const { error: upsertError } = await supabase
       .from("allowed_emails")
       .upsert({
         email,
-        stripe_customer_id:    customerId,
+        stripe_customer_id:     customerId,
         stripe_subscription_id: subId,
-        subscription_status:   "active",
-        onboarded:             false,   // will be set true after onboarding
+        subscription_status:    "active",
+        onboarded:              false,
       }, { onConflict: "email", ignoreDuplicates: false });
 
     if (upsertError) {
@@ -66,46 +79,41 @@ serve(async (req) => {
       return new Response("DB error", { status: 500 });
     }
 
-    // Send invite / magic-link email so they can log in
-    // inviteUserByEmail sends a nice "You've been invited" email with a login link
+    // Send invite email
     const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
       redirectTo: `${APP_URL}/onboarding.html`,
       data: { source: "stripe_checkout" },
     });
 
     if (inviteError) {
-      // User may already exist — try sending a magic link instead
-      console.warn("Invite failed (user may already exist), sending magic link:", inviteError.message);
+      console.warn("Invite failed, sending magic link:", inviteError.message);
       const { error: magicError } = await supabase.auth.admin.generateLink({
         type: "magiclink",
         email,
         options: { redirectTo: `${APP_URL}/onboarding.html` },
       });
       if (magicError) console.error("Magic link also failed:", magicError.message);
+      else console.log("Magic link sent to:", email);
+    } else {
+      console.log("Invite email sent to:", email);
     }
   }
 
-  // ── Subscription cancelled ────────────────────────────────────────────────
+  // ── Subscription cancelled / updated ─────────────────────────────────────
   if (
     event.type === "customer.subscription.deleted" ||
     event.type === "customer.subscription.updated"
   ) {
-    const sub = event.data.object as Stripe.Subscription;
+    const sub        = event.data.object;
     const customerId = typeof sub.customer === "string" ? sub.customer : null;
-
-    if (!customerId) {
-      return new Response("No customer id", { status: 400 });
-    }
+    if (!customerId) return new Response("No customer id", { status: 400 });
 
     if (sub.status === "canceled" || sub.status === "unpaid" || sub.status === "past_due") {
-      console.log("Subscription ended for customer:", customerId, "status:", sub.status);
-
       await supabase
         .from("allowed_emails")
         .update({ subscription_status: sub.status })
         .eq("stripe_customer_id", customerId);
 
-      // If fully cancelled, remove access
       if (sub.status === "canceled") {
         await supabase
           .from("allowed_emails")
@@ -114,7 +122,6 @@ serve(async (req) => {
       }
     }
 
-    // Re-activation (e.g. they updated payment method and subscription is active again)
     if (sub.status === "active") {
       await supabase
         .from("allowed_emails")
@@ -123,9 +130,9 @@ serve(async (req) => {
     }
   }
 
-  // ── Payment failed (grace period warning) ─────────────────────────────────
+  // ── Payment failed ────────────────────────────────────────────────────────
   if (event.type === "invoice.payment_failed") {
-    const invoice    = event.data.object as Stripe.Invoice;
+    const invoice    = event.data.object;
     const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
     if (customerId) {
       await supabase
