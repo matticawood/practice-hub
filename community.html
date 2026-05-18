@@ -1016,18 +1016,6 @@
     }
     .activity-like-btn:hover { color: var(--text); }
     .activity-like-btn.reacted { color: #e879a0; }
-    /* Comment button — same shape */
-    .activity-cmt-btn {
-      display: inline-flex; align-items: center; gap: 5px;
-      background: none; border: none;
-      padding: 4px 6px;
-      font-size: 0.83rem; font-weight: 500; font-family: inherit;
-      color: var(--text-muted); cursor: pointer;
-      transition: color .15s;
-      line-height: 1;
-    }
-    .activity-cmt-btn:hover { color: var(--text); }
-    .activity-cmt-btn.open { color: var(--text); }
     /* Session duration block — mirrors the achievement badge */
     .feed-session-block {
       display: flex; align-items: center; gap: 12px;
@@ -1061,8 +1049,7 @@
     .activity-react-picker button .picker-count {
       font-size: 0.62rem; color: var(--text-muted); font-family: inherit; line-height: 1;
     }
-    /* Comment section — activity comments reuse .comment-* classes */
-    .activity-cmt-section { margin-top: 10px; }
+    /* Activity comment section — handled by detail view now */
     .see-more-btn {
       display: block; width: 100%; margin: 4px 0 8px;
       padding: 10px; background: transparent;
@@ -1743,6 +1730,38 @@
 
       </div><!-- end #view-detail -->
 
+      <!-- ── Activity detail view ──────────────────────────────────────────── -->
+      <div id="view-activity-detail" style="display:none">
+        <button class="detail-back" onclick="showList()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          Back
+        </button>
+        <div id="activity-detail-area"></div>
+        <div class="comments-section" style="margin-top:16px">
+          <div class="comments-hdr" id="activity-comments-hdr">Comments</div>
+          <div id="activity-comments-list"></div>
+          <div class="comment-form" style="flex-direction:column;align-items:stretch;gap:0">
+            <div style="display:flex;gap:10px;align-items:flex-end">
+              <div class="comment-avatar" id="activity-comment-avatar-el"></div>
+              <textarea class="comment-input" id="activity-comment-input" placeholder="Write a comment…" rows="1"
+                oninput="autoResize(this)"
+                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitActivityDetailComment();}"></textarea>
+              <button class="btn btn-sm" onclick="submitActivityDetailComment()" style="flex-shrink:0">Send</button>
+            </div>
+            <div style="padding-left:38px;margin-top:4px">
+              <div class="composer-toolbar" id="activity-inline-main-toolbar" style="flex-wrap:wrap">
+                <button class="toolbar-btn" title="Image" onclick="document.getElementById('activity-inline-file-image').click()">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                </button>
+                <input type="file" id="activity-inline-file-image" accept="image/*" multiple style="display:none" onchange="handleActivityInlineFile(this,'image')">
+                <input type="file" id="activity-inline-file-file" accept="*/*" style="display:none" onchange="handleActivityInlineFile(this,'file')">
+              </div>
+              <div id="activity-inline-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
+            </div>
+          </div>
+        </div>
+      </div><!-- end #view-activity-detail -->
+
     </div><!-- end #community-main -->
   </main>
 
@@ -1988,6 +2007,10 @@ let _rxMap = {};
 let _postRxMap = {};
 // _cmtMap[`${event_type}:${item_id}`] = count
 let _cmtMap = {};
+// Activity detail view state
+let _currentActivityDetail = null; // { eventType, itemId }
+let _activityCommentMedia = []; // pending media for activity comment
+let _feedItems = []; // all feed rows for detail view lookup
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 (async () => {
@@ -2404,6 +2427,7 @@ function showDetail(postId) {
 function showList() {
   _currentPostId = null;
   document.getElementById("view-detail").style.display = "none";
+  document.getElementById("view-activity-detail").style.display = "none";
   document.getElementById("view-list").style.display   = "";
   window.scrollTo(0, 0);
 }
@@ -4600,6 +4624,7 @@ async function loadActivity() {
   }
 
   _feedRows = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+  _feedItems = _feedRows;
 
   // Bulk-load reactions + comment counts for all feed items that have an item_id
   _rxMap = {}; _cmtMap = {};
@@ -4669,40 +4694,23 @@ function feedItemHTML(row) {
     : (totalRx > 0 ? String(totalRx) : "Like");
 
   const footer = itemKey ? `
-    <div class="activity-footer">
-      <div class="activity-actions" id="actions-${safeKey}">
-        <button class="activity-like-btn${myEmoji ? " reacted" : ""}" id="like-btn-${safeKey}"
-          onclick="toggleReactPicker('${safeKey}','${row.event_type}','${String(row.item_id)}')"
-        ><svg viewBox="0 0 24 24" width="15" height="15" ${myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : ""}${totalRx > 0 ? ` ${totalRx}` : ""}</button>
+    <div class="activity-footer post-footer" style="margin-top:8px">
+      <div style="position:relative;display:inline-flex">
+        <button class="post-footer-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
+          onclick="toggleReactPicker('${safeKey}','${row.event_type}','${String(row.item_id)}')">
+          <svg viewBox="0 0 24 24" width="15" height="15" ${myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : ""}${totalRx > 0 ? ` ${totalRx}` : ""}
+        </button>
         <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
-          ${ACTIVITY_EMOJIS.map(e => {
-            const d = rxData[e] || { count: 0, mine: false };
-            return `<button class="${d.mine ? "picked" : ""}"
-              onclick="pickReaction(event,'${safeKey}','${row.event_type}','${String(row.item_id)}','${e}')"
-            >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
-          }).join("")}
+          ${ACTIVITY_EMOJIS.map(e => { const d = rxData[e]||{count:0,mine:false}; return `<button class="${d.mine?"picked":""}" onclick="pickReaction(event,'${safeKey}','${row.event_type}','${String(row.item_id)}','${e}')">${e}${d.count>0?`<span class="picker-count">${d.count}</span>`:""}</button>`; }).join("")}
         </div>
-        <button class="activity-cmt-btn" id="cmt-btn-${safeKey}"
-          onclick="toggleActivityComments(this,'${row.event_type}','${String(row.item_id)}')"
-        ><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${cmtCount > 0 ? ` ${cmtCount}` : ""}</button>
       </div>
+      <button class="post-footer-btn" onclick="showActivityDetail('${row.event_type}','${String(row.item_id)}')">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </button>
       <div class="post-footer-right">
         <span class="post-footer-meta" id="acmeta-${safeKey}">
-          ${totalRx > 0 ? `<span>${totalRx} reaction${totalRx !== 1 ? 's' : ''}</span>` : ''}
-          ${totalRx > 0 && cmtCount > 0 ? ' · ' : ''}
-          ${cmtCount > 0 ? `<span>${cmtCount} comment${cmtCount !== 1 ? 's' : ''}</span>` : ''}
+          ${totalRx > 0 ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : ""}${totalRx > 0 && cmtCount > 0 ? " · " : ""}${cmtCount > 0 ? `<span>${cmtCount} comment${cmtCount!==1?"s":""}</span>` : ""}
         </span>
-      </div>
-    </div>
-    <div class="activity-cmt-section comments-section" id="cmt-${safeKey}" style="display:none;margin-top:10px;border-radius:var(--radius)">
-      <div class="comments-hdr">Comments</div>
-      <div class="activity-cmt-list"></div>
-      <div class="comment-form" style="flex-direction:column;align-items:stretch;gap:0;padding:10px 20px 14px">
-        <div style="display:flex;gap:10px;align-items:flex-end">
-          <textarea class="comment-input" placeholder="Write a comment…" rows="1" oninput="autoResize(this)"
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitActivityComment(this,'${row.event_type}','${String(row.item_id)}');}"></textarea>
-          <button class="btn btn-sm" onclick="submitActivityComment(this.previousElementSibling,'${row.event_type}','${String(row.item_id)}')">Send</button>
-        </div>
       </div>
     </div>` : "";
 
@@ -4947,133 +4955,208 @@ function _refreshPostLikeBtn(safeKey, postId) {
   }
 }
 
-// ── Activity comments ─────────────────────────────────────────────────────────
-async function toggleActivityComments(btn, eventType, itemId) {
-  const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
-  const section = document.getElementById(`cmt-${safeKey}`);
-  if (!section) return;
+// ── Activity detail view ──────────────────────────────────────────────────────
+async function showActivityDetail(eventType, itemId) {
+  _currentActivityDetail = { eventType, itemId };
+  _activityCommentMedia = [];
 
-  const isOpen = section.style.display !== "none";
-  section.style.display = isOpen ? "none" : "";
-  btn.classList.toggle("open", !isOpen);
+  // Switch views
+  document.getElementById("view-list").style.display = "none";
+  document.getElementById("view-detail").style.display = "none";
+  document.getElementById("view-activity-detail").style.display = "";
+  window.scrollTo(0, 0);
 
-  if (!isOpen) {
-    await loadActivityComments(section, eventType, String(itemId));
-  }
-}
+  // Render the activity item content in #activity-detail-area
+  const row = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId));
+  const detailArea = document.getElementById("activity-detail-area");
 
-function activityCmtHTML(c, isReply, rootId, eventType, itemId) {
-  const n = c.name || c.email.split("@")[0];
-  const col = avatarColour(c.email);
-  const canDel = c.email === myEmail || isAdmin;
-  const replyPrefix = (isReply && c.reply_to_name)
-    ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
-  return `
-    <div class="comment-item${isReply ? " is-reply" : ""}" id="acmt-${c.id}">
-      <div style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;flex-shrink:0;margin-top:1px">${escHtml(initials(n))}</div>
-      <div class="comment-body">
-        <div class="comment-meta">
-          <span class="comment-name">${escHtml(n)}</span>
-          <span class="comment-time">${relativeTime(c.created_at)}</span>
-          ${canDel ? `<button onclick="deleteActivityComment('${c.id}','${eventType}','${itemId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
+  if (row) {
+    const name = row.name || row.email?.split("@")[0] || "Member";
+    const colour = avatarColour(row.email || "");
+    const ini = initials(name);
+    const timeAgo = relativeTime(row.created_at || row.session_date);
+
+    let contentHtml = "";
+    if (row.event_type === "session") {
+      contentHtml = `<div class="feed-session-block" style="background:rgba(245,197,24,.07);border-color:rgba(245,197,24,.25);margin-top:12px">
+        <div class="feed-session-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+        <div class="feed-session-duration">${formatMinutes(row.duration_minutes||0)}</div>
+      </div>`;
+    } else if (row.event_type === "achievement") {
+      const ach = ACH[row.achievement_id] || {};
+      const aname = ach.name || row.achievement_id || "Achievement";
+      const adesc = ach.desc || "";
+      const cat = ACH_CAT[row.achievement_id] || "sessions";
+      const col = _BADGE_PALETTE[cat] || _BADGE_PALETTE.sessions;
+      const badge = achBadgeSVG(row.achievement_id, 46);
+      contentHtml = `<div class="feed-ach-badge" style="background:${col[0]}12;border-color:${col[0]}40;margin-top:12px">
+        <span class="feed-ach-icon">${badge}</span>
+        <div><div class="feed-ach-name" style="color:${col[0]}">${escHtml(aname)}</div>${adesc?`<div class="feed-ach-desc">${escHtml(adesc)}</div>`:""}</div>
+      </div>`;
+    }
+
+    const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
+    const rxData = _rxMap[`${eventType}:${itemId}`] || _rxMap[safeKey] || {};
+    let myEmoji = null, totalRx = 0;
+    for (const [e, d] of Object.entries(rxData)) { totalRx += d.count; if (d.mine) myEmoji = e; }
+    const cmtCount = _cmtMap[`${eventType}:${String(itemId)}`] || 0;
+
+    detailArea.innerHTML = `<div class="detail-card">
+      <div class="post-author-row" style="margin-bottom:4px">
+        <div style="width:28px;height:28px;border-radius:50%;background:${colour.bg};color:${colour.fg};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;flex-shrink:0">${escHtml(ini)}</div>
+        <span class="post-author-name">${escHtml(name)}</span>
+        <span class="post-author-time" style="margin-left:auto">${timeAgo}</span>
+      </div>
+      ${contentHtml}
+      <div class="post-footer" style="margin-top:12px" onclick="event.stopPropagation()">
+        <div style="position:relative;display:inline-flex">
+          <button class="post-footer-btn${myEmoji?" liked":""}" id="like-btn-ad_${safeKey}"
+            onclick="toggleReactPicker('ad_${safeKey}','${eventType}','${String(itemId)}')">
+            <svg viewBox="0 0 24 24" width="15" height="15" ${myEmoji?`fill="currentColor" stroke="currentColor" stroke-width="1.5"`:`fill="none" stroke="currentColor" stroke-width="2"`} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${myEmoji&&myEmoji!=="❤️"?` ${myEmoji}`:""}${totalRx>0?` ${totalRx}`:""}
+          </button>
+          <div class="activity-react-picker" id="picker-ad_${safeKey}" style="display:none">
+            ${ACTIVITY_EMOJIS.map(e=>{const d=rxData[e]||{count:0,mine:false};return`<button class="${d.mine?"picked":""}" onclick="pickReaction(event,'ad_${safeKey}','${eventType}','${String(itemId)}','${e}')">${e}${d.count>0?`<span class="picker-count">${d.count}</span>`:""}</button>`;}).join("")}
+          </div>
         </div>
-        ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : ""}
-        <button class="comment-reply-btn" onclick="startActivityReply('${c.id}','${escHtml(n).replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}','${eventType}','${itemId}')">Reply</button>
+        <div class="post-footer-right">
+          <span class="post-footer-meta" id="acmeta-ad_${safeKey}">
+            ${totalRx>0?`<span>${totalRx} reaction${totalRx!==1?"s":""}</span>`:""}${totalRx>0&&cmtCount>0?" · ":""}${cmtCount>0?`<span>${cmtCount} comment${cmtCount!==1?"s":""}</span>`:""}
+          </span>
+        </div>
       </div>
     </div>`;
-}
-
-async function loadActivityComments(section, eventType, itemId) {
-  const listEl = section.querySelector(".activity-cmt-list");
-  listEl.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:4px 0">Loading…</div>`;
-
-  const { data, error } = await db.from("activity_comments")
-    .select("id,email,name,content,created_at,parent_comment_id,reply_to_name")
-    .eq("event_type", eventType).eq("item_id", itemId)
-    .order("created_at", { ascending: true });
-
-  if (error) { listEl.innerHTML = ""; return; }
-
-  if (!data.length) {
-    listEl.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:12px 20px">No comments yet — be the first!</div>`;
-    // Keep count in sync
-    const key = `${eventType}:${itemId}`;
-    _cmtMap[key] = 0;
-    _updateCmtBtn(eventType, itemId, 0);
-    return;
+  } else {
+    detailArea.innerHTML = `<div class="detail-card"><p style="color:var(--text-muted)">Loading…</p></div>`;
   }
 
-  const topLevel = data.filter(c => !c.parent_comment_id);
+  // Set up comment avatar
+  const avatarEl = document.getElementById("activity-comment-avatar-el");
+  if (avatarEl) avatarEl.innerHTML = avatarHtml(myEmail, myName, 28, null);
+
+  // Clear preview
+  const prevEl = document.getElementById("activity-inline-preview");
+  if (prevEl) prevEl.innerHTML = "";
+
+  // Load comments
+  await loadActivityDetailComments(eventType, itemId);
+}
+
+async function loadActivityDetailComments(eventType, itemId) {
+  const listEl = document.getElementById("activity-comments-list");
+  const hdrEl  = document.getElementById("activity-comments-hdr");
+  if (!listEl) return;
+  listEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:.82rem">Loading…</div>`;
+
+  const { data: comments, error } = await db.from("activity_comments")
+    .select("id,email,name,content,created_at,parent_comment_id,reply_to_name,media")
+    .eq("event_type", eventType).eq("item_id", String(itemId))
+    .order("created_at", { ascending: true });
+
+  const { data: avatarRows } = await db.from("allowed_emails")
+    .select("email,avatar_url").in("email", [...new Set((comments||[]).map(c=>c.email))]);
+  const cmtAvatarMap = {};
+  (avatarRows||[]).forEach(r=>{ if(r.avatar_url) cmtAvatarMap[r.email]=r.avatar_url; });
+
+  if (error || !comments) { listEl.innerHTML=""; return; }
+
+  const count = comments.length;
+  if (hdrEl) hdrEl.textContent = count ? `${count} Comment${count!==1?"s":""}` : "Comments";
+
+  // Update counts
+  const key = `${eventType}:${String(itemId)}`;
+  _cmtMap[key] = count;
+  _updateCmtBtn(eventType, itemId, count);
+
+  if (!count) { listEl.innerHTML=`<div style="text-align:center;padding:24px 0;color:var(--text-muted);font-size:.85rem">No comments yet — be the first!</div>`; return; }
+
+  const topLevel = comments.filter(c=>!c.parent_comment_id);
   const repliesMap = {};
-  data.filter(c => c.parent_comment_id).forEach(c => {
-    (repliesMap[c.parent_comment_id] = repliesMap[c.parent_comment_id] || []).push(c);
+  comments.filter(c=>c.parent_comment_id).forEach(c=>{
+    (repliesMap[c.parent_comment_id]=repliesMap[c.parent_comment_id]||[]).push(c);
   });
 
-  const myCol = avatarColour(myEmail);
-  const myIni = escHtml(initials(myName || myEmail));
+  function acDetailCmtHTML(c, isReply=false, rootId=null) {
+    const canDel = isAdmin || c.email === myEmail;
+    const dispName = escHtml(c.name || c.email.split("@")[0]);
+    const threadId = rootId || c.id;
+    const replyPrefix = (isReply && c.reply_to_name) ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
+    const media = c.media || [];
+    let mediaHtml = "";
+    if (media.length) mediaHtml = _renderCommentMedia(c);
+    return `<div class="comment-item${isReply?" is-reply":""}" id="activity-comment-${c.id}">
+      ${avatarHtml(c.email, c.name, 28, cmtAvatarMap[c.email]||null)}
+      <div class="comment-body">
+        <div class="comment-meta">
+          <span class="comment-name">${dispName}</span>
+          <span class="comment-time">${relativeTime(c.created_at)}</span>
+          ${canDel?`<button onclick="deleteActivityDetailComment('${c.id}','${eventType}','${String(itemId)}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
+        </div>
+        ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix?`<div class="comment-text">${replyPrefix}</div>`:"")}
+        ${mediaHtml}
+        <button class="comment-reply-btn" onclick="startActivityDetailReply('${threadId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}','${eventType}','${String(itemId)}')">Reply</button>
+      </div>
+    </div>`;
+  }
 
   listEl.innerHTML = topLevel.map(c => {
     const replies = repliesMap[c.id] || [];
-    return activityCmtHTML(c, false, c.id, eventType, itemId)
-      + `<div class="comment-replies" id="acmt-replies-${c.id}">
-          ${replies.map(r => activityCmtHTML(r, true, c.id, eventType, itemId)).join("")}
-          <div id="acmt-reply-composer-${c.id}" style="display:none" class="comment-item is-reply">
-            <div style="width:28px;height:28px;border-radius:50%;background:${myCol.bg};color:${myCol.fg};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;flex-shrink:0">${myIni}</div>
-            <div class="comment-body" style="flex:1;min-width:0">
-              <textarea class="comment-input" placeholder="Write a reply…" rows="1"
-                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
-                style="width:100%;box-sizing:border-box;margin-bottom:4px"></textarea>
-              <div style="display:flex;justify-content:flex-end;gap:14px;margin-top:4px">
-                <button onclick="cancelActivityReply('${c.id}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;cursor:pointer;color:var(--text-muted);padding:0">Cancel</button>
-                <button onclick="submitActivityReply('${c.id}','${eventType}','${itemId}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
-              </div>
-            </div>
+    return acDetailCmtHTML(c) + `<div class="comment-replies">
+      ${replies.map(r=>acDetailCmtHTML(r,true,c.id)).join("")}
+      <div id="activity-reply-composer-${c.id}" class="comment-item is-reply" style="display:none">
+        ${avatarHtml(myEmail, myName, 28, null)}
+        <div class="comment-body" style="flex:1;min-width:0">
+          <textarea class="comment-input" placeholder="Write a reply…" rows="1"
+            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitActivityDetailReply('${c.id}','${eventType}','${String(itemId)}');}"
+            style="width:100%;box-sizing:border-box;margin-bottom:4px"></textarea>
+          <div style="display:flex;justify-content:flex-end;gap:14px;margin-top:8px">
+            <button onclick="cancelActivityDetailReply('${c.id}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;cursor:pointer;color:var(--text-muted);padding:0">Cancel</button>
+            <button onclick="submitActivityDetailReply('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
           </div>
-        </div>`;
+        </div>
+      </div>
+    </div>`;
   }).join("");
-
-  // Keep count in sync
-  const key = `${eventType}:${itemId}`;
-  _cmtMap[key] = data.length;
-  _updateCmtBtn(eventType, itemId, data.length);
 }
 
-async function submitActivityComment(textarea, eventType, itemId) {
-  const content = textarea.value.trim();
-  if (!content) return;
-  textarea.disabled = true;
+async function submitActivityDetailComment() {
+  if (!_currentActivityDetail) return;
+  const { eventType, itemId } = _currentActivityDetail;
+  const ta = document.getElementById("activity-comment-input");
+  const content = ta?.value.trim() || "";
+  const media = _activityCommentMedia.slice();
+  if (!content && !media.length) return;
+
   const { error } = await db.from("activity_comments").insert({
     event_type: eventType, item_id: String(itemId),
-    email: myEmail, name: myName, content,
+    email: myEmail, name: myName, content, media
   });
-  textarea.disabled = false;
   if (error) { alert("Couldn't post comment"); return; }
-  textarea.value = ""; textarea.style.height = "";
-  const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
-  const section = document.getElementById(`cmt-${safeKey}`);
-  if (section) await loadActivityComments(section, eventType, String(itemId));
+  if (ta) { ta.value = ""; ta.style.height = ""; }
+  _activityCommentMedia = [];
+  const prevEl = document.getElementById("activity-inline-preview");
+  if (prevEl) prevEl.innerHTML = "";
+  await loadActivityDetailComments(eventType, itemId);
 }
 
-function startActivityReply(commentId, authorName, authorEmail, eventType, itemId) {
-  // Hide other open composers
-  document.querySelectorAll("[id^='acmt-reply-composer-']").forEach(el => {
-    if (el.id !== `acmt-reply-composer-${commentId}`) el.style.display = "none";
+function startActivityDetailReply(commentId, authorName, authorEmail, eventType, itemId) {
+  document.querySelectorAll("[id^='activity-reply-composer-']").forEach(el => {
+    if (el.id !== `activity-reply-composer-${commentId}`) el.style.display = "none";
   });
-  const composer = document.getElementById(`acmt-reply-composer-${commentId}`);
+  const composer = document.getElementById(`activity-reply-composer-${commentId}`);
   if (!composer) return;
   composer.style.display = "flex";
   composer.dataset.replyTo = authorName;
-  composer.dataset.replyEmail = authorEmail;
   composer.querySelector("textarea")?.focus();
 }
 
-function cancelActivityReply(commentId) {
-  const composer = document.getElementById(`acmt-reply-composer-${commentId}`);
+function cancelActivityDetailReply(commentId) {
+  const composer = document.getElementById(`activity-reply-composer-${commentId}`);
   if (composer) { composer.style.display = "none"; const ta = composer.querySelector("textarea"); if (ta) ta.value = ""; }
 }
 
-async function submitActivityReply(parentId, eventType, itemId) {
-  const composer = document.getElementById(`acmt-reply-composer-${parentId}`);
+async function submitActivityDetailReply(parentId, eventType, itemId) {
+  const composer = document.getElementById(`activity-reply-composer-${parentId}`);
   if (!composer) return;
   const ta = composer.querySelector("textarea");
   const content = ta?.value.trim();
@@ -5085,30 +5168,43 @@ async function submitActivityReply(parentId, eventType, itemId) {
     parent_comment_id: parentId, reply_to_name: replyToName
   });
   if (error) { alert("Couldn't post reply"); return; }
-  ta.value = ""; ta.style.height = "";
+  if (ta) { ta.value = ""; ta.style.height = ""; }
   composer.style.display = "none";
-  // Reload comments
-  const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
-  const section = document.getElementById(`cmt-${safeKey}`);
-  if (section) await loadActivityComments(section, eventType, String(itemId));
+  await loadActivityDetailComments(eventType, itemId);
 }
 
-async function deleteActivityComment(commentId, eventType, itemId) {
-  const el = document.getElementById(`acmt-${commentId}`);
+async function deleteActivityDetailComment(commentId, eventType, itemId) {
+  const el = document.getElementById(`activity-comment-${commentId}`);
   if (el) el.style.opacity = "0.4";
   const { error } = await db.from("activity_comments").delete().eq("id", commentId);
   if (error) { if (el) el.style.opacity = ""; return; }
   if (el) el.remove();
-  const key = `${eventType}:${String(itemId)}`;
-  _cmtMap[key] = Math.max(0, (_cmtMap[key] || 1) - 1);
-  _updateCmtBtn(eventType, itemId, _cmtMap[key]);
+  await loadActivityDetailComments(eventType, itemId);
+}
+
+async function handleActivityInlineFile(input, type) {
+  const files = Array.from(input.files);
+  for (const file of files) {
+    const path = `comments/${Date.now()}_${file.name.replace(/[^a-z0-9.]/gi,'_')}`;
+    const { error } = await db.storage.from("community").upload(path, file, { upsert: true });
+    if (error) { alert("Upload failed: " + error.message); continue; }
+    const { data: { publicUrl } } = db.storage.from("community").getPublicUrl(path);
+    _activityCommentMedia.push({ type, url: publicUrl, name: file.name });
+    const prev = document.getElementById("activity-inline-preview");
+    if (prev) {
+      if (type === "image") {
+        prev.innerHTML += `<img src="${escHtml(publicUrl)}" style="max-height:80px;border-radius:6px;border:1px solid var(--border)">`;
+      } else {
+        prev.innerHTML += `<span style="font-size:.78rem;color:var(--text-muted);background:var(--surface-2);padding:3px 8px;border-radius:6px">${escHtml(file.name)}</span>`;
+      }
+    }
+  }
+  input.value = "";
 }
 
 function _updateCmtBtn(eventType, itemId, count) {
   const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
-  const btn = document.getElementById(`cmt-btn-${safeKey}`);
-  const cmtSvg = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
-  if (btn) btn.innerHTML = cmtSvg + (count > 0 ? ` ${count}` : "");
+  // Update list-view comment bubble (now just shows count on the post-footer-btn, no separate cmt-btn)
   const metaEl = document.getElementById(`acmeta-${safeKey}`);
   if (metaEl) {
     const key = `${eventType}:${String(itemId)}`;
@@ -5119,6 +5215,18 @@ function _updateCmtBtn(eventType, itemId, count) {
     if (totalRx > 0) parts.push(`<span>${totalRx} reaction${totalRx !== 1 ? 's' : ''}</span>`);
     if (count > 0) parts.push(`<span>${count} comment${count !== 1 ? 's' : ''}</span>`);
     metaEl.innerHTML = parts.join(' · ');
+  }
+  // Also update detail view meta if open
+  const detailMetaEl = document.getElementById(`acmeta-ad_${safeKey}`);
+  if (detailMetaEl) {
+    const key = `${eventType}:${String(itemId)}`;
+    const rxData = _rxMap[key] || {};
+    let totalRx = 0;
+    for (const d of Object.values(rxData)) totalRx += d.count;
+    const parts = [];
+    if (totalRx > 0) parts.push(`<span>${totalRx} reaction${totalRx !== 1 ? 's' : ''}</span>`);
+    if (count > 0) parts.push(`<span>${count} comment${count !== 1 ? 's' : ''}</span>`);
+    detailMetaEl.innerHTML = parts.join(' · ');
   }
 }
 
