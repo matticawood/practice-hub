@@ -347,6 +347,13 @@ document.addEventListener("DOMContentLoaded", function() {
     </div>
     <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="community" href="/community.html">Community</a>
+      <div class="sh-tab-drop">
+        <a href="/community.html">Feed</a>
+        <a href="/community.html?filter=progress">Share Your Progress</a>
+        <a href="/community.html?filter=feedback">Get Feedback</a>
+        <a href="/community.html?filter=question">Ask a Question</a>
+        <a href="/community.html?filter=post">Just Post</a>
+      </div>
     </div>
     <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="resources" href="/practice-log.html#library">Resources</a>
@@ -406,7 +413,19 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
 
-    <a class="sh-section-btn" data-page="community" href="/community.html">Community</a>
+    <div class="sh-group">
+      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
+        Community
+        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sh-group-items">
+        <a class="sh-item" data-page="community" href="/community.html">Feed</a>
+        <a class="sh-item" data-page="community" href="/community.html?filter=progress">Share Your Progress</a>
+        <a class="sh-item" data-page="community" href="/community.html?filter=feedback">Get Feedback</a>
+        <a class="sh-item" data-page="community" href="/community.html?filter=question">Ask a Question</a>
+        <a class="sh-item" data-page="community" href="/community.html?filter=post">Just Post</a>
+      </div>
+    </div>
 
     <div class="sh-group">
       <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
