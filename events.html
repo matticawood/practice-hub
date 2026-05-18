@@ -259,26 +259,20 @@
     .event-detail-layout {
       display: grid;
       grid-template-columns: 1fr 300px;
-      grid-template-areas:
-        "main    sidebar"
-        "main    attendees"
-        "discuss .";
-      gap: 32px;
+      gap: 24px 32px;
       align-items: start;
     }
-    .event-detail-main    { grid-area: main; }
-    .event-detail-sidebar { grid-area: sidebar; align-self: start; }
-    #attendees-card       { grid-area: attendees; align-self: start; }
-    .comments-section     { grid-area: discuss; margin-top: 0; }
+    .event-detail-main    { grid-column: 1; align-self: start; }
+    .event-detail-sidebar { grid-column: 2; grid-row: 1; align-self: start; }
+    #attendees-card       { grid-column: 2; grid-row: 2; align-self: start; }
+    .comments-section     { grid-column: 1; grid-row: 2; margin-top: 0; }
     @media (max-width: 768px) {
-      .event-detail-layout {
-        grid-template-columns: 1fr;
-        grid-template-areas:
-          "main"
-          "sidebar"
-          "attendees"
-          "discuss";
-      }
+      .event-detail-layout { grid-template-columns: 1fr; gap: 16px; }
+      /* DOM order is already: main → sidebar → attendees → discussion */
+      .event-detail-main    { grid-column: 1; grid-row: auto; }
+      .event-detail-sidebar { grid-column: 1; grid-row: auto; }
+      #attendees-card       { grid-column: 1; grid-row: auto; }
+      .comments-section     { grid-column: 1; grid-row: auto; }
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────────── */
@@ -944,6 +938,7 @@
 <div id="modal-create" class="modal-overlay" style="display:none">
   <div class="modal">
     <h2 id="modal-title">New Event</h2>
+    <div id="recurrence-banner" style="display:none;background:rgba(245,197,24,.1);border:1px solid rgba(245,197,24,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.85rem;color:var(--text-muted)">Part of a recurring series. <button onclick="switchToEditAll()" style="background:none;border:none;color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit;font-size:.85rem">Edit all events in series →</button></div>
     <div class="form-field">
       <label>Title *</label>
       <input id="f-title" placeholder="Live Practice Clinic: …" />
@@ -998,6 +993,34 @@
     <div class="form-field">
       <label>Duration (minutes)</label>
       <input id="f-duration" type="number" value="60" min="15" max="360" />
+    </div>
+    <div class="form-field" id="recurrence-field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-recurring" onchange="toggleRecurring(this)" style="width:15px;height:15px;accent-color:var(--accent)">
+        <span>Repeat</span>
+      </label>
+      <div id="recurring-options" style="display:none;margin-top:12px;flex-direction:column;gap:10px">
+        <select id="f-frequency" style="background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:.88rem;font-family:inherit;width:100%">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="f-end-type" onchange="toggleRecurringEndType()" style="background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:.88rem;font-family:inherit;flex:1">
+            <option value="count">After N occurrences</option>
+            <option value="until">Until a date</option>
+          </select>
+        </div>
+        <div id="f-end-count-wrap" style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="f-end-count" value="8" min="2" max="52"
+            style="background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:.88rem;font-family:inherit;width:80px">
+          <span style="font-size:.85rem;color:var(--text-muted)">occurrences</span>
+        </div>
+        <div id="f-end-until-wrap" style="display:none">
+          <input type="date" id="f-end-until"
+            style="background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:.88rem;font-family:inherit;width:100%;box-sizing:border-box">
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeCreateModal()">Cancel</button>
@@ -2940,6 +2963,48 @@ function showSidebarTab(tab, btn) {
 }
 
 // ── Create / Edit event modal ─────────────────────────────────────────────────
+function toggleRecurring(cb) {
+  const opts = document.getElementById("recurring-options");
+  opts.style.display = cb.checked ? "flex" : "none";
+}
+
+function toggleRecurringEndType() {
+  const type = document.getElementById("f-end-type").value;
+  document.getElementById("f-end-count-wrap").style.display  = type === "count" ? "flex" : "none";
+  document.getElementById("f-end-until-wrap").style.display  = type === "until" ? "block" : "none";
+}
+
+function _getRecurrenceDates(startDate, rule) {
+  const { frequency, endType, count, until } = rule;
+  const dates = [new Date(startDate)];
+  let current = new Date(startDate);
+  const maxOccurrences = endType === "count" ? count : 200;
+  const untilDate = endType === "until" ? new Date(until) : null;
+
+  while (dates.length < maxOccurrences) {
+    const next = new Date(current);
+    if (frequency === "weekly")        next.setDate(next.getDate() + 7);
+    else if (frequency === "biweekly") next.setDate(next.getDate() + 14);
+    else if (frequency === "monthly")  next.setMonth(next.getMonth() + 1);
+    if (untilDate && next > untilDate) break;
+    dates.push(next);
+    current = next;
+  }
+  return dates;
+}
+
+let editingAllInSeries = false;
+
+function switchToEditAll() {
+  editingAllInSeries = true;
+  document.getElementById("recurrence-banner").innerHTML = `Editing <strong>all events</strong> in this series. <button onclick="switchToEditOne()" style="background:none;border:none;color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit;font-size:.85rem">Edit just this event →</button>`;
+}
+
+function switchToEditOne() {
+  editingAllInSeries = false;
+  document.getElementById("recurrence-banner").innerHTML = `Editing <strong>just this event</strong>. <button onclick="switchToEditAll()" style="background:none;border:none;color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit;font-size:.85rem">Edit all events in series →</button>`;
+}
+
 function openCreateModal() {
   editingEventId = null;
   document.getElementById("modal-title").textContent = "New Event";
@@ -2952,6 +3017,14 @@ function openCreateModal() {
   populateTzSelect();
   if (!datePicker) initDatePicker(); else datePicker.clear();
   loadPreviousCovers();
+  document.getElementById("f-recurring").checked = false;
+  document.getElementById("recurring-options").style.display = "none";
+  document.getElementById("f-frequency").value = "weekly";
+  document.getElementById("f-end-type").value = "count";
+  document.getElementById("f-end-count").value = "8";
+  document.getElementById("f-end-count-wrap").style.display = "flex";
+  document.getElementById("f-end-until-wrap").style.display = "none";
+  document.getElementById("recurrence-field").style.display = "";
   document.getElementById("modal-create").style.display = "flex";
 }
 
@@ -2978,11 +3051,22 @@ function openEditModal() {
   // Set cover preview after modal is visible so dimensions are available
   setCoverPreview(currentEvent.cover_url || null, currentEvent.cover_position ?? 50);
   loadPreviousCovers();
+  // Hide recurrence field when editing (use edit-all/edit-one banner instead)
+  document.getElementById("recurrence-field").style.display = "none";
+  editingAllInSeries = false;
+  const banner = document.getElementById("recurrence-banner");
+  if (currentEvent.recurrence_group_id) {
+    banner.style.display = "";
+    banner.innerHTML = `Part of a recurring series. <button onclick="switchToEditAll()" style="background:none;border:none;color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit;font-size:.85rem">Edit all events in series →</button>`;
+  } else {
+    banner.style.display = "none";
+  }
 }
 
 function closeCreateModal() {
   document.getElementById("modal-create").style.display = "none";
   _savingEvent = false;
+  editingAllInSeries = false;
 }
 
 let _savingEvent = false;
@@ -3018,6 +3102,38 @@ async function saveEvent() {
       timezone,
       created_by:     myEmail
     };
+
+    const isRecurring = !editingEventId && document.getElementById("f-recurring").checked;
+
+    if (isRecurring) {
+      const frequency = document.getElementById("f-frequency").value;
+      const endType   = document.getElementById("f-end-type").value;
+      const count     = parseInt(document.getElementById("f-end-count").value) || 8;
+      const until     = document.getElementById("f-end-until").value || null;
+      const rule      = { frequency, endType, count, until };
+      const groupId   = crypto.randomUUID();
+      const dates     = _getRecurrenceDates(new Date(dateVal), rule);
+      const rows      = dates.map(d => ({
+        ...payload,
+        scheduled_at:        d.toISOString(),
+        recurrence_group_id: groupId,
+        recurrence_rule:     rule,
+        status:              "scheduled",
+      }));
+      const { error: bulkErr } = await db.from("live_events").insert(rows);
+      if (bulkErr) { alert("Error creating recurring events: " + bulkErr.message); _savingEvent = false; if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Event"; } return; }
+      closeCreateModal();
+      loadEvents("upcoming");
+      return;
+    }
+
+    if (editingEventId && editingAllInSeries && currentEvent.recurrence_group_id) {
+      const sharedPayload = { title, description: desc || null, cover_url: cover || null, cover_position: coverPos, duration_mins: duration, timezone };
+      await db.from("live_events").update(sharedPayload).eq("recurrence_group_id", currentEvent.recurrence_group_id);
+      closeCreateModal();
+      renderDetailView(currentEvent);
+      return;
+    }
 
     if (editingEventId) {
       await db.from("live_events").update(payload).eq("id", editingEventId);
