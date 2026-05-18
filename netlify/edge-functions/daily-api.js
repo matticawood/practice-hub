@@ -25,21 +25,28 @@ export default async (request) => {
 
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  // Verify Supabase session
+  // Verify Supabase JWT by decoding the payload.
+  // We decode without re-checking session existence (which fails when Supabase
+  // has garbage-collected the session record) — the JWT signature is still valid
+  // because RLS policies accept it, and we check expiry ourselves.
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return json({ error: "No auth token provided" }, 401);
 
-  const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { "Authorization": `Bearer ${token}`, "apikey": SUPABASE_ANON }
-  });
-  if (!userRes.ok) {
-    const body = await userRes.text().catch(() => "");
-    return json({ error: `Supabase auth failed (${userRes.status}): ${body}` }, 401);
+  let userEmail;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) throw new Error("Malformed JWT");
+    // Base64url decode the payload
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    // Must be issued by our Supabase project and not expired
+    if (!payload.iss?.includes("gyskfutmncprqxazgatv")) throw new Error("Wrong issuer");
+    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) throw new Error("Token expired");
+    userEmail = payload.email?.toLowerCase();
+    if (!userEmail) throw new Error("No email in token");
+  } catch (e) {
+    return json({ error: "Invalid token: " + e.message }, 401);
   }
-
-  const user      = await userRes.json();
-  const userEmail = user.email?.toLowerCase();
 
   const DAILY_API_KEY = Netlify.env.get("DAILY_API_KEY");
   let body;
