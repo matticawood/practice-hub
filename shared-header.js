@@ -595,14 +595,14 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     return P[Math.abs(h) % P.length];
   }
   // Cache avatar state so back-navigation is instant.
-  // Always write — even when avatarUrl is null (initials-only users need the
-  // name in cache so the early-paint function can render the correct colour).
+  // Read existing cache first so we never overwrite a valid photo URL with null
+  // just because this page didn't fetch avatar_url.
   const _cacheKey = "sh_avatar_" + (myEmail || "");
-  sessionStorage.setItem(_cacheKey, JSON.stringify({ avatarUrl: avatarUrl ?? null, myName }));
-  // Apply immediately from cache if available (prevents flicker on back)
-  const _cached = JSON.parse(sessionStorage.getItem(_cacheKey) || "null");
-  const _effectiveUrl  = avatarUrl ?? _cached?.avatarUrl ?? null;
-  const _effectiveName = myName   || _cached?.myName || myEmail?.split("@")[0];
+  const _existing = JSON.parse(sessionStorage.getItem(_cacheKey) || "null");
+  const _effectiveUrl  = avatarUrl ?? _existing?.avatarUrl ?? null;
+  const _effectiveName = myName   || _existing?.myName || myEmail?.split("@")[0];
+  // Write back — always store the best available url + name
+  sessionStorage.setItem(_cacheKey, JSON.stringify({ avatarUrl: _effectiveUrl, myName: _effectiveName }));
 
   const avatarEl = document.getElementById("sh-avatar-el");
   if (avatarEl) {
