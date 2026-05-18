@@ -2481,7 +2481,18 @@ async function castVote(pollId, optionIndex, commentId) {
     .delete().eq("poll_id", pollId).eq("email", myEmail);
   await db.from("event_comment_poll_votes")
     .insert({ poll_id: pollId, email: myEmail, option_index: optionIndex });
-  if (_currentEventId) loadComments(_currentEventId);
+
+  // Patch just the poll card in-place — no full discussion reload needed
+  const { data: poll } = await db
+    .from("event_comment_polls")
+    .select("id,question,options,event_comment_poll_votes(email,option_index)")
+    .eq("id", pollId)
+    .single();
+  if (!poll) return;
+  const commentEl = document.getElementById(`comment-${commentId}`);
+  if (!commentEl) return;
+  const existingPoll = commentEl.querySelector(".poll-card");
+  if (existingPoll) existingPoll.outerHTML = _renderPollHtml(poll, commentId);
 }
 
 async function deleteComment(commentId, eventId) {
@@ -3245,10 +3256,19 @@ function formatEventDateWithLocal(iso, timezone) {
 
 function timeAgo(iso) {
   const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60000)  return "just now";
-  if (diff < 3600000) return Math.floor(diff/60000) + "m ago";
-  if (diff < 86400000) return Math.floor(diff/3600000) + "h ago";
-  return Math.floor(diff/86400000) + "d ago";
+  const abs  = Math.abs(diff);
+  const future = diff < 0;
+  if (abs < 60000) return "just now";
+  if (abs < 3600000) {
+    const m = Math.floor(abs / 60000);
+    return future ? `in ${m} minute${m !== 1 ? "s" : ""}` : `${m}m ago`;
+  }
+  if (abs < 86400000) {
+    const h = Math.floor(abs / 3600000);
+    return future ? `in ${h} hour${h !== 1 ? "s" : ""}` : `${h}h ago`;
+  }
+  const d = Math.floor(abs / 86400000);
+  return future ? `in ${d} day${d !== 1 ? "s" : ""}` : `${d}d ago`;
 }
 
 function getInitials(name) {
