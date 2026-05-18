@@ -1000,7 +1000,7 @@
     .feed-ach-name { font-size: 0.92rem; font-weight: 700; line-height: 1.2; }
     .feed-ach-desc { font-size: 0.76rem; color: var(--text-muted); margin-top: 3px; }
     /* ── Activity actions (Like + Comment) ───────────────────────────────────── */
-    .activity-footer { margin-top: 7px; }
+    .activity-footer { margin-top: 7px; display: flex; align-items: center; justify-content: space-between; }
     .activity-actions {
       display: flex; align-items: center; gap: 8px; position: relative;
     }
@@ -1061,35 +1061,8 @@
     .activity-react-picker button .picker-count {
       font-size: 0.62rem; color: var(--text-muted); font-family: inherit; line-height: 1;
     }
-    /* Comment section */
-    .activity-cmt-section {
-      margin-top: 10px; padding-top: 10px;
-      border-top: 1px solid var(--border);
-    }
-    .activity-cmt-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-    .activity-cmt-item { display: flex; align-items: flex-start; gap: 8px; }
-    .activity-cmt-content { flex: 1; min-width: 0; }
-    .activity-cmt-meta {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 0.75rem; margin-bottom: 2px;
-    }
-    .activity-cmt-time { color: var(--text-muted); }
-    .activity-cmt-del {
-      margin-left: auto; background: none; border: none;
-      color: var(--text-muted); cursor: pointer;
-      font-size: 1rem; padding: 0 2px; line-height: 1;
-    }
-    .activity-cmt-del:hover { color: #f87171; }
-    .activity-cmt-text { font-size: 0.83rem; color: var(--text); line-height: 1.45; word-break: break-word; }
-    .activity-cmt-composer { display: flex; align-items: flex-start; gap: 8px; }
-    .activity-cmt-submit {
-      flex-shrink: 0; padding: 7px 14px;
-      background: var(--accent); color: #000;
-      border: none; border-radius: 8px; font-size: 0.8rem;
-      font-weight: 700; cursor: pointer; font-family: inherit;
-      transition: opacity .15s;
-    }
-    .activity-cmt-submit:disabled { opacity: .5; cursor: default; }
+    /* Comment section — activity comments reuse .comment-* classes */
+    .activity-cmt-section { margin-top: 10px; }
     .see-more-btn {
       display: block; width: 100%; margin: 4px 0 8px;
       padding: 10px; background: transparent;
@@ -4713,13 +4686,22 @@ function feedItemHTML(row) {
           onclick="toggleActivityComments(this,'${row.event_type}','${String(row.item_id)}')"
         ><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${cmtCount > 0 ? ` ${cmtCount}` : ""}</button>
       </div>
-      <div class="activity-cmt-section" id="cmt-${safeKey}" style="display:none">
-        <div class="activity-cmt-list"></div>
-        <div class="activity-cmt-composer">
-          <textarea class="comment-input" placeholder="Write a comment…" rows="1"
-            oninput="autoResize(this)"></textarea>
-          <button class="activity-cmt-submit"
-            onclick="submitActivityComment(this,'${row.event_type}','${String(row.item_id)}')">Post</button>
+      <div class="post-footer-right">
+        <span class="post-footer-meta" id="acmeta-${safeKey}">
+          ${totalRx > 0 ? `<span>${totalRx} reaction${totalRx !== 1 ? 's' : ''}</span>` : ''}
+          ${totalRx > 0 && cmtCount > 0 ? ' · ' : ''}
+          ${cmtCount > 0 ? `<span>${cmtCount} comment${cmtCount !== 1 ? 's' : ''}</span>` : ''}
+        </span>
+      </div>
+    </div>
+    <div class="activity-cmt-section comments-section" id="cmt-${safeKey}" style="display:none;margin-top:10px;border-radius:var(--radius)">
+      <div class="comments-hdr">Comments</div>
+      <div class="activity-cmt-list"></div>
+      <div class="comment-form" style="flex-direction:column;align-items:stretch;gap:0;padding:10px 20px 14px">
+        <div style="display:flex;gap:10px;align-items:flex-end">
+          <textarea class="comment-input" placeholder="Write a comment…" rows="1" oninput="autoResize(this)"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitActivityComment(this,'${row.event_type}','${String(row.item_id)}');}"></textarea>
+          <button class="btn btn-sm" onclick="submitActivityComment(this.previousElementSibling,'${row.event_type}','${String(row.item_id)}')">Send</button>
         </div>
       </div>
     </div>` : "";
@@ -4980,37 +4962,74 @@ async function toggleActivityComments(btn, eventType, itemId) {
   }
 }
 
+function activityCmtHTML(c, isReply, rootId, eventType, itemId) {
+  const n = c.name || c.email.split("@")[0];
+  const col = avatarColour(c.email);
+  const canDel = c.email === myEmail || isAdmin;
+  const replyPrefix = (isReply && c.reply_to_name)
+    ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
+  return `
+    <div class="comment-item${isReply ? " is-reply" : ""}" id="acmt-${c.id}">
+      <div style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;flex-shrink:0;margin-top:1px">${escHtml(initials(n))}</div>
+      <div class="comment-body">
+        <div class="comment-meta">
+          <span class="comment-name">${escHtml(n)}</span>
+          <span class="comment-time">${relativeTime(c.created_at)}</span>
+          ${canDel ? `<button onclick="deleteActivityComment('${c.id}','${eventType}','${itemId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
+        </div>
+        ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : ""}
+        <button class="comment-reply-btn" onclick="startActivityReply('${c.id}','${escHtml(n).replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}','${eventType}','${itemId}')">Reply</button>
+      </div>
+    </div>`;
+}
+
 async function loadActivityComments(section, eventType, itemId) {
   const listEl = section.querySelector(".activity-cmt-list");
   listEl.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:4px 0">Loading…</div>`;
 
   const { data, error } = await db.from("activity_comments")
-    .select("id,email,name,content,created_at")
+    .select("id,email,name,content,created_at,parent_comment_id,reply_to_name")
     .eq("event_type", eventType).eq("item_id", itemId)
     .order("created_at", { ascending: true });
 
   if (error) { listEl.innerHTML = ""; return; }
 
   if (!data.length) {
-    listEl.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:2px 0">No comments yet — be the first!</div>`;
+    listEl.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:12px 20px">No comments yet — be the first!</div>`;
+    // Keep count in sync
+    const key = `${eventType}:${itemId}`;
+    _cmtMap[key] = 0;
+    _updateCmtBtn(eventType, itemId, 0);
     return;
   }
 
-  listEl.innerHTML = data.map(c => {
-    const n   = c.name || c.email.split("@")[0];
-    const col = avatarColour(c.email);
-    const canDel = c.email === myEmail || isAdmin;
-    return `<div class="activity-cmt-item" id="acmt-${c.id}">
-      <div class="feed-avatar" style="width:26px;height:26px;min-width:26px;font-size:.65rem;background:${col.bg};color:${col.fg}">${initials(n)}</div>
-      <div class="activity-cmt-content">
-        <div class="activity-cmt-meta">
-          <strong style="color:${col.fg}">${escHtml(n)}</strong>
-          <span class="activity-cmt-time">${relativeTime(c.created_at)}</span>
-          ${canDel ? `<button class="activity-cmt-del" title="Delete" onclick="deleteActivityComment('${c.id}','${eventType}','${itemId}')">×</button>` : ""}
-        </div>
-        <div class="activity-cmt-text">${escHtml(c.content)}</div>
-      </div>
-    </div>`;
+  const topLevel = data.filter(c => !c.parent_comment_id);
+  const repliesMap = {};
+  data.filter(c => c.parent_comment_id).forEach(c => {
+    (repliesMap[c.parent_comment_id] = repliesMap[c.parent_comment_id] || []).push(c);
+  });
+
+  const myCol = avatarColour(myEmail);
+  const myIni = escHtml(initials(myName || myEmail));
+
+  listEl.innerHTML = topLevel.map(c => {
+    const replies = repliesMap[c.id] || [];
+    return activityCmtHTML(c, false, c.id, eventType, itemId)
+      + `<div class="comment-replies" id="acmt-replies-${c.id}">
+          ${replies.map(r => activityCmtHTML(r, true, c.id, eventType, itemId)).join("")}
+          <div id="acmt-reply-composer-${c.id}" style="display:none" class="comment-item is-reply">
+            <div style="width:28px;height:28px;border-radius:50%;background:${myCol.bg};color:${myCol.fg};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;flex-shrink:0">${myIni}</div>
+            <div class="comment-body" style="flex:1;min-width:0">
+              <textarea class="comment-input" placeholder="Write a reply…" rows="1"
+                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
+                style="width:100%;box-sizing:border-box;margin-bottom:4px"></textarea>
+              <div style="display:flex;justify-content:flex-end;gap:14px;margin-top:4px">
+                <button onclick="cancelActivityReply('${c.id}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;cursor:pointer;color:var(--text-muted);padding:0">Cancel</button>
+                <button onclick="submitActivityReply('${c.id}','${eventType}','${itemId}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
   }).join("");
 
   // Keep count in sync
@@ -5019,22 +5038,59 @@ async function loadActivityComments(section, eventType, itemId) {
   _updateCmtBtn(eventType, itemId, data.length);
 }
 
-async function submitActivityComment(btn, eventType, itemId) {
-  const section = btn.closest(".activity-cmt-section");
-  const textarea = section.querySelector(".comment-input");
-  const content  = textarea.value.trim();
+async function submitActivityComment(textarea, eventType, itemId) {
+  const content = textarea.value.trim();
   if (!content) return;
-
-  btn.disabled = true;
+  textarea.disabled = true;
   const { error } = await db.from("activity_comments").insert({
     event_type: eventType, item_id: String(itemId),
     email: myEmail, name: myName, content,
   });
-  btn.disabled = false;
-  if (error) { alert("Couldn't post comment — please try again."); return; }
-
+  textarea.disabled = false;
+  if (error) { alert("Couldn't post comment"); return; }
   textarea.value = ""; textarea.style.height = "";
-  await loadActivityComments(section, eventType, String(itemId));
+  const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
+  const section = document.getElementById(`cmt-${safeKey}`);
+  if (section) await loadActivityComments(section, eventType, String(itemId));
+}
+
+function startActivityReply(commentId, authorName, authorEmail, eventType, itemId) {
+  // Hide other open composers
+  document.querySelectorAll("[id^='acmt-reply-composer-']").forEach(el => {
+    if (el.id !== `acmt-reply-composer-${commentId}`) el.style.display = "none";
+  });
+  const composer = document.getElementById(`acmt-reply-composer-${commentId}`);
+  if (!composer) return;
+  composer.style.display = "flex";
+  composer.dataset.replyTo = authorName;
+  composer.dataset.replyEmail = authorEmail;
+  composer.querySelector("textarea")?.focus();
+}
+
+function cancelActivityReply(commentId) {
+  const composer = document.getElementById(`acmt-reply-composer-${commentId}`);
+  if (composer) { composer.style.display = "none"; const ta = composer.querySelector("textarea"); if (ta) ta.value = ""; }
+}
+
+async function submitActivityReply(parentId, eventType, itemId) {
+  const composer = document.getElementById(`acmt-reply-composer-${parentId}`);
+  if (!composer) return;
+  const ta = composer.querySelector("textarea");
+  const content = ta?.value.trim();
+  if (!content) return;
+  const replyToName = composer.dataset.replyTo || "";
+  const { error } = await db.from("activity_comments").insert({
+    event_type: eventType, item_id: String(itemId),
+    email: myEmail, name: myName, content,
+    parent_comment_id: parentId, reply_to_name: replyToName
+  });
+  if (error) { alert("Couldn't post reply"); return; }
+  ta.value = ""; ta.style.height = "";
+  composer.style.display = "none";
+  // Reload comments
+  const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
+  const section = document.getElementById(`cmt-${safeKey}`);
+  if (section) await loadActivityComments(section, eventType, String(itemId));
 }
 
 async function deleteActivityComment(commentId, eventType, itemId) {
@@ -5052,6 +5108,17 @@ function _updateCmtBtn(eventType, itemId, count) {
   const safeKey = `${eventType}:${String(itemId)}`.replace(/[^a-z0-9]/gi, "_");
   const btn = document.getElementById(`cmt-btn-${safeKey}`);
   if (btn) btn.innerHTML = count > 0 ? `${count} Comments` : "Comment";
+  const metaEl = document.getElementById(`acmeta-${safeKey}`);
+  if (metaEl) {
+    const key = `${eventType}:${String(itemId)}`;
+    const rxData = _rxMap[key] || {};
+    let totalRx = 0;
+    for (const d of Object.values(rxData)) totalRx += d.count;
+    const parts = [];
+    if (totalRx > 0) parts.push(`<span>${totalRx} reaction${totalRx !== 1 ? 's' : ''}</span>`);
+    if (count > 0) parts.push(`<span>${count} comment${count !== 1 ? 's' : ''}</span>`);
+    metaEl.innerHTML = parts.join(' · ');
+  }
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
