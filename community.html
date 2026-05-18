@@ -1549,14 +1549,18 @@
     }
 
     /* ── Chat reactions ──────────────────────────────────────────────────────── */
-    .chat-bubble-wrap { position: relative; display: inline-flex; flex-direction: column; max-width: 100%; }
+    /* Outer wrapper — just flex column, no relative so pills aren't clipped */
+    .chat-bubble-wrap { display: inline-flex; flex-direction: column; max-width: 100%; }
+    /* Inner wrapper anchors the absolutely-positioned trigger and picker */
+    .chat-bubble-inner { position: relative; display: inline-flex; flex-direction: column; max-width: 100%; }
     .chat-react-trigger {
       opacity: 0; transition: opacity .15s;
+      position: absolute; bottom: -12px; right: 8px;
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 50%; width: 26px; height: 26px; min-width: 26px;
-      cursor: pointer; font-size: .82rem;
+      border-radius: 50%; width: 24px; height: 24px;
+      cursor: pointer; font-size: .78rem;
       display: flex; align-items: center; justify-content: center;
-      align-self: flex-end; margin-bottom: 2px; flex-shrink: 0;
+      z-index: 5; box-shadow: 0 1px 4px rgba(0,0,0,.14);
     }
     .chat-msg-group:hover .chat-react-trigger { opacity: 1; }
     .chat-react-picker {
@@ -1576,8 +1580,10 @@
     }
     .chat-react-picker button:hover,
     .chat-react-picker button.picked { background: rgba(245,197,24,.25); }
-    .chat-rx-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+    /* Extra top margin leaves room for the trigger button overlapping the bottom of the bubble */
+    .chat-rx-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 14px; }
     .chat-rx-pill {
+      position: relative;
       background: var(--surface-2); border: 1.5px solid var(--border);
       border-radius: 12px; padding: 1px 7px; font-size: .82rem;
       cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
@@ -1585,6 +1591,17 @@
     }
     .chat-rx-pill.mine { border-color: var(--accent); background: rgba(245,197,24,.12); }
     .chat-rx-pill span { font-size: .72rem; color: var(--text-muted); font-weight: 600; }
+    /* "Who reacted" tooltip on hover */
+    .chat-rx-pill::after {
+      content: attr(data-names);
+      position: absolute; bottom: calc(100% + 5px); left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,.82); color: #fff;
+      font-size: .7rem; padding: 3px 8px; border-radius: 6px;
+      white-space: nowrap; z-index: 300; pointer-events: none;
+      opacity: 0; transition: opacity .15s;
+    }
+    .chat-rx-pill:hover::after { opacity: 1; }
 
     /* Composer */
     .chat-composer {
@@ -6248,8 +6265,9 @@ async function _openConversation(chatIdOrEmail, otherName) {
       .select("message_id,email,emoji").in("message_id", allMsgIds);
     (rxRows || []).forEach(r => {
       if (!_chatRxMap[r.message_id]) _chatRxMap[r.message_id] = {};
-      if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false };
+      if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, emails: [] };
       _chatRxMap[r.message_id][r.emoji].count++;
+      _chatRxMap[r.message_id][r.emoji].emails.push(r.email);
       if (r.email === myEmail) _chatRxMap[r.message_id][r.emoji].mine = true;
     });
   }
@@ -6260,15 +6278,22 @@ async function _openConversation(chatIdOrEmail, otherName) {
 
 // ── Chat reactions ─────────────────────────────────────────────────────────
 
-const CHAT_EMOJIS = ["❤️","👍","😂","🔥","👏","😮"];
+const CHAT_EMOJIS = ["❤️","👍","😂","🔥","💪","👏"];
+
+function _rxNames(emails) {
+  return (emails || []).map(e =>
+    e === myEmail ? "You" : ((_allMembers || []).find(m => m.email === e)?.name || e.split("@")[0])
+  ).join(", ");
+}
 
 function _chatRxHtml(msgId) {
   const rx = _chatRxMap[msgId] || {};
   return Object.entries(rx)
     .filter(([, d]) => d.count > 0)
-    .map(([emoji, d]) =>
-      `<button class="chat-rx-pill${d.mine ? " mine" : ""}" onclick="pickChatReaction('${escHtml(msgId)}','${emoji}')">${emoji}${d.count > 1 ? `<span>${d.count}</span>` : ""}</button>`
-    ).join("");
+    .map(([emoji, d]) => {
+      const names = _rxNames(d.emails);
+      return `<button class="chat-rx-pill${d.mine ? " mine" : ""}" data-names="${escHtml(names)}" onclick="pickChatReaction('${escHtml(msgId)}','${emoji}')">${emoji}${d.count > 1 ? `<span>${d.count}</span>` : ""}</button>`;
+    }).join("");
 }
 
 function _chatPickerHtml(msgId, isMine) {
@@ -6304,6 +6329,7 @@ async function pickChatReaction(msgId, emoji) {
     // Toggle off
     _chatRxMap[msgId][emoji].mine = false;
     _chatRxMap[msgId][emoji].count = Math.max(0, _chatRxMap[msgId][emoji].count - 1);
+    _chatRxMap[msgId][emoji].emails = (_chatRxMap[msgId][emoji].emails || []).filter(e => e !== myEmail);
     await db.from("community_chat_reactions").delete()
       .eq("message_id", msgId).eq("email", myEmail);
   } else {
@@ -6311,12 +6337,14 @@ async function pickChatReaction(msgId, emoji) {
     if (existingEmoji) {
       _chatRxMap[msgId][existingEmoji].mine = false;
       _chatRxMap[msgId][existingEmoji].count = Math.max(0, _chatRxMap[msgId][existingEmoji].count - 1);
+      _chatRxMap[msgId][existingEmoji].emails = (_chatRxMap[msgId][existingEmoji].emails || []).filter(e => e !== myEmail);
       await db.from("community_chat_reactions").delete()
         .eq("message_id", msgId).eq("email", myEmail);
     }
-    if (!_chatRxMap[msgId][emoji]) _chatRxMap[msgId][emoji] = { count: 0, mine: false };
+    if (!_chatRxMap[msgId][emoji]) _chatRxMap[msgId][emoji] = { count: 0, mine: false, emails: [] };
     _chatRxMap[msgId][emoji].mine = true;
     _chatRxMap[msgId][emoji].count++;
+    _chatRxMap[msgId][emoji].emails = [...(_chatRxMap[msgId][emoji].emails || []), myEmail];
     await db.from("community_chat_reactions")
       .upsert({ message_id: msgId, email: myEmail, emoji }, { onConflict: "message_id,email" });
   }
@@ -6344,8 +6372,9 @@ async function _refreshChatRxFromDb(msgId) {
     .select("email,emoji").eq("message_id", msgId);
   _chatRxMap[msgId] = {};
   (rxRows || []).forEach(r => {
-    if (!_chatRxMap[msgId][r.emoji]) _chatRxMap[msgId][r.emoji] = { count: 0, mine: false };
+    if (!_chatRxMap[msgId][r.emoji]) _chatRxMap[msgId][r.emoji] = { count: 0, mine: false, emails: [] };
     _chatRxMap[msgId][r.emoji].count++;
+    _chatRxMap[msgId][r.emoji].emails.push(r.email);
     if (r.email === myEmail) _chatRxMap[msgId][r.emoji].mine = true;
   });
   _refreshChatRx(msgId);
@@ -6613,8 +6642,12 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const pickerHtml = _chatPickerHtml(msg.id, isMine);
   const triggerBtn = `<button class="chat-react-trigger" onclick="toggleChatReactPicker('${escHtml(msg.id)}',event)" title="React">😊</button>`;
 
-  const bubbleWrap = (bubbleHtml || pollHtml)
-    ? `<div class="chat-bubble-wrap">${pickerHtml}${bubbleHtml}${pollHtml}${rxHtml}</div>`
+  // chat-bubble-inner is position:relative so picker + trigger are anchored to the bubble
+  const innerWrap = (bubbleHtml || pollHtml)
+    ? `<div class="chat-bubble-inner">${pickerHtml}${bubbleHtml}${pollHtml}${triggerBtn}</div>`
+    : "";
+  const bubbleWrap = innerWrap
+    ? `<div class="chat-bubble-wrap">${innerWrap}${rxHtml}</div>`
     : "";
 
   return `
@@ -6622,10 +6655,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     <div class="chat-msg-avatar">${avatarEl}</div>
     <div class="chat-msg-body">
       ${metaHtml}
-      <div style="display:flex;align-items:flex-end;gap:4px${isMine ? ";flex-direction:row-reverse" : ""}">
-        ${bubbleWrap}
-        ${triggerBtn}
-      </div>
+      ${bubbleWrap}
     </div>
   </div>`;
 }
