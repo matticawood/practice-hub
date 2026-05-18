@@ -3971,9 +3971,9 @@ function _renderCommentMedia(c) {
     } else if (m.type === "audio") {
       html += `<div style="margin-top:6px;min-width:240px"><audio src="${escHtml(m.url)}" controls style="width:100%;min-width:240px;border-radius:8px"></audio></div>`;
     } else if (m.type === "youtube") {
-      html += `<div style="margin-top:8px;position:relative;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
+      html += `<div style="margin-top:8px;width:100%;border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "vimeo") {
-      html += `<div style="margin-top:8px;position:relative;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden"><iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
+      html += `<div style="margin-top:8px;width:100%;border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "file") {
       html += `<div style="margin-top:6px"><a href="${escHtml(m.url)}" target="_blank" download="${escHtml(m.name)}" class="post-media-chip"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${escHtml(m.name)}</a></div>`;
     } else if (m.type === "poll") {
@@ -5808,6 +5808,9 @@ function _setChatPanel(panel) {
 // Show the full chat view (switches away from posts/activity/members)
 function _showChatView() {
   window.scrollTo(0, 0);
+  // Prevent background page from scrolling behind the chat view
+  document.body.style.overflow = "hidden";
+  document.documentElement.style.overflow = "hidden";
   document.getElementById("community-main").style.display = "none";
   // Hide the desktop tab bar while chat is open — chat fills right below the header
   const tb = document.getElementById("sh-tab-bar");
@@ -5819,6 +5822,8 @@ function _showChatView() {
   const topPx = hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 0;
   chatEl.style.top = topPx + "px";
   chatEl.style.display = "flex";
+  // On mobile, use visualViewport to keep chat correctly sized when keyboard appears
+  _attachChatViewportListener(topPx);
 }
 
 function _hideChatView() {
@@ -5828,6 +5833,37 @@ function _hideChatView() {
   if (tb)   { tb.style.display = ""; }
   if (hbtn) { hbtn.style.display = ""; }
   document.getElementById("view-chat").style.display = "none";
+  // Restore background scrolling
+  document.body.style.overflow = "";
+  document.documentElement.style.overflow = "";
+  _detachChatViewportListener();
+}
+
+// Keep the chat panel fitted to the visible viewport (handles mobile keyboard appearing)
+let _chatViewportHandler = null;
+function _attachChatViewportListener(topPx) {
+  _detachChatViewportListener();
+  if (!window.visualViewport) return;
+  _chatViewportHandler = () => {
+    const chatEl = document.getElementById("view-chat");
+    if (!chatEl || chatEl.style.display === "none") return;
+    const vv = window.visualViewport;
+    // Offset from top of layout viewport to top of visual viewport (accounts for scroll/pinch)
+    const top = Math.max(topPx, vv.offsetTop + topPx);
+    chatEl.style.top    = topPx + "px";
+    chatEl.style.height = vv.height - topPx + "px";
+  };
+  window.visualViewport.addEventListener("resize", _chatViewportHandler);
+  window.visualViewport.addEventListener("scroll", _chatViewportHandler);
+}
+function _detachChatViewportListener() {
+  if (_chatViewportHandler && window.visualViewport) {
+    window.visualViewport.removeEventListener("resize", _chatViewportHandler);
+    window.visualViewport.removeEventListener("scroll", _chatViewportHandler);
+  }
+  const chatEl = document.getElementById("view-chat");
+  if (chatEl) chatEl.style.height = ""; // let CSS bottom:0 take over
+  _chatViewportHandler = null;
 }
 
 // Called from the nav "Chat" button — open group chat with sidebar visible
@@ -6315,9 +6351,10 @@ function _chatMsgHtml(msg, isMine, showMeta) {
       const pct   = total ? Math.round((count / total) * 100) : 0;
       const isMe  = vdata.myVote === i;
       if (voted) {
-        return `<div style="margin-bottom:6px">
-          <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px;color:var(--text)">
-            <span${isMe ? ' style="font-weight:700"' : ""}>${escHtml(o)}${isMe ? " ✓" : ""}</span>
+        // Bars are always clickable so the user can change their vote
+        return `<div onclick="castChatVote('${escHtml(msg.id)}',${i})" style="cursor:pointer;margin-bottom:8px;padding:2px 0">
+          <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px;color:var(--text)${isMe ? ";font-weight:700" : ""}">
+            <span>${escHtml(o)}</span>
             <span style="color:var(--text-muted)">${pct}%</span>
           </div>
           <div style="height:6px;border-radius:4px;background:var(--border);overflow:hidden">
@@ -6425,9 +6462,15 @@ async function sendChatMessage() {
   _myInsertedIds.add(inserted.id);
 
   const optEl = document.querySelector(`[data-msg-id="${optimistic.id}"]`);
-  if (optEl) optEl.dataset.msgId = inserted.id;
   const idx = _chatMessages.findIndex(m => m.id === optimistic.id);
   if (idx !== -1) _chatMessages[idx] = inserted;
+  // Re-render the optimistic DOM element with the real DB row so media URLs are final
+  if (optEl) {
+    const showMeta = optEl.style.marginTop !== "3px";
+    const tmp = document.createElement("div");
+    tmp.innerHTML = _chatMsgHtml(inserted, true, showMeta);
+    optEl.replaceWith(tmp.firstElementChild);
+  }
 
   // Broadcast the new message to all connected clients via the realtime channel
   // (postgres_changes requires the table to be in Supabase Realtime publication;
