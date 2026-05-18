@@ -1715,6 +1715,12 @@ function _renderEvMediaPreview(key) {
         <video src="${esc(m.url)}" style="max-width:160px;max-height:90px;border-radius:6px;display:block;border:1.5px solid var(--border)"></video>
         <button onclick="evRemoveMedia('${key}',${idx})" style="position:absolute;top:3px;right:3px;background:rgba(0,0,0,.55);border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;color:#fff;font-size:.8rem;display:flex;align-items:center;justify-content:center">×</button>
       </div>`;
+    } else if (m.type === "mux") {
+      if (m._uploading) {
+        html += `<span class="ev-media-chip" style="opacity:.6">⏳ ${esc(m.name)} — uploading…</span>`;
+      } else {
+        html += `<span class="ev-media-chip">🎬 ${esc(m.name)}<button class="ev-media-chip-remove" onclick="evRemoveMedia('${key}',${idx})">×</button></span>`;
+      }
     } else if (m.type === "youtube" || m.type === "vimeo") {
       html += `<span class="ev-media-chip">▶ ${esc(m.name)}<button class="ev-media-chip-remove" onclick="evRemoveMedia('${key}',${idx})">×</button></span>`;
     } else {
@@ -1822,9 +1828,14 @@ function evHandleVideo(input, key) {
   input.value = "";
   if (!file) return;
   _evKey(key);
-  _evMedia[key].push({ type: "video", blob: file, name: file.name, url: URL.createObjectURL(file) });
   evToggleVideoPanel(key);
+  const pendingIdx = _evMedia[key].length;
+  _evMedia[key].push({ type: "mux", name: file.name, _uploading: true });
   _renderEvMediaPreview(key);
+  _evUploadToMux(file, item => {
+    _evMedia[key][pendingIdx] = item;
+    _renderEvMediaPreview(key);
+  });
 }
 
 function evAddVideoUrl(key) {
@@ -1861,17 +1872,25 @@ async function evToggleCamRec(key) {
     mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     mr.onstop = () => {
       stream.getTracks().forEach(t => t.stop());
-      const blob = new Blob(chunks, { type: mr.mimeType || "video/webm" });
+      const mime = mr.mimeType || "video/webm";
+      const blob = new Blob(chunks, { type: mime });
       const name = `video-${Date.now()}.webm`;
-      _evKey(_evCamKey);
-      _evMedia[_evCamKey].push({ type: "video", blob, name, url: URL.createObjectURL(blob) });
-      _renderEvMediaPreview(_evCamKey);
-      const btn    = document.getElementById(`ev-camrec-btn-${_evCamKey}`);
-      const recInd = document.getElementById(`ev-recording-${_evCamKey}`);
+      const file = new File([blob], name, { type: mime });
+      const ck   = _evCamKey;
+      const btn    = document.getElementById(`ev-camrec-btn-${ck}`);
+      const recInd = document.getElementById(`ev-recording-${ck}`);
       if (btn) btn.classList.remove("ev-toolbar-btn--active");
       if (recInd) recInd.style.display = "none";
-      clearInterval(_evRecTimer[_evCamKey]);
+      clearInterval(_evRecTimer[ck]);
       _evCamRec = null; _evCamStream = null; _evCamKey = null;
+      _evKey(ck);
+      const pendingIdx = _evMedia[ck].length;
+      _evMedia[ck].push({ type: "mux", name, _uploading: true });
+      _renderEvMediaPreview(ck);
+      _evUploadToMux(file, item => {
+        _evMedia[ck][pendingIdx] = item;
+        _renderEvMediaPreview(ck);
+      });
     };
     mr.start();
     const btn    = document.getElementById(`ev-camrec-btn-${key}`);
@@ -1890,6 +1909,45 @@ async function evToggleCamRec(key) {
     }, 1000);
   } catch (e) {
     alert("Could not access camera/mic: " + e.message);
+  }
+}
+
+// ── Mux upload for events discussion ──────────────────────────────────────────
+async function _evUploadToMux(file, onDone) {
+  try {
+    const token = (await db.auth.getSession()).data.session?.access_token;
+    const createRes = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "create-mux-upload" })
+    });
+    const createData = await createRes.json();
+    if (createData.error) throw new Error(JSON.stringify(createData.error));
+    const { uploadId, uploadUrl } = createData;
+
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl);
+      xhr.onload = () => xhr.status < 300 ? resolve() : reject(new Error("Upload failed (" + xhr.status + ")"));
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.send(file);
+    });
+
+    let playbackId = null, muxAssetId = null;
+    for (let i = 0; i < 72; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const s = await (await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "get-mux-upload-status", uploadId })
+      })).json();
+      if (s.playbackId) { playbackId = s.playbackId; muxAssetId = s.assetId; break; }
+      if (s.status === "errored" || s.assetStatus === "errored") throw new Error("Mux reported an error");
+    }
+    if (!playbackId) throw new Error("Video processing timed out — try again");
+    onDone({ type: "mux", playbackId, assetId: muxAssetId, name: file.name });
+  } catch (e) {
+    alert("Video upload failed: " + e.message);
   }
 }
 
@@ -1955,18 +2013,21 @@ function _evClearState(key) {
 // Upload blobs to comment-attachments bucket
 async function _evUploadMedia(key) {
   const media = _evMedia[key] || [];
+  if (media.some(m => m._uploading)) throw new Error("A video is still uploading — please wait.");
   const result = [];
   for (const m of media) {
-    if (m.blob) {
+    if (m.type === "mux") {
+      result.push({ type: "mux", playbackId: m.playbackId, assetId: m.assetId, name: m.name });
+    } else if (m.type === "youtube") {
+      result.push({ type: "youtube", ytId: m.ytId, url: m.url, name: m.name });
+    } else if (m.type === "vimeo") {
+      result.push({ type: "vimeo", vimeoId: m.vimeoId, url: m.url, name: m.name });
+    } else if (m.blob) {
       const safe = `${(myEmail || "anon").replace(/[^a-z0-9]/gi, "_")}/${Date.now()}-${m.name.replace(/[^a-z0-9._-]/gi, "_")}`;
       const { error } = await db.storage.from("comment-attachments").upload(safe, m.blob);
       if (error) throw new Error(error.message);
       const { data: { publicUrl } } = db.storage.from("comment-attachments").getPublicUrl(safe);
       result.push({ type: m.type, url: publicUrl, name: m.name, size: m.blob.size, duration: m.duration });
-    } else if (m.type === "youtube") {
-      result.push({ type: "youtube", ytId: m.ytId, url: m.url, name: m.name });
-    } else if (m.type === "vimeo") {
-      result.push({ type: "vimeo", vimeoId: m.vimeoId, url: m.url, name: m.name });
     } else {
       result.push({ type: m.type, url: m.url, name: m.name });
     }
@@ -1997,6 +2058,8 @@ function _renderAttHtml(c) {
     others.forEach(m => {
       if (m.type === "audio") {
         html += `<div class="comment-att"><audio src="${esc(m.url)}" controls></audio></div>`;
+      } else if (m.type === "mux") {
+        html += `<div class="comment-att mux-player-wrap"><mux-player playback-id="${esc(m.playbackId)}" controls></mux-player></div>`;
       } else if (m.type === "video" || m.type === "video-url") {
         html += `<div class="comment-att"><video src="${esc(m.url)}" controls preload="metadata"></video></div>`;
       } else if (m.type === "youtube") {
