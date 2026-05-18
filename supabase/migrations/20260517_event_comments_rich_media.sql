@@ -1,9 +1,10 @@
 -- 1. Make event_comments.content nullable (currently NOT NULL, blocks poll/media-only posts)
 ALTER TABLE event_comments ALTER COLUMN content DROP NOT NULL;
 
--- 2. Add media jsonb + parent_id columns if they don't already exist
+-- 2. Add media jsonb + parent_id + reply_to_name columns if they don't already exist
 ALTER TABLE event_comments ADD COLUMN IF NOT EXISTS media jsonb;
 ALTER TABLE event_comments ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES event_comments(id) ON DELETE CASCADE;
+ALTER TABLE event_comments ADD COLUMN IF NOT EXISTS reply_to_name text;
 
 -- 3. Create comment-attachments storage bucket (for images/files/audio in events discussion)
 INSERT INTO storage.buckets (id, name, public)
