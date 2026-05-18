@@ -1715,6 +1715,26 @@
                 <span id="inline-rec-time-main" style="margin-left:4px;opacity:.8">0:00</span>
                 <button class="recording-stop-btn" onclick="stopInlineVoice('main')">■ Stop</button>
               </div>
+              <div id="inline-cam-panel-main" style="display:none;margin-top:6px" class="video-rec-panel">
+                <video id="inline-cam-preview-main" autoplay muted playsinline class="video-rec-preview"></video>
+                <div class="video-rec-devices" id="inline-cam-devices-main">
+                  <select id="inline-cam-sel-main" class="video-rec-select" onchange="inlineSwitchCamDevice('main')">
+                    <option>Loading cameras…</option>
+                  </select>
+                  <select id="inline-mic-sel-main" class="video-rec-select" onchange="inlineSwitchCamDevice('main')">
+                    <option>Loading mics…</option>
+                  </select>
+                </div>
+                <div class="video-rec-actions" id="inline-cam-actions-main">
+                  <button class="video-rec-start-btn" onclick="inlineStartCamRecording('main')">⏺ Start Recording</button>
+                  <button class="video-rec-cancel-btn" onclick="inlineCancelCamPreview('main')">Cancel</button>
+                </div>
+                <div class="video-rec-recording-bar" id="inline-cam-recbar-main" style="display:none">
+                  <span class="recording-dot"></span>
+                  <span id="inline-cam-timer-main" style="font-size:.88rem;font-weight:600;color:var(--text);flex:1">0:00</span>
+                  <button class="video-rec-stop-btn" onclick="inlineStopCamRecording('main')">■ Stop & Upload</button>
+                </div>
+              </div>
               <div id="inline-vid-panel-main" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
                 <div style="display:flex;gap:4px;margin-bottom:8px">
                   <button id="inline-vt-up-btn-main" style="background:rgba(0,0,0,.07);border-radius:4px;font-weight:600;background:none;border:none;font-family:inherit;font-size:.78rem;cursor:pointer;padding:4px 8px;border-radius:4px;color:var(--text-muted)" onclick="inlineSwitchVideoTab('upload','main')">Upload</button>
@@ -1976,9 +1996,11 @@ const _inlinePollOpen    = {}; // key -> bool
 const _inlineVoiceRec    = {}; // key -> MediaRecorder | null
 const _inlineRecTimer    = {}; // key -> intervalId | null
 const _inlineRecStart    = {}; // key -> timestamp | null
-let   _inlineCamRec      = null; // shared camera recorder (one at a time)
-let   _inlineCamKey      = null; // which composer owns the camera recording
-let   _inlineCamStream   = null;
+let   _inlineCamRec           = null; // active MediaRecorder
+let   _inlineCamKey           = null; // key that owns the active recording
+let   _inlineCamStream        = null; // stream used by active recorder
+let   _inlineCamPreviewStream = null; // stream used by preview (before recording starts)
+let   _inlineCamPreviewKey    = null; // key that owns the open preview panel
 
 // Activity feed state
 let _feedRows = [], _feedPage = 1;
@@ -3156,68 +3178,146 @@ function inlineAddVideoUrl(key) {
 }
 
 async function inlineToggleCamRec(key) {
-  // Stop if already recording for this key
+  // If preview is open for this key, cancel it
+  if (_inlineCamPreviewKey === key) { inlineCancelCamPreview(key); return; }
+  // If actively recording for this key, stop it
   if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") {
-    _inlineCamRec.stop();
-    return;
+    inlineStopCamRecording(key); return;
   }
-  // Warn if a different recording is active
+  // Block concurrent recordings/previews
   if (_inlineCamRec && _inlineCamRec.state !== "inactive") {
-    alert("Stop the current camera recording first.");
-    return;
+    alert("Stop the current camera recording first."); return;
   }
+  if (_inlineCamPreviewStream) { inlineCancelCamPreview(_inlineCamPreviewKey); }
+
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-    _inlineCamStream = stream;
-    _inlineCamKey    = key;
-    const chunks = [];
-    const mr = new MediaRecorder(stream);
-    _inlineCamRec = mr;
-    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    mr.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-      const mime  = mr.mimeType || "video/webm";
-      const blob  = new Blob(chunks, { type: mime });
-      const name  = `video-${Date.now()}.webm`;
-      const file  = new File([blob], name, { type: mime });
-      const ck    = _inlineCamKey;
-      // Reset recording UI
-      const btn    = document.getElementById(`inline-camrec-btn-${ck}`);
-      const recInd = document.getElementById(`inline-recording-${ck}`);
-      if (btn) btn.classList.remove("recording");
-      if (recInd) recInd.style.display = "none";
-      clearInterval(_inlineRecTimer[ck]);
-      _inlineCamRec = null; _inlineCamStream = null; _inlineCamKey = null;
-      // Upload via Mux (same as post videos)
-      if (!_inlineMedia[ck]) _inlineMedia[ck] = [];
-      const pendingIdx = _inlineMedia[ck].length;
-      _inlineMedia[ck].push({ type: "mux", name, _uploading: true });
-      _renderInlineMediaPreview(ck);
-      _uploadVideoToMux(file, item => {
-        _inlineMedia[ck][pendingIdx] = item;
-        _renderInlineMediaPreview(ck);
-      });
-    };
-    mr.start();
-    // Update UI to show camera recording in progress
-    const btn    = document.getElementById(`inline-camrec-btn-${key}`);
-    const recInd = document.getElementById(`inline-recording-${key}`);
-    const label  = document.getElementById(`inline-rec-label-${key}`);
-    const stopBtn = document.getElementById(`inline-rec-stop-${key}`);
-    if (btn) btn.classList.add("recording");
-    if (label) label.textContent = "Recording video…";
-    if (stopBtn) stopBtn.onclick = () => inlineToggleCamRec(key);
-    if (recInd) recInd.style.display = "";
-    _inlineRecStart[key] = Date.now();
-    _inlineRecTimer[key] = setInterval(() => {
-      const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
-      const m = Math.floor(secs / 60), s = secs % 60;
-      const el = document.getElementById(`inline-rec-time-${key}`);
-      if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
-    }, 1000);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { aspectRatio: 16/9 } });
+    _inlineCamPreviewStream = stream;
+    _inlineCamPreviewKey    = key;
+
+    const preview = document.getElementById(`inline-cam-preview-${key}`);
+    const panel   = document.getElementById(`inline-cam-panel-${key}`);
+    const btn     = document.getElementById(`inline-camrec-btn-${key}`);
+    if (preview) preview.srcObject = stream;
+    if (panel)   panel.style.display = "";
+    if (btn)     btn.classList.add("recording");
+
+    // Enumerate devices now that we have permission
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+    const mics    = devices.filter(d => d.kind === "audioinput");
+    const activeVideoLabel = stream.getVideoTracks()[0]?.label || "";
+    const activeAudioLabel = stream.getAudioTracks()[0]?.label || "";
+
+    const camSel = document.getElementById(`inline-cam-sel-${key}`);
+    const micSel = document.getElementById(`inline-mic-sel-${key}`);
+    if (camSel) camSel.innerHTML = cameras.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeVideoLabel ? "selected" : ""}>${d.label || "Camera " + (cameras.indexOf(d)+1)}</option>`
+    ).join("");
+    if (micSel) micSel.innerHTML = mics.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeAudioLabel ? "selected" : ""}>${d.label || "Mic " + (mics.indexOf(d)+1)}</option>`
+    ).join("");
   } catch (e) {
     alert("Could not access camera/mic: " + e.message);
   }
+}
+
+async function inlineSwitchCamDevice(key) {
+  if (!_inlineCamPreviewStream || _inlineCamPreviewKey !== key) return;
+  const camSel = document.getElementById(`inline-cam-sel-${key}`);
+  const micSel = document.getElementById(`inline-mic-sel-${key}`);
+  _inlineCamPreviewStream.getTracks().forEach(t => t.stop());
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: camSel?.value ? { deviceId: { exact: camSel.value } } : true,
+      audio: micSel?.value ? { deviceId: { exact: micSel.value } } : true,
+    });
+    _inlineCamPreviewStream = stream;
+    const preview = document.getElementById(`inline-cam-preview-${key}`);
+    if (preview) preview.srcObject = stream;
+  } catch (e) { alert("Could not switch device: " + e.message); }
+}
+
+function inlineStartCamRecording(key) {
+  if (!_inlineCamPreviewStream) return;
+  // Hide device/action UI, show recording bar
+  const devs    = document.getElementById(`inline-cam-devices-${key}`);
+  const actions = document.getElementById(`inline-cam-actions-${key}`);
+  const recBar  = document.getElementById(`inline-cam-recbar-${key}`);
+  if (devs)    devs.style.display    = "none";
+  if (actions) actions.style.display = "none";
+  if (recBar)  recBar.style.display  = "";
+
+  const stream = _inlineCamPreviewStream;
+  _inlineCamPreviewStream = null;
+  _inlineCamStream = stream;
+  _inlineCamKey    = key;
+
+  const chunks = [];
+  const mr     = new MediaRecorder(stream);
+  _inlineCamRec = mr;
+  mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mr.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    const mime = mr.mimeType || "video/webm";
+    const blob = new Blob(chunks, { type: mime });
+    const name = `video-${Date.now()}.webm`;
+    const file = new File([blob], name, { type: mime });
+    const ck   = _inlineCamKey;
+    // Reset panel
+    const panel   = document.getElementById(`inline-cam-panel-${ck}`);
+    const preview = document.getElementById(`inline-cam-preview-${ck}`);
+    const devEl   = document.getElementById(`inline-cam-devices-${ck}`);
+    const actEl   = document.getElementById(`inline-cam-actions-${ck}`);
+    const barEl   = document.getElementById(`inline-cam-recbar-${ck}`);
+    const btnEl   = document.getElementById(`inline-camrec-btn-${ck}`);
+    if (preview) preview.srcObject = null;
+    if (panel)   panel.style.display   = "none";
+    if (devEl)   devEl.style.display   = "";
+    if (actEl)   actEl.style.display   = "";
+    if (barEl)   barEl.style.display   = "none";
+    if (btnEl)   btnEl.classList.remove("recording");
+    clearInterval(_inlineRecTimer[ck]);
+    _inlineCamRec = null; _inlineCamStream = null; _inlineCamKey = null; _inlineCamPreviewKey = null;
+    // Queue Mux upload
+    if (!_inlineMedia[ck]) _inlineMedia[ck] = [];
+    const pendingIdx = _inlineMedia[ck].length;
+    _inlineMedia[ck].push({ type: "mux", name, _uploading: true, _localUrl: URL.createObjectURL(blob) });
+    _renderInlineMediaPreview(ck);
+    _uploadVideoToMux(file, item => {
+      _inlineMedia[ck][pendingIdx] = item;
+      _renderInlineMediaPreview(ck);
+    });
+  };
+  mr.start();
+
+  _inlineRecStart[key] = Date.now();
+  _inlineRecTimer[key] = setInterval(() => {
+    const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
+    const m = Math.floor(secs / 60), s = secs % 60;
+    const el = document.getElementById(`inline-cam-timer-${key}`);
+    if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
+  }, 1000);
+}
+
+function inlineStopCamRecording(key) {
+  if (_inlineCamRec && _inlineCamKey === key && _inlineCamRec.state !== "inactive") {
+    _inlineCamRec.stop();
+  }
+}
+
+function inlineCancelCamPreview(key) {
+  if (_inlineCamPreviewStream) {
+    _inlineCamPreviewStream.getTracks().forEach(t => t.stop());
+    _inlineCamPreviewStream = null;
+  }
+  _inlineCamPreviewKey = null;
+  const preview = document.getElementById(`inline-cam-preview-${key}`);
+  const panel   = document.getElementById(`inline-cam-panel-${key}`);
+  const btn     = document.getElementById(`inline-camrec-btn-${key}`);
+  if (preview) preview.srcObject = null;
+  if (panel)   panel.style.display = "none";
+  if (btn)     btn.classList.remove("recording");
 }
 
 function toggleInlinePoll(key) {
@@ -3321,6 +3421,26 @@ function _inlineToolbarHtml(key) {
       <span id="inline-rec-label-${key}">Recording…</span>
       <span id="inline-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
       <button class="recording-stop-btn" id="inline-rec-stop-${key}" onclick="stopInlineVoice('${key}')">■ Stop</button>
+    </div>
+    <div id="inline-cam-panel-${key}" style="display:none" class="video-rec-panel">
+      <video id="inline-cam-preview-${key}" autoplay muted playsinline class="video-rec-preview"></video>
+      <div class="video-rec-devices" id="inline-cam-devices-${key}">
+        <select id="inline-cam-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')">
+          <option>Loading cameras…</option>
+        </select>
+        <select id="inline-mic-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')">
+          <option>Loading mics…</option>
+        </select>
+      </div>
+      <div class="video-rec-actions" id="inline-cam-actions-${key}">
+        <button class="video-rec-start-btn" onclick="inlineStartCamRecording('${key}')">⏺ Start Recording</button>
+        <button class="video-rec-cancel-btn" onclick="inlineCancelCamPreview('${key}')">Cancel</button>
+      </div>
+      <div class="video-rec-recording-bar" id="inline-cam-recbar-${key}" style="display:none">
+        <span class="recording-dot"></span>
+        <span id="inline-cam-timer-${key}" style="font-size:.88rem;font-weight:600;color:var(--text);flex:1">0:00</span>
+        <button class="video-rec-stop-btn" onclick="inlineStopCamRecording('${key}')">■ Stop & Upload</button>
+      </div>
     </div>
     <div id="inline-vid-panel-${key}" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
       <div style="display:flex;gap:4px;margin-bottom:8px">

@@ -219,6 +219,42 @@
       background:transparent; overflow:hidden; border-radius:8px; margin-top:8px;
     }
     .comment-mux-wrap mux-player { position:absolute; top:0; left:0; width:100%; height:100%; display:block; }
+    /* ── Inline camera recording panel (matches post composer) ──────────────── */
+    .ev-cam-panel {
+      background:#0d0d0d; border:1.5px solid var(--border);
+      border-radius:12px; overflow:hidden; margin-top:8px;
+    }
+    .ev-cam-preview { display:block; width:100%; height:auto; background:#000; }
+    .ev-cam-devices { display:flex; gap:8px; padding:10px 12px 0; }
+    .ev-cam-select {
+      flex:1; background:rgba(0,0,0,.05); border:1.5px solid var(--border);
+      border-radius:8px; color:var(--text); font-size:.78rem; padding:6px 8px;
+      font-family:inherit; outline:none;
+    }
+    .ev-cam-actions { display:flex; gap:8px; padding:10px 12px 12px; }
+    .ev-cam-start-btn {
+      flex:1; background:#ef4444; color:#fff; border:none;
+      border-radius:8px; font-weight:700; font-size:.87rem;
+      padding:10px; cursor:pointer; transition:opacity .15s;
+    }
+    .ev-cam-start-btn:hover { opacity:.85; }
+    .ev-cam-cancel-btn {
+      background:rgba(0,0,0,.05); border:1.5px solid var(--border);
+      border-radius:8px; color:var(--text-muted); cursor:pointer;
+      font-size:.85rem; padding:10px 16px; font-family:inherit;
+    }
+    .ev-cam-recbar {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 14px 12px; background:rgba(239,68,68,.08);
+    }
+    .ev-cam-recbar .ev-recording-dot {
+      width:9px; height:9px; border-radius:50%; background:#ef4444;
+      animation:blink 1s ease-in-out infinite; flex-shrink:0;
+    }
+    .ev-cam-stop-btn {
+      background:#ef4444; color:#fff; border:none; border-radius:8px;
+      font-weight:700; font-size:.82rem; padding:8px 14px; cursor:pointer;
+    }
 
     /* ── Two-column detail layout ─────────────────────────────────────────────── */
     .event-detail-layout {
@@ -1648,10 +1684,12 @@ const _evMedia       = {}; // key -> [{type, url, name, blob?, duration?}]
 const _evPollOpen    = {}; // key -> bool
 const _evVoiceRec    = {}; // key -> MediaRecorder | null
 const _evRecTimer    = {}; // key -> intervalId | null
-let   _evCamRec      = null;
-let   _evCamKey      = null;
-let   _evCamStream   = null;
-const _evRecStart    = {}; // key -> timestamp | null
+let   _evCamRec           = null;  // active MediaRecorder
+let   _evCamKey           = null;  // key that owns the active recording
+let   _evCamStream        = null;  // stream used by active recorder
+let   _evCamPreviewStream = null;  // stream used by preview (before recording starts)
+let   _evCamPreviewKey    = null;  // key that owns the open preview panel
+const _evRecStart         = {};    // key -> timestamp | null
 
 function _evKey(key) {
   if (!_evMedia[key]) _evMedia[key] = [];
@@ -1691,6 +1729,26 @@ function _evToolbarHtml(key) {
       <span id="ev-rec-label-${key}">Recording…</span>
       <span id="ev-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
       <button class="ev-recording-stop" id="ev-rec-stop-${key}" onclick="evStopVoice('${key}')">■ Stop</button>
+    </div>
+    <div id="ev-cam-panel-${key}" style="display:none" class="ev-cam-panel">
+      <video id="ev-cam-preview-${key}" autoplay muted playsinline class="ev-cam-preview"></video>
+      <div class="ev-cam-devices" id="ev-cam-devices-${key}">
+        <select id="ev-cam-sel-${key}" class="ev-cam-select" onchange="evSwitchCamDevice('${key}')">
+          <option>Loading cameras…</option>
+        </select>
+        <select id="ev-mic-sel-${key}" class="ev-cam-select" onchange="evSwitchCamDevice('${key}')">
+          <option>Loading mics…</option>
+        </select>
+      </div>
+      <div class="ev-cam-actions" id="ev-cam-actions-${key}">
+        <button class="ev-cam-start-btn" onclick="evStartCamRecording('${key}')">⏺ Start Recording</button>
+        <button class="ev-cam-cancel-btn" onclick="evCancelCamPreview('${key}')">Cancel</button>
+      </div>
+      <div class="ev-cam-recbar" id="ev-cam-recbar-${key}" style="display:none">
+        <span class="ev-recording-dot"></span>
+        <span id="ev-cam-timer-${key}" style="font-size:.88rem;font-weight:600;color:var(--text);flex:1">0:00</span>
+        <button class="ev-cam-stop-btn" onclick="evStopCamRecording('${key}')">■ Stop & Upload</button>
+      </div>
     </div>
     <div id="ev-vid-panel-${key}" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
       <div style="display:flex;gap:4px;margin-bottom:8px">
@@ -1893,63 +1951,147 @@ function evAddVideoUrl(key) {
 }
 
 async function evToggleCamRec(key) {
+  // If preview is open for this key, cancel it
+  if (_evCamPreviewKey === key) { evCancelCamPreview(key); return; }
+  // If actively recording for this key, stop
   if (_evCamKey === key && _evCamRec && _evCamRec.state !== "inactive") {
-    _evCamRec.stop();
-    return;
+    evStopCamRecording(key); return;
   }
+  // Block concurrent recordings/previews
   if (_evCamRec && _evCamRec.state !== "inactive") {
-    alert("Stop the current camera recording first.");
-    return;
+    alert("Stop the current camera recording first."); return;
   }
+  if (_evCamPreviewStream) { evCancelCamPreview(_evCamPreviewKey); }
+
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-    _evCamStream = stream;
-    _evCamKey    = key;
-    const chunks = [];
-    const mr = new MediaRecorder(stream);
-    _evCamRec = mr;
-    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    mr.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-      const mime = mr.mimeType || "video/webm";
-      const blob = new Blob(chunks, { type: mime });
-      const name = `video-${Date.now()}.webm`;
-      const file = new File([blob], name, { type: mime });
-      const ck   = _evCamKey;
-      const btn    = document.getElementById(`ev-camrec-btn-${ck}`);
-      const recInd = document.getElementById(`ev-recording-${ck}`);
-      if (btn) btn.classList.remove("ev-toolbar-btn--active");
-      if (recInd) recInd.style.display = "none";
-      clearInterval(_evRecTimer[ck]);
-      _evCamRec = null; _evCamStream = null; _evCamKey = null;
-      _evKey(ck);
-      const pendingIdx = _evMedia[ck].length;
-      _evMedia[ck].push({ type: "mux", name, _uploading: true, _localUrl: URL.createObjectURL(blob) });
-      _renderEvMediaPreview(ck);
-      _evUploadToMux(file, item => {
-        _evMedia[ck][pendingIdx] = item;
-        _renderEvMediaPreview(ck);
-      });
-    };
-    mr.start();
-    const btn    = document.getElementById(`ev-camrec-btn-${key}`);
-    const recInd = document.getElementById(`ev-recording-${key}`);
-    const label  = document.getElementById(`ev-rec-label-${key}`);
-    const stopBtn = document.getElementById(`ev-rec-stop-${key}`);
-    if (btn) btn.classList.add("ev-toolbar-btn--active");
-    if (label) label.textContent = "Recording video…";
-    if (stopBtn) stopBtn.onclick = () => evToggleCamRec(key);
-    if (recInd) recInd.style.display = "";
-    _evRecStart[key] = Date.now();
-    _evRecTimer[key] = setInterval(() => {
-      const secs = Math.round((Date.now() - _evRecStart[key]) / 1000);
-      const m = Math.floor(secs / 60), s = secs % 60;
-      const el = document.getElementById(`ev-rec-time-${key}`);
-      if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
-    }, 1000);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { aspectRatio: 16/9 } });
+    _evCamPreviewStream = stream;
+    _evCamPreviewKey    = key;
+
+    const preview = document.getElementById(`ev-cam-preview-${key}`);
+    const panel   = document.getElementById(`ev-cam-panel-${key}`);
+    const btn     = document.getElementById(`ev-camrec-btn-${key}`);
+    if (preview) preview.srcObject = stream;
+    if (panel)   panel.style.display = "";
+    if (btn)     btn.classList.add("ev-toolbar-btn--active");
+
+    // Enumerate devices now that we have permission
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+    const mics    = devices.filter(d => d.kind === "audioinput");
+    const activeVideoLabel = stream.getVideoTracks()[0]?.label || "";
+    const activeAudioLabel = stream.getAudioTracks()[0]?.label || "";
+
+    const camSel = document.getElementById(`ev-cam-sel-${key}`);
+    const micSel = document.getElementById(`ev-mic-sel-${key}`);
+    if (camSel) camSel.innerHTML = cameras.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeVideoLabel ? "selected" : ""}>${d.label || "Camera " + (cameras.indexOf(d)+1)}</option>`
+    ).join("");
+    if (micSel) micSel.innerHTML = mics.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeAudioLabel ? "selected" : ""}>${d.label || "Mic " + (mics.indexOf(d)+1)}</option>`
+    ).join("");
   } catch (e) {
     alert("Could not access camera/mic: " + e.message);
   }
+}
+
+async function evSwitchCamDevice(key) {
+  if (!_evCamPreviewStream || _evCamPreviewKey !== key) return;
+  const camSel = document.getElementById(`ev-cam-sel-${key}`);
+  const micSel = document.getElementById(`ev-mic-sel-${key}`);
+  _evCamPreviewStream.getTracks().forEach(t => t.stop());
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: camSel?.value ? { deviceId: { exact: camSel.value } } : true,
+      audio: micSel?.value ? { deviceId: { exact: micSel.value } } : true,
+    });
+    _evCamPreviewStream = stream;
+    const preview = document.getElementById(`ev-cam-preview-${key}`);
+    if (preview) preview.srcObject = stream;
+  } catch (e) { alert("Could not switch device: " + e.message); }
+}
+
+function evStartCamRecording(key) {
+  if (!_evCamPreviewStream) return;
+  // Hide device/action UI, show recording bar
+  const devs    = document.getElementById(`ev-cam-devices-${key}`);
+  const actions = document.getElementById(`ev-cam-actions-${key}`);
+  const recBar  = document.getElementById(`ev-cam-recbar-${key}`);
+  if (devs)    devs.style.display    = "none";
+  if (actions) actions.style.display = "none";
+  if (recBar)  recBar.style.display  = "";
+
+  const stream = _evCamPreviewStream;
+  _evCamPreviewStream = null; // ownership moves to recorder
+  _evCamStream = stream;
+  _evCamKey    = key;
+
+  const chunks = [];
+  const mr     = new MediaRecorder(stream);
+  _evCamRec    = mr;
+  mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mr.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    const mime = mr.mimeType || "video/webm";
+    const blob = new Blob(chunks, { type: mime });
+    const name = `video-${Date.now()}.webm`;
+    const file = new File([blob], name, { type: mime });
+    const ck   = _evCamKey;
+    // Reset panel
+    const panel   = document.getElementById(`ev-cam-panel-${ck}`);
+    const preview = document.getElementById(`ev-cam-preview-${ck}`);
+    const devEl   = document.getElementById(`ev-cam-devices-${ck}`);
+    const actEl   = document.getElementById(`ev-cam-actions-${ck}`);
+    const barEl   = document.getElementById(`ev-cam-recbar-${ck}`);
+    const btnEl   = document.getElementById(`ev-camrec-btn-${ck}`);
+    if (preview) preview.srcObject = null;
+    if (panel)   panel.style.display   = "none";
+    if (devEl)   devEl.style.display   = "";
+    if (actEl)   actEl.style.display   = "";
+    if (barEl)   barEl.style.display   = "none";
+    if (btnEl)   btnEl.classList.remove("ev-toolbar-btn--active");
+    clearInterval(_evRecTimer[ck]);
+    _evCamRec = null; _evCamStream = null; _evCamKey = null; _evCamPreviewKey = null;
+    // Queue Mux upload
+    _evKey(ck);
+    const pendingIdx = _evMedia[ck].length;
+    _evMedia[ck].push({ type: "mux", name, _uploading: true, _localUrl: URL.createObjectURL(blob) });
+    _renderEvMediaPreview(ck);
+    _evUploadToMux(file, item => {
+      _evMedia[ck][pendingIdx] = item;
+      _renderEvMediaPreview(ck);
+    });
+  };
+  mr.start();
+
+  // Start timer
+  _evRecStart[key] = Date.now();
+  _evRecTimer[key] = setInterval(() => {
+    const secs = Math.round((Date.now() - _evRecStart[key]) / 1000);
+    const m = Math.floor(secs / 60), s = secs % 60;
+    const el = document.getElementById(`ev-cam-timer-${key}`);
+    if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
+  }, 1000);
+}
+
+function evStopCamRecording(key) {
+  if (_evCamRec && _evCamKey === key && _evCamRec.state !== "inactive") {
+    _evCamRec.stop();
+  }
+}
+
+function evCancelCamPreview(key) {
+  if (_evCamPreviewStream) {
+    _evCamPreviewStream.getTracks().forEach(t => t.stop());
+    _evCamPreviewStream = null;
+  }
+  _evCamPreviewKey = null;
+  const preview = document.getElementById(`ev-cam-preview-${key}`);
+  const panel   = document.getElementById(`ev-cam-panel-${key}`);
+  const btn     = document.getElementById(`ev-camrec-btn-${key}`);
+  if (preview) preview.srcObject = null;
+  if (panel)   panel.style.display = "none";
+  if (btn)     btn.classList.remove("ev-toolbar-btn--active");
 }
 
 // ── Mux upload for events discussion ──────────────────────────────────────────
