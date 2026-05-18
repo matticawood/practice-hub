@@ -1616,6 +1616,9 @@ const _evMedia       = {}; // key -> [{type, url, name, blob?, duration?}]
 const _evPollOpen    = {}; // key -> bool
 const _evVoiceRec    = {}; // key -> MediaRecorder | null
 const _evRecTimer    = {}; // key -> intervalId | null
+let   _evCamRec      = null;
+let   _evCamKey      = null;
+let   _evCamStream   = null;
 const _evRecStart    = {}; // key -> timestamp | null
 
 function _evKey(key) {
@@ -1625,6 +1628,8 @@ function _evKey(key) {
 
 // Build toolbar HTML for a given key
 function _evToolbarHtml(key) {
+  const tabActive = "background:rgba(255,255,255,.08);border-radius:4px;font-weight:600";
+  const tabBase   = "background:none;border:none;font-family:inherit;font-size:.78rem;cursor:pointer;padding:4px 8px;border-radius:4px;color:var(--text-muted)";
   return `
     <div class="comment-toolbar" id="ev-toolbar-${key}">
       <button type="button" class="ev-toolbar-btn" title="Photo" onclick="document.getElementById('ev-fi-img-${key}').click()">
@@ -1632,6 +1637,12 @@ function _evToolbarHtml(key) {
       </button>
       <button type="button" class="ev-toolbar-btn" title="File" onclick="document.getElementById('ev-fi-file-${key}').click()">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <button type="button" class="ev-toolbar-btn" title="Video / embed" id="ev-vid-btn-${key}" onclick="evToggleVideoPanel('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+      </button>
+      <button type="button" class="ev-toolbar-btn" title="Record video" id="ev-camrec-btn-${key}" onclick="evToggleCamRec('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M20.9 12c0 4.9-4 8.9-8.9 8.9S3.1 16.9 3.1 12 7.1 3.1 12 3.1 20.9 7.1 20.9 12z"/></svg>
       </button>
       <button type="button" class="ev-toolbar-btn" title="Voice recording" id="ev-voice-btn-${key}" onclick="evToggleVoice('${key}')">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -1641,12 +1652,30 @@ function _evToolbarHtml(key) {
       </button>
       <input type="file" id="ev-fi-img-${key}" accept="image/*" multiple style="display:none" onchange="evHandleImage(this,'${key}')">
       <input type="file" id="ev-fi-file-${key}" style="display:none" onchange="evHandleFile(this,'${key}')">
+      <input type="file" id="ev-fi-vid-${key}" accept="video/*" style="display:none" onchange="evHandleVideo(this,'${key}')">
     </div>
     <div id="ev-recording-${key}" style="display:none" class="ev-recording-indicator">
       <span class="ev-recording-dot"></span>
-      <span>Recording…</span>
+      <span id="ev-rec-label-${key}">Recording…</span>
       <span id="ev-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
-      <button class="ev-recording-stop" onclick="evStopVoice('${key}')">■ Stop</button>
+      <button class="ev-recording-stop" id="ev-rec-stop-${key}" onclick="evStopVoice('${key}')">■ Stop</button>
+    </div>
+    <div id="ev-vid-panel-${key}" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-bottom:8px">
+        <button id="ev-vt-up-btn-${key}" style="${tabBase};${tabActive}" onclick="evSwitchVideoTab('upload','${key}')">Upload</button>
+        <button id="ev-vt-em-btn-${key}" style="${tabBase}" onclick="evSwitchVideoTab('embed','${key}')">Embed URL</button>
+      </div>
+      <div id="ev-vt-up-${key}">
+        <div onclick="document.getElementById('ev-fi-vid-${key}').click()" style="border:2px dashed var(--border);border-radius:6px;padding:14px;text-align:center;cursor:pointer;font-size:.84rem;color:var(--text-muted)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block;margin:0 auto 6px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          Choose video file
+        </div>
+      </div>
+      <div id="ev-vt-em-${key}" style="display:none">
+        <input type="text" id="ev-vurl-${key}" placeholder="YouTube or Vimeo URL…"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:.88rem;font-family:inherit;margin-bottom:6px">
+        <button onclick="evAddVideoUrl('${key}')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:.84rem;font-weight:600;cursor:pointer;font-family:inherit">Add</button>
+      </div>
     </div>
     <div id="ev-poll-${key}" style="display:none" class="ev-poll-builder">
       <div class="ev-poll-title">Poll</div>
@@ -1681,10 +1710,18 @@ function _renderEvMediaPreview(key) {
   }
   others.forEach(m => {
     const idx = media.indexOf(m);
-    let icon = "📎", label = esc(m.name);
-    if (m.type === "audio") { icon = "🎙️"; label = `Voice message${m.duration ? " · " + m.duration + "s" : ""}`; }
-    if (m.type === "video") { icon = "🎬"; }
-    html += `<span class="ev-media-chip">${icon} ${label}<button class="ev-media-chip-remove" onclick="evRemoveMedia('${key}',${idx})">×</button></span>`;
+    if (m.type === "video" || m.type === "video-url") {
+      html += `<div style="margin-top:6px;position:relative;display:inline-block">
+        <video src="${esc(m.url)}" style="max-width:160px;max-height:90px;border-radius:6px;display:block;border:1.5px solid var(--border)"></video>
+        <button onclick="evRemoveMedia('${key}',${idx})" style="position:absolute;top:3px;right:3px;background:rgba(0,0,0,.55);border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;color:#fff;font-size:.8rem;display:flex;align-items:center;justify-content:center">×</button>
+      </div>`;
+    } else if (m.type === "youtube" || m.type === "vimeo") {
+      html += `<span class="ev-media-chip">▶ ${esc(m.name)}<button class="ev-media-chip-remove" onclick="evRemoveMedia('${key}',${idx})">×</button></span>`;
+    } else {
+      let icon = "📎", label = esc(m.name);
+      if (m.type === "audio") { icon = "🎙️"; label = `Voice message${m.duration ? " · " + m.duration + "s" : ""}`; }
+      html += `<span class="ev-media-chip">${icon} ${label}<button class="ev-media-chip-remove" onclick="evRemoveMedia('${key}',${idx})">×</button></span>`;
+    }
   });
   area.innerHTML = html;
 }
@@ -1761,6 +1798,101 @@ function evStopVoice(key) {
   if (_evVoiceRec[key] && _evVoiceRec[key].state !== "inactive") _evVoiceRec[key].stop();
 }
 
+// ── Inline video (events) ──────────────────────────────────────────────────────
+function evToggleVideoPanel(key) {
+  const panel = document.getElementById(`ev-vid-panel-${key}`);
+  const btn   = document.getElementById(`ev-vid-btn-${key}`);
+  if (!panel) return;
+  const open = panel.style.display === "none";
+  panel.style.display = open ? "" : "none";
+  btn?.classList.toggle("ev-toolbar-btn--active", open);
+  if (open) evSwitchVideoTab("upload", key);
+}
+
+function evSwitchVideoTab(tab, key) {
+  const upPanel = document.getElementById(`ev-vt-up-${key}`);
+  const emPanel = document.getElementById(`ev-vt-em-${key}`);
+  const tabActive = "background:rgba(255,255,255,.08);border-radius:4px;font-weight:600";
+  if (upPanel) upPanel.style.display = tab === "upload" ? "" : "none";
+  if (emPanel) emPanel.style.display = tab === "embed"  ? "" : "none";
+}
+
+function evHandleVideo(input, key) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  _evKey(key);
+  _evMedia[key].push({ type: "video", blob: file, name: file.name, url: URL.createObjectURL(file) });
+  evToggleVideoPanel(key);
+  _renderEvMediaPreview(key);
+}
+
+function evAddVideoUrl(key) {
+  const input = document.getElementById(`ev-vurl-${key}`);
+  const val   = input?.value.trim();
+  if (!val) return;
+  _evKey(key);
+  const ytMatch = val.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([^&\s]+)/);
+  const viMatch = val.match(/vimeo\.com\/(\d+)/);
+  if (ytMatch)      _evMedia[key].push({ type: "youtube",   ytId: ytMatch[1],    url: val, name: "YouTube video" });
+  else if (viMatch) _evMedia[key].push({ type: "vimeo",     vimeoId: viMatch[1], url: val, name: "Vimeo video" });
+  else              _evMedia[key].push({ type: "video-url", url: val, name: "Video" });
+  if (input) input.value = "";
+  evToggleVideoPanel(key);
+  _renderEvMediaPreview(key);
+}
+
+async function evToggleCamRec(key) {
+  if (_evCamKey === key && _evCamRec && _evCamRec.state !== "inactive") {
+    _evCamRec.stop();
+    return;
+  }
+  if (_evCamRec && _evCamRec.state !== "inactive") {
+    alert("Stop the current camera recording first.");
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    _evCamStream = stream;
+    _evCamKey    = key;
+    const chunks = [];
+    const mr = new MediaRecorder(stream);
+    _evCamRec = mr;
+    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: mr.mimeType || "video/webm" });
+      const name = `video-${Date.now()}.webm`;
+      _evKey(_evCamKey);
+      _evMedia[_evCamKey].push({ type: "video", blob, name, url: URL.createObjectURL(blob) });
+      _renderEvMediaPreview(_evCamKey);
+      const btn    = document.getElementById(`ev-camrec-btn-${_evCamKey}`);
+      const recInd = document.getElementById(`ev-recording-${_evCamKey}`);
+      if (btn) btn.classList.remove("ev-toolbar-btn--active");
+      if (recInd) recInd.style.display = "none";
+      clearInterval(_evRecTimer[_evCamKey]);
+      _evCamRec = null; _evCamStream = null; _evCamKey = null;
+    };
+    mr.start();
+    const btn    = document.getElementById(`ev-camrec-btn-${key}`);
+    const recInd = document.getElementById(`ev-recording-${key}`);
+    const label  = document.getElementById(`ev-rec-label-${key}`);
+    const stopBtn = document.getElementById(`ev-rec-stop-${key}`);
+    if (btn) btn.classList.add("ev-toolbar-btn--active");
+    if (label) label.textContent = "Recording video…";
+    if (stopBtn) stopBtn.onclick = () => evToggleCamRec(key);
+    if (recInd) recInd.style.display = "";
+    _evRecTimer[key] = setInterval(() => {
+      const secs = Math.round((Date.now() - (_evRecStart?.[key] || Date.now())) / 1000);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      const el = document.getElementById(`ev-rec-time-${key}`);
+      if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
+    }, 1000);
+  } catch (e) {
+    alert("Could not access camera/mic: " + e.message);
+  }
+}
+
 function evTogglePoll(key) {
   const panel = document.getElementById(`ev-poll-${key}`);
   if (!panel) return;
@@ -1831,6 +1963,10 @@ async function _evUploadMedia(key) {
       if (error) throw new Error(error.message);
       const { data: { publicUrl } } = db.storage.from("comment-attachments").getPublicUrl(safe);
       result.push({ type: m.type, url: publicUrl, name: m.name, size: m.blob.size, duration: m.duration });
+    } else if (m.type === "youtube") {
+      result.push({ type: "youtube", ytId: m.ytId, url: m.url, name: m.name });
+    } else if (m.type === "vimeo") {
+      result.push({ type: "vimeo", vimeoId: m.vimeoId, url: m.url, name: m.name });
     } else {
       result.push({ type: m.type, url: m.url, name: m.name });
     }
@@ -1861,8 +1997,12 @@ function _renderAttHtml(c) {
     others.forEach(m => {
       if (m.type === "audio") {
         html += `<div class="comment-att"><audio src="${esc(m.url)}" controls></audio></div>`;
-      } else if (m.type === "video") {
+      } else if (m.type === "video" || m.type === "video-url") {
         html += `<div class="comment-att"><video src="${esc(m.url)}" controls preload="metadata"></video></div>`;
+      } else if (m.type === "youtube") {
+        html += `<div class="comment-att" style="position:relative;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden"><iframe src="https://www.youtube.com/embed/${esc(m.ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
+      } else if (m.type === "vimeo") {
+        html += `<div class="comment-att" style="position:relative;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden"><iframe src="https://player.vimeo.com/video/${esc(m.vimeoId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
       } else {
         const size = m.size ? ` · ${_fmtBytes(m.size)}` : "";
         html += `<div class="comment-att"><a class="comment-att-file" href="${esc(m.url)}" target="_blank" download="${esc(m.name)}">

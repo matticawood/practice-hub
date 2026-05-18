@@ -1934,6 +1934,9 @@ const _inlinePollOpen    = {}; // key -> bool
 const _inlineVoiceRec    = {}; // key -> MediaRecorder | null
 const _inlineRecTimer    = {}; // key -> intervalId | null
 const _inlineRecStart    = {}; // key -> timestamp | null
+let   _inlineCamRec      = null; // shared camera recorder (one at a time)
+let   _inlineCamKey      = null; // which composer owns the camera recording
+let   _inlineCamStream   = null;
 
 // Activity feed state
 let _feedRows = [], _feedPage = 1;
@@ -3024,6 +3027,112 @@ function stopInlineVoice(key) {
   }
 }
 
+// ── Inline video ───────────────────────────────────────────────────────────────
+function inlineToggleVideoPanel(key) {
+  const panel  = document.getElementById(`inline-vid-panel-${key}`);
+  const btn    = document.getElementById(`inline-vid-btn-${key}`);
+  if (!panel) return;
+  const open = panel.style.display === "none";
+  panel.style.display = open ? "" : "none";
+  btn?.classList.toggle("recording", open);
+  if (open) inlineSwitchVideoTab("upload", key);
+}
+
+function inlineSwitchVideoTab(tab, key) {
+  const upPanel = document.getElementById(`inline-vt-up-${key}`);
+  const emPanel = document.getElementById(`inline-vt-em-${key}`);
+  const upBtn   = document.getElementById(`inline-vt-up-btn-${key}`);
+  const emBtn   = document.getElementById(`inline-vt-em-btn-${key}`);
+  const tabActive = "background:rgba(0,0,0,.07);border-radius:4px;font-weight:600";
+  if (upPanel) upPanel.style.display = tab === "upload" ? "" : "none";
+  if (emPanel) emPanel.style.display = tab === "embed"  ? "" : "none";
+  if (upBtn) upBtn.style.cssText = upBtn.style.cssText.replace(/font-weight:\s*600/g, "") + (tab === "upload" ? tabActive : "");
+  if (emBtn) emBtn.style.cssText = emBtn.style.cssText.replace(/font-weight:\s*600/g, "") + (tab === "embed"  ? tabActive : "");
+}
+
+function inlineHandleVideo(input, key) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  _inlineMedia[key].push({ type: "video", blob: file, name: file.name, url: URL.createObjectURL(file) });
+  inlineToggleVideoPanel(key);
+  _renderInlineMediaPreview(key);
+}
+
+function inlineAddVideoUrl(key) {
+  const input = document.getElementById(`inline-vurl-${key}`);
+  const val   = input?.value.trim();
+  if (!val) return;
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  const ytId = parseYouTubeId(val);
+  const viId = parseVimeoId(val);
+  if (ytId)      _inlineMedia[key].push({ type: "youtube",   ytId,     url: val, name: "YouTube video" });
+  else if (viId) _inlineMedia[key].push({ type: "vimeo",     vimeoId: viId, url: val, name: "Vimeo video" });
+  else           _inlineMedia[key].push({ type: "video-url", url: val, name: "Video" });
+  if (input) input.value = "";
+  inlineToggleVideoPanel(key);
+  _renderInlineMediaPreview(key);
+}
+
+async function inlineToggleCamRec(key) {
+  // Stop if already recording for this key
+  if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") {
+    _inlineCamRec.stop();
+    return;
+  }
+  // Warn if a different recording is active
+  if (_inlineCamRec && _inlineCamRec.state !== "inactive") {
+    alert("Stop the current camera recording first.");
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    _inlineCamStream = stream;
+    _inlineCamKey    = key;
+    const chunks = [];
+    const mr = new MediaRecorder(stream);
+    _inlineCamRec = mr;
+    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const mime = mr.mimeType || "video/webm";
+      const blob = new Blob(chunks, { type: mime });
+      const name = `video-${Date.now()}.webm`;
+      if (!_inlineMedia[_inlineCamKey]) _inlineMedia[_inlineCamKey] = [];
+      _inlineMedia[_inlineCamKey].push({ type: "video", blob, name, url: URL.createObjectURL(blob) });
+      _renderInlineMediaPreview(_inlineCamKey);
+      // Reset recording UI
+      const btn     = document.getElementById(`inline-camrec-btn-${_inlineCamKey}`);
+      const recInd  = document.getElementById(`inline-recording-${_inlineCamKey}`);
+      const stopBtn = document.getElementById(`inline-rec-stop-${_inlineCamKey}`);
+      if (btn) btn.classList.remove("recording");
+      if (recInd) recInd.style.display = "none";
+      clearInterval(_inlineRecTimer[_inlineCamKey]);
+      _inlineCamRec = null; _inlineCamStream = null; _inlineCamKey = null;
+    };
+    mr.start();
+    // Update UI to show camera recording in progress
+    const btn    = document.getElementById(`inline-camrec-btn-${key}`);
+    const recInd = document.getElementById(`inline-recording-${key}`);
+    const label  = document.getElementById(`inline-rec-label-${key}`);
+    const stopBtn = document.getElementById(`inline-rec-stop-${key}`);
+    if (btn) btn.classList.add("recording");
+    if (label) label.textContent = "Recording video…";
+    if (stopBtn) stopBtn.onclick = () => inlineToggleCamRec(key);
+    if (recInd) recInd.style.display = "";
+    _inlineRecStart[key] = Date.now();
+    _inlineRecTimer[key] = setInterval(() => {
+      const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      const el = document.getElementById(`inline-rec-time-${key}`);
+      if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
+    }, 1000);
+  } catch (e) {
+    alert("Could not access camera/mic: " + e.message);
+  }
+}
+
 function toggleInlinePoll(key) {
   const panel = document.getElementById(`inline-poll-${key}`);
   if (!panel) return;
@@ -3068,6 +3177,10 @@ function _clearInlineState(key) {
     _inlineVoiceRec[key].stop();
   }
   _inlineVoiceRec[key] = null;
+  if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") {
+    _inlineCamRec.stop();
+  }
+  if (_inlineCamKey === key) { _inlineCamRec = null; _inlineCamKey = null; }
   clearInterval(_inlineRecTimer[key]);
   _inlineRecTimer[key] = null;
   _inlineRecStart[key] = null;
@@ -3090,6 +3203,8 @@ function _clearInlineState(key) {
 
 // Build inline toolbar HTML string for a given key (used in reply composer template)
 function _inlineToolbarHtml(key) {
+  const tabActive = "background:rgba(0,0,0,.07);border-radius:4px;font-weight:600";
+  const tabBase   = "background:none;border:none;font-family:inherit;font-size:.78rem;cursor:pointer;padding:4px 8px;border-radius:4px;color:var(--text-muted)";
   return `
     <div class="composer-toolbar" id="inline-main-toolbar-${key}" style="flex-wrap:wrap;margin-top:4px">
       <button class="toolbar-btn" title="Image" onclick="document.getElementById('inline-fi-img-${key}').click()">
@@ -3097,6 +3212,12 @@ function _inlineToolbarHtml(key) {
       </button>
       <button class="toolbar-btn" title="File" onclick="document.getElementById('inline-fi-file-${key}').click()">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Video / embed" id="inline-vid-btn-${key}" onclick="inlineToggleVideoPanel('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Record video" id="inline-camrec-btn-${key}" onclick="inlineToggleCamRec('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M20.9 12c0 4.9-4 8.9-8.9 8.9S3.1 16.9 3.1 12 7.1 3.1 12 3.1 20.9 7.1 20.9 12z"/></svg>
       </button>
       <button class="toolbar-btn" title="Voice recording" id="inline-voice-btn-${key}" onclick="toggleInlineVoice('${key}')">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -3106,12 +3227,31 @@ function _inlineToolbarHtml(key) {
       </button>
       <input type="file" id="inline-fi-img-${key}" accept="image/*" multiple style="display:none" onchange="inlineHandleImage(this,'${key}')">
       <input type="file" id="inline-fi-file-${key}" style="display:none" onchange="inlineHandleFile(this,'${key}')">
+      <input type="file" id="inline-fi-vid-${key}" accept="video/*" style="display:none" onchange="inlineHandleVideo(this,'${key}')">
     </div>
     <div id="inline-recording-${key}" style="display:none" class="recording-indicator">
       <span class="recording-dot"></span>
-      <span>Recording…</span>
+      <span id="inline-rec-label-${key}">Recording…</span>
       <span id="inline-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
-      <button class="recording-stop-btn" onclick="stopInlineVoice('${key}')">■ Stop</button>
+      <button class="recording-stop-btn" id="inline-rec-stop-${key}" onclick="stopInlineVoice('${key}')">■ Stop</button>
+    </div>
+    <div id="inline-vid-panel-${key}" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-bottom:8px">
+        <button id="inline-vt-up-btn-${key}" style="${tabBase};${tabActive}" onclick="inlineSwitchVideoTab('upload','${key}')">Upload</button>
+        <button id="inline-vt-em-btn-${key}" style="${tabBase}" onclick="inlineSwitchVideoTab('embed','${key}')">Embed URL</button>
+      </div>
+      <div id="inline-vt-up-${key}">
+        <div onclick="document.getElementById('inline-fi-vid-${key}').click()" style="border:2px dashed var(--border);border-radius:6px;padding:14px;text-align:center;cursor:pointer;font-size:.84rem;color:var(--text-muted)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block;margin:0 auto 6px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          Choose video file (uploaded to storage)
+        </div>
+        <div id="inline-vid-progress-${key}" style="display:none;margin-top:8px;font-size:.82rem;color:var(--text-muted)"></div>
+      </div>
+      <div id="inline-vt-em-${key}" style="display:none">
+        <input type="text" id="inline-vurl-${key}" placeholder="YouTube or Vimeo URL…"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:.88rem;font-family:inherit;margin-bottom:6px">
+        <button onclick="inlineAddVideoUrl('${key}')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:.84rem;font-weight:600;cursor:pointer;font-family:inherit">Add</button>
+      </div>
     </div>
     <div id="inline-poll-${key}" style="display:none" class="poll-builder">
       <div class="poll-builder-title">Poll</div>
@@ -3141,6 +3281,12 @@ function _renderCommentMedia(c) {
   others.forEach(m => {
     if (m.type === "audio") {
       html += `<div style="margin-top:6px"><audio src="${escHtml(m.url)}" controls style="width:100%;border-radius:8px"></audio></div>`;
+    } else if (m.type === "video" || m.type === "video-url") {
+      html += `<div style="margin-top:6px"><video src="${escHtml(m.url)}" controls style="max-width:100%;max-height:280px;border-radius:8px;display:block"></video></div>`;
+    } else if (m.type === "youtube") {
+      html += `<div style="margin-top:8px;position:relative;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "vimeo") {
+      html += `<div style="margin-top:8px;position:relative;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden"><iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "file") {
       html += `<div style="margin-top:6px"><a href="${escHtml(m.url)}" target="_blank" download="${escHtml(m.name)}" class="post-media-chip">📎 ${escHtml(m.name)}</a></div>`;
     }
@@ -3158,6 +3304,10 @@ async function _uploadInlineMedia(key) {
       const entry = { type: m.type, url: publicUrl, name: m.name };
       if (m.duration) entry.duration = m.duration;
       result.push(entry);
+    } else if (m.type === "youtube") {
+      result.push({ type: "youtube", ytId: m.ytId, url: m.url, name: m.name });
+    } else if (m.type === "vimeo") {
+      result.push({ type: "vimeo", vimeoId: m.vimeoId, url: m.url, name: m.name });
     } else {
       result.push({ type: m.type, url: m.url, name: m.name });
     }
