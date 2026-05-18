@@ -6239,7 +6239,39 @@ async function castChatVote(messageId, optionIdx) {
     { message_id: messageId, email: myEmail, option_idx: optionIdx },
     { onConflict: "message_id,email" }
   );
-  if (error) console.error("Poll vote error", error);
+  if (error) { console.error("Poll vote error", error); return; }
+
+  // Notify other clients so they can refresh this poll's results
+  _chatRealtimeSub?.send({
+    type: "broadcast",
+    event: "poll_vote",
+    payload: { message_id: messageId }
+  });
+}
+
+// Re-fetch vote counts for a poll message and re-render it
+async function _refreshChatPoll(messageId) {
+  const [{ data: allVotes }, { data: myVotes }] = await Promise.all([
+    db.from("community_chat_poll_votes").select("option_idx").eq("message_id", messageId),
+    db.from("community_chat_poll_votes").select("option_idx").eq("message_id", messageId).eq("email", myEmail)
+  ]);
+  if (!_chatPollVotes[messageId]) _chatPollVotes[messageId] = { myVote: null, counts: {} };
+  const vdata = _chatPollVotes[messageId];
+  vdata.counts = {};
+  (allVotes || []).forEach(v => {
+    vdata.counts[v.option_idx] = (vdata.counts[v.option_idx] || 0) + 1;
+  });
+  if (myVotes?.length) vdata.myVote = myVotes[0].option_idx;
+
+  const el  = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+  const msg = _chatMessages.find(m => m.id === messageId);
+  if (el && msg) {
+    const isMine   = msg.email === myEmail;
+    const showMeta = el.style.marginTop !== "3px";
+    const tmp = document.createElement("div");
+    tmp.innerHTML = _chatMsgHtml(msg, isMine, showMeta);
+    el.replaceWith(tmp.firstElementChild);
+  }
 }
 
 // ── Single global realtime subscription ───────────────────────────────────────
@@ -6282,6 +6314,11 @@ function _subscribeGlobalRealtime() {
       }
       // Refresh sidebar preview
       if (document.getElementById("view-chat").style.display !== "none") _loadConversationsList();
+    })
+    .on("broadcast", { event: "poll_vote" }, ({ payload }) => {
+      if (!payload?.message_id) return;
+      // Re-fetch fresh counts from DB and re-render that poll for all clients
+      _refreshChatPoll(payload.message_id);
     })
     .on("broadcast", { event: "typing" }, ({ payload }) => {
       if (!payload || payload.chat_id !== _currentChatId) return;
