@@ -1168,10 +1168,11 @@ const db = supabase.createClient(SUPA_URL, SUPA_ANON);
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const OWNER_EMAIL = "matthew@matthewcawood.com";
-let myEmail    = null;
-let myName     = null;
-let isAdmin    = false;
-let authToken  = null;
+let myEmail      = null;
+let myName       = null;
+let myAvatarUrl  = null;
+let isAdmin      = false;
+let authToken    = null;
 let currentEvent = null;
 let editingEventId = null;
 let chatChannel  = null;
@@ -1189,8 +1190,9 @@ let isRecording  = false;
 
   // Get display name + avatar
   const { data: ae } = await db.from("allowed_emails").select("name, avatar_url").eq("email", myEmail).maybeSingle();
-  myName  = ae?.name || myEmail.split("@")[0];
-  isAdmin = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  myName       = ae?.name || myEmail.split("@")[0];
+  myAvatarUrl  = ae?.avatar_url || null;
+  isAdmin      = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
 
   // Show header, nav, notification panel, and mobile sheet
   initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "studio", avatarUrl: ae?.avatar_url || null });
@@ -1430,7 +1432,7 @@ async function renderDetailView(ev) {
         <div class="event-detail-title">${esc(ev.title)}</div>
 
         <div class="host-row" style="margin-top:12px">
-          ${avatarHtml("Matthew Cawood", "matthew@matthewcawood.com", 36)}
+          ${avatarHtml(myName, myEmail, 36, myAvatarUrl)}
           <div>
             <div class="host-label">Hosted by</div>
             <div class="host-name">Matthew Cawood</div>
@@ -1457,7 +1459,7 @@ async function renderDetailView(ev) {
           </div>
           <div class="comment-form" style="flex-direction:column;align-items:stretch;gap:0">
             <div style="display:flex;gap:10px;align-items:flex-end">
-              ${avatarHtml(myName, myEmail, 28)}
+              ${avatarHtml(myName, myEmail, 28, myAvatarUrl)}
               <textarea class="comment-input" id="comment-input" placeholder="Write a comment…" rows="1"
                 oninput="autoResize(this)"
                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();postComment('${ev.id}');}"></textarea>
@@ -1596,6 +1598,13 @@ async function loadComments(eventId) {
     return;
   }
 
+  // Fetch avatar URLs for comment authors
+  const commentEmails = [...new Set(comments.map(c => c.email))];
+  const { data: avatarRows } = await db.from("allowed_emails")
+    .select("email,avatar_url").in("email", commentEmails);
+  const avatarMap = {};
+  (avatarRows || []).forEach(r => { if (r.avatar_url) avatarMap[r.email] = r.avatar_url; });
+
   // Fetch polls attached to comments
   const commentIds = comments.map(c => c.id);
   const pollByComment = {};
@@ -1622,7 +1631,7 @@ async function loadComments(eventId) {
     const poll = pollByComment[c.id] || null;
     return `
       <div class="comment-item${isReply ? " is-reply" : ""}" id="comment-${c.id}">
-        ${avatarHtml(c.name, c.email, 28)}
+        ${avatarHtml(c.name, c.email, 28, avatarMap[c.email] || null)}
         <div class="comment-body">
           <div class="comment-meta">
             <span class="comment-name">${dispName}</span>
@@ -2448,16 +2457,20 @@ async function loadAttendees(eventId) {
     .select("*")
     .eq("event_id", eventId)
     .limit(10);
-  console.log("loadAttendees:", { data, error });
   if (error) console.error("loadAttendees error:", error);
   if (!data || data.length === 0) {
     el.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem">No RSVPs yet.</p>`;
     return;
   }
+  const rsvpEmails = data.map(r => r.email).filter(Boolean);
+  const { data: avRows } = await db.from("allowed_emails")
+    .select("email,avatar_url").in("email", rsvpEmails);
+  const avMap = {};
+  (avRows || []).forEach(r => { if (r.avatar_url) avMap[r.email] = r.avatar_url; });
   el.innerHTML = data.map(r => {
     const name = r.name || r.email?.split("@")[0] || "Member";
     return `<div class="attendee-row">
-      ${avatarHtml(name, r.email, 32)}
+      ${avatarHtml(name, r.email, 32, avMap[r.email] || null)}
       <span class="attendee-name">${esc(name)}</span>
     </div>`;
   }).join("");
@@ -3121,7 +3134,11 @@ function avatarColor(email) {
   return P[Math.abs(h) % P.length];
 }
 
-function avatarHtml(name, email, size = 36) {
+function avatarHtml(name, email, size = 36, avatarUrl = null) {
+  const style = `width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;`;
+  if (avatarUrl) {
+    return `<div style="${style}overflow:hidden"><img src="${esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" /></div>`;
+  }
   const initials = getInitials(name || email?.split("@")[0]);
   const colour = avatarColor(email || "");
   return `<div class="member-avatar" style="width:${size}px;height:${size}px;background:${colour.bg};color:${colour.fg};font-size:${Math.round(size*0.38)}px">${initials}</div>`;
