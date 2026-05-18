@@ -298,6 +298,14 @@ document.addEventListener("DOMContentLoaded", function() {
       <div style="flex:1"><h1>Practice Hub</h1></div>
       <div class="header-user">
         <span id="header-email" style="display:none"></span>
+        <a class="btn btn-ghost btn-sm btn-bell" id="header-chat-btn"
+          href="/community.html?goto=chat" title="Chat" aria-label="Chat" style="display:none;text-decoration:none">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="notif-badge" id="chat-unread-badge" style="display:none"></span>
+        </a>
         <button class="btn btn-ghost btn-sm btn-bell" id="notif-bell-btn"
           onclick="window._shToggleNotif()" title="Notifications" aria-label="Notifications" style="display:none">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
@@ -594,6 +602,19 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // Populate user
   const emailEl = document.getElementById("header-email");
   if (emailEl) emailEl.textContent = myName || myEmail;
+
+  // Show chat button
+  const chatBtn = document.getElementById("header-chat-btn");
+  if (chatBtn) {
+    chatBtn.style.display = "";
+    // If already on community.html, intercept the click to open chat in-page
+    if (activePage === "community") {
+      chatBtn.addEventListener("click", e => {
+        e.preventDefault();
+        if (typeof showChat === "function") showChat("group");
+      });
+    }
+  }
 
   // Show bell
   const bell = document.getElementById("notif-bell-btn");
