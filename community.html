@@ -3974,6 +3974,41 @@ function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, tota
   area.innerHTML = html;
 }
 
+// Returns poll HTML string — used for comment/reply polls and shared by _renderPollUI
+function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes) {
+  const hasVoted = !!myOptId;
+  let html = `<div class="poll-card"><div class="poll-card-question">${escHtml(question)}</div>`;
+  if (!hasVoted) {
+    html += opts.map(o =>
+      `<button class="poll-option-vote-btn" onclick="castCommentVote('${escHtml(pollId)}','${escHtml(o.id)}')">${escHtml(o.label)}</button>`
+    ).join("");
+  } else {
+    html += opts.map(o => {
+      const count  = voteCountMap[o.id] || 0;
+      const pct    = totalVotes > 0 ? Math.round(count / totalVotes * 100) : 0;
+      const isMine = o.id === myOptId;
+      return `<div class="poll-bar-row" onclick="castCommentVote('${escHtml(pollId)}','${escHtml(o.id)}')">
+        <div class="poll-bar-label">
+          <span>${escHtml(o.label)}${isMine ? ` <span style="color:#10b981;font-size:.7em">●</span>` : ""}</span>
+          <span>${pct}%</span>
+        </div>
+        <div class="poll-bar-track"><div class="poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join("");
+    html += `<div class="poll-footer"><span class="poll-total">${totalVotes} vote${totalVotes !== 1 ? "s" : ""}</span></div>`;
+  }
+  return html + `</div>`;
+}
+
+async function castCommentVote(pollId, optionId) {
+  const { error } = await db.from("community_post_poll_votes").upsert(
+    { poll_id: pollId, option_id: optionId, email: myEmail },
+    { onConflict: "poll_id,email" }
+  );
+  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  if (_currentPostId) await loadComments(_currentPostId);
+}
+
 // Temporarily show vote buttons so user can pick a different option
 // The upsert in castVote handles overwriting the existing vote in the DB
 async function changeDetailVote(pollId) {
@@ -4078,6 +4113,31 @@ async function loadComments(postId) {
   const cmtAvatarMap = {};
   (cmtAvatarRows || []).forEach(r => { if (r.avatar_url) cmtAvatarMap[r.email] = r.avatar_url; });
 
+  // Fetch polls attached to comments (submitted via reply/comment poll builder)
+  const commentIds = comments.map(c => c.id);
+  const pollByComment = {};
+  const { data: cPollRows } = await db.from("community_post_polls")
+    .select("id,question,comment_id").in("comment_id", commentIds);
+  if (cPollRows && cPollRows.length) {
+    const pollIds = cPollRows.map(p => p.id);
+    const [{ data: cOpts }, { data: cAllVotes }, { data: cMyVotes }] = await Promise.all([
+      db.from("community_post_poll_options").select("id,poll_id,label,position").in("poll_id", pollIds).order("position"),
+      db.from("community_post_poll_votes").select("poll_id,option_id").in("poll_id", pollIds),
+      db.from("community_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", pollIds),
+    ]);
+    cPollRows.forEach(p => {
+      const opts = (cOpts || []).filter(o => o.poll_id === p.id);
+      const allV = (cAllVotes || []).filter(v => v.poll_id === p.id);
+      const myV  = (cMyVotes  || []).find(v => v.poll_id === p.id);
+      const voteCountMap = {};
+      allV.forEach(v => { voteCountMap[v.option_id] = (voteCountMap[v.option_id] || 0) + 1; });
+      pollByComment[p.comment_id] = {
+        pollId: p.id, question: p.question, opts,
+        voteCountMap, myOptId: myV?.option_id || null, totalVotes: allV.length
+      };
+    });
+  }
+
   // Build threaded structure: top-level comments + their replies
   const topLevel = comments.filter(c => !c.parent_comment_id);
   const repliesMap = {};
@@ -4085,6 +4145,12 @@ async function loadComments(postId) {
     if (!repliesMap[c.parent_comment_id]) repliesMap[c.parent_comment_id] = [];
     repliesMap[c.parent_comment_id].push(c);
   });
+
+  function commentPollHtml(commentId) {
+    const p = pollByComment[commentId];
+    if (!p) return "";
+    return _commentPollHtml(p.pollId, p.question, p.opts, p.voteCountMap, p.myOptId, p.totalVotes);
+  }
 
   function commentHTML(c, isReply = false, threadId = null) {
     const canDel   = isAdmin || c.email === myEmail;
@@ -4105,6 +4171,7 @@ async function loadComments(postId) {
           </div>
           ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderCommentMedia(c)}
+          ${commentPollHtml(c.id)}
           <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
         </div>
       </div>`;

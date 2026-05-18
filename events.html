@@ -445,24 +445,31 @@
     }
     .ev-poll-add-opt:hover { border-color:var(--accent); color:var(--accent); }
     /* ── Rendered poll inside comment ────────────────────────────────────────── */
-    .comment-poll { margin-top:10px; }
-    .poll-q-text { font-size:.88rem; font-weight:600; color:var(--text); margin-bottom:9px; }
-    .poll-vote-btn {
-      width:100%; text-align:left; background:var(--surface); border:1.5px solid var(--border);
-      border-radius:6px; padding:8px 12px; margin-bottom:5px; cursor:pointer;
-      font-size:.85rem; font-family:inherit; color:var(--text);
+    .poll-card {
+      background:var(--surface-2,var(--surface)); border:1.5px solid var(--border);
+      border-radius:10px; padding:16px; margin-top:10px;
     }
-    .poll-vote-btn:hover { border-color:var(--accent); }
-    .poll-result-row {
-      position:relative; margin-bottom:5px; border-radius:6px; overflow:hidden;
-      border:1.5px solid var(--border); height:34px; display:flex; align-items:center;
+    .poll-card-question { font-size:.97rem; font-weight:700; color:var(--text); margin-bottom:12px; }
+    .poll-option-vote-btn {
+      width:100%; text-align:left; background:rgba(0,0,0,.04);
+      border:1.5px solid var(--border); border-radius:8px;
+      padding:9px 14px; font-size:.87rem; color:var(--text);
+      font-family:inherit; cursor:pointer; margin-bottom:8px;
+      transition:border-color .15s,background .15s;
     }
-    .poll-result-row.my-vote { border-color:var(--accent); }
-    .poll-result-bar { position:absolute; left:0; top:0; bottom:0; background:var(--accent); opacity:.12; }
-    .poll-result-row.my-vote .poll-result-bar { opacity:.22; }
-    .poll-result-label { position:relative; z-index:1; flex:1; padding:0 10px; font-size:.84rem; color:var(--text); }
-    .poll-result-pct { position:relative; z-index:1; padding:0 10px; font-size:.8rem; color:var(--text-muted); font-weight:600; }
-    .poll-vote-total { font-size:.74rem; color:var(--text-muted); margin-top:3px; }
+    .poll-option-vote-btn:hover { border-color:var(--accent); background:rgba(245,197,24,.07); }
+    .poll-bar-row { margin-bottom:8px; cursor:pointer; border-radius:6px; padding:2px 4px; }
+    .poll-bar-row:hover .poll-bar-fill { filter:brightness(1.15); }
+    .poll-bar-label {
+      display:flex; justify-content:space-between; align-items:center;
+      font-size:.85rem; color:var(--text); margin-bottom:4px;
+    }
+    .poll-bar-label span:last-child { color:var(--text-muted); font-size:.78rem; }
+    .poll-bar-track { background:rgba(0,0,0,.06); border-radius:4px; height:6px; }
+    .poll-bar-fill { height:100%; border-radius:4px; background:var(--accent); transition:width .4s ease; }
+    .poll-bar-fill.mine { background:#10b981; }
+    .poll-footer { display:flex; align-items:center; margin-top:10px; }
+    .poll-total { font-size:.75rem; color:var(--text-muted); }
     /* ── Rendered attachment inside comment ──────────────────────────────────── */
     .comment-att { margin-top:10px; }
     .comment-att img { max-width:100%; max-height:300px; border-radius:8px; cursor:pointer; display:block; object-fit:cover; }
@@ -2172,28 +2179,36 @@ function _renderAttHtml(c) {
 
 function _renderPollHtml(poll, commentId) {
   if (!poll) return "";
-  const opts    = typeof poll.options === "string" ? JSON.parse(poll.options) : (poll.options || []);
-  const votes   = poll.event_comment_poll_votes || [];
-  const total   = votes.length;
+  const opts      = typeof poll.options === "string" ? JSON.parse(poll.options) : (poll.options || []);
+  const votes     = poll.event_comment_poll_votes || [];
+  const total     = votes.length;
   const myVoteIdx = votes.find(v => v.email === myEmail)?.option_index ?? null;
   const hasVoted  = myVoteIdx !== null;
-  const optHtml = opts.map((opt, i) => {
-    if (hasVoted) {
-      const cnt = votes.filter(v => v.option_index === i).length;
-      const pct = total > 0 ? Math.round(cnt / total * 100) : 0;
-      return `<div class="poll-result-row${myVoteIdx === i ? " my-vote" : ""}">
-        <div class="poll-result-bar" style="width:${pct}%"></div>
-        <span class="poll-result-label">${esc(opt)}</span>
-        <span class="poll-result-pct">${pct}%</span>
+
+  let html = `<div class="poll-card"><div class="poll-card-question">${esc(poll.question)}</div>`;
+
+  if (!hasVoted) {
+    html += opts.map((opt, i) =>
+      `<button type="button" class="poll-option-vote-btn" onclick="castVote('${poll.id}',${i},'${commentId}')">${esc(opt)}</button>`
+    ).join("");
+  } else {
+    html += opts.map((opt, i) => {
+      const cnt   = votes.filter(v => v.option_index === i).length;
+      const pct   = total > 0 ? Math.round(cnt / total * 100) : 0;
+      const isMine = myVoteIdx === i;
+      return `<div class="poll-bar-row" onclick="castVote('${poll.id}',${i},'${commentId}')">
+        <div class="poll-bar-label">
+          <span>${esc(opt)}${isMine ? ` <span style="color:#10b981;font-size:.7em">●</span>` : ""}</span>
+          <span>${pct}%</span>
+        </div>
+        <div class="poll-bar-track"><div class="poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
       </div>`;
-    }
-    return `<button type="button" class="poll-vote-btn" onclick="castVote('${poll.id}',${i},'${commentId}')">${esc(opt)}</button>`;
-  }).join("");
-  return `<div class="comment-poll">
-    <div class="poll-q-text">${esc(poll.question)}</div>
-    ${optHtml}
-    <div class="poll-vote-total">${total} vote${total !== 1 ? "s" : ""}</div>
-  </div>`;
+    }).join("");
+    html += `<div class="poll-footer"><span class="poll-total">${total} vote${total !== 1 ? "s" : ""}</span></div>`;
+  }
+
+  html += `</div>`;
+  return html;
 }
 
 async function castVote(pollId, optionIndex, commentId) {
