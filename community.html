@@ -3793,9 +3793,12 @@ function postCardHTML(p) {
     : escHtml(content);
 
   const safeKey = 'post_' + p.id.replace(/-/g,'_');
+  // Always read live reaction state from _postRxMap (stale p.myEmoji / p.totalReactions after reacting)
   const postRxData = _postRxMap[p.id] || {};
-  const heartFill = p.myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
-  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${p.myEmoji && p.myEmoji !== "❤️" ? ` ${p.myEmoji}` : ""}${p.totalReactions > 0 ? ` ${p.totalReactions}` : ""}`;
+  let _liveMyEmoji = null, _liveTotal = 0;
+  for (const [e, d] of Object.entries(postRxData)) { _liveTotal += d.count; if (d.mine) _liveMyEmoji = e; }
+  const heartFill = _liveMyEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${_liveMyEmoji && _liveMyEmoji !== "❤️" ? ` ${_liveMyEmoji}` : ""}${_liveTotal > 0 ? ` ${_liveTotal}` : ""}`;
 
   // Build media section for card (list view) — render everything inline
   let mediaHtml = "";
@@ -3913,7 +3916,7 @@ function postCardHTML(p) {
       ${fileChipsHtml}
       <div class="post-footer" onclick="event.stopPropagation()">
         <div style="position:relative;display:inline-flex">
-          <button class="post-footer-btn${p.myEmoji ? " liked" : ""}" id="like-btn-${safeKey}" data-post-id="${p.id}" onclick="togglePostReactPicker('${safeKey}')">
+          <button class="post-footer-btn${_liveMyEmoji ? " liked" : ""}" id="like-btn-${safeKey}" data-post-id="${p.id}" onclick="togglePostReactPicker('${safeKey}')">
             ${likeIcon}
           </button>
           <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
@@ -3930,9 +3933,10 @@ function postCardHTML(p) {
         </button>
         <div class="post-footer-right">
           <span class="post-footer-meta like-count-${p.id}">
-            ${p.totalReactions ? `<span>${p.totalReactions} reaction${p.totalReactions !== 1 ? "s" : ""}</span>` : ""}
-            ${p.totalReactions && p.commentCount ? " · " : ""}
-            ${p.commentCount ? `<span onclick="event.stopPropagation();showDetail('${p.id}')" style="cursor:pointer">${p.commentCount} comment${p.commentCount !== 1 ? "s" : ""}</span>` : ""}
+            ${[
+              _liveTotal      ? `<span>${_liveTotal} reaction${_liveTotal !== 1 ? "s" : ""}</span>` : "",
+              p.commentCount  ? `<span onclick="event.stopPropagation();showDetail('${p.id}')" style="cursor:pointer">${p.commentCount} comment${p.commentCount !== 1 ? "s" : ""}</span>` : ""
+            ].filter(Boolean).join(" · ")}
           </span>
         </div>
       </div>
@@ -4106,10 +4110,20 @@ function renderDetail(postId) {
       ${pollPlaceholder}
       <div class="detail-footer post-footer">
         <div style="position:relative;display:inline-flex">
-          <button class="post-footer-btn${p.myEmoji ? " liked" : ""}" id="like-btn-detail_${p.id.replace(/-/g,'_')}" data-post-id="${p.id}"
-            onclick="togglePostReactPicker('detail_${p.id.replace(/-/g,'_')}')">
-            <svg viewBox="0 0 24 24" width="15" height="15" ${p.myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${p.myEmoji && p.myEmoji !== "❤️" ? ` ${p.myEmoji}` : ""}${p.totalReactions > 0 ? ` ${p.totalReactions}` : ""}
-          </button>
+          ${(() => {
+            // Always read live reaction state from _postRxMap so opening detail
+            // after reacting on feed (or vice-versa) shows the correct state.
+            const liveRx = _postRxMap[p.id] || {};
+            let liveEmoji = null, liveTotal = 0;
+            for (const [e, d] of Object.entries(liveRx)) { liveTotal += d.count; if (d.mine) liveEmoji = e; }
+            const fill = liveEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+            const emojiLabel = liveEmoji && liveEmoji !== "❤️" ? ` ${liveEmoji}` : "";
+            const countLabel = liveTotal > 0 ? ` ${liveTotal}` : "";
+            return `<button class="post-footer-btn${liveEmoji ? " liked" : ""}" id="like-btn-detail_${p.id.replace(/-/g,'_')}" data-post-id="${p.id}"
+              onclick="togglePostReactPicker('detail_${p.id.replace(/-/g,'_')}')">
+              <svg viewBox="0 0 24 24" width="15" height="15" ${fill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${emojiLabel}${countLabel}
+            </button>`;
+          })()}
           <div class="activity-react-picker" id="picker-detail_${p.id.replace(/-/g,'_')}" style="display:none">
             ${ACTIVITY_EMOJIS.map(e => {
               const d = (_postRxMap[p.id] || {})[e] || { count: 0, mine: false };
@@ -4120,10 +4134,15 @@ function renderDetail(postId) {
         ${deleteBtn}
         <div class="post-footer-right">
           <span class="post-footer-meta" id="detail-meta-${p.id.replace(/-/g,'_')}">
-            ${[
-              p.totalReactions ? `<span>${p.totalReactions} reaction${p.totalReactions !== 1 ? "s" : ""}</span>` : "",
-              p.commentCount   ? `<span>${p.commentCount} comment${p.commentCount !== 1 ? "s" : ""}</span>` : ""
-            ].filter(Boolean).join(" · ")}
+            ${(() => {
+              const liveRx = _postRxMap[p.id] || {};
+              let liveTotal = 0;
+              for (const d of Object.values(liveRx)) liveTotal += d.count;
+              return [
+                liveTotal       ? `<span>${liveTotal} reaction${liveTotal !== 1 ? "s" : ""}</span>` : "",
+                p.commentCount  ? `<span>${p.commentCount} comment${p.commentCount !== 1 ? "s" : ""}</span>` : ""
+              ].filter(Boolean).join(" · ");
+            })()}
           </span>
         </div>
       </div>
