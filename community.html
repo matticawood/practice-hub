@@ -1494,7 +1494,7 @@
     }
     .chat-msg-group.mine { flex-direction: row-reverse; }
     .chat-msg-avatar { flex-shrink: 0; align-self: flex-end; }
-    .chat-msg-body { max-width: 70%; display: flex; flex-direction: column; gap: 3px; }
+    .chat-msg-body { max-width: 70%; min-width: 220px; display: flex; flex-direction: column; gap: 3px; }
     .chat-msg-group.mine .chat-msg-body { align-items: flex-end; }
     .chat-msg-meta {
       font-size: 0.73rem; color: var(--text-muted);
@@ -3969,7 +3969,7 @@ function _renderCommentMedia(c) {
     if (m.type === "mux") {
       html += `<div class="comment-mux-wrap" style="margin-top:8px"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div>`;
     } else if (m.type === "audio") {
-      html += `<div style="margin-top:6px"><audio src="${escHtml(m.url)}" controls style="width:100%;border-radius:8px"></audio></div>`;
+      html += `<div style="margin-top:6px;min-width:240px"><audio src="${escHtml(m.url)}" controls style="width:100%;min-width:240px;border-radius:8px"></audio></div>`;
     } else if (m.type === "youtube") {
       html += `<div style="margin-top:8px;position:relative;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "vimeo") {
@@ -3978,7 +3978,7 @@ function _renderCommentMedia(c) {
       html += `<div style="margin-top:6px"><a href="${escHtml(m.url)}" target="_blank" download="${escHtml(m.name)}" class="post-media-chip"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${escHtml(m.name)}</a></div>`;
     } else if (m.type === "poll") {
       const opts = Array.isArray(m.options) ? m.options : [];
-      html += `<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;max-width:340px">
+      html += `<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:340px">
         <div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${escHtml(m.question || "Poll")}</div>
         ${opts.map(o => `<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${escHtml(o)}</div>`).join("")}
       </div>`;
@@ -5784,6 +5784,7 @@ let _chatRealtimeSub = null;          // single global realtime channel
 let _chatMessages    = [];            // loaded messages for current conversation
 let _chatConversations = [];          // list of all known conversations for this user
 let _chatState       = "list";        // 'list' | 'conversation' | 'new'
+let _chatPollVotes   = {};            // messageId -> { myVote: optionIdx|null, counts: {optionIdx: count} }
 
 // New-chat selection state
 let _newChatSelected = [];            // [{email, name, avatarUrl}]
@@ -6099,6 +6100,31 @@ async function _openConversation(chatIdOrEmail, otherName) {
   }
 
   _chatMessages = data || [];
+
+  // Load poll votes for any poll messages in this conversation
+  const pollMsgIds = _chatMessages
+    .filter(m => {
+      const media = Array.isArray(m.media) ? m.media : (typeof m.media === "string" ? JSON.parse(m.media || "[]") : []);
+      return media.some(x => x.type === "poll");
+    })
+    .map(m => m.id);
+
+  _chatPollVotes = {};
+  if (pollMsgIds.length) {
+    const [{ data: allVotes }, { data: myVotes }] = await Promise.all([
+      db.from("community_chat_poll_votes").select("message_id,option_idx").in("message_id", pollMsgIds),
+      db.from("community_chat_poll_votes").select("message_id,option_idx").eq("email", myEmail).in("message_id", pollMsgIds)
+    ]);
+    (allVotes || []).forEach(v => {
+      if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
+      _chatPollVotes[v.message_id].counts[v.option_idx] = (_chatPollVotes[v.message_id].counts[v.option_idx] || 0) + 1;
+    });
+    (myVotes || []).forEach(v => {
+      if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
+      _chatPollVotes[v.message_id].myVote = v.option_idx;
+    });
+  }
+
   _renderChatMessages();
   _scrollChatToBottom(true);
 }
@@ -6141,6 +6167,43 @@ function _showTyping(email, name) {
     }
     _scrollChatToBottom();
   }, 4000);
+}
+
+async function castChatVote(messageId, optionIdx) {
+  if (!myEmail) return;
+  const prev = _chatPollVotes[messageId] || { myVote: null, counts: {} };
+
+  // Optimistic update
+  if (!_chatPollVotes[messageId]) _chatPollVotes[messageId] = { myVote: null, counts: {} };
+  const vdata = _chatPollVotes[messageId];
+  // Remove previous vote count
+  if (vdata.myVote !== null && vdata.myVote !== undefined) {
+    vdata.counts[vdata.myVote] = Math.max(0, (vdata.counts[vdata.myVote] || 1) - 1);
+  }
+  vdata.myVote = optionIdx;
+  vdata.counts[optionIdx] = (vdata.counts[optionIdx] || 0) + 1;
+
+  // Re-render just this message's poll
+  const el = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+  if (el) {
+    const msg = _chatMessages.find(m => m.id === messageId);
+    if (msg) {
+      const isMine = msg.email === myEmail;
+      const prev = el.previousSibling;
+      const next = el.nextSibling;
+      const tmp = document.createElement("div");
+      const showMeta = el.style.marginTop === "10px";
+      tmp.innerHTML = _chatMsgHtml(msg, isMine, showMeta);
+      el.replaceWith(tmp.firstElementChild);
+    }
+  }
+
+  // Persist
+  const { error } = await db.from("community_chat_poll_votes").upsert(
+    { message_id: messageId, email: myEmail, option_idx: optionIdx },
+    { onConflict: "message_id,email" }
+  );
+  if (error) console.error("Poll vote error", error);
 }
 
 // ── Single global realtime subscription ───────────────────────────────────────
@@ -6243,10 +6306,32 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const bubbleContent = contentHtml + (mediaHtml ? `<div class="chat-media">${mediaHtml}</div>` : "");
 
   const pollHtml = pollItem ? (() => {
-    const opts = Array.isArray(pollItem.options) ? pollItem.options : [];
-    return `<div style="margin-top:6px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;max-width:300px">
+    const opts   = Array.isArray(pollItem.options) ? pollItem.options : [];
+    const vdata  = _chatPollVotes[msg.id] || { myVote: null, counts: {} };
+    const total  = Object.values(vdata.counts).reduce((a, b) => a + b, 0);
+    const voted  = vdata.myVote !== null && vdata.myVote !== undefined;
+    const rows   = opts.map((o, i) => {
+      const count = vdata.counts[i] || 0;
+      const pct   = total ? Math.round((count / total) * 100) : 0;
+      const isMe  = vdata.myVote === i;
+      if (voted) {
+        return `<div style="margin-bottom:6px">
+          <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px;color:var(--text)">
+            <span${isMe ? ' style="font-weight:700"' : ""}>${escHtml(o)}${isMe ? " ✓" : ""}</span>
+            <span style="color:var(--text-muted)">${pct}%</span>
+          </div>
+          <div style="height:6px;border-radius:4px;background:var(--border);overflow:hidden">
+            <div style="height:100%;width:${pct}%;border-radius:4px;background:${isMe ? "var(--accent)" : "var(--text-muted)"}"></div>
+          </div>
+        </div>`;
+      } else {
+        return `<button onclick="castChatVote('${escHtml(msg.id)}',${i})" style="display:block;width:100%;text-align:left;padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface);cursor:pointer;font-family:inherit;transition:border-color .15s,background .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">${escHtml(o)}</button>`;
+      }
+    }).join("");
+    return `<div style="margin-top:6px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:320px">
       <div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${escHtml(pollItem.question || "Poll")}</div>
-      ${opts.map(o => `<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${escHtml(o)}</div>`).join("")}
+      ${rows}
+      ${voted ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">${total} vote${total !== 1 ? "s" : ""}</div>` : ""}
     </div>`;
   })() : "";
 
