@@ -625,6 +625,12 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
   document.getElementById("sh-mob-logout-btn")?.addEventListener("click", logoutHandler);
 
+  // Clear any previously active states (initSharedHeader can be called more than
+  // once per page if auth state changes fire bootApp again — without this clear,
+  // active classes accumulate across calls).
+  document.querySelectorAll(".sh-item.active").forEach(i => i.classList.remove("active"));
+  document.querySelectorAll(".sh-tab-drop a.active").forEach(a => a.classList.remove("active"));
+
   // Mark active tab (desktop)
   document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
     t.classList.toggle("active", t.dataset.page === activePage)
