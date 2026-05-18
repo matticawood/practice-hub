@@ -254,6 +254,7 @@
       transition: color .15s;
     }
     .composer-cancel:hover { color: var(--text); }
+    .btn:disabled { opacity: 0.4; cursor: default; }
 
     /* ── Recording indicator ─────────────────────────────────────────────────── */
     .recording-indicator {
@@ -2035,7 +2036,7 @@
               <textarea class="comment-input" id="comment-input" placeholder="Write a comment…" rows="1"
                 oninput="autoResize(this)"
                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment();}"></textarea>
-              <button class="btn btn-sm" onclick="submitComment()" style="flex-shrink:0">Send</button>
+              <button class="btn btn-sm" id="comment-send-btn" onclick="submitComment()" style="flex-shrink:0">Send</button>
             </div>
             <!-- Inline toolbar for main comment input -->
             <div style="padding-left:38px;margin-top:4px">
@@ -2137,7 +2138,7 @@
               <textarea class="comment-input" id="activity-comment-input" placeholder="Write a comment…" rows="1"
                 oninput="autoResize(this)"
                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitActivityDetailComment();}"></textarea>
-              <button class="btn btn-sm" onclick="submitActivityDetailComment()" style="flex-shrink:0">Send</button>
+              <button class="btn btn-sm" id="activity-comment-send-btn" onclick="submitActivityDetailComment()" style="flex-shrink:0">Send</button>
             </div>
             <div style="padding-left:38px;margin-top:4px" id="activity-main-toolbar-container"></div>
           </div>
@@ -3089,6 +3090,8 @@ async function _uploadVideoToMux(file, onDone = null) {
   _setOverlay({ show: true, filename: file.name, pct: 0, status: "Getting upload URL…" });
 
   _muxUploading = true;
+  const _composerBtn = document.getElementById("composer-submit");
+  if (_composerBtn) { _composerBtn.disabled = true; _composerBtn.title = "Please wait — video is processing…"; }
   try {
     // Step 1: get a direct Mux upload URL from our edge function
     const token = (await db.auth.getSession()).data.session?.access_token;
@@ -3190,6 +3193,8 @@ async function _uploadVideoToMux(file, onDone = null) {
     if (!onDone) return; // modal path: dismiss button handles _muxUploading = false
   } finally {
     _muxUploading = false;
+    const _composerBtnF = document.getElementById("composer-submit");
+    if (_composerBtnF) { _composerBtnF.disabled = false; _composerBtnF.title = ""; }
   }
 }
 
@@ -3575,13 +3580,24 @@ function _renderInlineMediaPreview(key) {
   });
   area.innerHTML = html;
 
-  // Disable the chat send button while a Mux video is still uploading/processing
-  if (key === "chat_main") {
-    const sendBtn = document.getElementById("chat-send-btn");
+  // Disable the relevant send button while a Mux video is still uploading/processing
+  {
+    const isUploading = (media || []).some(m => m._uploading);
+    let sendBtnId;
+    if (key === "chat_main")          sendBtnId = "chat-send-btn";
+    else if (key === "main")          sendBtnId = "comment-send-btn";
+    else if (key === "activity_main") sendBtnId = "activity-comment-send-btn";
+    else                              sendBtnId = `reply-send-btn-${key}`; // post reply or activity reply
+    const sendBtn = document.getElementById(sendBtnId);
     if (sendBtn) {
-      const isUploading = (media || []).some(m => m._uploading);
       sendBtn.disabled = isUploading;
-      sendBtn.title = isUploading ? "Please wait — video is processing…" : "Send (Shift+Enter)";
+      sendBtn.title = isUploading ? "Please wait — video is processing…" : (key === "chat_main" ? "Send (Shift+Enter)" : "");
+    }
+    // Also try activity reply btn (activity replies share UUID keys with post replies)
+    const actReplySendBtn = document.getElementById(`activity-reply-send-btn-${key}`);
+    if (actReplySendBtn) {
+      actReplySendBtn.disabled = isUploading;
+      actReplySendBtn.title = isUploading ? "Please wait — video is processing…" : "";
     }
   }
 }
@@ -4949,7 +4965,7 @@ async function loadComments(postId) {
           ${_inlineToolbarHtml(c.id)}
           <div style="display:flex;justify-content:flex-end;gap:14px;margin-top:8px">
             <button onclick="cancelReply('${c.id}')" style="background:none;border:none;font-family:inherit;font-size:0.8rem;cursor:pointer;color:var(--text-muted);padding:0">Cancel</button>
-            <button onclick="submitReply('${c.id}',this.closest('.comment-item').querySelector('textarea'))" style="background:none;border:none;font-family:inherit;font-size:0.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
+            <button id="reply-send-btn-${c.id}" onclick="submitReply('${c.id}',this.closest('.comment-item').querySelector('textarea'))" style="background:none;border:none;font-family:inherit;font-size:0.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
           </div>
         </div>
       </div>`;
@@ -5675,7 +5691,7 @@ async function loadActivityDetailComments(eventType, itemId) {
           ${_inlineToolbarHtml(c.id)}
           <div style="display:flex;justify-content:flex-end;gap:14px;margin-top:8px">
             <button onclick="cancelActivityDetailReply('${c.id}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;cursor:pointer;color:var(--text-muted);padding:0">Cancel</button>
-            <button onclick="submitActivityDetailReply('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
+            <button id="activity-reply-send-btn-${c.id}" onclick="submitActivityDetailReply('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
           </div>
         </div>
       </div>
