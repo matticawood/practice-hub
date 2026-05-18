@@ -28,12 +28,15 @@ export default async (request) => {
   // Verify Supabase session
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
-  if (!token) return json({ error: "Unauthorized" }, 401);
+  if (!token) return json({ error: "No auth token provided" }, 401);
 
   const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: { "Authorization": `Bearer ${token}`, "apikey": SUPABASE_ANON }
   });
-  if (!userRes.ok) return json({ error: "Unauthorized" }, 401);
+  if (!userRes.ok) {
+    const body = await userRes.text().catch(() => "");
+    return json({ error: `Supabase auth failed (${userRes.status}): ${body}` }, 401);
+  }
 
   const user      = await userRes.json();
   const userEmail = user.email?.toLowerCase();
