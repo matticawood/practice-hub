@@ -346,6 +346,9 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
     <div class="sh-tab-wrap">
+      <a class="sh-tab" data-page="community" href="/community.html">Community</a>
+    </div>
+    <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="resources" href="/practice-log.html#library">Resources</a>
       <div class="sh-tab-drop">
         <a href="/practice-log.html#library">Pieces Library</a>
@@ -371,9 +374,6 @@ document.addEventListener("DOMContentLoaded", function() {
         <a href="/clinic-booking.html">One-to-One Clinics</a>
         <a href="#">Practice Room Updates</a>
       </div>
-    </div>
-    <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="community" href="/community.html">Community</a>
     </div>
   `;
   // Insert after header, before main
@@ -406,9 +406,12 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
 
+    <a class="sh-section-btn" data-page="community" href="/community.html">Community</a>
+
     <div class="sh-group">
       <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
         Resources
+
         <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sh-group-items">
@@ -444,8 +447,6 @@ document.addEventListener("DOMContentLoaded", function() {
         <a class="sh-item" data-page="studio" href="#">Practice Room Updates</a>
       </div>
     </div>
-
-    <a class="sh-section-btn" data-page="community" href="/community.html">Community</a>
 
     <hr style="border:none;border-top:1px solid rgba(255,255,255,.1);margin:8px 20px;">
     <a class="sh-section-btn" href="/profile.html">Edit Profile</a>
