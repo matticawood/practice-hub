@@ -1007,30 +1007,27 @@
     /* Like button */
     .activity-like-btn {
       display: inline-flex; align-items: center; gap: 5px;
-      background: rgba(0,0,0,.04); border: 1.5px solid rgba(0,0,0,.08);
-      border-radius: 8px; padding: 6px 16px;
-      font-size: 0.83rem; font-weight: 600; font-family: inherit;
-      color: var(--text); cursor: pointer;
-      transition: border-color .15s, background .15s, color .15s;
+      background: none; border: none;
+      padding: 4px 6px;
+      font-size: 0.83rem; font-weight: 500; font-family: inherit;
+      color: var(--text-muted); cursor: pointer;
+      transition: color .15s;
       line-height: 1;
     }
-    .activity-like-btn:hover { border-color: rgba(0,0,0,.18); background: rgba(0,0,0,.06); }
-    .activity-like-btn.reacted {
-      border-color: rgba(0,0,0,.2);
-      background: rgba(0,0,0,.07);
-    }
+    .activity-like-btn:hover { color: var(--text); }
+    .activity-like-btn.reacted { color: #e879a0; }
     /* Comment button — same shape */
     .activity-cmt-btn {
       display: inline-flex; align-items: center; gap: 5px;
-      background: rgba(0,0,0,.04); border: 1.5px solid rgba(0,0,0,.08);
-      border-radius: 8px; padding: 6px 16px;
-      font-size: 0.83rem; font-weight: 600; font-family: inherit;
-      color: var(--text); cursor: pointer;
-      transition: border-color .15s, background .15s, color .15s;
+      background: none; border: none;
+      padding: 4px 6px;
+      font-size: 0.83rem; font-weight: 500; font-family: inherit;
+      color: var(--text-muted); cursor: pointer;
+      transition: color .15s;
       line-height: 1;
     }
-    .activity-cmt-btn:hover { border-color: rgba(0,0,0,.18); background: rgba(0,0,0,.06); }
-    .activity-cmt-btn.open { border-color: rgba(0,0,0,.2); background: rgba(0,0,0,.07); }
+    .activity-cmt-btn:hover { color: var(--text); }
+    .activity-cmt-btn.open { color: var(--text); }
     /* Session duration block — mirrors the achievement badge */
     .feed-session-block {
       display: flex; align-items: center; gap: 12px;
@@ -2014,6 +2011,8 @@ let _activityLoaded = false;
 const ACTIVITY_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
 // _rxMap[`${event_type}:${item_id}`][emoji] = { count, mine }
 let _rxMap = {};
+// _postRxMap[postId][emoji] = { count, mine }
+let _postRxMap = {};
 // _cmtMap[`${event_type}:${item_id}`] = count
 let _cmtMap = {};
 
@@ -3702,14 +3701,24 @@ async function loadPosts() {
     return;
   }
 
-  // Fetch like counts, comment counts, poll info in parallel
+  // Fetch like counts, comment counts, poll info, and post reactions in parallel
   const ids = posts.map(p => p.id);
-  const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }] = await Promise.all([
+  const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }, { data: postReactions }] = await Promise.all([
     db.from("community_post_likes").select("post_id,email").in("post_id", ids),
     db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", ids),
     db.from("community_post_comments").select("post_id").in("post_id", ids),
-    db.from("community_post_polls").select("post_id,question,id").in("post_id", ids)
+    db.from("community_post_polls").select("post_id,question,id").in("post_id", ids),
+    db.from("activity_reactions").select("item_id,email,emoji").eq("event_type","post").in("item_id", ids)
   ]);
+
+  // Build _postRxMap[postId][emoji] = { count, mine }
+  _postRxMap = {};
+  (postReactions || []).forEach(rx => {
+    if (!_postRxMap[rx.item_id]) _postRxMap[rx.item_id] = {};
+    if (!_postRxMap[rx.item_id][rx.emoji]) _postRxMap[rx.item_id][rx.emoji] = { count: 0, mine: false };
+    _postRxMap[rx.item_id][rx.emoji].count++;
+    if (rx.email === myEmail) _postRxMap[rx.item_id][rx.emoji].mine = true;
+  });
 
   const likeCountMap    = {};
   const likersMap       = {}; // post_id → [email, ...]  (up to 3)
@@ -3761,16 +3770,26 @@ async function loadPosts() {
     if (r.badge)      badgeMap[r.email]     = r.badge;
   });
 
-  _posts = posts.map(p => ({
-    ...p,
-    likeCount:    likeCountMap[p.id]    || 0,
-    commentCount: commentCountMap[p.id] || 0,
-    iLiked:       myLikeSet.has(p.id),
-    likers:       likersMap[p.id]       || [],
-    poll:         pollMap[p.id]         || null,
-    avatarUrl:    avatarUrlMap[p.email] || null,
-    badge:        badgeMap[p.email]     || null
-  }));
+  _posts = posts.map(p => {
+    const rxData = _postRxMap[p.id] || {};
+    let myEmoji = null, totalReactions = 0;
+    for (const [e, d] of Object.entries(rxData)) {
+      totalReactions += d.count;
+      if (d.mine) myEmoji = e;
+    }
+    return {
+      ...p,
+      likeCount:      likeCountMap[p.id]    || 0,
+      commentCount:   commentCountMap[p.id] || 0,
+      iLiked:         myLikeSet.has(p.id),
+      likers:         likersMap[p.id]       || [],
+      poll:           pollMap[p.id]         || null,
+      avatarUrl:      avatarUrlMap[p.email] || null,
+      badge:          badgeMap[p.email]     || null,
+      myEmoji,
+      totalReactions
+    };
+  });
 
   _renderFilteredPosts();
 }
@@ -3785,9 +3804,10 @@ function postCardHTML(p) {
     ? escHtml(content.slice(0, PREVIEW)) + `<span class="post-see-more">… See more</span>`
     : escHtml(content);
 
-  const likeIcon = p.iLiked
-    ? `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`
-    : `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const safeKey = 'post_' + p.id.replace(/-/g,'_');
+  const postRxData = _postRxMap[p.id] || {};
+  const heartFill = p.myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${p.myEmoji && p.myEmoji !== "❤️" ? ` ${p.myEmoji}` : ""}${p.totalReactions > 0 ? ` ${p.totalReactions}` : ""}`;
 
   // Build media section for card (list view) — render everything inline
   let mediaHtml = "";
@@ -3904,9 +3924,19 @@ function postCardHTML(p) {
       ${mediaHtml}
       ${fileChipsHtml}
       <div class="post-footer" onclick="event.stopPropagation()">
-        <button class="post-footer-btn ${p.iLiked ? "liked" : ""}" data-post-id="${p.id}" onclick="toggleLike(this,'${p.id}')">
-          ${likeIcon}
-        </button>
+        <div style="position:relative;display:inline-flex">
+          <button class="post-footer-btn${p.myEmoji ? " liked" : ""}" id="like-btn-${safeKey}" data-post-id="${p.id}" onclick="togglePostReactPicker('${safeKey}')">
+            ${likeIcon}
+          </button>
+          <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
+            ${ACTIVITY_EMOJIS.map(e => {
+              const d = postRxData[e] || { count: 0, mine: false };
+              return `<button class="${d.mine ? "picked" : ""}"
+                onclick="pickPostReaction(event,'${safeKey}','${p.id}','${e}')"
+              >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+            }).join("")}
+          </div>
+        </div>
         <button class="post-footer-btn" onclick="showDetail('${p.id}')">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         </button>
@@ -4671,7 +4701,7 @@ function feedItemHTML(row) {
       <div class="activity-actions" id="actions-${safeKey}">
         <button class="activity-like-btn${myEmoji ? " reacted" : ""}" id="like-btn-${safeKey}"
           onclick="toggleReactPicker('${safeKey}','${row.event_type}','${String(row.item_id)}')"
-        >${likeLabel || "Like"}</button>
+        ><svg viewBox="0 0 24 24" width="15" height="15" ${myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : ""}${totalRx > 0 ? ` ${totalRx}` : ""}</button>
         <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
           ${ACTIVITY_EMOJIS.map(e => {
             const d = rxData[e] || { count: 0, mine: false };
@@ -4682,7 +4712,7 @@ function feedItemHTML(row) {
         </div>
         <button class="activity-cmt-btn" id="cmt-btn-${safeKey}"
           onclick="toggleActivityComments(this,'${row.event_type}','${String(row.item_id)}')"
-        >${cmtCount > 0 ? cmtCount + " Comments" : "Comment"}</button>
+        ><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${cmtCount > 0 ? ` ${cmtCount}` : ""}</button>
       </div>
       <div class="activity-cmt-section" id="cmt-${safeKey}" style="display:none">
         <div class="activity-cmt-list"></div>
@@ -4820,11 +4850,12 @@ function _refreshLikeBtn(safeKey, key) {
     total += d.count;
     if (d.mine) myEmoji = e;
   }
-  const label = myEmoji
-    ? (total > 0 ? `${myEmoji} ${total}` : myEmoji)
-    : (total > 0 ? String(total) : "Like");
+  const heartFill = myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+  const countLabel = total > 0 ? ` ${total}` : "";
   btn.classList.toggle("reacted", !!myEmoji);
-  btn.innerHTML = label;
+  btn.innerHTML = heartSvg + emojiLabel + countLabel;
 }
 
 function _refreshPickerCounts(safeKey, key) {
@@ -4837,6 +4868,81 @@ function _refreshPickerCounts(safeKey, key) {
     const d = rxData[e] || { count: 0 };
     btn.innerHTML = `${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}`;
   });
+}
+
+// ── Post reaction picker ──────────────────────────────────────────────────────
+function togglePostReactPicker(safeKey) {
+  const picker = document.getElementById(`picker-${safeKey}`);
+  if (!picker) return;
+  if (_openPicker && _openPicker !== safeKey) {
+    const prev = document.getElementById(`picker-${_openPicker}`);
+    if (prev) prev.style.display = "none";
+  }
+  const isOpen = picker.style.display !== "none";
+  picker.style.display = isOpen ? "none" : "";
+  _openPicker = isOpen ? null : safeKey;
+}
+
+async function pickPostReaction(event, safeKey, postId, emoji) {
+  event.stopPropagation();
+  const picker = document.getElementById(`picker-${safeKey}`);
+  if (!_postRxMap[postId]) _postRxMap[postId] = {};
+
+  const pickerBtn = event.currentTarget;
+  const wasPicked = pickerBtn.classList.contains("picked");
+  const existingEmoji = Object.keys(_postRxMap[postId]).find(e => _postRxMap[postId][e]?.mine);
+
+  if (picker) picker.style.display = "none";
+  _openPicker = null;
+
+  if (wasPicked) {
+    pickerBtn.classList.remove("picked");
+    const d = _postRxMap[postId][emoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    _refreshPostLikeBtn(safeKey, postId);
+    await db.from("activity_reactions").delete()
+      .eq("email", myEmail).eq("event_type", "post").eq("item_id", postId).eq("emoji", emoji);
+    return;
+  }
+
+  if (existingEmoji) {
+    const prevBtn = picker?.querySelector(".picked");
+    if (prevBtn) prevBtn.classList.remove("picked");
+    const d = _postRxMap[postId][existingEmoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    await db.from("activity_reactions").delete()
+      .eq("email", myEmail).eq("event_type", "post").eq("item_id", postId).eq("emoji", existingEmoji);
+  }
+
+  pickerBtn.classList.add("picked");
+  if (!_postRxMap[postId][emoji]) _postRxMap[postId][emoji] = { count: 0, mine: false };
+  _postRxMap[postId][emoji].mine = true;
+  _postRxMap[postId][emoji].count++;
+  _refreshPostLikeBtn(safeKey, postId);
+
+  // Sync into _rxMap so _refreshPickerCounts can read it
+  _rxMap[`post:${postId}`] = _postRxMap[postId];
+  _refreshPickerCounts(safeKey, `post:${postId}`);
+
+  await db.from("activity_reactions")
+    .insert({ email: myEmail, event_type: "post", item_id: postId, emoji });
+}
+
+function _refreshPostLikeBtn(safeKey, postId) {
+  const btn = document.getElementById(`like-btn-${safeKey}`);
+  if (!btn) return;
+  const rxData = _postRxMap[postId] || {};
+  let myEmoji = null, total = 0;
+  for (const [e, d] of Object.entries(rxData)) {
+    total += d.count;
+    if (d.mine) myEmoji = e;
+  }
+  const heartFill = myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+  const countLabel = total > 0 ? ` ${total}` : "";
+  btn.classList.toggle("liked", !!myEmoji);
+  btn.innerHTML = heartSvg + emojiLabel + countLabel;
 }
 
 // ── Activity comments ─────────────────────────────────────────────────────────
