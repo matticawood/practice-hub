@@ -6167,6 +6167,21 @@ function _subscribeGlobalRealtime() {
       // Refresh sidebar preview
       if (document.getElementById("view-chat").style.display !== "none") _loadConversationsList();
     })
+    .on("broadcast", { event: "new_message" }, ({ payload }) => {
+      if (!payload) return;
+      const msg = payload;
+      // Skip our own messages (already shown optimistically)
+      if (_myInsertedIds.has(msg.id)) { _myInsertedIds.delete(msg.id); return; }
+      // Append to current conversation if it matches
+      if (_chatState === "conversation" && msg.chat_id === _currentChatId) {
+        if (_chatMessages.find(m => m.id === msg.id)) return;
+        _chatMessages.push(msg);
+        _appendChatMessage(msg);
+        _scrollChatToBottom();
+      }
+      // Refresh sidebar preview
+      if (document.getElementById("view-chat").style.display !== "none") _loadConversationsList();
+    })
     .on("broadcast", { event: "typing" }, ({ payload }) => {
       if (!payload || payload.chat_id !== _currentChatId) return;
       _showTyping(payload.email, payload.name);
@@ -6326,6 +6341,17 @@ async function sendChatMessage() {
   if (optEl) optEl.dataset.msgId = inserted.id;
   const idx = _chatMessages.findIndex(m => m.id === optimistic.id);
   if (idx !== -1) _chatMessages[idx] = inserted;
+
+  // Broadcast the new message to all connected clients via the realtime channel
+  // (postgres_changes requires the table to be in Supabase Realtime publication;
+  //  broadcast works immediately for all connected clients)
+  if (_chatRealtimeSub) {
+    _chatRealtimeSub.send({
+      type: "broadcast",
+      event: "new_message",
+      payload: inserted
+    });
+  }
 
   // Refresh conversation list so new/updated convos always appear immediately
   _loadConversationsList();
