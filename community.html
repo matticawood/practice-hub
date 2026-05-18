@@ -4117,14 +4117,18 @@ function renderDetail(postId) {
       <div class="detail-content">${escHtml(p.content)}</div>
       ${pollPlaceholder}
       <div class="detail-footer">
-        <button class="post-footer-btn ${p.iLiked ? "liked" : ""}"
-          id="detail-like-btn" data-post-id="${p.id}"
-          onclick="toggleLike(this,'${p.id}')">
-          ${p.iLiked
-            ? `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`
-            : `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`}
-          <span class="like-count-${p.id}">${p.likeCount || ""}</span>
-        </button>
+        <div style="position:relative;display:inline-flex">
+          <button class="post-footer-btn${p.myEmoji ? " liked" : ""}" id="like-btn-detail_${p.id.replace(/-/g,'_')}" data-post-id="${p.id}"
+            onclick="togglePostReactPicker('detail_${p.id.replace(/-/g,'_')}')">
+            <svg viewBox="0 0 24 24" width="15" height="15" ${p.myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${p.myEmoji && p.myEmoji !== "❤️" ? ` ${p.myEmoji}` : ""}${p.totalReactions > 0 ? ` ${p.totalReactions}` : ""}
+          </button>
+          <div class="activity-react-picker" id="picker-detail_${p.id.replace(/-/g,'_')}" style="display:none">
+            ${ACTIVITY_EMOJIS.map(e => {
+              const d = (_postRxMap[p.id] || {})[e] || { count: 0, mine: false };
+              return `<button class="${d.mine ? "picked" : ""}" onclick="pickPostReaction(event,'detail_${p.id.replace(/-/g,'_')}','${p.id}','${e}')">${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+            }).join("")}
+          </div>
+        </div>
         ${deleteBtn}
       </div>
     </div>`;
@@ -4897,7 +4901,9 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
     _refreshPostLikeBtn(safeKey, postId);
     _rxMap[`post:${postId}`] = _postRxMap[postId];
+    const _dsk = `detail_${postId.replace(/-/g,'_')}`;
     _refreshPickerCounts(safeKey, `post:${postId}`);
+    _refreshPickerCounts(_dsk, `post:${postId}`);
     await db.from("activity_reactions").delete()
       .eq("email", myEmail).eq("event_type", "post").eq("item_id", postId).eq("emoji", emoji);
     return;
@@ -4918,17 +4924,17 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
   _postRxMap[postId][emoji].count++;
   _refreshPostLikeBtn(safeKey, postId);
 
-  // Sync into _rxMap so _refreshPickerCounts can read it
+  // Sync into _rxMap so _refreshPickerCounts can read it, refresh both card + detail pickers
   _rxMap[`post:${postId}`] = _postRxMap[postId];
+  const _detailSafeKey = `detail_${postId.replace(/-/g,'_')}`;
   _refreshPickerCounts(safeKey, `post:${postId}`);
+  _refreshPickerCounts(_detailSafeKey, `post:${postId}`);
 
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: "post", item_id: postId, emoji });
 }
 
 function _refreshPostLikeBtn(safeKey, postId) {
-  const btn = document.getElementById(`like-btn-${safeKey}`);
-  if (!btn) return;
   const rxData = _postRxMap[postId] || {};
   let myEmoji = null, total = 0;
   for (const [e, d] of Object.entries(rxData)) {
@@ -4939,8 +4945,14 @@ function _refreshPostLikeBtn(safeKey, postId) {
   const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
   const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
   const countLabel = total > 0 ? ` ${total}` : "";
-  btn.classList.toggle("liked", !!myEmoji);
-  btn.innerHTML = heartSvg + emojiLabel + countLabel;
+  // Update both the feed card button and the detail view button
+  const detailSafeKey = `detail_${postId.replace(/-/g,'_')}`;
+  for (const key of [safeKey, detailSafeKey]) {
+    const btn = document.getElementById(`like-btn-${key}`);
+    if (!btn) continue;
+    btn.classList.toggle("liked", !!myEmoji);
+    btn.innerHTML = heartSvg + emojiLabel + countLabel;
+  }
   // Update meta count on right
   const post = _posts.find(p => p.id === postId);
   const commentCount = post?.commentCount || 0;
