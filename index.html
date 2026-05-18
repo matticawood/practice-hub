@@ -1600,8 +1600,8 @@ document.getElementById("csv-upload").addEventListener("change", async e => {
     const currentEmails = (current || []).map(r => r.email.toLowerCase());
     const toRemove = currentEmails.filter(e => !incomingEmails.includes(e) && e !== owner);
     if (toRemove.length) {
-      const { error } = await db.from("allowed_emails").delete().in("email", toRemove);
-      if (error) { showAccessFeedback("Error removing old emails: " + error.message, "error"); return; }
+      const removeErr = await _deleteMembers(toRemove);
+      if (removeErr) { showAccessFeedback("Error removing old emails: " + removeErr.message, "error"); return; }
     }
     // Upsert all incoming members — adds new ones and updates names on existing rows
     const upsertRows = incomingMembers.map(m => ({ email: m.email, ...(m.name ? { name: m.name } : {}) }));
@@ -1621,8 +1621,27 @@ document.getElementById("csv-upload").addEventListener("change", async e => {
   };
   reader.readAsText(file);
 });
+// Delete all FK-constrained child records for the given emails, then remove
+// from allowed_emails. Returns an error object on failure, null on success.
+async function _deleteMembers(emails) {
+  if (!emails.length) return null;
+  // Tables with foreign key constraints on email → allowed_emails.email
+  // must be cleared before the parent row can be deleted.
+  const fkTables = [
+    "achievement_events",
+    "notifications",
+    "streak_tokens",
+  ];
+  for (const table of fkTables) {
+    const { error } = await db.from(table).delete().in("email", emails);
+    if (error) return error;
+  }
+  const { error } = await db.from("allowed_emails").delete().in("email", emails);
+  return error || null;
+}
+
 async function handleRemoveEmail(email) {
-  const { error } = await db.from("allowed_emails").delete().eq("email", email);
+  const error = await _deleteMembers([email]);
   if (error) { showAccessFeedback("Error removing email: " + error.message, "error"); return; }
   showAccessFeedback(`${email} removed.`);
   await renderEmailList();
