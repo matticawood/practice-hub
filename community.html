@@ -2360,8 +2360,9 @@ const POST_TYPES = {
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let myEmail = null;
-let myName  = null;
+let myEmail     = null;
+let myName      = null;
+let myAvatarUrl = null;
 let isAdmin = false;
 
 let _selectedType  = null;
@@ -2419,7 +2420,8 @@ let _feedItems = []; // all feed rows for detail view lookup
   myName  = ae?.name || myEmail.split("@")[0];
   isAdmin = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
 
-  initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "community", avatarUrl: ae?.avatar_url || null });
+  myAvatarUrl = ae?.avatar_url || null;
+  initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "community", avatarUrl: myAvatarUrl });
 
   // Avatars
   const colour = avatarColour(myEmail);
@@ -6195,27 +6197,49 @@ function _chatTime(ts) {
 
 // Build HTML for a single message
 function _chatMsgHtml(msg, isMine, showMeta) {
-  const media    = Array.isArray(msg.media) ? msg.media : (typeof msg.media === "string" ? JSON.parse(msg.media || "[]") : []);
-  // Look up proper display name + avatar from members list
-  const member   = (_allMembers || []).find(m => m.email === msg.email);
-  const dispName = member?.name || msg.name || msg.email?.split("@")[0] || "Member";
-  const avatarUrl = member?.avatar_url || null;
-  const name     = escHtml(dispName);
-  const timeStr  = _chatTime(msg.created_at);
-  const mediaHtml = _renderCommentMedia({ media });
+  const rawMedia = Array.isArray(msg.media) ? msg.media
+    : (typeof msg.media === "string" ? JSON.parse(msg.media || "[]") : []);
+
+  // Separate polls (render outside the bubble so they don't inherit its colour)
+  const pollItem    = rawMedia.find(m => m.type === "poll");
+  const nonPollMedia = rawMedia.filter(m => m.type !== "poll");
+
+  // Look up proper display name + avatar — use stored myAvatarUrl for own messages
+  const member    = (_allMembers || []).find(m => m.email === msg.email);
+  const dispName  = member?.name || msg.name || msg.email?.split("@")[0] || "Member";
+  const avatarUrl = isMine ? (myAvatarUrl || member?.avatar_url || null) : (member?.avatar_url || null);
+  const name      = escHtml(dispName);
+  const timeStr   = _chatTime(msg.created_at);
+
+  const mediaHtml = _renderCommentMedia({ media: nonPollMedia });
   const contentHtml = msg.content ? `<div>${escHtml(msg.content).replace(/\n/g, "<br>")}</div>` : "";
   const bubbleContent = contentHtml + (mediaHtml ? `<div class="chat-media">${mediaHtml}</div>` : "");
-  const avatarEl = avatarHtml(msg.email, dispName, 34, avatarUrl);
 
+  const pollHtml = pollItem ? (() => {
+    const opts = Array.isArray(pollItem.options) ? pollItem.options : [];
+    return `<div style="margin-top:6px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;max-width:300px">
+      <div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${escHtml(pollItem.question || "Poll")}</div>
+      ${opts.map(o => `<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${escHtml(o)}</div>`).join("")}
+    </div>`;
+  })() : "";
+
+  const avatarEl = avatarHtml(msg.email, dispName, 34, avatarUrl);
   const metaHtml = showMeta
     ? `<div class="chat-msg-meta"><span class="chat-msg-name">${name}</span><span class="chat-msg-time">${timeStr}</span></div>`
     : "";
+
+  // Only render the text/media bubble if there's something in it
+  const bubbleHtml = bubbleContent
+    ? `<div class="chat-bubble${isMine ? " mine" : ""}">${bubbleContent}</div>`
+    : "";
+
   return `
   <div class="chat-msg-group${isMine ? " mine" : ""}" data-msg-id="${escHtml(msg.id)}" style="margin-top:${showMeta ? "10" : "3"}px">
     <div class="chat-msg-avatar">${avatarEl}</div>
     <div class="chat-msg-body">
       ${metaHtml}
-      <div class="chat-bubble${isMine ? " mine" : ""}">${bubbleContent}</div>
+      ${bubbleHtml}
+      ${pollHtml}
     </div>
   </div>`;
 }
