@@ -4314,7 +4314,7 @@ function postCardHTML(p) {
   // Inline poll
   if (p.poll && p.poll.options?.length) {
     const poll = p.poll;
-    const hasVoted = !!poll.myVote;
+    const hasVoted = !!poll.myVote || p.email === myEmail;
     let pollHtml = `<div class="card-poll" onclick="event.stopPropagation()">
       <div class="card-poll-question">${escHtml(poll.question)}</div>`;
     if (!hasVoted) {
@@ -4543,7 +4543,7 @@ function renderDetail(postId) {
   }
 
   // Poll placeholder — loaded async
-  const pollPlaceholder = p.poll ? `<div id="detail-poll-area" data-poll-id="${escHtml(p.poll.id)}"><div style="text-align:center;padding:16px 0;color:var(--text-muted);font-size:.82rem"><div class="loading-spinner" style="margin:0 auto 8px;width:18px;height:18px"></div>Loading poll…</div></div>` : "";
+  const pollPlaceholder = p.poll ? `<div id="detail-poll-area" data-poll-id="${escHtml(p.poll.id)}" data-author-email="${escHtml(p.email)}"><div style="text-align:center;padding:16px 0;color:var(--text-muted);font-size:.82rem"><div class="loading-spinner" style="margin:0 auto 8px;width:18px;height:18px"></div>Loading poll…</div></div>` : "";
 
   document.getElementById("detail-post-area").innerHTML = `
     <div class="detail-card">
@@ -4627,11 +4627,12 @@ async function loadPollDetail(pollId) {
   const voteCountMap = {};
   (votes || []).forEach(v => { voteCountMap[v.option_id] = (voteCountMap[v.option_id] || 0) + 1; });
 
-  _renderPollUI(area, pollId, pollRow.question, opts, voteCountMap, myOptId, totalVotes);
+  const authorEmail = area.dataset.authorEmail || "";
+  _renderPollUI(area, pollId, pollRow.question, opts, voteCountMap, myOptId, totalVotes, authorEmail);
 }
 
-function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, totalVotes) {
-  const hasVoted = !!myOptId;
+function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail) {
+  const hasVoted = !!myOptId || (!!authorEmail && authorEmail === myEmail);
   let html = `<div class="poll-card">
     <div class="poll-card-question">${escHtml(question)}</div>`;
 
@@ -4666,8 +4667,8 @@ function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, tota
 }
 
 // Returns poll HTML string — used for comment/reply polls and shared by _renderPollUI
-function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes) {
-  const hasVoted = !!myOptId;
+function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail) {
+  const hasVoted = !!myOptId || (!!authorEmail && authorEmail === myEmail);
   let html = `<div class="poll-card"><div class="poll-card-question">${escHtml(question)}</div>`;
   if (!hasVoted) {
     html += opts.map(o =>
@@ -4837,10 +4838,10 @@ async function loadComments(postId) {
     repliesMap[c.parent_comment_id].push(c);
   });
 
-  function commentPollHtml(commentId) {
+  function commentPollHtml(commentId, authorEmail) {
     const p = pollByComment[commentId];
     if (!p) return "";
-    return _commentPollHtml(p.pollId, p.question, p.opts, p.voteCountMap, p.myOptId, p.totalVotes);
+    return _commentPollHtml(p.pollId, p.question, p.opts, p.voteCountMap, p.myOptId, p.totalVotes, authorEmail);
   }
 
   function commentHTML(c, isReply = false, threadId = null) {
@@ -4862,7 +4863,7 @@ async function loadComments(postId) {
           </div>
           ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderCommentMedia(c)}
-          ${commentPollHtml(c.id)}
+          ${commentPollHtml(c.id, c.email)}
           <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
         </div>
       </div>`;
@@ -6410,7 +6411,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     const opts   = Array.isArray(pollItem.options) ? pollItem.options : [];
     const vdata  = _chatPollVotes[msg.id] || { myVote: null, counts: {} };
     const total  = Object.values(vdata.counts).reduce((a, b) => a + b, 0);
-    const voted  = vdata.myVote !== null && vdata.myVote !== undefined;
+    const voted  = (vdata.myVote !== null && vdata.myVote !== undefined) || isMine;
     const rows   = opts.map((o, i) => {
       const count = vdata.counts[i] || 0;
       const pct   = total ? Math.round((count / total) * 100) : 0;
