@@ -621,7 +621,12 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   }
 
   // Logout — user menu button (desktop) and mobile sheet button
-  const logoutHandler = async () => { await db.auth.signOut(); window.location.href = "/practice-log.html"; };
+  const logoutHandler = async () => {
+    try { await db.auth.signOut(); } catch(e) {}
+    // Clear the custom session key that practice-log stores separately from Supabase auth
+    localStorage.removeItem("practiceRoom_session");
+    window.location.href = "/practice-log.html";
+  };
   document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
   document.getElementById("sh-mob-logout-btn")?.addEventListener("click", logoutHandler);
 
