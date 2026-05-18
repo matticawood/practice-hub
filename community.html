@@ -1501,7 +1501,9 @@
       display: flex; align-items: center; gap: 6px;
       padding: 0 4px 2px;
     }
-    .chat-msg-name { font-weight: 600; color: var(--text); }
+    .chat-msg-group.mine .chat-msg-meta { flex-direction: row-reverse; }
+    .chat-msg-name { font-weight: 700; font-size: 0.82rem; color: var(--text); }
+    .chat-msg-time { font-size: 0.72rem; color: var(--text-muted); }
     .chat-bubble {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -5826,6 +5828,9 @@ async function showChat(chatIdOrEmail, otherName) {
   _showChatView();
   _loadConversationsList();
 
+  // Ensure member list is loaded so avatars + proper names show in chat
+  if (!_membersLoaded) loadMembers();
+
   const isMobile = window.matchMedia("(max-width: 640px)").matches;
 
   if (isMobile) {
@@ -6129,23 +6134,42 @@ function _renderChatMessages() {
   });
 }
 
+// Format timestamp as clock time (e.g. "12:21 PM"), falling back to date for older
+function _chatTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const hhmm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (isToday)     return hhmm;
+  if (isYesterday) return `Yesterday ${hhmm}`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hhmm;
+}
+
 // Build HTML for a single message
 function _chatMsgHtml(msg, isMine, showMeta) {
   const media    = Array.isArray(msg.media) ? msg.media : (typeof msg.media === "string" ? JSON.parse(msg.media || "[]") : []);
-  const name     = escHtml(msg.name || msg.email?.split("@")[0] || "Member");
-  const timeStr  = relativeTime(msg.created_at);
+  // Look up proper display name + avatar from members list
+  const member   = (_allMembers || []).find(m => m.email === msg.email);
+  const dispName = member?.name || msg.name || msg.email?.split("@")[0] || "Member";
+  const avatarUrl = member?.avatar_url || null;
+  const name     = escHtml(dispName);
+  const timeStr  = _chatTime(msg.created_at);
   const mediaHtml = _renderCommentMedia({ media });
   const contentHtml = msg.content ? `<div>${escHtml(msg.content).replace(/\n/g, "<br>")}</div>` : "";
   const bubbleContent = contentHtml + (mediaHtml ? `<div class="chat-media">${mediaHtml}</div>` : "");
+  const avatarEl = avatarHtml(msg.email, dispName, 34, avatarUrl);
 
   if (showMeta) {
     return `
     <div class="chat-msg-group${isMine ? " mine" : ""}" data-msg-id="${escHtml(msg.id)}">
-      <div class="chat-msg-avatar">${avatarHtml(msg.email, msg.name, 32, null)}</div>
+      <div class="chat-msg-avatar">${avatarEl}</div>
       <div class="chat-msg-body">
         <div class="chat-msg-meta">
-          ${!isMine ? `<span class="chat-msg-name">${name}</span>` : ""}
-          <span>${timeStr}</span>
+          <span class="chat-msg-name">${name}</span>
+          <span class="chat-msg-time">${timeStr}</span>
         </div>
         <div class="chat-bubble">${bubbleContent}</div>
       </div>
