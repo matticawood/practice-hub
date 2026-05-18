@@ -1658,12 +1658,49 @@
         <div class="comments-section">
           <div class="comments-hdr" id="comments-hdr">Comments</div>
           <div id="comments-list"></div>
-          <div class="comment-form">
-            <div class="comment-avatar" id="comment-avatar-el"></div>
-            <textarea class="comment-input" id="comment-input" placeholder="Write a comment…" rows="1"
-              oninput="autoResize(this)"
-              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment();}"></textarea>
-            <button class="btn btn-sm" onclick="submitComment()" style="flex-shrink:0">Send</button>
+          <div class="comment-form" style="flex-direction:column;align-items:stretch;gap:0">
+            <div style="display:flex;gap:10px;align-items:flex-end">
+              <div class="comment-avatar" id="comment-avatar-el"></div>
+              <textarea class="comment-input" id="comment-input" placeholder="Write a comment…" rows="1"
+                oninput="autoResize(this)"
+                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment();}"></textarea>
+              <button class="btn btn-sm" onclick="submitComment()" style="flex-shrink:0">Send</button>
+            </div>
+            <!-- Inline toolbar for main comment input -->
+            <div style="padding-left:38px;margin-top:4px">
+              <div class="composer-toolbar" id="inline-main-toolbar" style="flex-wrap:wrap">
+                <button class="toolbar-btn" title="Image" onclick="document.getElementById('inline-file-image').click()">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                </button>
+                <button class="toolbar-btn" title="File" onclick="document.getElementById('inline-file-file').click()">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                </button>
+                <button class="toolbar-btn" title="Voice recording" id="inline-main-voice-btn" onclick="toggleInlineVoice('main')">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                </button>
+                <button class="toolbar-btn" title="Poll" id="inline-main-poll-btn" onclick="toggleInlinePoll('main')">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                </button>
+                <input type="file" id="inline-file-image" accept="image/*" multiple style="display:none" onchange="inlineHandleImage(this,'main')">
+                <input type="file" id="inline-file-file" style="display:none" onchange="inlineHandleFile(this,'main')">
+              </div>
+              <div id="inline-recording-main" style="display:none;margin-top:6px" class="recording-indicator">
+                <span class="recording-dot"></span>
+                <span>Recording…</span>
+                <span id="inline-rec-time-main" style="margin-left:4px;opacity:.8">0:00</span>
+                <button class="recording-stop-btn" onclick="stopInlineVoice('main')">■ Stop</button>
+              </div>
+              <div id="inline-poll-main" style="display:none;margin-top:6px" class="poll-builder">
+                <div class="poll-builder-title">Poll</div>
+                <input class="poll-question-input" id="inline-poll-q-main" placeholder="Ask a question…" />
+                <div class="poll-options-list" id="inline-poll-opts-main">
+                  <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+                  <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+                </div>
+                <button class="poll-add-option" onclick="addInlinePollOption('main')">+ Add option</button>
+              </div>
+              <div class="media-preview-area" id="inline-media-preview-main"></div>
+            </div>
           </div>
         </div>
 
@@ -1890,6 +1927,13 @@ let _recordingTimer = null;
 let _videoUrlPanelOpen = false;
 let _codePanelOpen     = false;
 let _pollBuilderOpen   = false;
+
+// Inline (comment/reply) rich media state — keyed by composer key ('main' or comment id)
+const _inlineMedia       = {}; // key -> [{type, url, name, blob?, duration?}]
+const _inlinePollOpen    = {}; // key -> bool
+const _inlineVoiceRec    = {}; // key -> MediaRecorder | null
+const _inlineRecTimer    = {}; // key -> intervalId | null
+const _inlineRecStart    = {}; // key -> timestamp | null
 
 // Activity feed state
 let _feedRows = [], _feedPage = 1;
@@ -2867,6 +2911,260 @@ function removeMedia(idx) {
   _renderMediaPreview();
 }
 
+// ── Inline toolbar (comment + reply composers) ────────────────────────────────
+
+function _inlineKey(key) {
+  // Ensure per-key media array exists
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  return key;
+}
+
+function _renderInlineMediaPreview(key) {
+  const area = document.getElementById(`inline-media-preview-${key}`);
+  if (!area) return;
+  const media = _inlineMedia[key] || [];
+  if (!media.length) { area.innerHTML = ""; return; }
+  const images = media.filter(m => m.type === "image");
+  const others = media.filter(m => m.type !== "image");
+  let html = "";
+  if (images.length) {
+    html += `<div class="media-preview-images">` +
+      images.map((m, i) => {
+        const idx = media.indexOf(m);
+        return `<div class="media-thumb-wrap">
+          <img src="${m.url}" alt="${escHtml(m.name)}" />
+          <button class="media-thumb-remove" onclick="removeInlineMedia('${key}',${idx})" title="Remove">×</button>
+        </div>`;
+      }).join("") + `</div>`;
+  }
+  others.forEach(m => {
+    const idx = media.indexOf(m);
+    let icon = "📎", label = escHtml(m.name);
+    if (m.type === "audio") { icon = "🎙️"; label = `Voice message${m.duration ? " · " + m.duration + "s" : ""}`; }
+    html += `<span class="media-chip">${icon} ${label}<button class="media-chip-remove" onclick="removeInlineMedia('${key}',${idx})" title="Remove">×</button></span>`;
+  });
+  area.innerHTML = html;
+}
+
+function removeInlineMedia(key, idx) {
+  if (_inlineMedia[key]) { _inlineMedia[key].splice(idx, 1); }
+  _renderInlineMediaPreview(key);
+}
+
+function inlineHandleImage(input, key) {
+  _inlineKey(key);
+  Array.from(input.files || []).forEach(file => {
+    const url = URL.createObjectURL(file);
+    _inlineMedia[key].push({ type: "image", url, name: file.name, blob: file });
+  });
+  input.value = "";
+  _renderInlineMediaPreview(key);
+}
+
+function inlineHandleFile(input, key) {
+  _inlineKey(key);
+  const file = input.files[0];
+  if (!file) return;
+  _inlineMedia[key].push({ type: "file", name: file.name, blob: file });
+  input.value = "";
+  _renderInlineMediaPreview(key);
+}
+
+async function toggleInlineVoice(key) {
+  if (_inlineVoiceRec[key]) {
+    // Currently recording — stop
+    if (_inlineVoiceRec[key].state !== "inactive") _inlineVoiceRec[key].stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = [];
+    const mr = new MediaRecorder(stream);
+    _inlineVoiceRec[key] = mr;
+    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(_inlineRecTimer[key]);
+      _inlineRecTimer[key] = null;
+      _inlineVoiceRec[key] = null;
+      const recInd = document.getElementById(`inline-recording-${key}`);
+      if (recInd) recInd.style.display = "none";
+      const btn = document.getElementById(`inline-${key === "main" ? "main" : key}-voice-btn`) ||
+                  document.getElementById(`inline-voice-btn-${key}`);
+      if (btn) btn.classList.remove("recording");
+      const mime = mr.mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: mime });
+      const duration = _inlineRecStart[key] ? Math.round((Date.now() - _inlineRecStart[key]) / 1000) : 0;
+      const name = `voice-${Date.now()}.webm`;
+      _inlineKey(key);
+      _inlineMedia[key].push({ type: "audio", url: URL.createObjectURL(blob), name, blob, duration });
+      _renderInlineMediaPreview(key);
+    };
+    mr.start();
+    _inlineRecStart[key] = Date.now();
+    const voiceBtn = document.getElementById(`inline-${key === "main" ? "main" : key}-voice-btn`) ||
+                     document.getElementById(`inline-voice-btn-${key}`);
+    if (voiceBtn) voiceBtn.classList.add("recording");
+    const recInd = document.getElementById(`inline-recording-${key}`);
+    const timeEl = document.getElementById(`inline-rec-time-${key}`);
+    if (recInd) recInd.style.display = "";
+    _inlineRecTimer[key] = setInterval(() => {
+      const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      if (timeEl) timeEl.textContent = `${m}:${String(s).padStart(2, "0")}`;
+    }, 1000);
+  } catch (e) {
+    alert("Microphone access denied: " + e.message);
+  }
+}
+
+function stopInlineVoice(key) {
+  if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") {
+    _inlineVoiceRec[key].stop();
+  }
+}
+
+function toggleInlinePoll(key) {
+  const panel = document.getElementById(`inline-poll-${key}`);
+  if (!panel) return;
+  const open = panel.style.display === "none";
+  panel.style.display = open ? "" : "none";
+  _inlinePollOpen[key] = open;
+  const btn = document.getElementById(`inline-${key === "main" ? "main" : key}-poll-btn`) ||
+              document.getElementById(`inline-poll-btn-${key}`);
+  if (btn) btn.classList.toggle("recording", open);
+  if (open) document.getElementById(`inline-poll-q-${key}`)?.focus();
+}
+
+function addInlinePollOption(key) {
+  const list = document.getElementById(`inline-poll-opts-${key}`);
+  if (!list) return;
+  const count = list.querySelectorAll(".poll-option-input").length + 1;
+  const row = document.createElement("div");
+  row.className = "poll-option-row";
+  row.innerHTML = `<input class="poll-option-input" placeholder="Option ${count}" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button>`;
+  list.appendChild(row);
+}
+
+function removeInlinePollOption(btn) {
+  const list = btn.closest(".poll-options-list") || btn.closest("[id^='inline-poll-opts-']");
+  if (!list) return;
+  if (list.querySelectorAll(".poll-option-row").length <= 2) return;
+  btn.closest(".poll-option-row").remove();
+}
+
+function _readInlinePoll(key) {
+  const q = document.getElementById(`inline-poll-q-${key}`)?.value.trim();
+  const opts = Array.from(document.querySelectorAll(`#inline-poll-opts-${key} .poll-option-input`))
+    .map(i => i.value.trim()).filter(Boolean);
+  if (!q || opts.length < 2) return null;
+  return { question: q, options: opts };
+}
+
+function _clearInlineState(key) {
+  _inlineMedia[key] = [];
+  _inlinePollOpen[key] = false;
+  if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") {
+    _inlineVoiceRec[key].stop();
+  }
+  _inlineVoiceRec[key] = null;
+  clearInterval(_inlineRecTimer[key]);
+  _inlineRecTimer[key] = null;
+  _inlineRecStart[key] = null;
+  _renderInlineMediaPreview(key);
+  const recInd = document.getElementById(`inline-recording-${key}`);
+  if (recInd) recInd.style.display = "none";
+  const pollPanel = document.getElementById(`inline-poll-${key}`);
+  if (pollPanel) pollPanel.style.display = "none";
+  const pollQ = document.getElementById(`inline-poll-q-${key}`);
+  if (pollQ) pollQ.value = "";
+  const pollOpts = document.getElementById(`inline-poll-opts-${key}`);
+  if (pollOpts) {
+    // Reset to 2 blank options
+    pollOpts.innerHTML = `
+      <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+      <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+    `;
+  }
+}
+
+// Build inline toolbar HTML string for a given key (used in reply composer template)
+function _inlineToolbarHtml(key) {
+  return `
+    <div class="composer-toolbar" id="inline-main-toolbar-${key}" style="flex-wrap:wrap;margin-top:4px">
+      <button class="toolbar-btn" title="Image" onclick="document.getElementById('inline-fi-img-${key}').click()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </button>
+      <button class="toolbar-btn" title="File" onclick="document.getElementById('inline-fi-file-${key}').click()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Voice recording" id="inline-voice-btn-${key}" onclick="toggleInlineVoice('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Poll" id="inline-poll-btn-${key}" onclick="toggleInlinePoll('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      </button>
+      <input type="file" id="inline-fi-img-${key}" accept="image/*" multiple style="display:none" onchange="inlineHandleImage(this,'${key}')">
+      <input type="file" id="inline-fi-file-${key}" style="display:none" onchange="inlineHandleFile(this,'${key}')">
+    </div>
+    <div id="inline-recording-${key}" style="display:none" class="recording-indicator">
+      <span class="recording-dot"></span>
+      <span>Recording…</span>
+      <span id="inline-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
+      <button class="recording-stop-btn" onclick="stopInlineVoice('${key}')">■ Stop</button>
+    </div>
+    <div id="inline-poll-${key}" style="display:none" class="poll-builder">
+      <div class="poll-builder-title">Poll</div>
+      <input class="poll-question-input" id="inline-poll-q-${key}" placeholder="Ask a question…" />
+      <div class="poll-options-list" id="inline-poll-opts-${key}">
+        <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+        <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+      </div>
+      <button class="poll-add-option" onclick="addInlinePollOption('${key}')">+ Add option</button>
+    </div>
+    <div class="media-preview-area" id="inline-media-preview-${key}"></div>
+  `;
+}
+
+// Render media attached to a comment row
+function _renderCommentMedia(c) {
+  const media = Array.isArray(c.media) ? c.media : [];
+  if (!media.length) return "";
+  let html = "";
+  const images = media.filter(m => m.type === "image");
+  const others = media.filter(m => m.type !== "image");
+  if (images.length) {
+    html += `<div class="media-preview-images" style="margin-top:6px">` +
+      images.map(m => `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border);cursor:pointer" onclick="window.open('${escHtml(m.url)}','_blank')" loading="lazy">`).join("") +
+      `</div>`;
+  }
+  others.forEach(m => {
+    if (m.type === "audio") {
+      html += `<div style="margin-top:6px"><audio src="${escHtml(m.url)}" controls style="width:100%;border-radius:8px"></audio></div>`;
+    } else if (m.type === "file") {
+      html += `<div style="margin-top:6px"><a href="${escHtml(m.url)}" target="_blank" download="${escHtml(m.name)}" class="post-media-chip">📎 ${escHtml(m.name)}</a></div>`;
+    }
+  });
+  return html;
+}
+
+// Upload inline media blobs to storage and return JSON-serialisable array
+async function _uploadInlineMedia(key) {
+  const media = _inlineMedia[key] || [];
+  const result = [];
+  for (const m of media) {
+    if (m.blob) {
+      const publicUrl = await uploadToStorage(m.blob, m.name);
+      const entry = { type: m.type, url: publicUrl, name: m.name };
+      if (m.duration) entry.duration = m.duration;
+      result.push(entry);
+    } else {
+      result.push({ type: m.type, url: m.url, name: m.name });
+    }
+  }
+  return result;
+}
+
 // ── Submit post (rich) ────────────────────────────────────────────────────────
 async function submitPost() {
   if (_muxUploading) { alert("Please wait for the video upload to finish."); return; }
@@ -3562,7 +3860,8 @@ async function loadComments(postId) {
             <span class="comment-time">${relativeTime(c.created_at)}</span>
             ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
           </div>
-          <div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>
+          ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
+          ${_renderCommentMedia(c)}
           <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
         </div>
       </div>`;
@@ -3573,13 +3872,14 @@ async function loadComments(postId) {
     const replyComposer = `
       <div id="reply-composer-${c.id}" class="comment-item is-reply" style="display:none">
         ${avatarHtml(myEmail, myName, 28, null)}
-        <div class="comment-body">
+        <div class="comment-body" style="flex:1;min-width:0">
           <textarea class="comment-input" placeholder="Write a reply…" rows="1"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReply('${c.id}',this)}"
-            style="width:100%;box-sizing:border-box;margin-bottom:6px"
+            style="width:100%;box-sizing:border-box;margin-bottom:4px"
           ></textarea>
-          <div style="display:flex;justify-content:flex-end;gap:14px">
+          ${_inlineToolbarHtml(c.id)}
+          <div style="display:flex;justify-content:flex-end;gap:14px;margin-top:8px">
             <button onclick="cancelReply('${c.id}')" style="background:none;border:none;font-family:inherit;font-size:0.8rem;cursor:pointer;color:var(--text-muted);padding:0">Cancel</button>
             <button onclick="submitReply('${c.id}',this.closest('.comment-item').querySelector('textarea'))" style="background:none;border:none;font-family:inherit;font-size:0.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Send</button>
           </div>
@@ -3592,12 +3892,23 @@ async function loadComments(postId) {
 
 function cancelReply(commentId) {
   const composer = document.getElementById(`reply-composer-${commentId}`);
-  if (composer) { composer.style.display = "none"; composer.querySelector("textarea").value = ""; }
+  if (composer) {
+    composer.style.display = "none";
+    const ta = composer.querySelector("textarea");
+    if (ta) ta.value = "";
+  }
+  _clearInlineState(commentId);
 }
 
 function startReply(commentId, authorName, authorEmail) {
-  // Hide any other open reply composers
-  document.querySelectorAll("[id^='reply-composer-']").forEach(el => el.style.display = "none");
+  // Hide any other open reply composers and clear their state
+  document.querySelectorAll("[id^='reply-composer-']").forEach(el => {
+    if (el.style.display !== "none") {
+      el.style.display = "none";
+      const existingId = el.id.replace("reply-composer-", "");
+      _clearInlineState(existingId);
+    }
+  });
   const composer = document.getElementById(`reply-composer-${commentId}`);
   if (!composer) return;
   composer.style.display = "flex";
@@ -3609,26 +3920,50 @@ function startReply(commentId, authorName, authorEmail) {
 
 async function submitReply(parentCommentId, textarea) {
   let content = textarea.value.trim();
-  if (!content) return;
+  const replyMedia = _inlineMedia[parentCommentId] || [];
+  const replyPoll  = _inlinePollOpen[parentCommentId] ? _readInlinePoll(parentCommentId) : null;
+  if (!content && !replyMedia.length && !replyPoll) return;
+
   // Strip any @Name prefix the user may have typed (we store it separately)
   const composer    = document.getElementById(`reply-composer-${parentCommentId}`);
   const replyToName = composer?.dataset.replyToName || null;
   if (replyToName && content.startsWith(`@${replyToName}`)) {
     content = content.slice(replyToName.length + 1).trimStart();
   }
-  if (!content) return;
   const replyToEmail = composer?.dataset.replyToEmail || null;
 
   textarea.disabled = true;
 
-  const { error } = await db.from("community_post_comments").insert({
+  // Upload inline media blobs
+  let mediaJson = [];
+  try {
+    mediaJson = await _uploadInlineMedia(parentCommentId);
+  } catch (e) {
+    textarea.disabled = false;
+    alert("Failed to upload media: " + e.message); return;
+  }
+
+  const { data: row, error } = await db.from("community_post_comments").insert({
     post_id:           _currentPostId,
     email:             myEmail,
     name:              myName,
-    content,
+    content:           content || null,
     parent_comment_id: parentCommentId,
     reply_to_name:     replyToName,
-  });
+    media:             mediaJson.length ? mediaJson : null,
+  }).select().single();
+
+  // Insert poll if provided
+  if (!error && replyPoll && row) {
+    const { data: pollRow } = await db.from("community_post_polls").insert({
+      post_id: _currentPostId, comment_id: row.id, question: replyPoll.question
+    }).select().single();
+    if (pollRow) {
+      await db.from("community_post_poll_options").insert(
+        replyPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
+      );
+    }
+  }
 
   // Notify the person being replied to
   if (!error && replyToEmail && replyToEmail !== myEmail) {
@@ -3636,7 +3971,7 @@ async function submitReply(parentCommentId, textarea) {
       email:    replyToEmail,
       type:     "comment_reply",
       title:    `${myName || "Someone"} replied to your comment`,
-      body:     content.slice(0, 120),
+      body:     (content || "Sent an attachment").slice(0, 120),
       link_url: `/community.html?post=${_currentPostId}`,
       metadata: {},
     });
@@ -3645,21 +3980,49 @@ async function submitReply(parentCommentId, textarea) {
 
   textarea.disabled = false;
   if (error) { alert("Couldn't post reply: " + error.message); return; }
+  _clearInlineState(parentCommentId);
   await loadComments(_currentPostId);
 }
 
 async function submitComment() {
-  const input = document.getElementById("comment-input");
+  const input   = document.getElementById("comment-input");
   const content = input.value.trim();
-  if (!content || !_currentPostId) return;
+  const cmtMedia = _inlineMedia["main"] || [];
+  const cmtPoll  = _inlinePollOpen["main"] ? _readInlinePoll("main") : null;
+  if (!content && !cmtMedia.length && !cmtPoll) return;
+  if (!_currentPostId) return;
 
   input.disabled = true;
-  const { error } = await db.from("community_post_comments").insert({
-    post_id: _currentPostId, email: myEmail, name: myName, content
-  });
+
+  // Upload inline media blobs
+  let mediaJson = [];
+  try {
+    mediaJson = await _uploadInlineMedia("main");
+  } catch (e) {
+    input.disabled = false;
+    alert("Failed to upload media: " + e.message); return;
+  }
+
+  const { data: row, error } = await db.from("community_post_comments").insert({
+    post_id: _currentPostId, email: myEmail, name: myName,
+    content: content || null,
+    media: mediaJson.length ? mediaJson : null,
+  }).select().single();
   input.disabled = false;
 
   if (error) { alert("Couldn't post comment: " + error.message); return; }
+
+  // Insert poll if provided
+  if (cmtPoll && row) {
+    const { data: pollRow } = await db.from("community_post_polls").insert({
+      post_id: _currentPostId, comment_id: row.id, question: cmtPoll.question
+    }).select().single();
+    if (pollRow) {
+      await db.from("community_post_poll_options").insert(
+        cmtPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
+      );
+    }
+  }
 
   // Notify the post owner if it's not their own comment
   const post = _posts.find(p => p.id === _currentPostId);
@@ -3668,7 +4031,7 @@ async function submitComment() {
       email:    post.email,
       type:     "new_comment",
       title:    `${myName || "Someone"} commented on your post`,
-      body:     content.slice(0, 120),
+      body:     (content || "Sent an attachment").slice(0, 120),
       link_url: `/community.html?post=${_currentPostId}`,
       metadata: {},
     });
@@ -3677,6 +4040,7 @@ async function submitComment() {
 
   input.value = "";
   input.style.height = "";
+  _clearInlineState("main");
   await loadComments(_currentPostId);
 }
 
