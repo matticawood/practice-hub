@@ -229,6 +229,7 @@
       border-radius: 5px; padding: 6px 10px;
       pointer-events: none; z-index: 10;
       animation: vod-qa-fadein .3s ease;
+      transition: bottom .3s ease;
     }
     #vod-qa-overlay.visible { display: block; }
     /* In fullscreen the overlay is moved into the fullscreen element and
@@ -3829,13 +3830,41 @@ async function setupVodQaOverlay(ev) {
     }
   });
 
+  // Move overlay up/down with the player controls bar.
+  // mux-player uses media-chrome internally — the media-controller element gets
+  // a "user-inactive" attribute when controls hide. Watch that with a
+  // MutationObserver so we stay perfectly in sync with the controls animation.
+  const BOTTOM_CONTROLS_SHOWN = 48;
+  const BOTTOM_CONTROLS_HIDDEN = 10;
+
+  function setOverlayBottom(controlsVisible) {
+    const ov = document.getElementById("vod-qa-overlay");
+    if (!ov || ov.classList.contains("fullscreen-mode")) return;
+    ov.style.bottom = (controlsVisible ? BOTTOM_CONTROLS_SHOWN : BOTTOM_CONTROLS_HIDDEN) + "px";
+  }
+
+  try {
+    const controller = player.shadowRoot?.querySelector("media-controller");
+    if (!controller) throw new Error("no controller");
+    new MutationObserver(() => {
+      setOverlayBottom(!controller.hasAttribute("user-inactive"));
+    }).observe(controller, { attributes: true, attributeFilter: ["user-inactive"] });
+  } catch(e) {
+    // Fallback: approximate with mouse events
+    let hideTimer = null;
+    const show = () => { setOverlayBottom(true); clearTimeout(hideTimer); hideTimer = setTimeout(() => setOverlayBottom(false), 2500); };
+    player.addEventListener("mousemove",  show);
+    player.addEventListener("touchstart", show);
+    player.addEventListener("mouseleave", () => { clearTimeout(hideTimer); setOverlayBottom(false); });
+  }
+
   // Fullscreen: mux-player's native fullscreen owns its own shadow DOM so our
   // overlay disappears. Fix: move it into the fullscreen element with
   // position:fixed, then use positionVodOverlay() to compute pixel coords that
   // match the actual video render area (accounting for letterbox bars).
   const wrap = document.getElementById("vod-player-wrap");
 
-  function positionVodOverlay(ov) {
+  function positionVodOverlay(ov, controlsVisible = true) {
     // Use screen.width/height — these always reflect the physical screen size
     // even before window.innerWidth has updated after the fullscreen transition.
     // Daily.co recordings are 16:9, so assume that aspect ratio.
@@ -3857,7 +3886,8 @@ async function setupVodQaOverlay(ev) {
 
     const set = (el, prop, val) => el?.style.setProperty(prop, val, "important");
 
-    set(ov, "bottom",      (offsetY + renderH * 0.07) + "px");
+    set(ov, "bottom",      (offsetY + renderH * (controlsVisible ? 0.07 : 0.02)) + "px");
+    set(ov, "transition",  "bottom .3s ease");
     set(ov, "left",        (offsetX + renderW * 0.015) + "px");
     set(ov, "max-width",   (renderW * 0.28) + "px");
     set(ov, "padding",     (renderH * 0.012) + "px " + (renderW * 0.012) + "px");
@@ -3896,8 +3926,18 @@ async function setupVodQaOverlay(ev) {
       fs.appendChild(ov);
       ov.classList.add("fullscreen-mode");
       // Small delay — browser needs time to finish the fullscreen transition
-      // before screen dimensions are reliable
-      setTimeout(() => positionVodOverlay(ov), 150);
+      setTimeout(() => {
+        positionVodOverlay(ov, true);
+        // Keep overlay in sync with controls visibility in fullscreen too
+        try {
+          const ctrl = player.shadowRoot?.querySelector("media-controller");
+          if (ctrl) {
+            new MutationObserver(() => {
+              positionVodOverlay(ov, !ctrl.hasAttribute("user-inactive"));
+            }).observe(ctrl, { attributes: true, attributeFilter: ["user-inactive"] });
+          }
+        } catch(e) {}
+      }, 150);
     } else if (wrap) {
       wrap.appendChild(ov);
       ov.classList.remove("fullscreen-mode");
