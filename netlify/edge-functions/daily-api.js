@@ -317,10 +317,10 @@ export default async (request) => {
   }
 
   // ── Action: fetch-recording ────────────────────────────────────────────────
-  // Admin only. Finds ALL Daily.co recordings for a room (sorted by start
-  // time), gets download links for each, and creates a single Mux asset with
-  // all parts as inputs — Mux concatenates them automatically. This handles
-  // the case where the host left and rejoined, creating multiple recordings.
+  // Admin only. Finds ALL Daily.co recordings for a room, picks the longest
+  // one (Mux does not support multi-video concatenation via multi-input),
+  // creates a Mux asset from it, and saves the playback ID to the event row.
+  // This handles the case where the host left and rejoined (multiple recordings).
   if (action === "fetch-recording") {
     if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
     const { roomName: rn, eventId: eid } = body;
@@ -330,38 +330,53 @@ export default async (request) => {
     const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
     const SERVICE_KEY      = Netlify.env.get("SUPABASE_SERVICE_KEY");
 
-    // List ALL recordings for this room, sorted oldest → newest
+    // List ALL recordings for this room
     const recRes = await fetch(
       `https://api.daily.co/v1/recordings?room_name=${encodeURIComponent(rn)}`,
       { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
     );
     const recData = await recRes.json();
-    const recordings = (recData?.data || []).sort((a, b) => a.start_ts - b.start_ts);
+    const recordings = recData?.data || [];
     if (!recordings.length) return json({ error: "No recordings found for this room" }, 404);
 
-    // Get a signed download URL for each recording in parallel
-    const inputs = (await Promise.all(
-      recordings.map(async rec => {
-        const res  = await fetch(`https://api.daily.co/v1/recordings/${rec.id}/access-link`,
-          { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } });
-        const data = await res.json();
-        const url  = data?.download_link || data?.url || rec.download_link;
-        return url ? { url } : null;
-      })
-    )).filter(Boolean);
+    console.log(`fetch-recording: found ${recordings.length} recording(s) for room ${rn}`);
+    recordings.forEach(r => console.log(`  id=${r.id} duration=${r.duration} start_ts=${r.start_ts} status=${r.status}`));
 
-    if (!inputs.length) return json({ error: "No download links available yet — recordings may still be processing" }, 404);
+    // Pick the longest recording by duration (fall back to most recent if no duration)
+    // Mux only accepts one video input — concatenation via multi-input is not supported.
+    const bestRec = recordings.reduce((best, rec) => {
+      const bestDur = best.duration ?? -1;
+      const recDur  = rec.duration  ?? -1;
+      if (recDur > bestDur) return rec;
+      if (recDur === bestDur) return (rec.start_ts || 0) > (best.start_ts || 0) ? rec : best;
+      return best;
+    }, recordings[0]);
 
-    // Create a single Mux asset; if multiple parts, Mux concatenates them
+    console.log(`fetch-recording: using recording id=${bestRec.id} duration=${bestRec.duration}`);
+
+    // Get a signed download link for the chosen recording
+    const linkRes  = await fetch(
+      `https://api.daily.co/v1/recordings/${bestRec.id}/access-link`,
+      { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
+    );
+    const linkData = await linkRes.json();
+    console.log("fetch-recording: access-link response:", JSON.stringify(linkData));
+
+    // Daily.co may use download_link, link, or url — try all three
+    const url = linkData?.download_link || linkData?.link || linkData?.url || bestRec.download_link;
+    if (!url) return json({ error: "No download link available yet — recording may still be processing", recordings: recordings.length }, 404);
+
+    // Create Mux asset (single input only — Mux concatenation is not supported here)
     const muxRes = await fetch("https://api.mux.com/video/v1/assets", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`)
       },
-      body: JSON.stringify({ input: inputs, playback_policy: ["public"] })
+      body: JSON.stringify({ input: [{ url }], playback_policy: ["public"] })
     });
     const muxData = await muxRes.json();
+    console.log("fetch-recording: Mux response:", JSON.stringify(muxData));
     const asset = muxData?.data;
     if (!asset) return json({ error: "Mux asset creation failed", detail: muxData }, 500);
 
@@ -377,7 +392,12 @@ export default async (request) => {
       body: JSON.stringify({ mux_asset_id: muxAssetId, mux_playback_id: muxPlaybackId })
     });
 
-    return json({ ok: true, muxAssetId, muxPlaybackId, parts: inputs.length });
+    return json({
+      ok: true, muxAssetId, muxPlaybackId,
+      totalRecordings: recordings.length,
+      usedRecording: bestRec.id,
+      usedDuration: bestRec.duration ?? null,
+    });
   }
 
   // ── Action: setup-webhook ──────────────────────────────────────────────────
