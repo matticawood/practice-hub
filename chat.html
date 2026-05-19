@@ -2181,7 +2181,7 @@ function _renderCommentMedia(c) {
     if (m.type === "mux") {
       html += `<div style="margin-top:8px;width:min(480px,70vw);aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#000"><mux-player playback-id="${escHtml(m.playbackId)}" controls style="width:100%;height:100%;display:block"></mux-player></div>`;
     } else if (m.type === "audio") {
-      html += `<div style="margin-top:6px;min-width:240px"><audio controls preload="auto" style="width:100%;min-width:240px;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
+      html += `<div style="margin-top:6px;min-width:240px"><audio controls preload="metadata" style="width:100%;min-width:240px;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
     } else if (m.type === "youtube") {
       html += `<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "vimeo") {
@@ -2439,6 +2439,9 @@ let _chatConversations = [];          // list of all known conversations for thi
 let _chatState       = "list";        // 'list' | 'conversation' | 'new'
 let _chatPollVotes   = {};            // messageId -> { myVote: optionIdx|null, counts: {optionIdx: count} }
 let _chatRxMap       = {};            // messageId -> { emoji -> { count, mine } }
+let _chatHasMore     = false;         // whether older messages exist beyond current page
+let _chatLoadingMore = false;         // guard against concurrent load-more requests
+const CHAT_PAGE_SIZE = 50;            // messages per page
 
 // New-chat selection state
 let _newChatSelected = [];            // [{email, name, avatarUrl}]
@@ -2735,17 +2738,19 @@ async function _openConversation(chatIdOrEmail, otherName) {
   _clearInlineState("chat_main");
   toolbarContainer.innerHTML = _inlineToolbarHtml("chat_main");
 
-  // Load messages
+  // Load messages — fetch one extra to detect whether older pages exist
   document.getElementById("chat-messages").innerHTML =
     `<div class="chat-empty" id="chat-empty" style="color:var(--text-muted);font-size:.85rem">Loading…</div>`;
-  _chatMessages = [];
+  _chatMessages  = [];
+  _chatHasMore   = false;
+  _chatLoadingMore = false;
 
   const { data, error } = await db
     .from("community_messages")
     .select("*")
     .eq("chat_id", chatId)
-    .order("created_at", { ascending: true })
-    .limit(200);
+    .order("created_at", { ascending: false })
+    .limit(CHAT_PAGE_SIZE + 1);
 
   if (error) {
     document.getElementById("chat-messages").innerHTML =
@@ -2753,49 +2758,125 @@ async function _openConversation(chatIdOrEmail, otherName) {
     return;
   }
 
-  _chatMessages = data || [];
+  const rows = data || [];
+  if (rows.length > CHAT_PAGE_SIZE) { _chatHasMore = true; rows.pop(); }
+  _chatMessages = rows.reverse(); // back to chronological order
 
-  // Load poll votes for any poll messages in this conversation
-  const pollMsgIds = _chatMessages
+  await _fetchPollsAndReactions(_chatMessages.map(m => m.id), true);
+
+  _renderChatMessages();
+  _scrollChatToBottom(true);
+}
+
+// Fetch poll votes + reactions for a set of message IDs and merge into global maps.
+// Pass reset=true on initial load to clear the maps first.
+async function _fetchPollsAndReactions(msgIds, reset = false) {
+  if (reset) { _chatPollVotes = {}; _chatRxMap = {}; }
+  if (!msgIds.length) return;
+
+  const msgs = msgIds.map(id => _chatMessages.find(m => m.id === id)).filter(Boolean);
+  const pollMsgIds = msgs
     .filter(m => {
       const media = Array.isArray(m.media) ? m.media : (typeof m.media === "string" ? JSON.parse(m.media || "[]") : []);
       return media.some(x => x.type === "poll");
     })
     .map(m => m.id);
 
-  _chatPollVotes = {};
+  const fetches = [
+    db.from("community_chat_reactions").select("message_id,email,emoji").in("message_id", msgIds)
+  ];
   if (pollMsgIds.length) {
-    const [{ data: allVotes }, { data: myVotes }] = await Promise.all([
+    fetches.push(
       db.from("community_chat_poll_votes").select("message_id,option_idx").in("message_id", pollMsgIds),
       db.from("community_chat_poll_votes").select("message_id,option_idx").eq("email", myEmail).in("message_id", pollMsgIds)
-    ]);
-    (allVotes || []).forEach(v => {
-      if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
-      _chatPollVotes[v.message_id].counts[v.option_idx] = (_chatPollVotes[v.message_id].counts[v.option_idx] || 0) + 1;
-    });
-    (myVotes || []).forEach(v => {
-      if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
-      _chatPollVotes[v.message_id].myVote = v.option_idx;
-    });
+    );
   }
+  const results = await Promise.all(fetches);
+  const rxRows  = results[0].data || [];
+  const allVotes = results[1]?.data || [];
+  const myVotes  = results[2]?.data || [];
 
-  // Load reactions for all messages
-  _chatRxMap = {};
-  const allMsgIds = _chatMessages.map(m => m.id);
-  if (allMsgIds.length) {
-    const { data: rxRows } = await db.from("community_chat_reactions")
-      .select("message_id,email,emoji").in("message_id", allMsgIds);
-    (rxRows || []).forEach(r => {
-      if (!_chatRxMap[r.message_id]) _chatRxMap[r.message_id] = {};
-      if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, emails: [] };
-      _chatRxMap[r.message_id][r.emoji].count++;
-      _chatRxMap[r.message_id][r.emoji].emails.push(r.email);
-      if (r.email === myEmail) _chatRxMap[r.message_id][r.emoji].mine = true;
-    });
-  }
+  rxRows.forEach(r => {
+    if (!_chatRxMap[r.message_id]) _chatRxMap[r.message_id] = {};
+    if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, emails: [] };
+    _chatRxMap[r.message_id][r.emoji].count++;
+    _chatRxMap[r.message_id][r.emoji].emails.push(r.email);
+    if (r.email === myEmail) _chatRxMap[r.message_id][r.emoji].mine = true;
+  });
+  allVotes.forEach(v => {
+    if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
+    _chatPollVotes[v.message_id].counts[v.option_idx] = (_chatPollVotes[v.message_id].counts[v.option_idx] || 0) + 1;
+  });
+  myVotes.forEach(v => {
+    if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
+    _chatPollVotes[v.message_id].myVote = v.option_idx;
+  });
+}
 
-  _renderChatMessages();
-  _scrollChatToBottom(true);
+// Load the next page of older messages and prepend them, preserving scroll position.
+async function _loadMoreMessages() {
+  if (_chatLoadingMore || !_chatHasMore || !_chatMessages.length) return;
+  _chatLoadingMore = true;
+
+  const btn = document.getElementById("chat-load-more-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+
+  const oldest = _chatMessages[0].created_at;
+  const { data } = await db
+    .from("community_messages")
+    .select("*")
+    .eq("chat_id", _currentChatId)
+    .lt("created_at", oldest)
+    .order("created_at", { ascending: false })
+    .limit(CHAT_PAGE_SIZE + 1);
+
+  const rows = data || [];
+  if (rows.length > CHAT_PAGE_SIZE) { _chatHasMore = true; rows.pop(); }
+  else _chatHasMore = false;
+
+  const newMsgs = rows.reverse();
+  if (!newMsgs.length) { _chatLoadingMore = false; return; }
+
+  _chatMessages = [...newMsgs, ..._chatMessages];
+  await _fetchPollsAndReactions(newMsgs.map(m => m.id));
+
+  // Prepend to DOM, preserving scroll position
+  const container = document.getElementById("chat-messages");
+  const prevScrollHeight = container.scrollHeight;
+
+  // Remove old sentinel
+  document.getElementById("chat-load-more-sentinel")?.remove();
+
+  // Prepend new message nodes
+  const frag = document.createDocumentFragment();
+  const tmp  = document.createElement("div");
+  newMsgs.forEach((msg, idx) => {
+    const isMine  = msg.email === myEmail;
+    const showMeta = idx === 0 || msg.email !== newMsgs[idx - 1].email;
+    tmp.innerHTML = _chatMsgHtml(msg, isMine, showMeta);
+    if (tmp.firstElementChild) frag.appendChild(tmp.firstElementChild);
+  });
+  container.insertBefore(frag, container.firstChild);
+
+  // Re-insert sentinel if more pages remain
+  if (_chatHasMore) container.insertAdjacentHTML("afterbegin", _chatLoadMoreSentinelHtml());
+
+  // Restore scroll so the user stays at the same visual position
+  container.scrollTop += container.scrollHeight - prevScrollHeight;
+
+  _chatLoadingMore = false;
+}
+
+function _chatLoadMoreSentinelHtml() {
+  return `<div id="chat-load-more-sentinel" style="text-align:center;padding:12px 0">
+    <button id="chat-load-more-btn" onclick="_loadMoreMessages()"
+      style="background:none;border:1px solid var(--border);border-radius:20px;color:var(--text-muted);
+             font-size:.78rem;padding:5px 16px;cursor:pointer;font-family:inherit;transition:color .15s,border-color .15s"
+      onmouseover="this.style.color='var(--text)';this.style.borderColor='var(--text)'"
+      onmouseout="this.style.color='var(--text-muted)';this.style.borderColor='var(--border)'">
+      Load earlier messages
+    </button>
+  </div>`;
 }
 
 // ── Chat reactions ─────────────────────────────────────────────────────────
@@ -3070,12 +3151,15 @@ function _subscribeGlobalRealtime() {
 
 // Render all messages in the chat area
 function _renderChatMessages() {
+  // Clear image group store — old keys are stale after a full re-render
+  Object.keys(_chatImgGroups).forEach(k => delete _chatImgGroups[k]);
+
   const container = document.getElementById("chat-messages");
   if (!_chatMessages.length) {
     container.innerHTML = `<div class="chat-empty" id="chat-empty">No messages yet — say hello!</div>`;
     return;
   }
-  container.innerHTML = "";
+  container.innerHTML = _chatHasMore ? _chatLoadMoreSentinelHtml() : "";
   let lastEmail = null;
   _chatMessages.forEach(msg => {
     const isMine  = msg.email === myEmail;
