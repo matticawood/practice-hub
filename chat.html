@@ -1556,12 +1556,40 @@ function inlineHandleFile(input, key) {
   _renderInlineMediaPreview(key);
 }
 
+// ── Mutual exclusion: close every inline panel except the one being opened ────
+function _closeInlineExcept(key, except) {
+  if (except !== "video") {
+    const vp = document.getElementById(`inline-vid-panel-${key}`);
+    if (vp && vp.style.display !== "none") {
+      vp.style.display = "none";
+      document.getElementById(`inline-vid-btn-${key}`)?.classList.remove("recording");
+    }
+  }
+  if (except !== "poll") {
+    const pp = document.getElementById(`inline-poll-${key}`);
+    if (pp && pp.style.display !== "none") {
+      pp.style.display = "none";
+      _inlinePollOpen[key] = false;
+      (document.getElementById(`inline-${key === "main" ? "main" : key}-poll-btn`) ||
+       document.getElementById(`inline-poll-btn-${key}`))?.classList.remove("recording");
+    }
+  }
+  if (except !== "cam") {
+    if (_inlineCamPreviewKey === key) inlineCancelCamPreview(key);
+    if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") _inlineCamRec.stop();
+  }
+  if (except !== "voice") {
+    if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") _inlineVoiceRec[key].stop();
+  }
+}
+
 async function toggleInlineVoice(key) {
   if (_inlineVoiceRec[key]) {
     // Currently recording — stop
     if (_inlineVoiceRec[key].state !== "inactive") _inlineVoiceRec[key].stop();
     return;
   }
+  _closeInlineExcept(key, "voice");
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const chunks = [];
@@ -1621,6 +1649,7 @@ function inlineToggleVideoPanel(key) {
   const btn    = document.getElementById(`inline-vid-btn-${key}`);
   if (!panel) return;
   const open = panel.style.display === "none";
+  if (open) _closeInlineExcept(key, "video");
   panel.style.display = open ? "" : "none";
   btn?.classList.toggle("recording", open);
   if (open) inlineSwitchVideoTab("upload", key);
@@ -1681,6 +1710,7 @@ async function inlineToggleCamRec(key) {
     alert("Stop the current camera recording first."); return;
   }
   if (_inlineCamPreviewStream) { inlineCancelCamPreview(_inlineCamPreviewKey); }
+  _closeInlineExcept(key, "cam");
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { aspectRatio: 16/9 } });
@@ -1816,6 +1846,7 @@ function toggleInlinePoll(key) {
   const panel = document.getElementById(`inline-poll-${key}`);
   if (!panel) return;
   const open = panel.style.display === "none";
+  if (open) _closeInlineExcept(key, "poll");
   panel.style.display = open ? "" : "none";
   _inlinePollOpen[key] = open;
   const btn = document.getElementById(`inline-${key === "main" ? "main" : key}-poll-btn`) ||
