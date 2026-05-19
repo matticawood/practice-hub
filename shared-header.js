@@ -35,6 +35,10 @@
     /* Pin header ghost-buttons so page-level CSS variable overrides and browser a:link defaults don't bleed in */
     #app-header .btn-ghost { border-color: #2e2e2e; color: #888; }
     #app-header .btn-ghost:hover { border-color: var(--accent, #f5c518); color: var(--accent, #f5c518); }
+    /* Directly pin SVG stroke so neither element type nor inheritance differences affect icon colour */
+    #header-chat-btn svg, #notif-bell-btn svg { stroke: #888; }
+    #header-chat-btn:hover svg, #notif-bell-btn:hover svg { stroke: var(--accent, #f5c518); }
+    #header-chat-btn.active svg { stroke: #1a1410; }
     #header-chat-btn.active { background: var(--accent, #f5c518); color: #1a1410; border-radius: 8px; border-color: var(--accent, #f5c518); }
     .notif-badge {
       position: absolute; top: -5px; right: -5px;
