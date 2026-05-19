@@ -859,4 +859,77 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `email=eq.${myEmail}` },
       payload => { _notifs.unshift(payload.new); _badge(); })
     .subscribe();
+
+  // ── Chat unread badge (live on all pages) ────────────────────────────────────
+  let _shChatUnread = 0;
+  let _shMyRoomIds  = new Set();
+  let _shChatReads  = {};   // chat_id → last_read_at
+
+  // Exposed so chat.html can set the exact count when it has the full picture
+  window._shSetChatBadge = function(n) {
+    _shChatUnread = Math.max(0, n);
+    const badge = document.getElementById("chat-unread-badge");
+    if (!badge) return;
+    if (_shChatUnread > 0) {
+      badge.textContent = _shChatUnread > 99 ? "99+" : String(_shChatUnread);
+      badge.style.display = "";
+    } else {
+      badge.style.display = "none";
+    }
+  };
+
+  async function _shLoadChatBadge() {
+    if (!myEmail || !db) return;
+
+    // Rooms this user belongs to
+    const { data: rooms } = await db.from("community_chat_participants")
+      .select("room_id").eq("email", myEmail);
+    _shMyRoomIds = new Set((rooms || []).map(r => r.room_id));
+
+    // Read timestamps
+    const { data: reads } = await db.from("community_chat_reads")
+      .select("chat_id, last_read_at").eq("email", myEmail);
+    _shChatReads = {};
+    (reads || []).forEach(r => { _shChatReads[r.chat_id] = r.last_read_at; });
+
+    // Recent messages not from me — count those newer than last read per chat
+    const { data: msgs } = await db.from("community_messages")
+      .select("chat_id, email, created_at")
+      .neq("email", myEmail)
+      .order("created_at", { ascending: false })
+      .limit(400);
+
+    let count = 0;
+    for (const msg of (msgs || [])) {
+      const cid = msg.chat_id;
+      const isDM   = cid.includes("|") && cid.includes(myEmail);
+      const isRoom = _shMyRoomIds.has(cid);
+      if (cid !== "group" && !isDM && !isRoom) continue;
+      const lastRead = _shChatReads[cid];
+      if (!lastRead || msg.created_at > lastRead) count++;
+    }
+    window._shSetChatBadge(count);
+  }
+
+  // Realtime: increment badge when a new message arrives in any of my chats.
+  // If chat.html is active it manages the badge itself via _shSetChatBadge —
+  // we skip here to avoid double-counting.
+  db.channel("sh-chat-badge-" + myEmail)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "community_messages" },
+      payload => {
+        const msg = payload.new;
+        if (!msg || msg.email === myEmail) return;
+        // Let chat.html own the badge when it's the active page
+        if (window._chatPageActive) return;
+        const cid  = msg.chat_id;
+        const isDM   = cid.includes("|") && cid.includes(myEmail);
+        const isRoom = _shMyRoomIds.has(cid);
+        if (cid !== "group" && !isDM && !isRoom) return;
+        const lastRead = _shChatReads[cid];
+        if (lastRead && msg.created_at <= lastRead) return;
+        window._shSetChatBadge(_shChatUnread + 1);
+      })
+    .subscribe();
+
+  _shLoadChatBadge();
 };
