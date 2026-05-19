@@ -234,7 +234,13 @@ export default async (request) => {
       headers: { "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`) }
     });
     const muxData = await muxRes.json();
-    return json({ streamKey: muxData?.data?.stream_key || null });
+    const ls = muxData?.data;
+    // Return status so the client can detect a locked/completed stream and create a fresh one
+    return json({
+      streamKey: ls?.stream_key || null,
+      status:    ls?.status    || null,   // "active" | "idle" | "disabled" (disabled = locked after complete)
+      playbackId: ls?.playback_ids?.[0]?.id || null,
+    });
   }
 
   // ── Action: delete-mux-livestream ──────────────────────────────────────────

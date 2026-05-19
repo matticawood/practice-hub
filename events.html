@@ -3158,9 +3158,28 @@ async function startStream(eventId) {
           enable_recording: "cloud"
         }})
       });
-      // Always create a fresh Mux live stream for this session — the previous
-      // one was deleted when the last stream ended, so we need a new one.
-      if (!latestEv.mux_live_stream_id) {
+      // Determine whether to reuse the existing Mux live stream or create a fresh one.
+      // A stream becomes "disabled" (locked) after complete() is called — reusing it
+      // would silently fail to start RTMP streaming.
+      let needNewStream = !latestEv.mux_live_stream_id;
+      if (!needNewStream) {
+        // Retrieve stream key + status for the existing live stream
+        const skRes = await fetch("/api/daily", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+          body: JSON.stringify({ action: "get-mux-stream-key", eventId })
+        });
+        const skData = await skRes.json();
+        if (skData.status === "disabled" || !skData.streamKey) {
+          // Stream is locked/completed — need a fresh one
+          needNewStream = true;
+        } else {
+          // Active or idle — safe to rejoin with same stream key
+          currentEvent._muxStreamKey        = skData.streamKey;
+          currentEvent.mux_live_playback_id = skData.playbackId || currentEvent.mux_live_playback_id;
+        }
+      }
+      if (needNewStream) {
         const muxRes = await fetch("/api/daily", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
@@ -3169,15 +3188,6 @@ async function startStream(eventId) {
         const muxData = await muxRes.json();
         currentEvent._muxStreamKey        = muxData.muxStreamKey || null;
         currentEvent.mux_live_playback_id = muxData.muxLivePlaybackId || null;
-      } else {
-        // Stream key exists in DB — just retrieve it (page refresh mid-stream)
-        const skRes = await fetch("/api/daily", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-          body: JSON.stringify({ action: "get-mux-stream-key", eventId })
-        });
-        const skData = await skRes.json();
-        if (skData.streamKey) currentEvent._muxStreamKey = skData.streamKey;
       }
       const ok = await joinStream(eventId);
       if (!ok) btn.disabled = false;
