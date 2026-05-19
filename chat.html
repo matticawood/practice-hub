@@ -1,0 +1,3103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat — The Practice Room</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#f5c518" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Practice Room" />
+  <link rel="icon" href="/icon-192.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icon-512.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/shared-header.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3/dist/mux-player.mjs"></script>
+  <style>
+    :root {
+      --bg:           #faf7f3;
+      --surface:      #ffffff;
+      --surface-2:    #f0ebe2;
+      --border:       #e0d5c8;
+      --text:         #1a1410;
+      --text-muted:   #8a7868;
+      --accent-subtle:#fdf0d8;
+    }
+    body { background: var(--bg); }
+    /* ── Composer toolbar ─────────────────────────────────────────────────────── */
+    .composer-toolbar {
+      display: flex; align-items: center; gap: 4px;
+      flex: 1; flex-wrap: wrap;
+    }
+    .toolbar-btn {
+      width: 32px; height: 32px;
+      background: none; border: 1.5px solid transparent;
+      border-radius: 8px; cursor: pointer; font-size: 1.05rem;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); transition: background .15s, border-color .15s, color .15s;
+      position: relative;
+      font-family: inherit;
+    }
+    .toolbar-btn:hover { background: rgba(0,0,0,.05); color: var(--text); border-color: var(--border); }
+    .toolbar-btn.recording {
+      color: #ef4444; border-color: #ef4444;
+      animation: pulse-red 1s ease-in-out infinite;
+    }
+    .toolbar-btn[title]:hover::after {
+      content: attr(title);
+      position: absolute; bottom: calc(100% + 6px); left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); font-size: 0.72rem; white-space: nowrap;
+      padding: 3px 8px; border-radius: 5px; pointer-events: none;
+      z-index: 1000;
+    }
+    @keyframes pulse-red {
+      0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+      50%      { box-shadow: 0 0 0 5px rgba(239,68,68,.25); }
+    }
+
+    .composer-cancel {
+      background: none; border: none; font-size: 0.85rem;
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+      padding: 6px 10px; border-radius: 6px;
+      transition: color .15s;
+    }
+    .composer-cancel:hover { color: var(--text); }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── Recording indicator ─────────────────────────────────────────────────── */
+    .recording-indicator {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.8rem; color: #ef4444; font-weight: 600;
+      background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
+      border-radius: 20px; padding: 4px 12px; margin-top: 8px;
+    }
+    .recording-stop-btn {
+      background: rgba(239,68,68,.2); border: 1px solid rgba(239,68,68,.4);
+      border-radius: 12px; color: #ef4444; cursor: pointer;
+      font-size: 0.75rem; font-weight: 700; padding: 2px 10px; margin-left: 4px;
+    }
+    .recording-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ef4444;
+      animation: pulse-red 1s ease-in-out infinite;
+    }
+    /* ── Video recording preview panel ──────────────────────────────────────── */
+    .video-rec-panel {
+      background: #0d0d0d; border: 1.5px solid var(--border);
+      border-radius: 12px; overflow: hidden; margin-top: 10px;
+    }
+    .video-rec-preview {
+      display: block; width: 100%; height: auto;
+      background: #000;
+    }
+    .video-rec-devices {
+      display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px 0;
+      background: var(--surface);
+    }
+    .video-rec-select {
+      flex: 1; min-width: 0;
+      background: var(--bg);
+      border: 1.5px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 0.78rem; padding: 6px 8px;
+      font-family: inherit; outline: none;
+    }
+    .video-rec-actions {
+      display: flex; gap: 8px; padding: 10px 12px 12px;
+      background: var(--surface);
+    }
+    .video-rec-start-btn {
+      flex: 1; background: #ef4444; color: #fff; border: none;
+      border-radius: 8px; font-weight: 700; font-size: 0.87rem;
+      padding: 10px; cursor: pointer; transition: opacity .15s;
+    }
+    .video-rec-start-btn:hover { opacity: .85; }
+    .video-rec-cancel-btn {
+      background: var(--bg); border: 1.5px solid var(--border);
+      border-radius: 8px; color: var(--text-muted); cursor: pointer;
+      font-size: 0.85rem; padding: 10px 16px;
+    }
+    .video-rec-recording-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px 12px; background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    .video-rec-recording-bar .recording-dot {
+      width: 9px; height: 9px; border-radius: 50%; background: #ef4444;
+      animation: blink 1s ease-in-out infinite; flex-shrink: 0;
+    }
+    #video-rec-timer { font-size: 0.88rem; font-weight: 600; color: var(--text); flex: 1; }
+    .video-rec-stop-btn {
+      background: #ef4444; color: #fff; border: none; border-radius: 8px;
+      font-weight: 700; font-size: 0.82rem; padding: 8px 14px; cursor: pointer;
+    }
+
+    /* ── Video URL inline panel ───────────────────────────────────────────────── */
+    /* ── Video attach panel ───────────────────────────────────────────────────── */
+    .video-attach-panel {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 12px; margin-top: 10px; overflow: hidden;
+    }
+    .video-attach-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px 0;
+      font-size: 1rem; font-weight: 700; color: var(--text);
+    }
+    .video-attach-close {
+      background: rgba(0,0,0,.06); border: none; border-radius: 6px;
+      color: var(--text-muted); cursor: pointer;
+      font-size: 0.85rem; width: 26px; height: 26px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .video-attach-tabs {
+      display: flex; gap: 0; padding: 10px 16px 0;
+      border-bottom: 1.5px solid var(--border);
+    }
+    .video-tab {
+      background: none; border: none; border-bottom: 2.5px solid transparent;
+      color: var(--text-muted); cursor: pointer; font-size: 0.88rem;
+      font-weight: 600; padding: 6px 12px 10px; margin-bottom: -1.5px;
+      transition: color .15s, border-color .15s;
+    }
+    .video-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+    .video-dropzone {
+      margin: 16px; border: 1.5px dashed rgba(0,0,0,.12);
+      border-radius: 10px; padding: 32px 20px;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      transition: background .15s, border-color .15s;
+    }
+    .video-dropzone.drag-over { background: rgba(0,0,0,.05); border-color: rgba(0,0,0,.25); }
+    .video-dropzone-icon { font-size: 2rem; opacity: .4; }
+    .video-dropzone-text { color: var(--text-muted); font-size: 0.85rem; margin: 0; text-align: center; }
+    .video-choose-btn {
+      background: #fff; color: #000; border: none; border-radius: 20px;
+      font-size: 0.85rem; font-weight: 700; cursor: pointer;
+      padding: 8px 20px; margin-top: 4px;
+      transition: opacity .15s;
+    }
+    .video-choose-btn:hover { opacity: .85; }
+    .mux-upload-progress {
+      width: 80%; height: 4px;
+      background: rgba(0,0,0,.08); border-radius: 4px; overflow: hidden;
+    }
+    .mux-upload-bar {
+      height: 100%; background: var(--accent);
+      border-radius: 4px; transition: width .3s;
+      width: 0%;
+    }
+    mux-player {
+      display: block; border-radius: 8px;
+      background: transparent;
+      --media-background-color: transparent;
+      --media-object-fit: contain;
+    }
+    .mux-wrap {
+      position: relative;
+      width: 100%;
+      padding-top: 56.25%; /* default 16:9 — JS overrides for portrait */
+      background: transparent;
+      overflow: hidden;
+    }
+    .mux-wrap mux-player {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      display: block;
+    }
+    .mux-wrap.portrait {
+      padding-top: 0;
+      height: min(177.78vw, 72vh);
+    }
+
+    /* ── Composer upload progress overlay ────────────────────────────────────── */
+    .mux-upload-overlay {
+      display: flex; align-items: center; gap: 14px;
+      background: rgba(245,197,24,.07);
+      border: 1.5px solid rgba(245,197,24,.25);
+      border-radius: 10px; padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .mux-upload-overlay-icon { font-size: 1.5rem; flex-shrink: 0; }
+    .mux-upload-overlay-body { flex: 1; min-width: 0; }
+    .mux-upload-overlay-filename {
+      font-size: 0.85rem; font-weight: 600; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 8px;
+    }
+    .mux-upload-overlay-track {
+      width: 100%; height: 5px;
+      background: rgba(0,0,0,.08); border-radius: 4px; overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .mux-upload-overlay-bar {
+      height: 100%; background: var(--accent);
+      border-radius: 4px; transition: width .25s ease;
+      width: 0%;
+    }
+    @keyframes mux-stripe {
+      0%   { background-position: 0 0; }
+      100% { background-position: 40px 0; }
+    }
+    .mux-upload-overlay-bar.processing {
+      background-color: var(--accent);
+      background-image: repeating-linear-gradient(
+        45deg,
+        rgba(0,0,0,.12) 0px, rgba(0,0,0,.12) 10px,
+        transparent 10px, transparent 20px
+      );
+      background-size: 40px 100%;
+      animation: mux-stripe 0.8s linear infinite;
+    }
+    .mux-upload-overlay-status {
+      font-size: 0.75rem; color: var(--text-muted);
+    }
+    @keyframes mux-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .mux-upload-overlay-status.processing {
+      animation: mux-pulse 1.4s ease-in-out infinite;
+      color: var(--accent);
+    }
+    /* Global fixed overlay for inline (reply/comment) Mux uploads */
+    .mux-global-overlay {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      width: min(440px, calc(100vw - 32px)); z-index: 9999;
+      display: flex; align-items: center; gap: 14px;
+      background: rgba(245,197,24,.07); border: 1.5px solid rgba(245,197,24,.25);
+      border-radius: 10px; padding: 14px 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.35);
+    }
+    /* Comments: same mux-wrap aspect-ratio as posts */
+    .comment-mux-wrap {
+      position: relative; width: 100%; padding-top: 56.25%;
+      background: transparent; overflow: hidden; border-radius: 8px;
+      margin-top: 8px;
+    }
+    .comment-mux-wrap mux-player {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block;
+    }
+    .video-embed-tab {
+      display: flex; gap: 8px; align-items: center; padding: 14px 16px;
+    }
+    .video-url-input {
+      flex: 1; background: rgba(0,0,0,.05); border: 1.5px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: inherit;
+      font-size: 0.87rem; outline: none; padding: 8px 12px;
+    }
+    .video-url-input::placeholder { color: #555; }
+    .video-url-input:focus { border-color: rgba(0,0,0,.2); }
+    .video-add-btn {
+      background: var(--accent); color: #000; border: none; border-radius: 8px;
+      font-size: 0.85rem; font-weight: 700; cursor: pointer; padding: 8px 16px;
+      flex-shrink: 0;
+    }
+
+    /* ── Poll builder ─────────────────────────────────────────────────────────── */
+    .poll-builder {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; padding: 14px; margin-top: 10px;
+    }
+    .poll-builder-title {
+      font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .poll-question-input, .poll-option-input {
+      width: 100%; box-sizing: border-box;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 7px; color: var(--text);
+      font-size: 0.87rem; font-family: inherit;
+      padding: 8px 12px; margin-bottom: 8px;
+      transition: border-color .15s;
+    }
+    .poll-question-input:focus, .poll-option-input:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .poll-question-input::placeholder, .poll-option-input::placeholder { color: #444; }
+    .poll-options-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+    .poll-option-row { display: flex; align-items: center; gap: 6px; }
+    .poll-option-row input { flex: 1; margin-bottom: 0; }
+    .poll-option-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 1.1rem; line-height: 1;
+      padding: 2px 4px; transition: color .15s;
+    }
+    .poll-option-remove:hover { color: #ef4444; }
+    .poll-add-option {
+      background: none; border: 1.5px dashed var(--border);
+      border-radius: 7px; color: var(--text-muted);
+      font-size: 0.82rem; font-family: inherit;
+      padding: 6px 12px; cursor: pointer; width: 100%;
+      transition: border-color .15s, color .15s;
+    }
+    .poll-add-option:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Code embed panel ────────────────────────────────────────────────────── */
+    .code-panel {
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 10px; padding: 14px; margin-top: 10px;
+    }
+    .code-panel-title {
+      font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-muted); margin-bottom: 8px;
+    }
+    .code-panel textarea {
+      width: 100%; box-sizing: border-box;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 7px; color: #a5f3fc;
+      font-size: 0.82rem; font-family: 'Courier New', monospace;
+      padding: 10px 12px; resize: vertical; min-height: 80px;
+      transition: border-color .15s;
+    }
+    .code-panel textarea:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Media preview area ───────────────────────────────────────────────────── */
+    .media-preview-area {
+      margin-top: 10px;
+    }
+    .media-preview-images {
+      display: grid; gap: 6px; margin-bottom: 6px;
+    }
+    .media-thumb-wrap {
+      position: relative; display: block;
+    }
+    .media-thumb-wrap img {
+      width: 100%; height: auto; max-height: 420px;
+      object-fit: contain; border-radius: 8px;
+      border: 1.5px solid var(--border); display: block;
+    }
+    .media-thumb-remove {
+      position: absolute; top: 6px; right: 6px;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: rgba(0,0,0,.55); border: none;
+      color: #fff; font-size: 0.8rem; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: background .15s;
+    }
+    .media-thumb-remove:hover { background: #ef4444; }
+    .media-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 20px; padding: 5px 10px 5px 8px;
+      font-size: 0.8rem; color: var(--text-muted); margin: 4px 4px 4px 0;
+    }
+    .media-chip-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 1rem; line-height: 1;
+      padding: 0 2px; transition: color .15s;
+    }
+    .media-chip-remove:hover { color: #ef4444; }
+    .media-preview-video-wrap {
+      position: relative; margin-bottom: 8px;
+    }
+    .media-video-remove {
+      display: block; width: 100%; margin-top: 6px;
+      background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3);
+      border-radius: 6px; color: #ef4444; cursor: pointer;
+      font-size: 0.78rem; padding: 4px 0;
+    }
+    .media-video-remove:hover { background: rgba(239,68,68,.22); }
+    /* ── Community Chat — full-viewport wrapper ──────────────────────────────── */
+    #view-chat {
+      display: none;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      top: 0; /* overridden by JS to sit below the header */
+      z-index: 90;
+      flex-direction: row;
+      background: var(--bg);
+      overflow: hidden;
+      border-top: 1.5px solid var(--border);
+    }
+
+    /* ── Chat sidebar (conversation list) ────────────────────────────────────── */
+    #chat-sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    @media (max-width: 640px) {
+      #chat-sidebar { width: 100%; border-right: none; }
+      #chat-sidebar.hidden-mobile { display: none; }
+    }
+
+    /* ── Chat main area (conversation + new-chat panel) ─────────────────────── */
+    #chat-main-area {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    @media (max-width: 640px) {
+      #chat-main-area { display: none; }
+      #chat-main-area.show-mobile { display: flex; }
+    }
+
+    /* ── Chat sub-panels ─────────────────────────────────────────────────────── */
+    #chat-panel-conversation, #chat-panel-new {
+      display: flex; flex-direction: column; flex: 1; min-height: 0;
+    }
+
+    /* ── Conversations list panel ────────────────────────────────────────────── */
+    .chat-list-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .chat-list-title {
+      font-size: 1.1rem; font-weight: 700; color: var(--text);
+    }
+    .chat-new-btn {
+      background: none; border: 1.5px solid var(--border);
+      border-radius: 8px; cursor: pointer; color: var(--text-muted);
+      padding: 6px 10px; display: flex; align-items: center; gap: 6px;
+      font-size: 0.82rem; font-weight: 600; font-family: inherit;
+      transition: border-color .15s, color .15s;
+    }
+    .chat-new-btn:hover { border-color: var(--accent); color: var(--text); }
+    .chat-search-wrap {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .chat-search-input {
+      width: 100%; box-sizing: border-box;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 20px; padding: 8px 14px;
+      font-size: 0.87rem; font-family: inherit; color: var(--text);
+      outline: none; transition: border-color .15s;
+    }
+    .chat-search-input:focus { border-color: var(--accent); }
+    .chat-conv-list {
+      flex: 1; overflow-y: auto;
+      background: var(--surface);
+    }
+    .chat-conv-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px;
+      /* Reset all button borders, then apply only the ones we want */
+      border: none;
+      border-bottom: 1px solid var(--border);
+      border-left: 3px solid transparent;
+      outline: none;
+      cursor: pointer; background: none; width: 100%; text-align: left;
+      font-family: inherit;
+      transition: background .12s, border-left-color .12s;
+      min-height: 60px;
+      box-sizing: border-box;
+    }
+    .chat-conv-row:hover { background: var(--surface-2); }
+    .chat-conv-row.active { background: var(--surface-2); border-left-color: var(--accent); }
+    .chat-conv-row-avatars { flex-shrink: 0; position: relative; }
+    .chat-conv-row-body { flex: 1; min-width: 0; }
+    .chat-conv-row-top {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 8px; margin-bottom: 2px;
+    }
+    .chat-conv-row-name {
+      font-size: 0.9rem; font-weight: 700; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .chat-conv-row-time {
+      font-size: 0.72rem; color: var(--text-muted); flex-shrink: 0;
+    }
+    .chat-conv-row-preview {
+      font-size: 0.8rem; color: var(--text-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .chat-conv-empty {
+      padding: 40px 20px; text-align: center;
+      color: var(--text-muted); font-size: 0.87rem;
+    }
+
+    /* ── Active conversation panel ────────────────────────────────────────────── */
+    .chat-conv-hdr {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .chat-back-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); padding: 4px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      transition: color .15s;
+    }
+    .chat-back-btn:hover { color: var(--text); }
+    .chat-conv-hdr-title {
+      font-size: 0.95rem; font-weight: 700; color: var(--text);
+      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 16px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      background: var(--bg);
+    }
+    .chat-msg-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .chat-msg-group.mine { flex-direction: row-reverse; }
+    .chat-msg-avatar { flex-shrink: 0; align-self: flex-start; }
+    .chat-msg-body { max-width: 70%; min-width: 220px; display: flex; flex-direction: column; gap: 3px; }
+    .chat-msg-group.mine .chat-msg-body { align-items: flex-end; }
+    .chat-msg-meta {
+      font-size: 0.73rem; color: var(--text-muted);
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 4px 2px;
+    }
+    .chat-msg-group.mine .chat-msg-meta { flex-direction: row-reverse; }
+    .chat-msg-name { font-weight: 700; font-size: 0.82rem; color: var(--text); }
+    .chat-msg-time { font-size: 0.72rem; color: var(--text-muted); }
+    .chat-bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 8px 12px;
+      font-size: 0.88rem;
+      color: var(--text);
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .chat-bubble.mine {
+      background: var(--accent);
+      border-color: transparent;
+      color: #1a1410;
+    }
+    .chat-media { margin-top: 6px; }
+    /* ── Typing indicator ── */
+    .chat-typing {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 16px 6px;
+      font-size: 0.78rem; color: var(--text-muted);
+    }
+    .typing-dots { display: flex; align-items: center; gap: 3px; }
+    .typing-dots span {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--text-muted); display: block;
+      animation: typingBounce 1.2s infinite ease-in-out;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .2s; }
+    .typing-dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes typingBounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+      30% { transform: translateY(-5px); opacity: 1; }
+    }
+    @media (max-width: 600px) {
+      .chat-msg-body { max-width: 82%; }
+      .chat-bubble-cont { max-width: 82%; }
+      .chat-bubble-cont-mine { max-width: 82%; }
+    }
+
+    /* ── Chat reactions ──────────────────────────────────────────────────────── */
+    /* Outer wrapper — just flex column, no relative so pills aren't clipped */
+    .chat-bubble-wrap { display: inline-flex; flex-direction: column; max-width: 100%; }
+    /* Inner wrapper anchors the absolutely-positioned trigger and picker */
+    .chat-bubble-inner { position: relative; display: inline-flex; flex-direction: column; max-width: 100%; }
+    .chat-react-trigger {
+      opacity: 0; transition: opacity .15s;
+      position: absolute; bottom: -12px; right: 8px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 50%; width: 24px; height: 24px;
+      cursor: pointer; font-size: .78rem;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 5; box-shadow: 0 1px 4px rgba(0,0,0,.14);
+    }
+    .chat-msg-group:hover .chat-react-trigger { opacity: 1; }
+    .chat-react-picker {
+      display: none; gap: 2px; flex-wrap: nowrap;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 5px 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.18);
+      position: absolute; bottom: calc(100% + 6px); z-index: 200;
+      white-space: nowrap;
+    }
+    .chat-react-picker.mine { right: 0; }
+    .chat-react-picker:not(.mine) { left: 0; }
+    .chat-react-picker button {
+      background: none; border: none; cursor: pointer;
+      font-size: 1.15rem; padding: 2px 4px; border-radius: 8px;
+      transition: background .1s; line-height: 1.3;
+    }
+    .chat-react-picker button:hover,
+    .chat-react-picker button.picked { background: rgba(245,197,24,.25); }
+    /* Extra top margin leaves room for the trigger button overlapping the bottom of the bubble */
+    .chat-rx-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 14px; }
+    .chat-rx-pill {
+      position: relative;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 12px; padding: 1px 7px; font-size: .82rem;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
+      transition: background .1s, border-color .1s; line-height: 1.5;
+    }
+    .chat-rx-pill.mine { border-color: var(--accent); background: rgba(245,197,24,.12); }
+    .chat-rx-pill span { font-size: .72rem; color: var(--text-muted); font-weight: 600; }
+    /* "Who reacted" tooltip on hover */
+    .chat-rx-pill::after {
+      content: attr(data-names);
+      position: absolute; bottom: calc(100% + 5px); left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,.82); color: #fff;
+      font-size: .7rem; padding: 3px 8px; border-radius: 6px;
+      white-space: nowrap; z-index: 300; pointer-events: none;
+      opacity: 0; transition: opacity .15s;
+    }
+    .chat-rx-pill:hover::after { opacity: 1; }
+
+    /* Composer */
+    .chat-composer {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      padding: 10px 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    /* Input row always visible */
+    .chat-input-row { background: var(--surface); padding-top: 6px; }
+    /* Limit live camera preview height inside chat */
+    .chat-composer .video-rec-preview { max-height: min(200px, 28vh); object-fit: contain; background: #000; }
+    /* Limit recorded/uploaded video preview height inside chat */
+    .chat-composer video.chat-preview-video { max-height: min(180px, 24vh); object-fit: contain; width: 100%; border-radius: 8px; display: block; }
+    /* Cap and scroll just the media preview area so it never pushes the input off screen */
+    #inline-media-preview-chat_main { max-height: min(200px, 26vh); overflow-y: auto; }
+    /* Cap the mux player preview inside the chat media preview */
+    #inline-media-preview-chat_main .comment-mux-wrap { padding-top: 0; height: min(180px, 24vh); }
+    .chat-input-row {
+      display: flex; gap: 8px; align-items: flex-end;
+    }
+    .chat-textarea {
+      flex: 1;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      padding: 9px 14px;
+      font-size: 0.88rem;
+      font-family: inherit;
+      color: var(--text);
+      resize: none; outline: none;
+      min-height: 38px; max-height: 140px;
+      line-height: 1.5;
+      transition: border-color .15s;
+    }
+    .chat-textarea:focus { border-color: var(--accent); }
+    .chat-send-btn {
+      background: var(--accent); border: none; border-radius: 50%;
+      width: 36px; height: 36px; cursor: pointer; color: #1a1410;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: opacity .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .chat-send-btn:hover { opacity: .85; }
+    .chat-send-btn:disabled { opacity: .4; cursor: default; }
+    .chat-send-btn svg { width: 16px; height: 16px; }
+    .chat-toolbar-wrap { padding: 0 2px; }
+    .chat-empty {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 0.87rem; text-align: center;
+      padding: 40px 20px;
+    }
+
+    /* ── New Chat panel ───────────────────────────────────────────────────────── */
+    .chat-new-hdr {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .chat-new-hdr-title {
+      font-size: 1rem; font-weight: 700; color: var(--text); flex: 1;
+    }
+    .chat-new-cancel {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 0.85rem; font-family: inherit;
+      padding: 4px 8px; border-radius: 6px; transition: color .15s;
+    }
+    .chat-new-cancel:hover { color: var(--text); }
+    .chat-new-body {
+      padding: 14px 16px;
+      flex: 1; overflow-y: auto;
+      background: var(--surface);
+    }
+    .chat-chips-row {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-bottom: 8px; min-height: 0;
+    }
+    .chat-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--accent-subtle); border: 1.5px solid var(--accent);
+      border-radius: 20px; padding: 4px 10px 4px 8px;
+      font-size: 0.82rem; font-weight: 600; color: var(--text);
+    }
+    .chat-chip-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 1rem; line-height: 1;
+      padding: 0 2px; transition: color .15s;
+    }
+    .chat-chip-remove:hover { color: #ef4444; }
+    .chat-people-input {
+      width: 100%; box-sizing: border-box;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 10px; padding: 10px 14px;
+      font-size: 0.87rem; font-family: inherit; color: var(--text);
+      outline: none; transition: border-color .15s;
+    }
+    .chat-people-input:focus { border-color: var(--accent); }
+    .chat-autocomplete {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; margin-top: 4px;
+      max-height: 260px; overflow-y: auto;
+      box-shadow: 0 4px 16px rgba(0,0,0,.08);
+    }
+    .chat-ac-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; cursor: pointer;
+      transition: background .12s;
+    }
+    .chat-ac-item:hover { background: var(--surface-2); }
+    .chat-ac-item:not(:last-child) { border-bottom: 1px solid var(--border); }
+    .chat-ac-name { font-size: 0.88rem; font-weight: 600; color: var(--text); }
+    .chat-new-footer {
+      padding: 12px 16px 14px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .chat-start-btn {
+      width: 100%; background: var(--accent); border: none;
+      border-radius: 10px; padding: 12px;
+      font-size: 0.92rem; font-weight: 700; font-family: inherit;
+      cursor: pointer; color: #1a1410;
+      transition: opacity .15s;
+    }
+    .chat-start-btn:disabled { opacity: .45; cursor: default; }
+  </style>
+</head>
+<body>
+  <header id="app-header" style="display:none"></header>
+
+  <div id="view-chat">
+
+    <!-- LEFT: Sidebar — conversation list -->
+    <div id="chat-sidebar">
+      <div class="chat-list-hdr">
+        <span class="chat-list-title">Messages</span>
+        <button class="chat-new-btn" onclick="showNewChat()" title="New conversation">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          New Chat
+        </button>
+      </div>
+      <div class="chat-search-wrap">
+        <input class="chat-search-input" id="chat-search-input" type="search" placeholder="Search conversations…"
+          oninput="_filterConvList(this.value)" />
+      </div>
+      <div class="chat-conv-list" id="chat-conv-list">
+        <div class="chat-conv-empty">Loading conversations…</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Main area — active conversation or new-chat panel -->
+    <div id="chat-main-area">
+
+      <!-- Sub-panel: Active conversation -->
+      <div id="chat-panel-conversation">
+        <div class="chat-conv-hdr">
+          <!-- Back button: mobile only (hides sidebar, shows main) -->
+          <button class="chat-back-btn" id="chat-mobile-back" onclick="_chatMobileBack()" title="Back" style="display:none">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="chat-conv-hdr-title" id="chat-conv-hdr-title">Group Chat</span>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-empty" id="chat-empty">No messages yet — say hello!</div>
+        </div>
+        <div class="chat-typing" id="chat-typing" style="display:none">
+          <div class="typing-dots"><span></span><span></span><span></span></div>
+          <span class="typing-label" id="chat-typing-label"></span>
+        </div>
+        <div class="chat-composer">
+          <div class="chat-toolbar-wrap" id="chat-toolbar-container"></div>
+          <div class="chat-input-row">
+            <textarea class="chat-textarea" id="chat-input" rows="1"
+              placeholder="Message…"
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,140)+'px';_broadcastTyping()"
+              onkeydown="if(event.key==='Enter'&&event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+            <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" title="Send (Shift+Enter)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-panel: New Chat -->
+      <div id="chat-panel-new" style="display:none">
+        <div class="chat-new-hdr">
+          <button class="chat-back-btn" onclick="showChatList()" title="Back">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="chat-new-hdr-title">New Conversation</span>
+          <button class="chat-new-cancel" onclick="showChatList()">Cancel</button>
+        </div>
+        <div class="chat-new-body">
+          <div class="chat-chips-row" id="chat-selected-chips"></div>
+          <input class="chat-people-input" id="chat-people-input" type="text" placeholder="Add people…"
+            oninput="_onPeopleSearch(this.value)"
+            onkeydown="_onPeopleKeydown(event)" />
+          <div class="chat-autocomplete" id="chat-autocomplete" style="display:none"></div>
+        </div>
+        <div class="chat-new-footer">
+          <button class="chat-start-btn" id="chat-start-btn" onclick="startNewChat()" disabled>Start Chat</button>
+        </div>
+      </div>
+
+      <!-- Placeholder shown when no conversation selected (desktop) -->
+      <div id="chat-no-selection" style="display:none;flex:1;align-items:center;justify-content:center;color:var(--text-muted);font-size:.9rem;flex-direction:column;gap:10px">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.3"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Select a conversation</span>
+      </div>
+
+    </div><!-- end #chat-main-area -->
+
+  </div><!-- end #view-chat -->
+
+<!-- Global Mux progress bar for inline video uploads -->
+<div id="mux-global-overlay" style="display:none" class="mux-upload-overlay mux-global-overlay">
+  <div class="mux-upload-overlay-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+  <div class="mux-upload-overlay-body">
+    <div class="mux-upload-overlay-filename" id="mux-global-filename">Uploading video…</div>
+    <div class="mux-upload-overlay-track"><div class="mux-upload-overlay-bar" id="mux-global-bar"></div></div>
+    <div class="mux-upload-overlay-status" id="mux-global-status">Starting…</div>
+  </div>
+</div>
+<script>
+const SUPA_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const db = supabase.createClient(SUPA_URL, SUPA_ANON);
+const OWNER_EMAIL = "matthew@matthewcawood.com";
+
+let myEmail = null, myName = null, myAvatarUrl = null, isAdmin = false;
+let _allMembers = [], _membersLoaded = false;
+
+// Inline media state
+const _inlineMedia    = {};
+const _inlinePollOpen = {};
+const _inlineVoiceRec = {};
+const _inlineRecTimer = {};
+const _inlineRecStart = {};
+let _inlineCamRec = null, _inlineCamKey = null, _inlineCamStream = null;
+let _inlineCamPreviewStream = null, _inlineCamPreviewKey = null;
+
+// Mux upload state
+let _muxUploading = false;
+// Stubs for modal composer (not used on chat.html but referenced by _uploadVideoToMux)
+let _composerMedia = [];
+function _renderMediaPreview() {}
+function _resetVideoDropzone() {}
+function _setMuxOverlay() {}
+
+let _muxUploading = false;
+
+function _resetVideoDropzone() {
+  document.getElementById("video-dropzone").innerHTML = `
+    <div class="video-dropzone-icon">🎬</div>
+    <p class="video-dropzone-text">Drop your video files here to attach them</p>
+    <button class="video-choose-btn" onclick="document.getElementById('file-input-video').click()">Choose video</button>
+  `;
+}
+
+function _setGlobalMuxOverlay({ show, filename, pct, status, processing }) {
+  const overlay  = document.getElementById("mux-global-overlay");
+  const fnEl     = document.getElementById("mux-global-filename");
+  const barEl    = document.getElementById("mux-global-bar");
+  const statusEl = document.getElementById("mux-global-status");
+  if (!overlay) return;
+  if (show === true)  overlay.style.display = "flex";
+  if (show === false) { overlay.style.display = "none"; return; }
+  if (filename  !== undefined && fnEl)  fnEl.textContent  = filename;
+  if (pct       !== undefined && barEl) barEl.style.width = pct + "%";
+  if (status    !== undefined && statusEl) {
+    statusEl.textContent = status;
+    statusEl.className   = "mux-upload-overlay-status" + (processing ? " processing" : "");
+  }
+}
+
+function _setMuxOverlay({ show, filename, pct, status, processing }) {
+  const overlay  = document.getElementById("mux-upload-overlay");
+  const fnEl     = document.getElementById("mux-overlay-filename");
+  const barEl    = document.getElementById("mux-overlay-bar");
+  const statusEl = document.getElementById("mux-overlay-status");
+  if (!overlay) return;
+  // Only change visibility when show is explicitly passed
+  if (show === true)  overlay.style.display = "";
+  if (show === false) { overlay.style.display = "none"; return; }
+  if (filename  !== undefined && fnEl)  fnEl.textContent  = filename;
+  if (pct       !== undefined && barEl) barEl.style.width = pct + "%";
+  if (status    !== undefined && statusEl) {
+    statusEl.textContent = status;
+    statusEl.className   = "mux-upload-overlay-status" + (processing ? " processing" : "");
+  }
+}
+
+async function _uploadVideoToMux(file, onDone = null) {
+  if (!file || !file.type.startsWith("video/")) { alert("Please select a video file."); return; }
+  if (_muxUploading) { alert("A video upload is already in progress."); return; }
+
+  // For inline (reply/comment) uploads use the global fixed bar; for modal use the in-composer one
+  const _setOverlay = onDone ? _setGlobalMuxOverlay : _setMuxOverlay;
+
+  if (!onDone) {
+    // Close the video panel (only relevant for modal composer)
+    _videoUrlPanelOpen = false;
+    document.getElementById("composer-video-url-panel").style.display = "none";
+    document.getElementById("toolbar-video-btn").classList.remove("recording");
+  }
+  _setOverlay({ show: true, filename: file.name, pct: 0, status: "Getting upload URL…" });
+
+  _muxUploading = true;
+  const _composerBtn = document.getElementById("composer-submit");
+  if (_composerBtn) { _composerBtn.disabled = true; _composerBtn.title = "Please wait — video is processing…"; }
+  try {
+    // Step 1: get a direct Mux upload URL from our edge function
+    const token = (await db.auth.getSession()).data.session?.access_token;
+    if (!token) throw new Error("You appear to be signed out. Please refresh the page and sign in again.");
+    console.log("[Mux] Requesting upload URL…");
+    const createRes = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "create-mux-upload" })
+    });
+    const createText = await createRes.text();
+    console.log("[Mux] create-mux-upload response:", createRes.status, createText);
+    let createData;
+    try { createData = JSON.parse(createText); } catch { throw new Error("Bad response from server: " + createText); }
+    if (createData.error) throw new Error(JSON.stringify(createData.error));
+    const { uploadId, uploadUrl } = createData;
+    if (!uploadUrl) throw new Error("No upload URL returned from server");
+
+    // Step 2: PUT the file directly to Mux with XHR for progress
+    _setOverlay({ pct: 0, status: "Uploading… 0%" });
+    console.log("[Mux] Starting upload…");
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          console.log("[Mux] Upload progress:", pct + "%");
+          _setOverlay({ pct, status: `Uploading… ${pct}%` });
+        }
+      };
+      xhr.onload = () => {
+        console.log("[Mux] Upload complete, status:", xhr.status);
+        xhr.status < 300 ? resolve() : reject(new Error("Upload failed (" + xhr.status + ")"));
+      };
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.send(file);
+    });
+
+    // Step 3: poll for Mux to finish processing
+    const barId  = onDone ? "mux-global-bar" : "mux-overlay-bar";
+    const barEl  = document.getElementById(barId);
+    if (barEl) barEl.classList.add("processing");
+    _setOverlay({ pct: 100, status: "Queuing for processing…" });
+    console.log("[Mux] Upload done, polling for processing completion. uploadId:", uploadId);
+
+    const processingMessages = [
+      { after: 0,   msg: "Queuing for processing…" },
+      { after: 10,  msg: "Encoding video…" },
+      { after: 30,  msg: "Still encoding — larger videos take a minute or two…" },
+      { after: 60,  msg: "Almost there, finishing up…" },
+      { after: 120, msg: "This is taking longer than usual, but it's still going…" },
+    ];
+
+    let playbackId = null, muxAssetId = null;
+    const pollStart = Date.now();
+    for (let i = 0; i < 72; i++) {  // up to ~6 min
+      await new Promise(r => setTimeout(r, 5000));
+      const elapsed = Math.round((Date.now() - pollStart) / 1000);
+
+      const msg = processingMessages.filter(m => elapsed >= m.after).pop()?.msg;
+      if (msg) _setOverlay({ status: msg });
+
+      const statusRes = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "get-mux-upload-status", uploadId })
+      });
+      const s = await statusRes.json();
+      console.log(`[Mux] Poll ${i + 1} (${elapsed}s): uploadStatus=${s.status} assetStatus=${s.assetStatus} playbackId=${s.playbackId}`);
+      if (s.playbackId) { playbackId = s.playbackId; muxAssetId = s.assetId; break; }
+      if (s.status === "errored" || s.assetStatus === "errored") throw new Error("Mux reported an error processing the video");
+    }
+    if (!playbackId) throw new Error("Video processing timed out after 6 minutes — try again");
+
+    console.log("[Mux] Done! playbackId:", playbackId);
+    if (barEl) { barEl.classList.remove("processing"); barEl.style.background = "#10b981"; }
+    _setOverlay({ pct: 100, status: "✓ Video ready!", filename: file.name });
+    await new Promise(r => setTimeout(r, 1500));
+    _setOverlay({ show: false });
+    const muxItem = { type: "mux", playbackId, assetId: muxAssetId, name: file.name };
+    if (onDone) { onDone(muxItem); }
+    else { _composerMedia.push(muxItem); _renderMediaPreview(); }
+
+  } catch (e) {
+    console.error("[Mux] Upload error:", e);
+    _setOverlay({ show: true, filename: "❌ Upload failed", status: e.message, processing: false });
+    const barEl = document.getElementById(onDone ? "mux-global-bar" : "mux-overlay-bar");
+    if (barEl) barEl.style.background = "#ef4444";
+    // Add a dismiss button
+    const statusElId = onDone ? "mux-global-status" : "mux-overlay-status";
+    const statusEl = document.getElementById(statusElId);
+    const dismissFn = onDone ? "_setGlobalMuxOverlay({show:false})" : "_setMuxOverlay({show:false});_muxUploading=false;_resetVideoDropzone()";
+    if (statusEl) statusEl.innerHTML =
+      escHtml(e.message) +
+      `<br><button onclick="${dismissFn}"
+        style="margin-top:8px;background:rgba(0,0,0,.07);border:1px solid rgba(0,0,0,.12);
+        border-radius:6px;color:#fff;cursor:pointer;font-size:.75rem;padding:4px 10px">Dismiss</button>`;
+    if (!onDone) return; // modal path: dismiss button handles _muxUploading = false
+  } finally {
+    _muxUploading = false;
+    const _composerBtnF = document.getElementById("composer-submit");
+    if (_composerBtnF) { _composerBtnF.disabled = false; _composerBtnF.title = ""; }
+  }
+}
+
+function handleVideoFile(input) {
+  const file = input.files[0];
+  input.value = "";
+  _uploadVideoToMux(file);
+}
+
+function handleVideoDrop(event) {
+  event.preventDefault();
+  document.getElementById("video-dropzone").classList.remove("drag-over");
+  const file = event.dataTransfer.files[0];
+  _uploadVideoToMux(file);
+}
+
+function switchVideoTab(tab) {
+  document.getElementById("video-tab-upload-panel").style.display = tab === "upload" ? "" : "none";
+  document.getElementById("video-tab-embed-panel").style.display  = tab === "embed"  ? "" : "none";
+  document.getElementById("video-tab-upload-btn").classList.toggle("active", tab === "upload");
+  document.getElementById("video-tab-embed-btn").classList.toggle("active", tab === "embed");
+}
+
+function toggleVideoPanel() {
+  if (_muxUploading) return; // don't close while uploading
+  _videoUrlPanelOpen = !_videoUrlPanelOpen;
+  document.getElementById("composer-video-url-panel").style.display = _videoUrlPanelOpen ? "" : "none";
+  document.getElementById("toolbar-video-btn").classList.toggle("recording", _videoUrlPanelOpen);
+  if (_videoUrlPanelOpen) { switchVideoTab("upload"); _resetVideoDropzone(); }
+}
+
+function addVideoUrl() {
+  const val = document.getElementById("composer-video-url-input").value.trim();
+  if (!val) return;
+  const ytId = parseYouTubeId(val);
+  const viId = parseVimeoId(val);
+  if (ytId) {
+    _composerMedia.push({ type: "youtube", ytId, url: val, name: "YouTube video" });
+  } else if (viId) {
+    _composerMedia.push({ type: "vimeo", vimeoId: viId, url: val, name: "Vimeo video" });
+  } else {
+    _composerMedia.push({ type: "video-url", url: val, name: "Video" });
+  }
+  document.getElementById("composer-video-url-input").value = "";
+  toggleVideoPanel();
+  _renderMediaPreview();
+}
+
+async function toggleVoiceRecording() {
+  if (_recordingType === "voice") {
+    _stopRecording(); return;
+  }
+  if (_recordingType) { alert("Already recording. Stop the current recording first."); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    _startRecording(stream, "voice");
+  } catch (e) { alert("Could not access microphone: " + e.message); }
+}
+
+let _previewStream = null;
+
+async function toggleVideoRecording() {
+  // If already recording video, stop it
+  if (_recordingType === "video") { _stopRecording(); return; }
+  if (_recordingType) { alert("Already recording. Stop the current recording first."); return; }
+
+  // If preview panel is already open, close it
+  const panel = document.getElementById("video-rec-panel");
+  if (panel.style.display !== "none") { cancelVideoPreview(); return; }
+
+  try {
+    // Get initial stream with defaults
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { aspectRatio: 16/9 } });
+    _previewStream = stream;
+
+    // Show live preview
+    const preview = document.getElementById("video-rec-preview");
+    preview.srcObject = stream;
+    panel.style.display = "";
+    document.getElementById("toolbar-videorec-btn").classList.add("recording");
+
+    // Enumerate devices now that we have permission
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+    const mics    = devices.filter(d => d.kind === "audioinput");
+
+    const camSel = document.getElementById("video-rec-camera");
+    const micSel = document.getElementById("video-rec-mic");
+
+    // Get current track labels to pre-select
+    const activeVideoLabel = stream.getVideoTracks()[0]?.label || "";
+    const activeAudioLabel = stream.getAudioTracks()[0]?.label || "";
+
+    camSel.innerHTML = cameras.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeVideoLabel ? "selected" : ""}>${d.label || "Camera " + (cameras.indexOf(d)+1)}</option>`
+    ).join("");
+    micSel.innerHTML = mics.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeAudioLabel ? "selected" : ""}>${d.label || "Mic " + (mics.indexOf(d)+1)}</option>`
+    ).join("");
+
+  } catch (e) {
+    alert("Could not access camera/mic: " + e.message);
+    document.getElementById("toolbar-videorec-btn").classList.remove("recording");
+  }
+}
+
+async function switchCamera() {
+  if (!_previewStream) return;
+  const camSel = document.getElementById("video-rec-camera");
+  const micSel = document.getElementById("video-rec-mic");
+  const videoId = camSel.value;
+  const audioId = micSel.value;
+
+  // Stop existing tracks
+  _previewStream.getTracks().forEach(t => t.stop());
+
+  try {
+    const constraints = {
+      video: videoId ? { deviceId: { exact: videoId } } : true,
+      audio: audioId ? { deviceId: { exact: audioId } } : true
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    _previewStream = stream;
+    document.getElementById("video-rec-preview").srcObject = stream;
+  } catch (e) {
+    alert("Could not switch device: " + e.message);
+  }
+}
+
+function startVideoRecordingFromPreview() {
+  if (!_previewStream) return;
+  // Keep the preview panel open so they can see themselves while recording
+  document.getElementById("video-rec-devices").style.display = "none";
+  document.getElementById("video-rec-actions").style.display  = "none";
+  document.getElementById("video-rec-recording-bar").style.display = "";
+  _startRecording(_previewStream, "video");
+  _previewStream = null; // ownership transferred to recorder
+}
+
+function cancelVideoPreview() {
+  if (_previewStream) { _previewStream.getTracks().forEach(t => t.stop()); _previewStream = null; }
+  const preview = document.getElementById("video-rec-preview");
+  preview.srcObject = null;
+  document.getElementById("video-rec-panel").style.display = "none";
+  document.getElementById("toolbar-videorec-btn").classList.remove("recording");
+}
+
+function _startRecording(stream, type) {
+  _recordingType = type;
+  const chunks = [];
+  const mr = new MediaRecorder(stream);
+  mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mr.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    const mime = mr.mimeType || (type === "voice" ? "audio/webm" : "video/webm");
+    const blob = new Blob(chunks, { type: mime });
+    const ext = type === "voice"
+      ? (mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm")
+      : "webm";
+    const name = `${type}-${Date.now()}.${ext}`;
+    const duration = _recordingStart ? Math.round((Date.now() - _recordingStart) / 1000) : 0;
+    clearInterval(_recordingTimer); _recordingTimer = null;
+    document.getElementById("composer-recording-indicator").style.display = "none";
+    const btnId = type === "voice" ? "toolbar-voice-btn" : "toolbar-videorec-btn";
+    document.getElementById(btnId)?.classList.remove("recording");
+    _recordingType = null; _voiceRecorder = null; _videoRecorder = null;
+
+    if (type === "video") {
+      // Hide and reset the preview panel
+      const panel = document.getElementById("video-rec-panel");
+      panel.style.display = "none";
+      document.getElementById("video-rec-devices").style.display      = "";
+      document.getElementById("video-rec-actions").style.display       = "";
+      document.getElementById("video-rec-recording-bar").style.display = "none";
+      document.getElementById("video-rec-preview").srcObject = null;
+      // Route through Mux so large recordings are handled properly
+      const file = new File([blob], name, { type: mime });
+      _uploadVideoToMux(file);
+    } else {
+      // Voice recordings are small — store in Supabase Storage as before
+      const url = URL.createObjectURL(blob);
+      _composerMedia.push({ type: "audio", url, name, blob, duration });
+      _renderMediaPreview();
+    }
+  };
+  if (type === "voice") _voiceRecorder = mr; else _videoRecorder = mr;
+  mr.start();
+  _recordingStart = Date.now();
+  const btnId = type === "voice" ? "toolbar-voice-btn" : "toolbar-videorec-btn";
+  document.getElementById(btnId)?.classList.add("recording");
+  const label = type === "voice" ? "Recording voice…" : "Recording video…";
+  document.getElementById("composer-recording-label").textContent = label;
+  document.getElementById("composer-recording-time").textContent  = "0:00";
+  document.getElementById("composer-recording-indicator").style.display = "";
+  _recordingTimer = setInterval(() => {
+    const secs = Math.round((Date.now() - _recordingStart) / 1000);
+    const m = Math.floor(secs / 60), s = secs % 60;
+    const ts = `${m}:${String(s).padStart(2,"0")}`;
+    document.getElementById("composer-recording-time").textContent = ts;
+    const inPanel = document.getElementById("video-rec-timer");
+    if (inPanel) inPanel.textContent = ts;
+  }, 1000);
+}
+
+function _stopRecording() {
+  if (_voiceRecorder && _voiceRecorder.state !== "inactive") _voiceRecorder.stop();
+  if (_videoRecorder && _videoRecorder.state !== "inactive") _videoRecorder.stop();
+}
+
+function togglePollBuilder() {
+  _pollBuilderOpen = !_pollBuilderOpen;
+  document.getElementById("composer-poll-builder").style.display = _pollBuilderOpen ? "" : "none";
+  document.getElementById("toolbar-poll-btn").classList.toggle("recording", _pollBuilderOpen);
+  if (_pollBuilderOpen) document.getElementById("poll-question-input").focus();
+}
+
+function addPollOption() {
+  const list = document.getElementById("poll-options-list");
+  const count = list.querySelectorAll(".poll-option-row").length + 1;
+  const row = document.createElement("div");
+  row.className = "poll-option-row";
+  row.innerHTML = `<input class="poll-option-input" placeholder="Option ${count}" /><button class="poll-option-remove" onclick="removePollOption(this)" title="Remove">×</button>`;
+  list.appendChild(row);
+}
+
+function removePollOption(btn) {
+  const list = document.getElementById("poll-options-list");
+  if (list.querySelectorAll(".poll-option-row").length <= 2) return;
+  btn.closest(".poll-option-row").remove();
+  list.querySelectorAll(".poll-option-input").forEach((input, i) => {
+    if (!input.value) input.placeholder = `Option ${i + 1}`;
+  });
+}
+
+function toggleCodePanel() {
+  _codePanelOpen = !_codePanelOpen;
+  document.getElementById("composer-code-panel").style.display = _codePanelOpen ? "" : "none";
+  document.getElementById("toolbar-code-btn").classList.toggle("recording", _codePanelOpen);
+  if (_codePanelOpen) document.getElementById("composer-code-input").focus();
+}
+
+// ── Media preview rendering ───────────────────────────────────────────────────
+function _renderMediaPreview() {
+  const area = document.getElementById("composer-media-preview");
+  if (!_composerMedia.length) { area.innerHTML = ""; return; }
+  const images = _composerMedia.filter(m => m.type === "image");
+  const others = _composerMedia.filter(m => m.type !== "image");
+  let html = "";
+  if (images.length) {
+    const cols = Math.min(images.length, 2);
+    html += `<div class="media-preview-images" style="grid-template-columns:repeat(${cols},1fr)">` +
+      images.map((m, i) => {
+        const idx = _composerMedia.indexOf(m);
+        return `<div class="media-thumb-wrap">
+          <img src="${m.url}" alt="${escHtml(m.name)}" style="${cols > 1 ? "height:180px;object-fit:cover" : ""}" />
+          <button class="media-thumb-remove" onclick="removeMedia(${idx})" title="Remove">×</button>
+        </div>`;
+      }).join("") + `</div>`;
+  }
+  const rmBtnPost = (idx) => `<button onclick="removeMedia(${idx})" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:.8rem;display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;transition:background .15s" onmouseover="this.style.background='#ef4444'" onmouseout="this.style.background='rgba(0,0,0,.55)'">×</button>`;
+  others.forEach(m => {
+    const idx = _composerMedia.indexOf(m);
+    if (m.type === "mux") {
+      html += `<div style="position:relative;margin-top:6px">
+        <div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div>
+        ${rmBtnPost(idx)}
+      </div>`;
+    } else if (m.type === "youtube") {
+      html += `<div style="position:relative;margin-top:6px;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden">
+        <iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe>
+        ${rmBtnPost(idx)}
+      </div>`;
+    } else if (m.type === "vimeo") {
+      html += `<div style="position:relative;margin-top:6px;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden">
+        <iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe>
+        ${rmBtnPost(idx)}
+      </div>`;
+    } else if (m.type === "audio") {
+      const dur = m.duration ? ` · ${m.duration}s` : "";
+      html += `<div style="margin-top:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:.78rem;color:var(--text-muted)">🎙️ Voice message${escHtml(dur)}</span>
+          <button onclick="removeMedia(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:.85rem;padding:0 2px" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">×</button>
+        </div>
+        <audio src="${escHtml(m.url)}" controls style="width:100%;display:block;border-radius:8px"></audio>
+      </div>`;
+    } else if (m.type === "code") {
+      html += `<span class="media-chip"></> ${escHtml((m.html || "").slice(0, 30))}…<button class="media-chip-remove" onclick="removeMedia(${idx})" title="Remove">×</button></span>`;
+    } else {
+      html += `<span class="media-chip">📎 ${escHtml(m.name)}<button class="media-chip-remove" onclick="removeMedia(${idx})" title="Remove">×</button></span>`;
+    }
+  });
+  area.innerHTML = html;
+}
+
+async function _deleteMuxAsset(assetId) {
+  if (!assetId) return;
+  try {
+    const token = (await db.auth.getSession()).data.session?.access_token;
+    await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "delete-mux-asset", assetId })
+    });
+  } catch (e) { console.warn("Mux asset delete failed:", e); }
+}
+
+function removeMedia(idx) {
+  const m = _composerMedia[idx];
+  if (m?.type === "mux" && m.assetId) _deleteMuxAsset(m.assetId);
+  _composerMedia.splice(idx, 1);
+  _renderMediaPreview();
+}
+
+// ── Inline toolbar (comment + reply composers) ────────────────────────────────
+
+function _inlineKey(key) {
+  // Ensure per-key media array exists
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  return key;
+}
+
+function _renderInlineMediaPreview(key) {
+  const area = document.getElementById(`inline-media-preview-${key}`);
+  if (!area) return;
+  const media = _inlineMedia[key] || [];
+  if (!media.length) { area.innerHTML = ""; return; }
+  const images = media.filter(m => m.type === "image");
+  const others = media.filter(m => m.type !== "image");
+  let html = "";
+  if (images.length) {
+    const cols = Math.min(images.length, 2);
+    html += `<div class="media-preview-images" style="grid-template-columns:repeat(${cols},1fr)">` +
+      images.map((m, i) => {
+        const idx = media.indexOf(m);
+        return `<div class="media-thumb-wrap">
+          <img src="${m.url}" alt="${escHtml(m.name)}" style="${cols > 1 ? "height:180px;object-fit:cover" : ""}" />
+          <button class="media-thumb-remove" onclick="removeInlineMedia('${key}',${idx})" title="Remove">×</button>
+        </div>`;
+      }).join("") + `</div>`;
+  }
+  const rmBtn = (fn) => `<button onclick="${fn}" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:.8rem;display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;transition:background .15s" onmouseover="this.style.background='#ef4444'" onmouseout="this.style.background='rgba(0,0,0,.55)'">×</button>`;
+  others.forEach(m => {
+    const idx = media.indexOf(m);
+    const rm  = `removeInlineMedia('${key}',${idx})`;
+    if (m.type === "mux") {
+      if (m._uploading && m._localUrl) {
+        html += `<div style="position:relative;margin-top:6px">
+          <video src="${escHtml(m._localUrl)}" class="chat-preview-video" style="border:1.5px solid var(--border)"></video>
+          <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 8px;background:rgba(0,0,0,.5);border-radius:0 0 8px 8px;font-size:.75rem;color:#fff;display:flex;align-items:center;gap:5px"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="animation:spin 1s linear infinite;flex-shrink:0"><circle cx="12" cy="12" r="10" stroke-opacity=".25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg> Uploading…</div>
+          ${rmBtn(rm)}
+        </div>`;
+      } else if (m._uploading) {
+        html += `<span class="media-chip" style="opacity:.6;margin-top:6px;display:inline-flex;align-items:center;gap:5px"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="animation:spin 1s linear infinite;flex-shrink:0"><circle cx="12" cy="12" r="10" stroke-opacity=".25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>${escHtml(m.name)} — uploading…</span>`;
+      } else {
+        html += `<div style="position:relative;margin-top:6px">
+          <div class="comment-mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div>
+          ${rmBtn(rm)}
+        </div>`;
+      }
+    } else if (m.type === "youtube") {
+      html += `<div style="position:relative;margin-top:6px;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden">
+        <iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe>
+        ${rmBtn(rm)}
+      </div>`;
+    } else if (m.type === "vimeo") {
+      html += `<div style="position:relative;margin-top:6px;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden">
+        <iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe>
+        ${rmBtn(rm)}
+      </div>`;
+    } else if (m.type === "audio") {
+      const dur = m.duration ? ` · ${m.duration}s` : "";
+      html += `<div style="margin-top:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:.78rem;color:var(--text-muted)">🎙️ Voice message${escHtml(dur)}</span>
+          <button onclick="${rm}" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:.85rem;padding:0 2px" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">×</button>
+        </div>
+        <audio src="${escHtml(m.url)}" controls style="width:100%;display:block;border-radius:8px"></audio>
+      </div>`;
+    } else {
+      html += `<span class="media-chip" style="margin-top:6px">📎 ${escHtml(m.name)}<button class="media-chip-remove" onclick="${rm}" title="Remove">×</button></span>`;
+    }
+  });
+  area.innerHTML = html;
+
+  // Disable the relevant send button while a Mux video is still uploading/processing
+  {
+    const isUploading = (media || []).some(m => m._uploading);
+    let sendBtnId;
+    if (key === "chat_main")          sendBtnId = "chat-send-btn";
+    else if (key === "main")          sendBtnId = "comment-send-btn";
+    else if (key === "activity_main") sendBtnId = "activity-comment-send-btn";
+    else                              sendBtnId = `reply-send-btn-${key}`; // post reply or activity reply
+    const sendBtn = document.getElementById(sendBtnId);
+    if (sendBtn) {
+      sendBtn.disabled = isUploading;
+      sendBtn.title = isUploading ? "Please wait — video is processing…" : (key === "chat_main" ? "Send (Shift+Enter)" : "");
+    }
+    // Also try activity reply btn (activity replies share UUID keys with post replies)
+    const actReplySendBtn = document.getElementById(`activity-reply-send-btn-${key}`);
+    if (actReplySendBtn) {
+      actReplySendBtn.disabled = isUploading;
+      actReplySendBtn.title = isUploading ? "Please wait — video is processing…" : "";
+    }
+  }
+}
+
+function removeInlineMedia(key, idx) {
+  if (_inlineMedia[key]) {
+    const m = _inlineMedia[key][idx];
+    if (m?.type === "mux" && m.assetId) _deleteMuxAsset(m.assetId);
+    _inlineMedia[key].splice(idx, 1);
+  }
+  _renderInlineMediaPreview(key);
+}
+
+function inlineHandleImage(input, key) {
+  _inlineKey(key);
+  Array.from(input.files || []).forEach(file => {
+    const url = URL.createObjectURL(file);
+    _inlineMedia[key].push({ type: "image", url, name: file.name, blob: file });
+  });
+  input.value = "";
+  _renderInlineMediaPreview(key);
+}
+
+function inlineHandleFile(input, key) {
+  _inlineKey(key);
+  const file = input.files[0];
+  if (!file) return;
+  _inlineMedia[key].push({ type: "file", name: file.name, blob: file });
+  input.value = "";
+  _renderInlineMediaPreview(key);
+}
+
+async function toggleInlineVoice(key) {
+  if (_inlineVoiceRec[key]) {
+    // Currently recording — stop
+    if (_inlineVoiceRec[key].state !== "inactive") _inlineVoiceRec[key].stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = [];
+    const mr = new MediaRecorder(stream);
+    _inlineVoiceRec[key] = mr;
+    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(_inlineRecTimer[key]);
+      _inlineRecTimer[key] = null;
+      _inlineVoiceRec[key] = null;
+      const recInd = document.getElementById(`inline-recording-${key}`);
+      if (recInd) recInd.style.display = "none";
+      const btn = document.getElementById(`inline-${key === "main" ? "main" : key}-voice-btn`) ||
+                  document.getElementById(`inline-voice-btn-${key}`);
+      if (btn) btn.classList.remove("recording");
+      const mime = mr.mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: mime });
+      const duration = _inlineRecStart[key] ? Math.round((Date.now() - _inlineRecStart[key]) / 1000) : 0;
+      // Use the correct extension for the MIME type so storage serves it back correctly
+      // iOS Safari records as audio/mp4; Chrome/Android as audio/webm
+      const ext = mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac") ? "m4a"
+        : mime.includes("ogg") ? "ogg"
+        : "webm";
+      const name = `voice-${Date.now()}.${ext}`;
+      _inlineKey(key);
+      _inlineMedia[key].push({ type: "audio", url: URL.createObjectURL(blob), name, blob, duration });
+      _renderInlineMediaPreview(key);
+    };
+    mr.start();
+    _inlineRecStart[key] = Date.now();
+    const voiceBtn = document.getElementById(`inline-${key === "main" ? "main" : key}-voice-btn`) ||
+                     document.getElementById(`inline-voice-btn-${key}`);
+    if (voiceBtn) voiceBtn.classList.add("recording");
+    const recInd = document.getElementById(`inline-recording-${key}`);
+    const timeEl = document.getElementById(`inline-rec-time-${key}`);
+    if (recInd) recInd.style.display = "";
+    _inlineRecTimer[key] = setInterval(() => {
+      const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      if (timeEl) timeEl.textContent = `${m}:${String(s).padStart(2, "0")}`;
+    }, 1000);
+  } catch (e) {
+    alert("Microphone access denied: " + e.message);
+  }
+}
+
+function stopInlineVoice(key) {
+  if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") {
+    _inlineVoiceRec[key].stop();
+  }
+}
+
+// ── Inline video ───────────────────────────────────────────────────────────────
+function inlineToggleVideoPanel(key) {
+  const panel  = document.getElementById(`inline-vid-panel-${key}`);
+  const btn    = document.getElementById(`inline-vid-btn-${key}`);
+  if (!panel) return;
+  const open = panel.style.display === "none";
+  panel.style.display = open ? "" : "none";
+  btn?.classList.toggle("recording", open);
+  if (open) inlineSwitchVideoTab("upload", key);
+}
+
+function inlineSwitchVideoTab(tab, key) {
+  const upPanel = document.getElementById(`inline-vt-up-${key}`);
+  const emPanel = document.getElementById(`inline-vt-em-${key}`);
+  const upBtn   = document.getElementById(`inline-vt-up-btn-${key}`);
+  const emBtn   = document.getElementById(`inline-vt-em-btn-${key}`);
+  const tabActive = "background:rgba(0,0,0,.07);border-radius:4px;font-weight:600";
+  if (upPanel) upPanel.style.display = tab === "upload" ? "" : "none";
+  if (emPanel) emPanel.style.display = tab === "embed"  ? "" : "none";
+  if (upBtn) upBtn.style.cssText = upBtn.style.cssText.replace(/font-weight:\s*600/g, "") + (tab === "upload" ? tabActive : "");
+  if (emBtn) emBtn.style.cssText = emBtn.style.cssText.replace(/font-weight:\s*600/g, "") + (tab === "embed"  ? tabActive : "");
+}
+
+function inlineHandleVideo(input, key) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  inlineToggleVideoPanel(key);
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  // Show a pending chip immediately so the user knows it's uploading
+  const pendingIdx = _inlineMedia[key].length;
+  _inlineMedia[key].push({ type: "mux", name: file.name, _uploading: true, _localUrl: URL.createObjectURL(file) });
+  _renderInlineMediaPreview(key);
+  _uploadVideoToMux(file, item => {
+    _inlineMedia[key][pendingIdx] = item;
+    _renderInlineMediaPreview(key);
+  });
+}
+
+function inlineAddVideoUrl(key) {
+  const input = document.getElementById(`inline-vurl-${key}`);
+  const val   = input?.value.trim();
+  if (!val) return;
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  const ytId = parseYouTubeId(val);
+  const viId = parseVimeoId(val);
+  if (ytId)      _inlineMedia[key].push({ type: "youtube",   ytId,     url: val, name: "YouTube video" });
+  else if (viId) _inlineMedia[key].push({ type: "vimeo",     vimeoId: viId, url: val, name: "Vimeo video" });
+  else           _inlineMedia[key].push({ type: "video-url", url: val, name: "Video" });
+  if (input) input.value = "";
+  inlineToggleVideoPanel(key);
+  _renderInlineMediaPreview(key);
+}
+
+async function inlineToggleCamRec(key) {
+  // If preview is open for this key, cancel it
+  if (_inlineCamPreviewKey === key) { inlineCancelCamPreview(key); return; }
+  // If actively recording for this key, stop it
+  if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") {
+    inlineStopCamRecording(key); return;
+  }
+  // Block concurrent recordings/previews
+  if (_inlineCamRec && _inlineCamRec.state !== "inactive") {
+    alert("Stop the current camera recording first."); return;
+  }
+  if (_inlineCamPreviewStream) { inlineCancelCamPreview(_inlineCamPreviewKey); }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { aspectRatio: 16/9 } });
+    _inlineCamPreviewStream = stream;
+    _inlineCamPreviewKey    = key;
+
+    const preview = document.getElementById(`inline-cam-preview-${key}`);
+    const panel   = document.getElementById(`inline-cam-panel-${key}`);
+    const btn     = document.getElementById(`inline-camrec-btn-${key}`);
+    if (preview) preview.srcObject = stream;
+    if (panel)   panel.style.display = "";
+    if (btn)     btn.classList.add("recording");
+
+    // Enumerate devices now that we have permission
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+    const mics    = devices.filter(d => d.kind === "audioinput");
+    const activeVideoLabel = stream.getVideoTracks()[0]?.label || "";
+    const activeAudioLabel = stream.getAudioTracks()[0]?.label || "";
+
+    const camSel = document.getElementById(`inline-cam-sel-${key}`);
+    const micSel = document.getElementById(`inline-mic-sel-${key}`);
+    if (camSel) camSel.innerHTML = cameras.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeVideoLabel ? "selected" : ""}>${d.label || "Camera " + (cameras.indexOf(d)+1)}</option>`
+    ).join("");
+    if (micSel) micSel.innerHTML = mics.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeAudioLabel ? "selected" : ""}>${d.label || "Mic " + (mics.indexOf(d)+1)}</option>`
+    ).join("");
+  } catch (e) {
+    alert("Could not access camera/mic: " + e.message);
+  }
+}
+
+async function inlineSwitchCamDevice(key) {
+  if (!_inlineCamPreviewStream || _inlineCamPreviewKey !== key) return;
+  const camSel = document.getElementById(`inline-cam-sel-${key}`);
+  const micSel = document.getElementById(`inline-mic-sel-${key}`);
+  _inlineCamPreviewStream.getTracks().forEach(t => t.stop());
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: camSel?.value ? { deviceId: { exact: camSel.value } } : true,
+      audio: micSel?.value ? { deviceId: { exact: micSel.value } } : true,
+    });
+    _inlineCamPreviewStream = stream;
+    const preview = document.getElementById(`inline-cam-preview-${key}`);
+    if (preview) preview.srcObject = stream;
+  } catch (e) { alert("Could not switch device: " + e.message); }
+}
+
+function inlineStartCamRecording(key) {
+  if (!_inlineCamPreviewStream) return;
+  // Hide device/action UI, show recording bar
+  const devs    = document.getElementById(`inline-cam-devices-${key}`);
+  const actions = document.getElementById(`inline-cam-actions-${key}`);
+  const recBar  = document.getElementById(`inline-cam-recbar-${key}`);
+  if (devs)    devs.style.display    = "none";
+  if (actions) actions.style.display = "none";
+  if (recBar)  recBar.style.display  = "";
+
+  const stream = _inlineCamPreviewStream;
+  _inlineCamPreviewStream = null;
+  _inlineCamStream = stream;
+  _inlineCamKey    = key;
+
+  const chunks = [];
+  const mr     = new MediaRecorder(stream);
+  _inlineCamRec = mr;
+  mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mr.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    const mime = mr.mimeType || "video/webm";
+    const blob = new Blob(chunks, { type: mime });
+    const name = `video-${Date.now()}.webm`;
+    const file = new File([blob], name, { type: mime });
+    const ck   = _inlineCamKey;
+    // Reset panel
+    const panel   = document.getElementById(`inline-cam-panel-${ck}`);
+    const preview = document.getElementById(`inline-cam-preview-${ck}`);
+    const devEl   = document.getElementById(`inline-cam-devices-${ck}`);
+    const actEl   = document.getElementById(`inline-cam-actions-${ck}`);
+    const barEl   = document.getElementById(`inline-cam-recbar-${ck}`);
+    const btnEl   = document.getElementById(`inline-camrec-btn-${ck}`);
+    if (preview) preview.srcObject = null;
+    if (panel)   panel.style.display   = "none";
+    if (devEl)   devEl.style.display   = "";
+    if (actEl)   actEl.style.display   = "";
+    if (barEl)   barEl.style.display   = "none";
+    if (btnEl)   btnEl.classList.remove("recording");
+    clearInterval(_inlineRecTimer[ck]);
+    _inlineCamRec = null; _inlineCamStream = null; _inlineCamKey = null; _inlineCamPreviewKey = null;
+    // Queue Mux upload
+    if (!_inlineMedia[ck]) _inlineMedia[ck] = [];
+    const pendingIdx = _inlineMedia[ck].length;
+    _inlineMedia[ck].push({ type: "mux", name, _uploading: true, _localUrl: URL.createObjectURL(blob) });
+    _renderInlineMediaPreview(ck);
+    _uploadVideoToMux(file, item => {
+      _inlineMedia[ck][pendingIdx] = item;
+      _renderInlineMediaPreview(ck);
+    });
+  };
+  mr.start();
+
+  _inlineRecStart[key] = Date.now();
+  _inlineRecTimer[key] = setInterval(() => {
+    const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
+    const m = Math.floor(secs / 60), s = secs % 60;
+    const el = document.getElementById(`inline-cam-timer-${key}`);
+    if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
+  }, 1000);
+}
+
+function inlineStopCamRecording(key) {
+  if (_inlineCamRec && _inlineCamKey === key && _inlineCamRec.state !== "inactive") {
+    _inlineCamRec.stop();
+  }
+}
+
+function inlineCancelCamPreview(key) {
+  if (_inlineCamPreviewStream) {
+    _inlineCamPreviewStream.getTracks().forEach(t => t.stop());
+    _inlineCamPreviewStream = null;
+  }
+  _inlineCamPreviewKey = null;
+  const preview = document.getElementById(`inline-cam-preview-${key}`);
+  const panel   = document.getElementById(`inline-cam-panel-${key}`);
+  const btn     = document.getElementById(`inline-camrec-btn-${key}`);
+  if (preview) preview.srcObject = null;
+  if (panel)   panel.style.display = "none";
+  if (btn)     btn.classList.remove("recording");
+}
+
+function toggleInlinePoll(key) {
+  const panel = document.getElementById(`inline-poll-${key}`);
+  if (!panel) return;
+  const open = panel.style.display === "none";
+  panel.style.display = open ? "" : "none";
+  _inlinePollOpen[key] = open;
+  const btn = document.getElementById(`inline-${key === "main" ? "main" : key}-poll-btn`) ||
+              document.getElementById(`inline-poll-btn-${key}`);
+  if (btn) btn.classList.toggle("recording", open);
+  if (open) document.getElementById(`inline-poll-q-${key}`)?.focus();
+}
+
+function addInlinePollOption(key) {
+  const list = document.getElementById(`inline-poll-opts-${key}`);
+  if (!list) return;
+  const count = list.querySelectorAll(".poll-option-input").length + 1;
+  const row = document.createElement("div");
+  row.className = "poll-option-row";
+  row.innerHTML = `<input class="poll-option-input" placeholder="Option ${count}" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button>`;
+  list.appendChild(row);
+}
+
+function removeInlinePollOption(btn) {
+  const list = btn.closest(".poll-options-list") || btn.closest("[id^='inline-poll-opts-']");
+  if (!list) return;
+  if (list.querySelectorAll(".poll-option-row").length <= 2) return;
+  btn.closest(".poll-option-row").remove();
+  list.querySelectorAll(".poll-option-input").forEach((input, i) => {
+    if (!input.value) input.placeholder = `Option ${i + 1}`;
+  });
+}
+
+function _readInlinePoll(key) {
+  const q = document.getElementById(`inline-poll-q-${key}`)?.value.trim();
+  const opts = Array.from(document.querySelectorAll(`#inline-poll-opts-${key} .poll-option-input`))
+    .map(i => i.value.trim()).filter(Boolean);
+  if (!q || opts.length < 2) return null;
+  return { question: q, options: opts };
+}
+
+function _clearInlineState(key) {
+  _inlineMedia[key] = [];
+  _inlinePollOpen[key] = false;
+  if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") {
+    _inlineVoiceRec[key].stop();
+  }
+  _inlineVoiceRec[key] = null;
+  if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") {
+    _inlineCamRec.stop();
+  }
+  if (_inlineCamKey === key) { _inlineCamRec = null; _inlineCamKey = null; }
+  clearInterval(_inlineRecTimer[key]);
+  _inlineRecTimer[key] = null;
+  _inlineRecStart[key] = null;
+  _renderInlineMediaPreview(key);
+  const recInd = document.getElementById(`inline-recording-${key}`);
+  if (recInd) recInd.style.display = "none";
+  // Hide all panels
+  document.getElementById(`inline-poll-${key}`)?.style.setProperty("display", "none");
+  document.getElementById(`inline-vid-panel-${key}`)?.style.setProperty("display", "none");
+  document.getElementById(`inline-cam-panel-${key}`)?.style.setProperty("display", "none");
+  // Reset all button highlights
+  document.getElementById(`inline-poll-btn-${key}`)?.classList.remove("recording");
+  document.getElementById(`inline-vid-btn-${key}`)?.classList.remove("recording");
+  document.getElementById(`inline-voice-btn-${key}`)?.classList.remove("recording");
+  document.getElementById(`inline-camrec-btn-${key}`)?.classList.remove("recording");
+  // Also handle "main" static toolbar IDs when key === "main"
+  if (key === "main") {
+    document.getElementById("inline-main-poll-btn")?.classList.remove("recording");
+    document.getElementById("inline-vid-btn-main")?.classList.remove("recording");
+    document.getElementById("inline-main-voice-btn")?.classList.remove("recording");
+    document.getElementById("inline-camrec-btn-main")?.classList.remove("recording");
+    document.getElementById("inline-vid-panel-main")?.style.setProperty("display", "none");
+    document.getElementById("inline-cam-panel-main")?.style.setProperty("display", "none");
+  }
+  // Cancel any open camera preview
+  if (_inlineCamPreviewKey === key) inlineCancelCamPreview(key);
+  const pollPanel = document.getElementById(`inline-poll-${key}`);
+  if (pollPanel) pollPanel.style.display = "none";
+  const pollQ = document.getElementById(`inline-poll-q-${key}`);
+  if (pollQ) pollQ.value = "";
+  const pollOpts = document.getElementById(`inline-poll-opts-${key}`);
+  if (pollOpts) {
+    // Reset to 2 blank options
+    pollOpts.innerHTML = `
+      <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+      <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+    `;
+  }
+}
+
+// Build inline toolbar HTML string for a given key (used in reply composer template)
+function _inlineToolbarHtml(key) {
+  const tabActive = "background:rgba(0,0,0,.07);border-radius:4px;font-weight:600";
+  const tabBase   = "background:none;border:none;font-family:inherit;font-size:.78rem;cursor:pointer;padding:4px 8px;border-radius:4px;color:var(--text-muted)";
+  return `
+    <div class="composer-toolbar" id="inline-main-toolbar-${key}" style="flex-wrap:wrap;margin-top:4px">
+      <button class="toolbar-btn" title="Image" onclick="document.getElementById('inline-fi-img-${key}').click()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </button>
+      <button class="toolbar-btn" title="File" onclick="document.getElementById('inline-fi-file-${key}').click()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Video / embed" id="inline-vid-btn-${key}" onclick="inlineToggleVideoPanel('${key}')">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="4"/><polygon points="10 8 18 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Record video" id="inline-camrec-btn-${key}" onclick="inlineToggleCamRec('${key}')">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Voice recording" id="inline-voice-btn-${key}" onclick="toggleInlineVoice('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Poll" id="inline-poll-btn-${key}" onclick="toggleInlinePoll('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      </button>
+      <input type="file" id="inline-fi-img-${key}" accept="image/*" multiple style="display:none" onchange="inlineHandleImage(this,'${key}')">
+      <input type="file" id="inline-fi-file-${key}" style="display:none" onchange="inlineHandleFile(this,'${key}')">
+      <input type="file" id="inline-fi-vid-${key}" accept="video/*" style="display:none" onchange="inlineHandleVideo(this,'${key}')">
+    </div>
+    <div id="inline-recording-${key}" style="display:none" class="recording-indicator">
+      <span class="recording-dot"></span>
+      <span id="inline-rec-label-${key}">Recording…</span>
+      <span id="inline-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
+      <button class="recording-stop-btn" id="inline-rec-stop-${key}" onclick="stopInlineVoice('${key}')">■ Stop</button>
+    </div>
+    <div id="inline-cam-panel-${key}" style="display:none" class="video-rec-panel">
+      <video id="inline-cam-preview-${key}" autoplay muted playsinline class="video-rec-preview"></video>
+      <div class="video-rec-devices" id="inline-cam-devices-${key}">
+        <select id="inline-cam-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')">
+          <option>Loading cameras…</option>
+        </select>
+        <select id="inline-mic-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')">
+          <option>Loading mics…</option>
+        </select>
+      </div>
+      <div class="video-rec-actions" id="inline-cam-actions-${key}">
+        <button class="video-rec-start-btn" onclick="inlineStartCamRecording('${key}')">⏺ Start Recording</button>
+        <button class="video-rec-cancel-btn" onclick="inlineCancelCamPreview('${key}')">Cancel</button>
+      </div>
+      <div class="video-rec-recording-bar" id="inline-cam-recbar-${key}" style="display:none">
+        <span class="recording-dot"></span>
+        <span id="inline-cam-timer-${key}" style="font-size:.88rem;font-weight:600;color:var(--text);flex:1">0:00</span>
+        <button class="video-rec-stop-btn" onclick="inlineStopCamRecording('${key}')">■ Stop & Upload</button>
+      </div>
+    </div>
+    <div id="inline-vid-panel-${key}" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-bottom:8px">
+        <button id="inline-vt-up-btn-${key}" style="${tabBase};${tabActive}" onclick="inlineSwitchVideoTab('upload','${key}')">Upload</button>
+        <button id="inline-vt-em-btn-${key}" style="${tabBase}" onclick="inlineSwitchVideoTab('embed','${key}')">Embed URL</button>
+      </div>
+      <div id="inline-vt-up-${key}">
+        <div onclick="document.getElementById('inline-fi-vid-${key}').click()" style="border:2px dashed var(--border);border-radius:6px;padding:14px;text-align:center;cursor:pointer;font-size:.84rem;color:var(--text-muted)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block;margin:0 auto 6px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          Choose video file (uploaded to storage)
+        </div>
+        <div id="inline-vid-progress-${key}" style="display:none;margin-top:8px;font-size:.82rem;color:var(--text-muted)"></div>
+      </div>
+      <div id="inline-vt-em-${key}" style="display:none">
+        <input type="text" id="inline-vurl-${key}" placeholder="YouTube or Vimeo URL…"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:.88rem;font-family:inherit;margin-bottom:6px">
+        <button onclick="inlineAddVideoUrl('${key}')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:.84rem;font-weight:600;cursor:pointer;font-family:inherit">Add</button>
+      </div>
+    </div>
+    <div id="inline-poll-${key}" style="display:none" class="poll-builder">
+      <div class="poll-builder-title">Poll</div>
+      <input class="poll-question-input" id="inline-poll-q-${key}" placeholder="Ask a question…" />
+      <div class="poll-options-list" id="inline-poll-opts-${key}">
+        <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+        <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+      </div>
+      <button class="poll-add-option" onclick="addInlinePollOption('${key}')">+ Add option</button>
+    </div>
+    <div class="media-preview-area" id="inline-media-preview-${key}"></div>
+  `;
+}
+
+// Render media attached to a comment row
+function _renderCommentMedia(c) {
+  const media = Array.isArray(c.media) ? c.media : [];
+  if (!media.length) return "";
+  let html = "";
+  const images = media.filter(m => m.type === "image");
+  const others = media.filter(m => m.type !== "image");
+  if (images.length) {
+    const cols = Math.min(images.length, 2);
+    html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:6px">` +
+      images.map(m => `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" style="width:100%;height:${cols > 1 ? "180px" : "auto"};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};border-radius:8px;display:block;cursor:pointer" onclick="window.open('${escHtml(m.url)}','_blank')" loading="lazy">`).join("") +
+      `</div>`;
+  }
+  others.forEach(m => {
+    if (m.type === "mux") {
+      html += `<div style="margin-top:8px;width:min(480px,70vw);aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#000"><mux-player playback-id="${escHtml(m.playbackId)}" controls style="width:100%;height:100%;display:block"></mux-player></div>`;
+    } else if (m.type === "audio") {
+      html += `<div style="margin-top:6px;min-width:240px"><audio src="${escHtml(m.url)}" controls style="width:100%;min-width:240px;border-radius:8px"></audio></div>`;
+    } else if (m.type === "youtube") {
+      html += `<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "vimeo") {
+      html += `<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "file") {
+      html += `<div style="margin-top:6px"><a href="${escHtml(m.url)}" target="_blank" download="${escHtml(m.name)}" class="post-media-chip"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${escHtml(m.name)}</a></div>`;
+    } else if (m.type === "poll") {
+      const opts = Array.isArray(m.options) ? m.options : [];
+      html += `<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:340px">
+        <div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${escHtml(m.question || "Poll")}</div>
+        ${opts.map(o => `<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${escHtml(o)}</div>`).join("")}
+      </div>`;
+    }
+  });
+  return html;
+}
+
+// Upload inline media blobs to storage and return JSON-serialisable array
+async function _uploadInlineMedia(key) {
+  const media = _inlineMedia[key] || [];
+  // Block if any video is still uploading to Mux
+  if (media.some(m => m._uploading)) {
+    throw new Error("A video is still uploading — please wait for it to finish.");
+  }
+  const result = [];
+  for (const m of media) {
+    if (m.type === "mux") {
+      result.push({ type: "mux", playbackId: m.playbackId, assetId: m.assetId, name: m.name });
+    } else if (m.type === "youtube") {
+      result.push({ type: "youtube", ytId: m.ytId, url: m.url, name: m.name });
+    } else if (m.type === "vimeo") {
+      result.push({ type: "vimeo", vimeoId: m.vimeoId, url: m.url, name: m.name });
+    } else if (m.blob) {
+      const publicUrl = await uploadToStorage(m.blob, m.name);
+      const entry = { type: m.type, url: publicUrl, name: m.name };
+      if (m.duration) entry.duration = m.duration;
+      result.push(entry);
+    } else {
+      result.push({ type: m.type, url: m.url, name: m.name });
+    }
+  }
+  return result;
+}
+function escHtml(str) {
+  return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+function initials(name) {
+  if (!name) return "?";
+  return name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
+}
+
+function avatarColour(email) {
+  const P = [
+    {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+    {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
+    {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+    {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+  ];
+  let h = 0;
+  for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
+  return P[Math.abs(h) % P.length];
+}
+
+function avatarHtml(email, name, size = 32, avatarUrl = null) {
+  const style = `width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;`;
+  if (avatarUrl) {
+    return `<div style="${style}overflow:hidden"><img src="${escHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" /></div>`;
+  }
+  const c = avatarColour(email);
+  const ini = initials(name || email?.split("@")[0] || "?");
+  const fontSize = Math.round(size * 0.34);
+  return `<div style="${style}background:${c.bg};color:${c.fg};display:flex;align-items:center;justify-content:center;font-size:${fontSize}px;font-weight:800">${ini}</div>`;
+}
+
+function relativeTime(ts) {
+  if (!ts) return "";
+  const diff = Date.now() - new Date(ts).getTime();
+  const m = Math.floor(diff/60000), h = Math.floor(diff/3600000), d = Math.floor(diff/86400000);
+  if (m < 2)  return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  if (d === 1) return "yesterday";
+  return `${d}d ago`;
+}
+
+function formatMinutes(mins) {
+  if (!mins||mins<=0) return "0 min";
+  const h = Math.floor(mins/60), m = mins%60;
+  if (h===0) return `${m} min`;
+  if (m===0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// ── Community Chat ────────────────────────────────────────────────────────────
+
+let _currentChatId   = "group";       // 'group', 'email1|email2', or room UUID
+let _currentChatName = "Group Chat";  // display name for current chat
+let _chatRealtimeSub = null;          // single global realtime channel
+let _chatMessages    = [];            // loaded messages for current conversation
+let _chatConversations = [];          // list of all known conversations for this user
+let _chatState       = "list";        // 'list' | 'conversation' | 'new'
+let _chatPollVotes   = {};            // messageId -> { myVote: optionIdx|null, counts: {optionIdx: count} }
+let _chatRxMap       = {};            // messageId -> { emoji -> { count, mine } }
+
+// New-chat selection state
+let _newChatSelected = [];            // [{email, name, avatarUrl}]
+
+// Build a DM chat_id from two emails (sorted so it's canonical)
+function _dmChatId(otherEmail) {
+  return [myEmail, otherEmail].sort().join("|");
+}
+
+// ── Chat state switching ──────────────────────────────────────────────────────
+
+function _setChatPanel(panel) {
+  // Sidebar stays always visible — only toggle panels inside chat-main-area
+  document.getElementById("chat-panel-conversation").style.display = panel === "conversation" ? "flex" : "none";
+  document.getElementById("chat-panel-new").style.display          = panel === "new"          ? "flex" : "none";
+  const noSel = document.getElementById("chat-no-selection");
+  if (noSel) noSel.style.display = panel === "no-selection" ? "flex" : "none";
+  _chatState = panel;
+}
+
+// Show the full chat view (switches away from posts/activity/members)
+let _chatViewportHandler = null;
+function _attachChatViewportListener(topPx) {
+  _detachChatViewportListener();
+  if (!window.visualViewport) return;
+  _chatViewportHandler = () => {
+    const chatEl = document.getElementById("view-chat");
+    if (!chatEl || chatEl.style.display === "none") return;
+    const vv = window.visualViewport;
+    // Offset from top of layout viewport to top of visual viewport (accounts for scroll/pinch)
+    const top = Math.max(topPx, vv.offsetTop + topPx);
+    chatEl.style.top    = topPx + "px";
+    chatEl.style.height = vv.height - topPx + "px";
+  };
+  window.visualViewport.addEventListener("resize", _chatViewportHandler);
+  window.visualViewport.addEventListener("scroll", _chatViewportHandler);
+}
+function _detachChatViewportListener() {
+  if (_chatViewportHandler && window.visualViewport) {
+    window.visualViewport.removeEventListener("resize", _chatViewportHandler);
+    window.visualViewport.removeEventListener("scroll", _chatViewportHandler);
+  }
+  const chatEl = document.getElementById("view-chat");
+  if (chatEl) chatEl.style.height = ""; // let CSS bottom:0 take over
+  _chatViewportHandler = null;
+}
+
+// Called from the nav "Chat" button — open group chat with sidebar visible
+async function showChat(chatIdOrEmail, otherName) {
+  _showChatView();
+  _loadConversationsList();
+
+  // Ensure member list is loaded so avatars + proper names show in chat
+  // members loaded by auth bootstrap
+
+  const isMobile = window.matchMedia("(max-width: 640px)").matches;
+
+  if (isMobile) {
+    // On mobile: hide sidebar immediately, show main area, show back button
+    document.getElementById("chat-sidebar").style.display    = "none";
+    document.getElementById("chat-main-area").style.display  = "flex";
+    const backBtn = document.getElementById("chat-mobile-back");
+    if (backBtn) backBtn.style.display = "flex";
+    // Default to group chat if no specific target given
+    await _openConversation(chatIdOrEmail || "group", otherName);
+  } else {
+    if (chatIdOrEmail) {
+      await _openConversation(chatIdOrEmail, otherName);
+    } else {
+      _setChatPanel("no-selection");
+    }
+  }
+
+  // Ensure global realtime is subscribed
+  _subscribeGlobalRealtime();
+}
+
+// Called by Cancel/Back in the new-chat panel — return to prior conversation or no-selection
+function showChatList() {
+  if (_currentChatId) {
+    _setChatPanel("conversation");
+  } else {
+    _setChatPanel("no-selection");
+  }
+  // Mobile: show sidebar if going to no-selection, keep main if conversation active
+  if (window.innerWidth <= 640 && !_currentChatId) {
+    document.getElementById("chat-sidebar").classList.remove("hidden-mobile");
+    document.getElementById("chat-main-area").classList.remove("show-mobile");
+  }
+}
+
+// Mobile: back button in conversation header goes back to sidebar
+function _chatMobileBack() {
+  const sidebar = document.getElementById("chat-sidebar");
+  const main    = document.getElementById("chat-main-area");
+  const backBtn = document.getElementById("chat-mobile-back");
+  // Show sidebar, hide main — clear both inline styles AND CSS classes
+  sidebar.style.display = "flex";
+  main.style.display    = "none";
+  sidebar.classList.remove("hidden-mobile");
+  main.classList.remove("show-mobile");
+  if (backBtn) backBtn.style.display = "none";
+  _currentChatId = null;
+}
+
+// ── Conversations list ────────────────────────────────────────────────────────
+
+async function _loadConversationsList() {
+  const listEl = document.getElementById("chat-conv-list");
+  listEl.innerHTML = `<div class="chat-conv-empty">Loading…</div>`;
+
+  if (!myEmail) return;
+
+  // 1. Fetch latest message per chat_id where user is involved
+  //    We fetch the last 200 messages and group client-side (simple approach)
+  const { data: msgs, error } = await db
+    .from("community_messages")
+    .select("chat_id, content, email, name, created_at, media")
+    .order("created_at", { ascending: false })
+    .limit(400);
+
+  if (error) {
+    listEl.innerHTML = `<div class="chat-conv-empty">Could not load conversations.</div>`;
+    return;
+  }
+
+  // 2. Also fetch rooms this user participates in
+  const { data: participantRows } = await db
+    .from("community_chat_participants")
+    .select("room_id")
+    .eq("email", myEmail);
+  const myRoomIds = new Set((participantRows || []).map(r => r.room_id));
+
+  // 3. Deduplicate by chat_id — keep first (most recent) occurrence
+  const seen = new Map(); // chat_id -> msg
+  for (const msg of (msgs || [])) {
+    if (seen.has(msg.chat_id)) continue;
+    const cid = msg.chat_id;
+    // Include if: group chat, contains my email (DM), or is a room I'm in
+    const isDM = cid !== "group" && cid.includes("|") && cid.includes(myEmail);
+    const isRoom = myRoomIds.has(cid);
+    if (cid === "group" || isDM || isRoom) {
+      seen.set(cid, msg);
+    }
+  }
+
+  // Always include group chat even if no messages
+  if (!seen.has("group")) {
+    seen.set("group", { chat_id: "group", content: "", email: "", name: "", created_at: null });
+  }
+
+  // Always pin a DM with Matt (owner) for non-owner members
+  if (myEmail && myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+    const mattDmId = _dmChatId(OWNER_EMAIL);
+    if (!seen.has(mattDmId)) {
+      seen.set(mattDmId, { chat_id: mattDmId, content: "", email: OWNER_EMAIL, name: "Matthew", created_at: null });
+    }
+  }
+
+  // 4. Fetch room names for group DMs
+  const roomIds = [...seen.keys()].filter(id => myRoomIds.has(id));
+  let roomNames = {};
+  if (roomIds.length) {
+    const { data: rooms } = await db
+      .from("community_chat_rooms")
+      .select("id, name, created_at")
+      .in("id", roomIds);
+    const { data: participants } = await db
+      .from("community_chat_participants")
+      .select("room_id, email")
+      .in("room_id", roomIds);
+    for (const r of (rooms || [])) {
+      const pEmails = (participants || []).filter(p => p.room_id === r.id).map(p => p.email).filter(e => e !== myEmail);
+      roomNames[r.id] = r.name || pEmails.map(e => {
+        const m = (_allMembers || []).find(m => m.email === e);
+        return m ? m.name : e.split("@")[0];
+      }).join(", ") || "Group";
+    }
+  }
+
+  // 5. Sort: group first, then by recency
+  const convList = [...seen.values()].sort((a, b) => {
+    if (a.chat_id === "group") return -1;
+    if (b.chat_id === "group") return 1;
+    return (b.created_at || "") > (a.created_at || "") ? 1 : -1;
+  });
+
+  _chatConversations = convList;
+  _renderConvList(convList, roomNames);
+}
+
+function _renderConvList(convList, roomNames) {
+  const listEl = document.getElementById("chat-conv-list");
+  if (!convList.length) {
+    listEl.innerHTML = `<div class="chat-conv-empty">No conversations yet — start one!</div>`;
+    return;
+  }
+
+  listEl.innerHTML = convList.map(msg => {
+    const cid = msg.chat_id;
+    let name, avatarEl;
+
+    if (cid === "group") {
+      name = "Group Chat";
+      avatarEl = `<div style="width:44px;height:44px;border-radius:50%;background:var(--surface-2);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-muted)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>`;
+    } else if (cid.includes("|")) {
+      // DM
+      const otherEmail = cid.split("|").find(e => e !== myEmail) || cid.split("|")[0];
+      const member = (_allMembers || []).find(m => m.email === otherEmail);
+      name = member ? member.name : (otherEmail.split("@")[0]);
+      avatarEl = avatarHtml(otherEmail, name, 44, member?.avatar_url || null);
+    } else {
+      // Group DM room
+      name = roomNames && roomNames[cid] ? roomNames[cid] : "Group";
+      avatarEl = `<div style="width:44px;height:44px;border-radius:50%;background:var(--surface-2);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-muted)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>`;
+    }
+
+    const preview = msg.content
+      ? escHtml(msg.content).slice(0, 60)
+      : (Array.isArray(msg.media) && msg.media.length ? "Attachment" : "");
+    const timeStr = msg.created_at ? relativeTime(msg.created_at) : "";
+
+    return `<button class="chat-conv-row" data-chat-id="${escHtml(cid)}" onclick="_openConversation('${escHtml(cid)}')">
+      <div class="chat-conv-row-avatars">${avatarEl}</div>
+      <div class="chat-conv-row-body">
+        <div class="chat-conv-row-top">
+          <span class="chat-conv-row-name">${escHtml(name)}</span>
+          <span class="chat-conv-row-time">${timeStr}</span>
+        </div>
+        <div class="chat-conv-row-preview">${preview}</div>
+      </div>
+    </button>`;
+  }).join("");
+}
+
+function _filterConvList(q) {
+  if (!q.trim()) {
+    _renderConvList(_chatConversations, {});
+    return;
+  }
+  const lq = q.toLowerCase();
+  const filtered = _chatConversations.filter(msg => {
+    const name = msg.chat_id === "group" ? "group chat" : msg.chat_id.toLowerCase();
+    return name.includes(lq) || (msg.content || "").toLowerCase().includes(lq);
+  });
+  _renderConvList(filtered, {});
+}
+
+// ── Opening a conversation ────────────────────────────────────────────────────
+
+async function _openConversation(chatIdOrEmail, otherName) {
+  let chatId, title;
+  if (!chatIdOrEmail || chatIdOrEmail === "group") {
+    chatId = "group";
+    title  = "Group Chat";
+  } else if (chatIdOrEmail.includes("|")) {
+    chatId = chatIdOrEmail;
+    const parts = chatId.split("|");
+    const other = parts.find(e => e !== myEmail) || parts[0];
+    const member = (_allMembers || []).find(m => m.email === other);
+    title = otherName || (member ? member.name : other.split("@")[0]);
+  } else if (/^[0-9a-f-]{36}$/i.test(chatIdOrEmail)) {
+    // UUID — group DM room
+    chatId = chatIdOrEmail;
+    title  = otherName || "Group";
+  } else {
+    // Raw email — DM
+    chatId = _dmChatId(chatIdOrEmail);
+    const member = (_allMembers || []).find(m => m.email === chatIdOrEmail);
+    title  = otherName || (member ? member.name : chatIdOrEmail.split("@")[0]);
+  }
+
+  _currentChatId   = chatId;
+  _currentChatName = title;
+
+  _setChatPanel("conversation");
+  document.getElementById("chat-conv-hdr-title").textContent = title;
+
+  // Highlight active row in sidebar
+  document.querySelectorAll(".chat-conv-row").forEach(r => {
+    r.classList.toggle("active", r.dataset.chatId === chatId);
+  });
+
+  // Mobile: hide sidebar, show main area, show back button (use inline styles to match _chatMobileBack)
+  const backBtn = document.getElementById("chat-mobile-back");
+  if (window.matchMedia("(max-width: 640px)").matches) {
+    document.getElementById("chat-sidebar").style.display   = "none";
+    document.getElementById("chat-main-area").style.display = "flex";
+    if (backBtn) backBtn.style.display = "flex";
+  } else {
+    if (backBtn) backBtn.style.display = "none";
+  }
+
+  // Inject toolbar
+  const toolbarContainer = document.getElementById("chat-toolbar-container");
+  _clearInlineState("chat_main");
+  toolbarContainer.innerHTML = _inlineToolbarHtml("chat_main");
+
+  // Load messages
+  document.getElementById("chat-messages").innerHTML =
+    `<div class="chat-empty" id="chat-empty" style="color:var(--text-muted);font-size:.85rem">Loading…</div>`;
+  _chatMessages = [];
+
+  const { data, error } = await db
+    .from("community_messages")
+    .select("*")
+    .eq("chat_id", chatId)
+    .order("created_at", { ascending: true })
+    .limit(200);
+
+  if (error) {
+    document.getElementById("chat-messages").innerHTML =
+      `<div class="chat-empty">Could not load messages.</div>`;
+    return;
+  }
+
+  _chatMessages = data || [];
+
+  // Load poll votes for any poll messages in this conversation
+  const pollMsgIds = _chatMessages
+    .filter(m => {
+      const media = Array.isArray(m.media) ? m.media : (typeof m.media === "string" ? JSON.parse(m.media || "[]") : []);
+      return media.some(x => x.type === "poll");
+    })
+    .map(m => m.id);
+
+  _chatPollVotes = {};
+  if (pollMsgIds.length) {
+    const [{ data: allVotes }, { data: myVotes }] = await Promise.all([
+      db.from("community_chat_poll_votes").select("message_id,option_idx").in("message_id", pollMsgIds),
+      db.from("community_chat_poll_votes").select("message_id,option_idx").eq("email", myEmail).in("message_id", pollMsgIds)
+    ]);
+    (allVotes || []).forEach(v => {
+      if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
+      _chatPollVotes[v.message_id].counts[v.option_idx] = (_chatPollVotes[v.message_id].counts[v.option_idx] || 0) + 1;
+    });
+    (myVotes || []).forEach(v => {
+      if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
+      _chatPollVotes[v.message_id].myVote = v.option_idx;
+    });
+  }
+
+  // Load reactions for all messages
+  _chatRxMap = {};
+  const allMsgIds = _chatMessages.map(m => m.id);
+  if (allMsgIds.length) {
+    const { data: rxRows } = await db.from("community_chat_reactions")
+      .select("message_id,email,emoji").in("message_id", allMsgIds);
+    (rxRows || []).forEach(r => {
+      if (!_chatRxMap[r.message_id]) _chatRxMap[r.message_id] = {};
+      if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, emails: [] };
+      _chatRxMap[r.message_id][r.emoji].count++;
+      _chatRxMap[r.message_id][r.emoji].emails.push(r.email);
+      if (r.email === myEmail) _chatRxMap[r.message_id][r.emoji].mine = true;
+    });
+  }
+
+  _renderChatMessages();
+  _scrollChatToBottom(true);
+}
+
+// ── Chat reactions ─────────────────────────────────────────────────────────
+
+const CHAT_EMOJIS = ["❤️","👍","😂","🔥","💪","👏","😮"];
+
+function _rxNames(emails) {
+  return (emails || []).map(e =>
+    e === myEmail ? "You" : ((_allMembers || []).find(m => m.email === e)?.name || e.split("@")[0])
+  ).join(", ");
+}
+
+function _chatRxHtml(msgId) {
+  const rx = _chatRxMap[msgId] || {};
+  return Object.entries(rx)
+    .filter(([, d]) => d.count > 0)
+    .map(([emoji, d]) => {
+      const names = _rxNames(d.emails);
+      return `<button class="chat-rx-pill${d.mine ? " mine" : ""}" data-names="${escHtml(names)}" onclick="pickChatReaction('${escHtml(msgId)}','${emoji}')">${emoji}${d.count > 1 ? `<span>${d.count}</span>` : ""}</button>`;
+    }).join("");
+}
+
+function _chatPickerHtml(msgId, isMine) {
+  const rx = _chatRxMap[msgId] || {};
+  const btns = CHAT_EMOJIS.map(e => {
+    const mine = rx[e]?.mine;
+    return `<button class="${mine ? "picked" : ""}" data-emoji="${e}" onclick="pickChatReaction('${escHtml(msgId)}','${e}')">${e}</button>`;
+  }).join("");
+  return `<div class="chat-react-picker${isMine ? " mine" : ""}" id="chat-picker-${escHtml(msgId)}">${btns}</div>`;
+}
+
+function toggleChatReactPicker(msgId, ev) {
+  ev.stopPropagation();
+  // Close any other open picker
+  document.querySelectorAll(".chat-react-picker").forEach(p => {
+    if (p.id !== `chat-picker-${msgId}`) p.style.display = "none";
+  });
+  const picker = document.getElementById(`chat-picker-${msgId}`);
+  if (!picker) return;
+  const isOpen = picker.style.display === "flex";
+  picker.style.display = isOpen ? "none" : "flex";
+}
+
+async function pickChatReaction(msgId, emoji) {
+  // Close picker
+  const picker = document.getElementById(`chat-picker-${msgId}`);
+  if (picker) picker.style.display = "none";
+
+  if (!_chatRxMap[msgId]) _chatRxMap[msgId] = {};
+  const existingEmoji = Object.entries(_chatRxMap[msgId]).find(([, d]) => d.mine)?.[0];
+
+  if (existingEmoji === emoji) {
+    // Toggle off
+    _chatRxMap[msgId][emoji].mine = false;
+    _chatRxMap[msgId][emoji].count = Math.max(0, _chatRxMap[msgId][emoji].count - 1);
+    _chatRxMap[msgId][emoji].emails = (_chatRxMap[msgId][emoji].emails || []).filter(e => e !== myEmail);
+    await db.from("community_chat_reactions").delete()
+      .eq("message_id", msgId).eq("email", myEmail);
+  } else {
+    // Remove previous reaction if any
+    if (existingEmoji) {
+      _chatRxMap[msgId][existingEmoji].mine = false;
+      _chatRxMap[msgId][existingEmoji].count = Math.max(0, _chatRxMap[msgId][existingEmoji].count - 1);
+      _chatRxMap[msgId][existingEmoji].emails = (_chatRxMap[msgId][existingEmoji].emails || []).filter(e => e !== myEmail);
+      await db.from("community_chat_reactions").delete()
+        .eq("message_id", msgId).eq("email", myEmail);
+    }
+    if (!_chatRxMap[msgId][emoji]) _chatRxMap[msgId][emoji] = { count: 0, mine: false, emails: [] };
+    _chatRxMap[msgId][emoji].mine = true;
+    _chatRxMap[msgId][emoji].count++;
+    _chatRxMap[msgId][emoji].emails = [...(_chatRxMap[msgId][emoji].emails || []), myEmail];
+    await db.from("community_chat_reactions")
+      .upsert({ message_id: msgId, email: myEmail, emoji }, { onConflict: "message_id,email" });
+  }
+
+  _refreshChatRx(msgId);
+  _chatRealtimeSub?.send({ type: "broadcast", event: "chat_reaction", payload: { message_id: msgId } });
+}
+
+function _refreshChatRx(msgId) {
+  // Update pills row
+  const rxRow = document.getElementById(`chat-rx-${msgId}`);
+  if (rxRow) rxRow.innerHTML = _chatRxHtml(msgId);
+  // Update picker button states
+  const picker = document.getElementById(`chat-picker-${msgId}`);
+  if (picker) {
+    const rx = _chatRxMap[msgId] || {};
+    picker.querySelectorAll("button[data-emoji]").forEach(btn => {
+      btn.classList.toggle("picked", !!(rx[btn.dataset.emoji]?.mine));
+    });
+  }
+}
+
+async function _refreshChatRxFromDb(msgId) {
+  const { data: rxRows } = await db.from("community_chat_reactions")
+    .select("email,emoji").eq("message_id", msgId);
+  _chatRxMap[msgId] = {};
+  (rxRows || []).forEach(r => {
+    if (!_chatRxMap[msgId][r.emoji]) _chatRxMap[msgId][r.emoji] = { count: 0, mine: false, emails: [] };
+    _chatRxMap[msgId][r.emoji].count++;
+    _chatRxMap[msgId][r.emoji].emails.push(r.email);
+    if (r.email === myEmail) _chatRxMap[msgId][r.emoji].mine = true;
+  });
+  _refreshChatRx(msgId);
+}
+
+// ── Typing indicator ─────────────────────────────────────────────────────────
+const _typingTimers = {}; // email -> clearTimeout handle
+
+let _typingThrottle = 0;
+function _broadcastTyping() {
+  if (!_chatRealtimeSub || !_currentChatId) return;
+  const now = Date.now();
+  if (now - _typingThrottle < 2000) return; // throttle: max once per 2s
+  _typingThrottle = now;
+  _chatRealtimeSub.send({
+    type: "broadcast", event: "typing",
+    payload: { email: myEmail, name: myName || myEmail.split("@")[0], chat_id: _currentChatId }
+  });
+}
+
+function _showTyping(email, name) {
+  if (email === myEmail) return;
+  // Clear previous timer for this user
+  clearTimeout(_typingTimers[email]);
+  const el    = document.getElementById("chat-typing");
+  const label = document.getElementById("chat-typing-label");
+  if (!el || !label) return;
+  // Add to typing set
+  if (!_showTyping._active) _showTyping._active = new Set();
+  _showTyping._active.add(name);
+  label.textContent = [..._showTyping._active].join(", ") + " is typing…";
+  el.style.display = "flex";
+  _scrollChatToBottom();
+  // Auto-hide after 4s silence
+  _typingTimers[email] = setTimeout(() => {
+    _showTyping._active?.delete(name);
+    if (!_showTyping._active?.size) {
+      if (el) el.style.display = "none";
+    } else {
+      if (label) label.textContent = [..._showTyping._active].join(", ") + " is typing…";
+    }
+    _scrollChatToBottom();
+  }, 4000);
+}
+
+async function castChatVote(messageId, optionIdx) {
+  if (!myEmail) return;
+  const prev = _chatPollVotes[messageId] || { myVote: null, counts: {} };
+
+  // Optimistic update
+  if (!_chatPollVotes[messageId]) _chatPollVotes[messageId] = { myVote: null, counts: {} };
+  const vdata = _chatPollVotes[messageId];
+  // Remove previous vote count
+  if (vdata.myVote !== null && vdata.myVote !== undefined) {
+    vdata.counts[vdata.myVote] = Math.max(0, (vdata.counts[vdata.myVote] || 1) - 1);
+  }
+  vdata.myVote = optionIdx;
+  vdata.counts[optionIdx] = (vdata.counts[optionIdx] || 0) + 1;
+
+  // Re-render just this message's poll
+  const el = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+  if (el) {
+    const msg = _chatMessages.find(m => m.id === messageId);
+    if (msg) {
+      const isMine = msg.email === myEmail;
+      const prev = el.previousSibling;
+      const next = el.nextSibling;
+      const tmp = document.createElement("div");
+      const showMeta = el.style.marginTop === "10px";
+      tmp.innerHTML = _chatMsgHtml(msg, isMine, showMeta);
+      el.replaceWith(tmp.firstElementChild);
+    }
+  }
+
+  // Persist
+  const { error } = await db.from("community_chat_poll_votes").upsert(
+    { message_id: messageId, email: myEmail, option_idx: optionIdx },
+    { onConflict: "message_id,email" }
+  );
+  if (error) { console.error("Poll vote error", error); return; }
+
+  // Notify other clients so they can refresh this poll's results
+  _chatRealtimeSub?.send({
+    type: "broadcast",
+    event: "poll_vote",
+    payload: { message_id: messageId }
+  });
+}
+
+// Re-fetch vote counts for a poll message and re-render it
+async function _refreshChatPoll(messageId) {
+  const [{ data: allVotes }, { data: myVotes }] = await Promise.all([
+    db.from("community_chat_poll_votes").select("option_idx").eq("message_id", messageId),
+    db.from("community_chat_poll_votes").select("option_idx").eq("message_id", messageId).eq("email", myEmail)
+  ]);
+  if (!_chatPollVotes[messageId]) _chatPollVotes[messageId] = { myVote: null, counts: {} };
+  const vdata = _chatPollVotes[messageId];
+  vdata.counts = {};
+  (allVotes || []).forEach(v => {
+    vdata.counts[v.option_idx] = (vdata.counts[v.option_idx] || 0) + 1;
+  });
+  if (myVotes?.length) vdata.myVote = myVotes[0].option_idx;
+
+  const el  = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+  const msg = _chatMessages.find(m => m.id === messageId);
+  if (el && msg) {
+    const isMine   = msg.email === myEmail;
+    const showMeta = el.style.marginTop !== "3px";
+    const tmp = document.createElement("div");
+    tmp.innerHTML = _chatMsgHtml(msg, isMine, showMeta);
+    el.replaceWith(tmp.firstElementChild);
+  }
+}
+
+// ── Single global realtime subscription ───────────────────────────────────────
+// Track IDs we inserted ourselves so realtime echo doesn't duplicate them
+const _myInsertedIds = new Set();
+
+function _subscribeGlobalRealtime() {
+  if (_chatRealtimeSub) return; // already subscribed
+  _chatRealtimeSub = db.channel("community-chat-global")
+    .on("postgres_changes", {
+      event: "INSERT",
+      schema: "public",
+      table: "community_messages"
+    }, payload => {
+      const msg = payload.new;
+      if (!msg) return;
+      // Skip our own inserts (already shown optimistically)
+      if (_myInsertedIds.has(msg.id)) { _myInsertedIds.delete(msg.id); return; }
+      // Append to current conversation
+      if (_chatState === "conversation" && msg.chat_id === _currentChatId) {
+        if (_chatMessages.find(m => m.id === msg.id)) return;
+        _chatMessages.push(msg);
+        _appendChatMessage(msg);
+        _scrollChatToBottom();
+      }
+      // Refresh sidebar preview
+      if (document.getElementById("view-chat").style.display !== "none") _loadConversationsList();
+    })
+    .on("broadcast", { event: "new_message" }, ({ payload }) => {
+      if (!payload) return;
+      const msg = payload;
+      // Skip our own messages (already shown optimistically)
+      if (_myInsertedIds.has(msg.id)) { _myInsertedIds.delete(msg.id); return; }
+      // Append to current conversation if it matches
+      if (_chatState === "conversation" && msg.chat_id === _currentChatId) {
+        if (_chatMessages.find(m => m.id === msg.id)) return;
+        _chatMessages.push(msg);
+        _appendChatMessage(msg);
+        _scrollChatToBottom();
+      }
+      // Refresh sidebar preview
+      if (document.getElementById("view-chat").style.display !== "none") _loadConversationsList();
+    })
+    .on("broadcast", { event: "poll_vote" }, ({ payload }) => {
+      if (!payload?.message_id) return;
+      // Re-fetch fresh counts from DB and re-render that poll for all clients
+      _refreshChatPoll(payload.message_id);
+    })
+    .on("broadcast", { event: "chat_reaction" }, ({ payload }) => {
+      if (!payload?.message_id) return;
+      _refreshChatRxFromDb(payload.message_id);
+    })
+    .on("broadcast", { event: "typing" }, ({ payload }) => {
+      if (!payload || payload.chat_id !== _currentChatId) return;
+      _showTyping(payload.email, payload.name);
+    })
+    .subscribe();
+}
+
+// Render all messages in the chat area
+function _renderChatMessages() {
+  const container = document.getElementById("chat-messages");
+  if (!_chatMessages.length) {
+    container.innerHTML = `<div class="chat-empty" id="chat-empty">No messages yet — say hello!</div>`;
+    return;
+  }
+  container.innerHTML = "";
+  let lastEmail = null;
+  _chatMessages.forEach(msg => {
+    const isMine  = msg.email === myEmail;
+    const isGroup = msg.email === lastEmail;
+    container.insertAdjacentHTML("beforeend", _chatMsgHtml(msg, isMine, !isGroup));
+    lastEmail = msg.email;
+  });
+}
+
+// Format timestamp as clock time (e.g. "12:21 PM"), falling back to date for older
+function _chatTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const hhmm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (isToday)     return hhmm;
+  if (isYesterday) return `Yesterday ${hhmm}`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hhmm;
+}
+
+// Build HTML for a single message
+function _chatMsgHtml(msg, isMine, showMeta) {
+  const rawMedia = Array.isArray(msg.media) ? msg.media
+    : (typeof msg.media === "string" ? JSON.parse(msg.media || "[]") : []);
+
+  // Separate polls (render outside the bubble so they don't inherit its colour)
+  const pollItem    = rawMedia.find(m => m.type === "poll");
+  const nonPollMedia = rawMedia.filter(m => m.type !== "poll");
+
+  // Look up proper display name + avatar — use stored myAvatarUrl for own messages
+  const member    = (_allMembers || []).find(m => m.email === msg.email);
+  const dispName  = member?.name || msg.name || msg.email?.split("@")[0] || "Member";
+  const avatarUrl = isMine ? (myAvatarUrl || member?.avatar_url || null) : (member?.avatar_url || null);
+  const name      = escHtml(dispName);
+  const timeStr   = _chatTime(msg.created_at);
+
+  const mediaHtml = _renderCommentMedia({ media: nonPollMedia });
+  const contentHtml = msg.content ? `<div>${escHtml(msg.content).replace(/\n/g, "<br>")}</div>` : "";
+  const bubbleContent = contentHtml + (mediaHtml ? `<div class="chat-media">${mediaHtml}</div>` : "");
+
+  const pollHtml = pollItem ? (() => {
+    const opts   = Array.isArray(pollItem.options) ? pollItem.options : [];
+    const vdata  = _chatPollVotes[msg.id] || { myVote: null, counts: {} };
+    const total  = Object.values(vdata.counts).reduce((a, b) => a + b, 0);
+    const voted  = (vdata.myVote !== null && vdata.myVote !== undefined) || isMine;
+    const rows   = opts.map((o, i) => {
+      const count = vdata.counts[i] || 0;
+      const pct   = total ? Math.round((count / total) * 100) : 0;
+      const isMe  = vdata.myVote === i;
+      if (voted) {
+        // Bars are always clickable so the user can change their vote
+        return `<div onclick="castChatVote('${escHtml(msg.id)}',${i})" style="cursor:pointer;margin-bottom:8px;padding:2px 0">
+          <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px;color:var(--text)${isMe ? ";font-weight:700" : ""}">
+            <span>${escHtml(o)}</span>
+            <span style="color:var(--text-muted)">${pct}%</span>
+          </div>
+          <div style="height:6px;border-radius:4px;background:var(--border);overflow:hidden">
+            <div style="height:100%;width:${pct}%;border-radius:4px;background:${isMe ? "var(--accent)" : "var(--text-muted)"}"></div>
+          </div>
+        </div>`;
+      } else {
+        return `<button onclick="castChatVote('${escHtml(msg.id)}',${i})" style="display:block;width:100%;text-align:left;padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface);cursor:pointer;font-family:inherit;transition:border-color .15s,background .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">${escHtml(o)}</button>`;
+      }
+    }).join("");
+    return `<div style="margin-top:6px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:320px">
+      <div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${escHtml(pollItem.question || "Poll")}</div>
+      ${rows}
+      ${voted ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">${total} vote${total !== 1 ? "s" : ""}</div>` : ""}
+    </div>`;
+  })() : "";
+
+  const avatarEl = avatarHtml(msg.email, dispName, 34, avatarUrl);
+  const metaHtml = showMeta
+    ? `<div class="chat-msg-meta"><span class="chat-msg-name">${name}</span><span class="chat-msg-time">${timeStr}</span></div>`
+    : "";
+
+  // Only render the text/media bubble if there's something in it
+  const bubbleHtml = bubbleContent
+    ? `<div class="chat-bubble${isMine ? " mine" : ""}">${bubbleContent}</div>`
+    : "";
+
+  const rxHtml = `<div class="chat-rx-row" id="chat-rx-${escHtml(msg.id)}">${_chatRxHtml(msg.id)}</div>`;
+  const pickerHtml = _chatPickerHtml(msg.id, isMine);
+  const triggerBtn = `<button class="chat-react-trigger" onclick="toggleChatReactPicker('${escHtml(msg.id)}',event)" title="React">😊</button>`;
+
+  // chat-bubble-inner is position:relative so picker + trigger are anchored to the bubble
+  const innerWrap = (bubbleHtml || pollHtml)
+    ? `<div class="chat-bubble-inner">${pickerHtml}${bubbleHtml}${pollHtml}${triggerBtn}</div>`
+    : "";
+  const bubbleWrap = innerWrap
+    ? `<div class="chat-bubble-wrap">${innerWrap}${rxHtml}</div>`
+    : "";
+
+  return `
+  <div class="chat-msg-group${isMine ? " mine" : ""}" data-msg-id="${escHtml(msg.id)}" style="margin-top:${showMeta ? "10" : "3"}px">
+    <div class="chat-msg-avatar">${avatarEl}</div>
+    <div class="chat-msg-body">
+      ${metaHtml}
+      ${bubbleWrap}
+    </div>
+  </div>`;
+}
+
+// Append a single new message to the DOM efficiently
+function _appendChatMessage(msg) {
+  const container = document.getElementById("chat-messages");
+  const emptyEl = document.getElementById("chat-empty");
+  if (emptyEl) emptyEl.remove();
+  const isMine  = msg.email === myEmail;
+  const prevMsg = _chatMessages[_chatMessages.length - 2];
+  const isGroup = prevMsg && prevMsg.email === msg.email;
+  container.insertAdjacentHTML("beforeend", _chatMsgHtml(msg, isMine, !isGroup));
+}
+
+// Scroll to bottom of chat
+function _scrollChatToBottom(instant) {
+  const el = document.getElementById("chat-messages");
+  if (!el) return;
+  el.scrollTo({ top: el.scrollHeight, behavior: instant ? "auto" : "smooth" });
+}
+
+// Send a message
+async function sendChatMessage() {
+  if (!myEmail) return;
+  const input = document.getElementById("chat-input");
+  const content = (input.value || "").trim();
+
+  let media = [];
+  try {
+    media = await _uploadInlineMedia("chat_main");
+  } catch (e) {
+    alert(e.message || "Upload error");
+    return;
+  }
+
+  // Include poll data (stored as a media item so it fits the existing schema)
+  const pollData = _inlinePollOpen["chat_main"] ? _readInlinePoll("chat_main") : null;
+  if (pollData) media = [...media, { type: "poll", question: pollData.question, options: pollData.options }];
+
+  if (!content && !media.length) return;
+
+  const optimistic = {
+    id: "opt-" + Date.now(),
+    chat_id: _currentChatId,
+    email: myEmail,
+    name: myName,
+    content,
+    media,
+    created_at: new Date().toISOString()
+  };
+  _chatMessages.push(optimistic);
+  _appendChatMessage(optimistic);
+  _scrollChatToBottom();
+
+  input.value = ""; input.style.height = "";
+  _clearInlineState("chat_main");
+  document.getElementById("chat-toolbar-container").innerHTML = _inlineToolbarHtml("chat_main");
+
+  const { data: inserted, error } = await db.from("community_messages").insert({
+    chat_id: _currentChatId,
+    email:   myEmail,
+    name:    myName,
+    content,
+    media
+  }).select().single();
+
+  if (error) { console.error("Chat send error", error); return; }
+
+  // Register the real ID so the realtime echo is skipped (already shown optimistically)
+  _myInsertedIds.add(inserted.id);
+
+  const optEl = document.querySelector(`[data-msg-id="${optimistic.id}"]`);
+  const idx = _chatMessages.findIndex(m => m.id === optimistic.id);
+  if (idx !== -1) _chatMessages[idx] = inserted;
+  // Re-render the optimistic DOM element with the real DB row so media URLs are final
+  if (optEl) {
+    const showMeta = optEl.style.marginTop !== "3px";
+    const tmp = document.createElement("div");
+    tmp.innerHTML = _chatMsgHtml(inserted, true, showMeta);
+    optEl.replaceWith(tmp.firstElementChild);
+  }
+
+  // Broadcast the new message to all connected clients via the realtime channel
+  // (postgres_changes requires the table to be in Supabase Realtime publication;
+  //  broadcast works immediately for all connected clients)
+  if (_chatRealtimeSub) {
+    _chatRealtimeSub.send({
+      type: "broadcast",
+      event: "new_message",
+      payload: inserted
+    });
+  }
+
+  // Refresh conversation list so new/updated convos always appear immediately
+  _loadConversationsList();
+}
+
+// Open a DM from a member card/name — called from existing member UI
+function openDM(email, name) {
+  _showChatView();
+  _subscribeGlobalRealtime();
+  _openConversation(email, name);
+}
+
+// ── New Chat flow ─────────────────────────────────────────────────────────────
+
+async function showNewChat() {
+  _newChatSelected = [];
+  // Ensure members are loaded for autocomplete
+  if (!_membersLoaded) await _loadAllMembers();
+  _setChatPanel("new");
+  document.getElementById("chat-selected-chips").innerHTML = "";
+  document.getElementById("chat-people-input").value = "";
+  document.getElementById("chat-autocomplete").style.display = "none";
+  document.getElementById("chat-start-btn").disabled = true;
+  // Mobile: show main area
+  if (window.innerWidth <= 640) {
+    document.getElementById("chat-sidebar").classList.add("hidden-mobile");
+    document.getElementById("chat-main-area").classList.add("show-mobile");
+  }
+  setTimeout(() => document.getElementById("chat-people-input").focus(), 50);
+}
+
+function _onPeopleSearch(q) {
+  const acEl = document.getElementById("chat-autocomplete");
+  if (!q.trim()) { acEl.style.display = "none"; return; }
+  const lq = q.toLowerCase();
+  const selectedEmails = new Set(_newChatSelected.map(s => s.email));
+  const results = (_allMembers || []).filter(m =>
+    m.email !== myEmail &&
+    !selectedEmails.has(m.email) &&
+    ((m.name || "").toLowerCase().includes(lq) || (m.email || "").toLowerCase().includes(lq))
+  ).slice(0, 8);
+
+  if (!results.length) { acEl.style.display = "none"; return; }
+
+  acEl.style.display = "block";
+  acEl.innerHTML = results.map(m => `
+    <div class="chat-ac-item" onclick="_selectPerson('${escHtml(m.email)}','${escHtml(m.name || "")}','${escHtml(m.avatar_url || "")}')">
+      ${avatarHtml(m.email, m.name, 36, m.avatar_url || null)}
+      <span class="chat-ac-name">${escHtml(m.name || m.email)}</span>
+    </div>`).join("");
+}
+
+function _onPeopleKeydown(event) {
+  if (event.key === "Escape") {
+    document.getElementById("chat-autocomplete").style.display = "none";
+  }
+}
+
+function _selectPerson(email, name, avatarUrl) {
+  _newChatSelected.push({ email, name, avatarUrl });
+  document.getElementById("chat-people-input").value = "";
+  document.getElementById("chat-autocomplete").style.display = "none";
+  _renderNewChatChips();
+  document.getElementById("chat-start-btn").disabled = _newChatSelected.length === 0;
+  document.getElementById("chat-people-input").focus();
+}
+
+function _removeNewChatPerson(email) {
+  _newChatSelected = _newChatSelected.filter(s => s.email !== email);
+  _renderNewChatChips();
+  document.getElementById("chat-start-btn").disabled = _newChatSelected.length === 0;
+}
+
+function _renderNewChatChips() {
+  const el = document.getElementById("chat-selected-chips");
+  el.innerHTML = _newChatSelected.map(s => `
+    <div class="chat-chip">
+      ${avatarHtml(s.email, s.name, 22, s.avatarUrl || null)}
+      <span>${escHtml(s.name || s.email)}</span>
+      <button class="chat-chip-remove" onclick="_removeNewChatPerson('${escHtml(s.email)}')" title="Remove">×</button>
+    </div>`).join("");
+}
+
+async function startNewChat() {
+  if (!_newChatSelected.length) return;
+  const btn = document.getElementById("chat-start-btn");
+  btn.disabled = true;
+  btn.textContent = "Starting…";
+
+  const allParticipants = [myEmail, ..._newChatSelected.map(s => s.email)];
+
+  if (_newChatSelected.length === 1) {
+    // Simple DM
+    const email = _newChatSelected[0].email;
+    const name  = _newChatSelected[0].name;
+    _showChatView();
+    _subscribeGlobalRealtime();
+    await _openConversation(email, name);
+  } else {
+    // Group DM — create a room
+    const { data: room, error: roomErr } = await db.from("community_chat_rooms").insert({
+      created_by: myEmail
+    }).select().single();
+    if (roomErr) { alert("Could not create group chat."); btn.disabled = false; btn.textContent = "Start Chat"; return; }
+
+    const { error: partErr } = await db.from("community_chat_participants").insert(
+      allParticipants.map(email => ({ room_id: room.id, email }))
+    );
+    if (partErr) { console.error("participants insert error", partErr); }
+
+    const names = _newChatSelected.map(s => s.name || s.email.split("@")[0]).join(", ");
+    _showChatView();
+    _subscribeGlobalRealtime();
+    await _openConversation(room.id, names);
+  }
+}
+
+// ── Mux aspect ratio correction ───────────────────────────────────────────────
+// After rendering, detect portrait videos and apply the tall wrapper class.
+function fixMuxAspectRatios() {
+  document.querySelectorAll('.mux-wrap').forEach(wrap => {
+    const player = wrap.querySelector('mux-player');
+    if (!player) return;
+    const apply = () => {
+      const w = player.videoWidth, h = player.videoHeight;
+      if (!w || !h) return;
+      wrap.classList.toggle('portrait', h > w);
+    };
+    // Already loaded (e.g. cached)
+    if (player.videoWidth) { apply(); return; }
+    player.addEventListener('loadedmetadata', apply, { once: true });
+  });
+}
+
+// ── Chat view (simplified for standalone chat.html) ───────────────────────────
+function _showChatView() {
+  document.body.style.overflow = "hidden";
+  document.documentElement.style.overflow = "hidden";
+  const chatEl = document.getElementById("view-chat");
+  const hdr    = document.getElementById("app-header");
+  const topPx  = hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 0;
+  chatEl.style.top     = topPx + "px";
+  chatEl.style.display = "flex";
+  _attachChatViewportListener(topPx);
+}
+function _hideChatView() { /* no-op on chat.html — this IS the chat page */ }
+
+
+async function _loadAllMembers() {
+  _membersLoaded = true;
+  const { data } = await db
+    .from("allowed_emails")
+    .select("email, name, headline, avatar_url")
+    .eq("subscription_status", "active")
+    .eq("onboarded", true)
+    .order("name", { ascending: true });
+  _allMembers = (data || []).filter(m => m.name && m.name.trim());
+  // Re-render chat messages now that member names/avatars are available
+  if (_chatMessages.length) {
+    _renderChatMessages();
+    _scrollChatToBottom(true);
+  }
+}
+
+// ── Auth bootstrap ────────────────────────────────────────────────────────────
+(async () => {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) { window.location.href = "/practice-log.html"; return; }
+
+  myEmail = session.user.email;
+  const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
+  myName      = ae?.name || myEmail.split("@")[0];
+  isAdmin     = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  myAvatarUrl = ae?.avatar_url || null;
+
+  initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "community", avatarUrl: myAvatarUrl });
+
+  await showChat("group");
+  _loadAllMembers();
+})();
+
+function fixMuxAspectRatios() {
+  document.querySelectorAll('.mux-wrap').forEach(wrap => {
+    const player = wrap.querySelector('mux-player');
+    if (!player) return;
+    const apply = () => {
+      const w = player.videoWidth, h = player.videoHeight;
+      if (!w || !h) return;
+      wrap.classList.toggle('portrait', h > w);
+    };
+    if (player.videoWidth) { apply(); return; }
+    player.addEventListener('loadedmetadata', apply, { once: true });
+  });
+}
+</script>
+</body>
+</html>
