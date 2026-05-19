@@ -160,6 +160,50 @@ export default async (request) => {
     });
   }
 
+  // ── Action: create-mux-livestream ─────────────────────────────────────────
+  // Admin only. Creates a fresh Mux live stream for an event that already has
+  // a Daily room (i.e. subsequent Go Live sessions on the same event).
+  if (action === "create-mux-livestream") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { eventId } = body;
+    if (!eventId) return json({ error: "eventId required" }, 400);
+
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+    const SERVICE_KEY      = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
+    const muxLiveRes = await fetch("https://api.mux.com/video/v1/live-streams", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`)
+      },
+      body: JSON.stringify({
+        playback_policy: ["public"],
+        latency_mode: "reduced",
+        reconnect_window: 60,
+      })
+    });
+    const muxLiveData = await muxLiveRes.json();
+    const muxLiveStream    = muxLiveData?.data;
+    const muxLiveStreamId  = muxLiveStream?.id || null;
+    const muxStreamKey     = muxLiveStream?.stream_key || null;
+    const muxLivePlaybackId = muxLiveStream?.playback_ids?.[0]?.id || null;
+
+    if (muxLiveStreamId && muxLivePlaybackId && SERVICE_KEY) {
+      await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`,
+          "Content-Type": "application/json", "Prefer": "return=minimal"
+        },
+        body: JSON.stringify({ mux_live_stream_id: muxLiveStreamId, mux_live_playback_id: muxLivePlaybackId })
+      });
+    }
+
+    return json({ muxStreamKey, muxLivePlaybackId });
+  }
+
   // ── Action: get-mux-stream-key ─────────────────────────────────────────────
   // Admin only. Returns the RTMP stream key for an event's Mux live stream.
   // Used when the host rejoins an already-live event after a page refresh.

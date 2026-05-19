@@ -1346,6 +1346,7 @@ let authToken    = null;
 let currentEvent = null;
 let editingEventId = null;
 let chatChannel  = null;
+let _recordingWatcher = null;
 let currentEvtTab = "upcoming";
 let qaChannel    = null;
 let countdownInterval = null;
@@ -1756,14 +1757,20 @@ async function renderDetailView(ev) {
   }
 
   // For ended events without a recording yet, watch for the webhook to populate it
+  // Always clean up any existing watcher first to avoid duplicate channel errors
+  if (_recordingWatcher) {
+    db.removeChannel(_recordingWatcher);
+    _recordingWatcher = null;
+  }
   if (ev.status === "ended" && !ev.mux_playback_id) {
-    const recordingWatcher = db.channel(`event-recording-${ev.id}`)
+    _recordingWatcher = db.channel(`event-recording-${ev.id}`)
       .on("postgres_changes", {
         event: "UPDATE", schema: "public", table: "live_events",
         filter: `id=eq.${ev.id}`
       }, payload => {
         if (payload.new.mux_playback_id) {
-          db.removeChannel(recordingWatcher);
+          db.removeChannel(_recordingWatcher);
+          _recordingWatcher = null;
           currentEvent = { ...currentEvent, ...payload.new };
           renderDetailView(currentEvent);
         }
@@ -2918,8 +2925,19 @@ async function startStream(eventId) {
           enable_recording: "cloud"
         }})
       });
-      // Retrieve the Mux stream key (may have been lost on page refresh)
-      if (latestEv.mux_live_stream_id && !currentEvent._muxStreamKey) {
+      // Always create a fresh Mux live stream for this session — the previous
+      // one was deleted when the last stream ended, so we need a new one.
+      if (!latestEv.mux_live_stream_id) {
+        const muxRes = await fetch("/api/daily", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+          body: JSON.stringify({ action: "create-mux-livestream", eventId })
+        });
+        const muxData = await muxRes.json();
+        currentEvent._muxStreamKey        = muxData.muxStreamKey || null;
+        currentEvent.mux_live_playback_id = muxData.muxLivePlaybackId || null;
+      } else {
+        // Stream key exists in DB — just retrieve it (page refresh mid-stream)
         const skRes = await fetch("/api/daily", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
