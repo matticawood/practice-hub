@@ -607,6 +607,64 @@
       margin: 0 6px 8px 0;
     }
 
+    /* ── Image shimmer placeholders ────────────────────────────────────────── */
+    .comm-img-wrap {
+      position: relative; overflow: hidden; border-radius: 8px;
+      background: var(--surface-2,#f0ebe4);
+    }
+    /* GPU-accelerated shimmer */
+    .comm-img-wrap::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.45) 50%, transparent 100%);
+      transform: translateX(-100%);
+      animation: comm-shimmer 1.4s ease-in-out infinite;
+    }
+    .comm-img-wrap.loaded::after { display: none; }
+    .comm-img-wrap img { opacity: 0; transition: opacity .25s ease; display: block; width: 100%; }
+    .comm-img-wrap.loaded img { opacity: 1; }
+    @keyframes comm-shimmer {
+      100% { transform: translateX(200%); }
+    }
+
+    /* ── Image lightbox ─────────────────────────────────────────────────────── */
+    #comm-img-modal {
+      position: fixed; inset: 0; z-index: 9000;
+      background: rgba(0,0,0,.88);
+      display: none; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .18s ease;
+    }
+    #comm-img-modal.open { display: flex; opacity: 1; }
+    #comm-img-modal img {
+      max-width: min(84vw, 1200px); max-height: 88vh;
+      border-radius: 10px; object-fit: contain;
+      box-shadow: 0 8px 48px rgba(0,0,0,.7); transition: opacity .12s ease;
+    }
+    #comm-img-modal-close {
+      position: absolute; top: 16px; right: 18px;
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 38px; height: 38px; cursor: pointer; color: #fff;
+      font-size: 1.3rem; display: flex; align-items: center; justify-content: center;
+      transition: background .15s;
+    }
+    #comm-img-modal-close:hover { background: rgba(255,255,255,.22); }
+    .comm-img-modal-nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 44px; height: 44px; cursor: pointer; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s; flex-shrink: 0;
+    }
+    .comm-img-modal-nav:hover { background: rgba(255,255,255,.26); }
+    .comm-img-modal-nav:disabled { opacity: 0; pointer-events: none; }
+    #comm-img-modal-prev { left: 14px; }
+    #comm-img-modal-next { right: 14px; }
+    #comm-img-modal-counter {
+      position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,.6); font-size: .82rem; font-weight: 600;
+      background: rgba(0,0,0,.4); padding: 3px 10px; border-radius: 20px;
+      pointer-events: none;
+    }
+
     /* ── Inline media in post cards ──────────────────────────────────────────── */
     .post-card-inline-media {
       margin: 0 -20px 0;
@@ -2441,6 +2499,11 @@ let _selectedType  = null;
 let _currentPostId = null;
 let _posts         = [];
 let _postFilter    = null; // null = all, or 'progress'|'feedback'|'question'|'post'
+let _postsPage     = 1;
+const POSTS_PER_PAGE = 50;
+const _commImgGroups = {}; // groupKey → [url, ...]
+let _commImgCurrentGroup = null;
+let _commImgCurrentIdx   = 0;
 
 // Composer rich media state
 let _composerMedia  = []; // {type, url, name, blob?, html?, ytId?, vimeoId?, duration?}
@@ -2855,6 +2918,7 @@ const _filterPlaceholders = {
 
 function setPostFilter(type, btn) {
   _postFilter = type;
+  _postsPage  = 1;
   document.querySelectorAll(".space-card").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
   const ph = document.getElementById("composer-placeholder");
@@ -2892,10 +2956,20 @@ function _renderFilteredPosts() {
     const label = _postFilter ? `No ${_postFilter} posts yet.` : "No posts yet — be the first to share something! 👆";
     list.innerHTML = `<div class="posts-empty">${label}</div>`;
   } else {
-    list.innerHTML = filtered.map(p => postCardHTML(p)).join("");
+    const visible = filtered.slice(0, _postsPage * POSTS_PER_PAGE);
+    const hasMore = visible.length < filtered.length;
+    list.innerHTML = visible.map(p => postCardHTML(p)).join("") +
+      (hasMore ? `<button class="see-more-btn" style="margin-top:4px" onclick="loadMorePosts()">Load more <span style="opacity:.6">(${filtered.length - visible.length} remaining)</span></button>` : "");
     fixMuxAspectRatios();
   }
   _updateSpaceBadges();
+}
+
+function loadMorePosts() {
+  _postsPage++;
+  _renderFilteredPosts();
+  // Re-fix Mux players that were just added
+  setTimeout(fixMuxAspectRatios, 100);
 }
 
 // ── View switching: list ↔ detail ──────────────────────────────────────────────
@@ -3003,6 +3077,33 @@ function parseVimeoId(url) {
   const m = url.match(/vimeo\.com\/(\d+)/);
   return m ? m[1] : null;
 }
+// ── Client-side image compression ────────────────────────────────────────────
+async function compressImage(file, { maxPx = 1920, quality = 0.82 } = {}) {
+  if (file.type === "image/gif") return file;
+  return new Promise(resolve => {
+    const img = new Image();
+    const rawUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(rawUrl);
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > maxPx || h > maxPx) {
+        const r = Math.min(maxPx / w, maxPx / h);
+        w = Math.round(w * r); h = Math.round(h * r);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        if (!blob || blob.size >= file.size) { resolve(file); return; }
+        const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        resolve(new File([blob], name, { type: "image/jpeg" }));
+      }, "image/jpeg", quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(rawUrl); resolve(file); };
+    img.src = rawUrl;
+  });
+}
+
 async function uploadToStorage(blob, filename) {
   const MAX_MB = 500;
   if (blob.size > MAX_MB * 1024 * 1024) {
@@ -3021,14 +3122,15 @@ async function uploadToStorage(blob, filename) {
 }
 
 // ── Toolbar handlers ──────────────────────────────────────────────────────────
-function handleImageFiles(input) {
+async function handleImageFiles(input) {
   const files = Array.from(input.files || []);
-  files.forEach(file => {
-    const url = URL.createObjectURL(file);
-    _composerMedia.push({ type: "image", url, name: file.name, blob: file });
-  });
   input.value = "";
-  _renderMediaPreview();
+  for (const file of files) {
+    const compressed = await compressImage(file);
+    const url = URL.createObjectURL(compressed);
+    _composerMedia.push({ type: "image", url, name: compressed.name, blob: compressed });
+    _renderMediaPreview();
+  }
 }
 
 function handleFileAttach(input) {
@@ -3487,7 +3589,7 @@ function _renderMediaPreview() {
           <span style="font-size:.78rem;color:var(--text-muted)">🎙️ Voice message${escHtml(dur)}</span>
           <button onclick="removeMedia(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:.85rem;padding:0 2px" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">×</button>
         </div>
-        <audio controls preload="auto" style="width:100%;display:block;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
+        <audio controls preload="metadata" style="width:100%;display:block;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
       </div>`;
     } else if (m.type === "code") {
       html += `<span class="media-chip"></> ${escHtml((m.html || "").slice(0, 30))}…<button class="media-chip-remove" onclick="removeMedia(${idx})" title="Remove">×</button></span>`;
@@ -3580,7 +3682,7 @@ function _renderInlineMediaPreview(key) {
           <span style="font-size:.78rem;color:var(--text-muted)">🎙️ Voice message${escHtml(dur)}</span>
           <button onclick="${rm}" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:.85rem;padding:0 2px" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">×</button>
         </div>
-        <audio controls preload="auto" style="width:100%;display:block;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
+        <audio controls preload="metadata" style="width:100%;display:block;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
       </div>`;
     } else {
       html += `<span class="media-chip" style="margin-top:6px">📎 ${escHtml(m.name)}<button class="media-chip-remove" onclick="${rm}" title="Remove">×</button></span>`;
@@ -3619,18 +3721,20 @@ function removeInlineMedia(key, idx) {
   _renderInlineMediaPreview(key);
 }
 
-function inlineHandleImage(input, key) {
+async function inlineHandleImage(input, key) {
   _inlineKey(key);
-  Array.from(input.files || []).forEach(file => {
+  const files = Array.from(input.files || []);
+  input.value = "";
+  for (const file of files) {
     if (!file.type.startsWith("image/")) {
       alert(`"${file.name}" is not an image. Use the file attachment button to send other file types.`);
-      return;
+      continue;
     }
-    const url = URL.createObjectURL(file);
-    _inlineMedia[key].push({ type: "image", url, name: file.name, blob: file });
-  });
-  input.value = "";
-  _renderInlineMediaPreview(key);
+    const compressed = await compressImage(file);
+    const url = URL.createObjectURL(compressed);
+    _inlineMedia[key].push({ type: "image", url, name: compressed.name, blob: compressed });
+    _renderInlineMediaPreview(key);
+  }
 }
 
 function inlineHandleFile(input, key) {
@@ -4118,15 +4222,23 @@ function _renderCommentMedia(c) {
   const others = media.filter(m => m.type !== "image");
   if (images.length) {
     const cols = Math.min(images.length, 2);
+    const multi = cols > 1;
+    const gk = _commImgGroupStore(images.map(m => m.url));
     html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:6px">` +
-      images.map(m => `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" style="width:100%;height:${cols > 1 ? "180px" : "auto"};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};border-radius:8px;display:block;cursor:pointer" onclick="window.open('${escHtml(m.url)}','_blank')" loading="lazy">`).join("") +
+      images.map((m, i) =>
+        `<div class="comm-img-wrap" style="${multi ? "aspect-ratio:1;" : ""}border-radius:8px;cursor:pointer" onclick="_commImgModalOpen('${gk}',${i})">` +
+          `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" decoding="async" ` +
+            `style="${multi ? "height:100%;object-fit:cover;" : "max-height:420px;object-fit:contain;"}" ` +
+            `loading="lazy" onload="this.parentElement.classList.add('loaded')">` +
+          `</div>`
+      ).join("") +
       `</div>`;
   }
   others.forEach(m => {
     if (m.type === "mux") {
       html += `<div style="margin-top:8px;width:min(480px,70vw);aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#000"><mux-player playback-id="${escHtml(m.playbackId)}" controls style="width:100%;height:100%;display:block"></mux-player></div>`;
     } else if (m.type === "audio") {
-      html += `<div style="margin-top:6px;min-width:240px"><audio controls preload="auto" style="width:100%;min-width:240px;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
+      html += `<div style="margin-top:6px;min-width:240px"><audio controls preload="metadata" style="width:100%;min-width:240px;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
     } else if (m.type === "youtube") {
       html += `<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "vimeo") {
@@ -4255,6 +4367,7 @@ async function submitPost() {
 
 // ── Posts ─────────────────────────────────────────────────────────────────────
 async function loadPosts() {
+  _postsPage = 1; // reset pagination on fresh load
   const list = document.getElementById("posts-list");
   list.innerHTML = '<div class="posts-empty"><div class="loading-spinner" style="margin:0 auto 12px"></div>Loading posts…</div>';
 
@@ -4391,8 +4504,11 @@ function postCardHTML(p) {
   const images = media.filter(m => m.type === "image");
   if (images.length) {
     const shown = images.slice(0, 2);
-    mediaHtml += `<div class="post-media-strip">${shown.map(m =>
-      `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" loading="lazy" />`
+    const gk = _commImgGroupStore(images.map(m => m.url));
+    mediaHtml += `<div class="post-media-strip">${shown.map((m, i) =>
+      `<div class="comm-img-wrap" onclick="_commImgModalOpen('${gk}',${i})" style="cursor:pointer">` +
+      `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" loading="lazy" onload="this.parentElement.classList.add('loaded')" />` +
+      `</div>`
     ).join("")}</div>`;
   }
   // Inline richMedia — all non-image types
@@ -4403,7 +4519,7 @@ function postCardHTML(p) {
       const dur = m.duration ? ` · ${m.duration}s` : "";
       richMedia += `<div class="post-card-inline-media" onclick="event.stopPropagation()">
         <div class="post-card-media-label">🎙️ Voice message${escHtml(dur)}</div>
-        <audio controls preload="auto" style="width:100%"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
+        <audio controls preload="metadata" style="width:100%"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
       </div>`;
     } else if (m.type === "mux") {
       richMedia += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()">
@@ -4640,15 +4756,21 @@ function renderDetail(postId) {
   let mediaHtml = "";
   const media = p.media || [];
   if (media.length) {
+    const detailImgs = media.filter(m => m.type === "image");
+    const detailGk   = detailImgs.length ? _commImgGroupStore(detailImgs.map(m => m.url)) : null;
+    let   detailImgIdx = 0;
     mediaHtml = `<div class="detail-media-section">`;
     for (const m of media) {
       if (m.type === "image") {
-        mediaHtml += `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" loading="lazy" />`;
+        const idx = detailImgIdx++;
+        mediaHtml += `<div class="comm-img-wrap" onclick="_commImgModalOpen('${detailGk}',${idx})" style="cursor:pointer;margin-bottom:8px">` +
+          `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" loading="lazy" onload="this.parentElement.classList.add('loaded')" />` +
+          `</div>`;
       } else if (m.type === "audio") {
         const dur = m.duration ? ` · ${m.duration}s` : "";
         mediaHtml += `<div style="margin-bottom:8px">
           <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:4px">🎙️ Voice message${escHtml(dur)}</div>
-          <audio controls preload="auto" style="width:100%"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
+          <audio controls preload="metadata" style="width:100%"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
         </div>`;
       } else if (m.type === "mux") {
         mediaHtml += `<div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div>`;
@@ -6947,7 +7069,83 @@ function fixMuxAspectRatios() {
     player.addEventListener('loadedmetadata', apply, { once: true });
   });
 }
+
+// ── Image lightbox ────────────────────────────────────────────────────────────
+function _commImgGroupStore(urls) {
+  const key = "cg" + Date.now() + Math.random().toString(36).slice(2, 6);
+  _commImgGroups[key] = urls;
+  return key;
+}
+
+function _commImgModalOpen(groupKey, index) {
+  index = index || 0;
+  const urls = _commImgGroups[groupKey];
+  if (!urls) return;
+  _commImgCurrentGroup = groupKey;
+  _commImgCurrentIdx   = index;
+  const modal = document.getElementById("comm-img-modal");
+  if (modal) { modal.style.display = "flex"; requestAnimationFrame(() => modal.classList.add("open")); }
+  _commImgModalShow();
+  document.addEventListener("keydown", _commImgModalKeyHandler);
+}
+
+function _commImgModalShow() {
+  const urls    = _commImgGroups[_commImgCurrentGroup] || [];
+  const idx     = _commImgCurrentIdx;
+  const modal   = document.getElementById("comm-img-modal");
+  if (modal && modal.style.display === "none") { modal.style.display = "flex"; requestAnimationFrame(() => modal.classList.add("open")); }
+  const img     = document.getElementById("comm-img-modal-img");
+  const prev    = document.getElementById("comm-img-modal-prev");
+  const next    = document.getElementById("comm-img-modal-next");
+  const counter = document.getElementById("comm-img-modal-counter");
+  if (!modal || !img) return;
+  img.src = urls[idx] || "";
+  modal.classList.add("open");
+  const multi = urls.length > 1;
+  if (prev)    prev.disabled    = !multi || idx === 0;
+  if (next)    next.disabled    = !multi || idx === urls.length - 1;
+  if (counter) { counter.style.display = multi ? "" : "none"; counter.textContent = `${idx + 1} / ${urls.length}`; }
+}
+
+function _commImgModalNav(dir) {
+  const urls = _commImgGroups[_commImgCurrentGroup] || [];
+  const next = _commImgCurrentIdx + dir;
+  if (next < 0 || next >= urls.length) return;
+  _commImgCurrentIdx = next;
+  _commImgModalShow();
+}
+
+function _commImgModalClose() {
+  const modal = document.getElementById("comm-img-modal");
+  if (modal) modal.classList.remove("open");
+  document.removeEventListener("keydown", _commImgModalKeyHandler);
+  setTimeout(() => {
+    const img = document.getElementById("comm-img-modal-img");
+    if (img) img.src = "";
+    if (modal) modal.style.display = "none";
+  }, 200);
+  _commImgCurrentGroup = null;
+}
+
+function _commImgModalKeyHandler(e) {
+  if (e.key === "Escape")     _commImgModalClose();
+  if (e.key === "ArrowRight") _commImgModalNav(1);
+  if (e.key === "ArrowLeft")  _commImgModalNav(-1);
+}
 </script>
+
+<!-- Image lightbox modal -->
+<div id="comm-img-modal" onclick="_commImgModalClose()">
+  <button id="comm-img-modal-close" onclick="_commImgModalClose()" aria-label="Close">✕</button>
+  <button id="comm-img-modal-prev" class="comm-img-modal-nav" onclick="event.stopPropagation();_commImgModalNav(-1)" aria-label="Previous">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <img id="comm-img-modal-img" src="" alt="" onclick="event.stopPropagation()">
+  <button id="comm-img-modal-next" class="comm-img-modal-nav" onclick="event.stopPropagation();_commImgModalNav(1)" aria-label="Next">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <div id="comm-img-modal-counter" style="display:none"></div>
+</div>
 
 <!-- Global Mux progress bar — used for inline (reply/comment) video uploads -->
 <div id="mux-global-overlay" style="display:none" class="mux-upload-overlay mux-global-overlay">

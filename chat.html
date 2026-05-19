@@ -746,20 +746,22 @@
     .chat-img-wrap {
       background: var(--surface-2, #222);
       border-radius: 8px; overflow: hidden; display: block;
-      background-image: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
-      background-size: 200% 100%;
+      position: relative;
+    }
+    /* GPU-accelerated shimmer via transform (no paint per frame) */
+    .chat-img-wrap::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.08) 50%, transparent 100%);
+      transform: translateX(-100%);
       animation: chat-img-shimmer 1.4s ease-in-out infinite;
     }
+    .chat-img-wrap.loaded::after { display: none; }
     @keyframes chat-img-shimmer {
-      0%   { background-position: 200% 0; }
-      100% { background-position: -200% 0; }
-    }
-    .chat-img-wrap.loaded {
-      animation: none;
-      background: none;
+      100% { transform: translateX(200%); }
     }
     .chat-img-wrap img {
       opacity: 0; transition: opacity 0.25s ease; display: block; width: 100%;
+      decoding: async;
     }
     .chat-img-wrap.loaded img { opacity: 1; }
 
@@ -923,6 +925,11 @@
       transition: opacity .15s;
     }
     .chat-start-btn:disabled { opacity: .45; cursor: default; }
+
+    /* chat.html: always show hamburger, always hide tab bar
+       (the tab bar ends up inside #view-chat and is never needed here) */
+    #sh-hamburger-btn { display: inline-flex !important; }
+    .sh-tab-bar       { display: none       !important; }
   </style>
 </head>
 <body>
@@ -1677,18 +1684,20 @@ function removeInlineMedia(key, idx) {
   _renderInlineMediaPreview(key);
 }
 
-function inlineHandleImage(input, key) {
+async function inlineHandleImage(input, key) {
   _inlineKey(key);
-  Array.from(input.files || []).forEach(file => {
+  const files = Array.from(input.files || []);
+  input.value = "";
+  for (const file of files) {
     if (!file.type.startsWith("image/")) {
       alert(`"${file.name}" is not an image. Use the file attachment button to send other file types.`);
-      return;
+      continue;
     }
-    const url = URL.createObjectURL(file);
-    _inlineMedia[key].push({ type: "image", url, name: file.name, blob: file });
-  });
-  input.value = "";
-  _renderInlineMediaPreview(key);
+    const compressed = await compressImage(file);
+    const url = URL.createObjectURL(compressed);
+    _inlineMedia[key].push({ type: "image", url, name: compressed.name, blob: compressed });
+    _renderInlineMediaPreview(key);
+  }
 }
 
 function inlineHandleFile(input, key) {
@@ -2173,13 +2182,14 @@ function _renderCommentMedia(c) {
   if (images.length) {
     const cols = Math.min(images.length, 2);
     const gk = _chatImgGroupStore(images.map(m => m.url));
-    const fixedH = cols > 1 ? "180px" : "auto";
-    const minH   = cols > 1 ? "180px" : "80px"; // reserve space while loading
+    const multi = cols > 1;
     html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:6px">` +
       images.map((m, i) =>
-        `<div class="chat-img-wrap" style="min-height:${minH};height:${fixedH === "auto" ? "auto" : fixedH}">` +
-          `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" ` +
-            `style="height:${fixedH};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};cursor:pointer" ` +
+        // Multi-image: square aspect-ratio thumbnails (scale on resize, no squash)
+        // Single image: natural height up to 420px
+        `<div class="chat-img-wrap" style="${multi ? "aspect-ratio:1;" : ""}">` +
+          `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" decoding="async"` +
+            `style="${multi ? "height:100%;object-fit:cover;" : "max-height:420px;object-fit:contain;"}cursor:pointer" ` +
             `onclick="_chatImgModalOpen('${gk}',${i})" loading="lazy" ` +
             `onload="this.closest('.chat-img-wrap').classList.add('loaded')">` +
         `</div>`
@@ -2256,6 +2266,37 @@ function parseVimeoId(url) {
   const m = url.match(/vimeo\.com\/(\d+)/);
   return m ? m[1] : null;
 }
+// ── Client-side image compression ────────────────────────────────────────────
+// Resizes to maxPx on the longest side and re-encodes as JPEG @ quality.
+// GIFs are returned as-is (compression strips animation).
+// Falls back to original if canvas output is somehow larger.
+async function compressImage(file, { maxPx = 1920, quality = 0.82 } = {}) {
+  if (file.type === "image/gif") return file;
+  return new Promise(resolve => {
+    const img = new Image();
+    const rawUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(rawUrl);
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > maxPx || h > maxPx) {
+        const r = Math.min(maxPx / w, maxPx / h);
+        w = Math.round(w * r);
+        h = Math.round(h * r);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        if (!blob || blob.size >= file.size) { resolve(file); return; }
+        const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        resolve(new File([blob], name, { type: "image/jpeg" }));
+      }, "image/jpeg", quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(rawUrl); resolve(file); };
+    img.src = rawUrl;
+  });
+}
+
 async function uploadToStorage(blob, filename) {
   const MAX_MB = 500;
   if (blob.size > MAX_MB * 1024 * 1024) {
@@ -3591,9 +3632,11 @@ function _showChatView() {
   window._chatPageActive = true; // tell shared-header to step aside for badge management
   document.body.style.overflow = "hidden";
   document.documentElement.style.overflow = "hidden";
-  // Hide the tab bar so chat fills the full viewport below the header
-  const tb = document.getElementById("sh-tab-bar");
-  if (tb) tb.style.display = "none";
+  // Hide the tab bar and show the hamburger instead (gives desktop users a nav option)
+  const tb   = document.getElementById("sh-tab-bar");
+  const hbtn = document.getElementById("sh-hamburger-btn");
+  if (tb)   tb.style.display = "none";
+  if (hbtn) hbtn.style.display = "inline-flex";
   const hdr   = document.getElementById("app-header");
   const topPx = hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 60;
   // Set CSS variables; #view-chat uses calc(var(--win-h) - --hdr-h - --kb-h)

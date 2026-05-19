@@ -528,6 +528,64 @@
     .comment-att-fname { font-weight:500; }
     .comment-att-size { color:var(--text-muted); font-size:.76rem; }
 
+    /* ── Image shimmer placeholders ─────────────────────────────────────────── */
+    .ev-img-wrap {
+      position: relative; overflow: hidden; border-radius: 8px;
+      background: var(--surface-2,#f0ebe4);
+    }
+    /* GPU-accelerated shimmer */
+    .ev-img-wrap::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.45) 50%, transparent 100%);
+      transform: translateX(-100%);
+      animation: ev-shimmer 1.4s ease-in-out infinite;
+    }
+    .ev-img-wrap.loaded::after { display: none; }
+    .ev-img-wrap img { opacity: 0; transition: opacity .25s ease; display: block; width: 100%; }
+    .ev-img-wrap.loaded img { opacity: 1; }
+    @keyframes ev-shimmer {
+      100% { transform: translateX(200%); }
+    }
+
+    /* ── Image lightbox ─────────────────────────────────────────────────────── */
+    #ev-img-modal {
+      position: fixed; inset: 0; z-index: 9000;
+      background: rgba(0,0,0,.88);
+      display: none; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .18s ease;
+    }
+    #ev-img-modal.open { display: flex; opacity: 1; }
+    #ev-img-modal img {
+      max-width: min(84vw, 1200px); max-height: 88vh;
+      border-radius: 10px; object-fit: contain;
+      box-shadow: 0 8px 48px rgba(0,0,0,.7); transition: opacity .12s ease;
+    }
+    #ev-img-modal-close {
+      position: absolute; top: 16px; right: 18px;
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 38px; height: 38px; cursor: pointer; color: #fff;
+      font-size: 1.3rem; display: flex; align-items: center; justify-content: center;
+      transition: background .15s;
+    }
+    #ev-img-modal-close:hover { background: rgba(255,255,255,.22); }
+    .ev-img-modal-nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 44px; height: 44px; cursor: pointer; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s; flex-shrink: 0;
+    }
+    .ev-img-modal-nav:hover { background: rgba(255,255,255,.26); }
+    .ev-img-modal-nav:disabled { opacity: 0; pointer-events: none; }
+    #ev-img-modal-prev { left: 14px; }
+    #ev-img-modal-next { right: 14px; }
+    #ev-img-modal-counter {
+      position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,.6); font-size: .82rem; font-weight: 600;
+      background: rgba(0,0,0,.4); padding: 3px 10px; border-radius: 20px;
+      pointer-events: none;
+    }
+
     /* ── Live stream layout — full viewport below header ────────────────────── */
     #view-stream.active {
       position: fixed;
@@ -1840,6 +1898,9 @@ function autoResize(el) {
 // ── Events discussion: community-style rich toolbar ───────────────────────────
 // State keyed by composer key: 'main' for main comment input, comment-id for replies
 
+const _evImgGroups       = {}; // groupKey → [url, ...]
+let   _evImgCurrentGroup = null;
+let   _evImgCurrentIdx   = 0;
 const _evMedia       = {}; // key -> [{type, url, name, blob?, duration?}]
 const _evPollOpen    = {}; // key -> bool
 const _evVoiceRec    = {}; // key -> MediaRecorder | null
@@ -2038,17 +2099,19 @@ function evRemoveMedia(key, idx) {
   _renderEvMediaPreview(key);
 }
 
-function evHandleImage(input, key) {
+async function evHandleImage(input, key) {
   _evKey(key);
-  Array.from(input.files || []).forEach(file => {
+  const files = Array.from(input.files || []);
+  input.value = "";
+  for (const file of files) {
     if (!file.type.startsWith("image/")) {
       alert(`"${file.name}" is not an image. Use the file attachment button to send other file types.`);
-      return;
+      continue;
     }
-    _evMedia[key].push({ type: "image", url: URL.createObjectURL(file), name: file.name, blob: file });
-  });
-  input.value = "";
-  _renderEvMediaPreview(key);
+    const compressed = await compressImage(file);
+    _evMedia[key].push({ type: "image", url: URL.createObjectURL(compressed), name: compressed.name, blob: compressed });
+    _renderEvMediaPreview(key);
+  }
 }
 
 function evHandleFile(input, key) {
@@ -2509,6 +2572,33 @@ async function _evUploadMedia(key) {
   return result;
 }
 
+// ── Client-side image compression ────────────────────────────────────────────
+async function compressImage(file, { maxPx = 1920, quality = 0.82 } = {}) {
+  if (file.type === "image/gif") return file;
+  return new Promise(resolve => {
+    const img = new Image();
+    const rawUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(rawUrl);
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > maxPx || h > maxPx) {
+        const r = Math.min(maxPx / w, maxPx / h);
+        w = Math.round(w * r); h = Math.round(h * r);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        if (!blob || blob.size >= file.size) { resolve(file); return; }
+        const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        resolve(new File([blob], name, { type: "image/jpeg" }));
+      }, "image/jpeg", quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(rawUrl); resolve(file); };
+    img.src = rawUrl;
+  });
+}
+
 // ── Render helpers ─────────────────────────────────────────────────────────────
 function _fmtBytes(b) {
   if (!b) return "";
@@ -2526,8 +2616,16 @@ function _renderAttHtml(c) {
     const others = mediaArr.filter(m => m.type !== "image");
     if (images.length) {
       const cols = Math.min(images.length, 2);
+      const multi = cols > 1;
+      const gk = _evImgGroupStore(images.map(m => m.url));
       html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:8px">` +
-        images.map(m => `<img src="${esc(m.url)}" alt="${esc(m.name)}" style="width:100%;height:${cols > 1 ? "180px" : "auto"};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};border-radius:8px;display:block;cursor:pointer" onclick="window.open('${esc(m.url)}','_blank')" loading="lazy">`).join("") +
+        images.map((m, i) =>
+          `<div class="ev-img-wrap" style="${multi ? "aspect-ratio:1;" : ""}border-radius:8px;cursor:pointer" onclick="_evImgModalOpen('${gk}',${i})">` +
+            `<img src="${esc(m.url)}" alt="${esc(m.name)}" decoding="async" ` +
+              `style="${multi ? "height:100%;object-fit:cover;" : "max-height:420px;object-fit:contain;"}" ` +
+              `loading="lazy" onload="this.parentElement.classList.add('loaded')">` +
+            `</div>`
+        ).join("") +
         `</div>`;
     }
     others.forEach(m => {
@@ -2557,8 +2655,10 @@ function _renderAttHtml(c) {
   const name = c.attachment_name || "Attachment";
   const size = c.attachment_size ? ` · ${_fmtBytes(c.attachment_size)}` : "";
   switch (c.attachment_type) {
-    case "image":
-      return `<div class="comment-att"><img src="${url}" alt="${esc(name)}" onclick="window.open('${url}','_blank')" loading="lazy"></div>`;
+    case "image": {
+      const lgk = _evImgGroupStore([url]);
+      return `<div class="comment-att"><div class="ev-img-wrap" onclick="_evImgModalOpen('${lgk}',0)" style="cursor:pointer"><img src="${url}" alt="${esc(name)}" loading="lazy" onload="this.parentElement.classList.add('loaded')"></div></div>`;
+    }
     case "video":
       return `<div class="comment-att"><video src="${url}" controls preload="metadata"></video></div>`;
     case "audio":
@@ -3507,7 +3607,83 @@ function avatarHtml(name, email, size = 36, avatarUrl = null) {
   const colour = avatarColor(email || "");
   return `<div class="member-avatar" style="width:${size}px;height:${size}px;background:${colour.bg};color:${colour.fg};font-size:${Math.round(size*0.38)}px">${initials}</div>`;
 }
+
+// ── Image lightbox ────────────────────────────────────────────────────────────
+function _evImgGroupStore(urls) {
+  const key = "eg" + Date.now() + Math.random().toString(36).slice(2, 6);
+  _evImgGroups[key] = urls;
+  return key;
+}
+
+function _evImgModalOpen(groupKey, index) {
+  index = index || 0;
+  const urls = _evImgGroups[groupKey];
+  if (!urls) return;
+  _evImgCurrentGroup = groupKey;
+  _evImgCurrentIdx   = index;
+  const modal = document.getElementById("ev-img-modal");
+  if (modal) { modal.style.display = "flex"; requestAnimationFrame(() => modal.classList.add("open")); }
+  _evImgModalShow();
+  document.addEventListener("keydown", _evImgModalKeyHandler);
+}
+
+function _evImgModalShow() {
+  const urls    = _evImgGroups[_evImgCurrentGroup] || [];
+  const idx     = _evImgCurrentIdx;
+  const modal   = document.getElementById("ev-img-modal");
+  if (modal && modal.style.display === "none") { modal.style.display = "flex"; requestAnimationFrame(() => modal.classList.add("open")); }
+  const img     = document.getElementById("ev-img-modal-img");
+  const prev    = document.getElementById("ev-img-modal-prev");
+  const next    = document.getElementById("ev-img-modal-next");
+  const counter = document.getElementById("ev-img-modal-counter");
+  if (!modal || !img) return;
+  img.src = urls[idx] || "";
+  modal.classList.add("open");
+  const multi = urls.length > 1;
+  if (prev)    prev.disabled    = !multi || idx === 0;
+  if (next)    next.disabled    = !multi || idx === urls.length - 1;
+  if (counter) { counter.style.display = multi ? "" : "none"; counter.textContent = `${idx + 1} / ${urls.length}`; }
+}
+
+function _evImgModalNav(dir) {
+  const urls = _evImgGroups[_evImgCurrentGroup] || [];
+  const next = _evImgCurrentIdx + dir;
+  if (next < 0 || next >= urls.length) return;
+  _evImgCurrentIdx = next;
+  _evImgModalShow();
+}
+
+function _evImgModalClose() {
+  const modal = document.getElementById("ev-img-modal");
+  if (modal) modal.classList.remove("open");
+  document.removeEventListener("keydown", _evImgModalKeyHandler);
+  setTimeout(() => {
+    const img = document.getElementById("ev-img-modal-img");
+    if (img) img.src = "";
+    if (modal) modal.style.display = "none";
+  }, 200);
+  _evImgCurrentGroup = null;
+}
+
+function _evImgModalKeyHandler(e) {
+  if (e.key === "Escape")     _evImgModalClose();
+  if (e.key === "ArrowRight") _evImgModalNav(1);
+  if (e.key === "ArrowLeft")  _evImgModalNav(-1);
+}
 </script>
+
+<!-- Image lightbox modal -->
+<div id="ev-img-modal" onclick="_evImgModalClose()">
+  <button id="ev-img-modal-close" onclick="_evImgModalClose()" aria-label="Close">✕</button>
+  <button id="ev-img-modal-prev" class="ev-img-modal-nav" onclick="event.stopPropagation();_evImgModalNav(-1)" aria-label="Previous">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <img id="ev-img-modal-img" src="" alt="" onclick="event.stopPropagation()">
+  <button id="ev-img-modal-next" class="ev-img-modal-nav" onclick="event.stopPropagation();_evImgModalNav(1)" aria-label="Next">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <div id="ev-img-modal-counter" style="display:none"></div>
+</div>
 
 <!-- Global Mux progress bar for video uploads in discussion -->
 <div id="mux-global-overlay" style="display:none" class="mux-global-overlay">
