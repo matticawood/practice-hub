@@ -1728,6 +1728,18 @@ async function addRsvp(eventId) {
     alert("Could not save your RSVP: " + (error.message || JSON.stringify(error)));
     return;
   }
+  // Notify the event owner (unless they're RSVPing themselves)
+  if (myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+    const evTitle = currentEvent?.title || "an event";
+    await db.from("notifications").insert({
+      email:    OWNER_EMAIL,
+      type:     "event_rsvp",
+      title:    `${myName || "Someone"} is attending ${evTitle}`,
+      body:     `${myName || myEmail} just RSVPed for "${evTitle}"`,
+      link_url: `/events.html`,
+      metadata: { event_id: eventId },
+    });
+  }
   renderDetailView(currentEvent);
 }
 async function removeRsvp(eventId) {
@@ -3019,6 +3031,14 @@ function setupRealtimeStream(ev) {
         document.getElementById("featured-qa-bar").classList.add("visible");
       }
     });
+
+  // Subscribe to new/updated discussion comments and poll votes — reload comments on any change
+  db.channel(`event-discussion-${ev.id}`)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_comments",
+      filter: `event_id=eq.${ev.id}` }, () => loadComments(ev.id))
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_comment_poll_votes" },
+      () => loadComments(ev.id))
+    .subscribe();
 
   // Subscribe to new chat messages
   chatChannel = db.channel(`event-chat-${ev.id}`)
