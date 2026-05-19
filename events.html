@@ -113,6 +113,7 @@
       margin-bottom: 6px; line-height: 1.3;
     }
     .event-card-meta { font-size: 0.8rem; color: var(--text-muted); }
+    .event-card-ended { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
     .event-card-footer {
       display: flex; align-items: center; justify-content: space-between; gap: 8px;
       margin-top: 10px;
@@ -1430,6 +1431,7 @@ function buildEventCard(ev) {
       ${statusBadge}
       <div class="event-card-title">${esc(ev.title)}</div>
       <div class="event-card-meta">${dateStr}</div>
+      ${ev.status === "ended" ? `<div class="event-card-ended">Ended ${timeAgoAbs(ev.ended_at || ev.scheduled_at)}</div>` : ""}
       <div class="event-card-footer">
         <div style="display:flex;align-items:center;gap:6px">
           ${avatarHtml(ownerName, OWNER_EMAIL, 22, ownerAvatarUrl)}
@@ -1452,11 +1454,14 @@ async function loadEvents(tab) {
 
   // Fetch all non-live events + live events; filter client-side so scheduled
   // events past their end time (scheduled_at + duration_mins) appear in Past.
-  let query = db.from("live_events").select("*").order("scheduled_at", { ascending: tab === "upcoming" });
+  // Past events: sort by ended_at desc (most recently ended first), fall back to scheduled_at
+  let query = db.from("live_events").select("*");
   if (tab === "upcoming") {
-    query = query.in("status", ["scheduled", "live"]);
+    query = query.in("status", ["scheduled", "live"]).order("scheduled_at", { ascending: true });
   } else {
-    query = query.in("status", ["ended", "scheduled"]);
+    query = query.in("status", ["ended", "scheduled"])
+      .order("ended_at",    { ascending: false, nullsFirst: false })
+      .order("scheduled_at", { ascending: false });
   }
 
   const { data: rawEvents } = await query;
@@ -3335,8 +3340,9 @@ async function endStream() {
     body: JSON.stringify({ action: "delete-mux-livestream", eventId: currentEvent.id })
   }).catch(e => console.warn("delete-mux-livestream:", e));
 
-  await db.from("live_events").update({ status: "ended" }).eq("id", currentEvent.id);
-  currentEvent = { ...currentEvent, status: "ended" };
+  const endedAt = new Date().toISOString();
+  await db.from("live_events").update({ status: "ended", ended_at: endedAt }).eq("id", currentEvent.id);
+  currentEvent = { ...currentEvent, status: "ended", ended_at: endedAt };
   showView("detail");
   renderDetailView(currentEvent);
 }
@@ -3366,8 +3372,9 @@ async function endStreamFromDetail(eventId) {
     body: JSON.stringify({ action: "delete-mux-livestream", eventId })
   }).catch(e => console.warn("delete-mux-livestream:", e));
 
-  await db.from("live_events").update({ status: "ended" }).eq("id", eventId);
-  currentEvent = { ...currentEvent, status: "ended" };
+  const endedAt = new Date().toISOString();
+  await db.from("live_events").update({ status: "ended", ended_at: endedAt }).eq("id", eventId);
+  currentEvent = { ...currentEvent, status: "ended", ended_at: endedAt };
   renderDetailView(currentEvent);
 }
 
