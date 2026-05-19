@@ -1440,6 +1440,7 @@ let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
 let _chatUnread         = 0;
 let _qaUnread           = 0;
 let _typingTimeout      = null;
+let _typingActive       = false; // true while we've broadcast typing:true
 let _typingUsers        = {};   // email → name (currently typing)
 let _typingClearTimers  = {};   // email → setTimeout handle
 let currentEvtTab = "upcoming";
@@ -3435,7 +3436,7 @@ function setupRealtimeStream(ev) {
           delete _typingUsers[payload.email];
           delete _typingClearTimers[payload.email];
           updateTypingIndicator();
-        }, 3000);
+        }, 4000);
       } else {
         clearTimeout(_typingClearTimers[payload.email]);
         delete _typingUsers[payload.email];
@@ -3520,13 +3521,22 @@ function appendChatMsg(msg, skipUnread = false) {
 
 function onChatTyping() {
   if (!chatChannel) return;
-  chatChannel.send({ type: "broadcast", event: "typing",
-    payload: { email: myEmail, name: myName || myEmail, typing: true } });
+  // Only broadcast typing:true once when they start — not on every keystroke
+  if (!_typingActive) {
+    _typingActive = true;
+    chatChannel.send({ type: "broadcast", event: "typing",
+      payload: { email: myEmail, name: myName || myEmail, typing: true } });
+  }
+  // Debounce the stop signal — reset on every keystroke
   clearTimeout(_typingTimeout);
-  _typingTimeout = setTimeout(() => {
-    if (chatChannel) chatChannel.send({ type: "broadcast", event: "typing",
-      payload: { email: myEmail, name: myName || myEmail, typing: false } });
-  }, 2500);
+  _typingTimeout = setTimeout(stopTypingBroadcast, 3000);
+}
+
+function stopTypingBroadcast() {
+  if (!_typingActive) return;
+  _typingActive = false;
+  if (chatChannel) chatChannel.send({ type: "broadcast", event: "typing",
+    payload: { email: myEmail, name: myName || myEmail, typing: false } });
 }
 
 function updateTypingIndicator() {
@@ -3543,10 +3553,9 @@ async function sendChat() {
   const message = input.value.trim();
   if (!message || !currentEvent) return;
   input.value = "";
-  // Clear typing indicator
+  // Clear typing indicator immediately on send
   clearTimeout(_typingTimeout);
-  if (chatChannel) chatChannel.send({ type: "broadcast", event: "typing",
-    payload: { email: myEmail, name: myName || myEmail, typing: false } });
+  stopTypingBroadcast();
   await db.from("event_chat").insert({
     event_id: currentEvent.id, email: myEmail, name: myName, message
   });
