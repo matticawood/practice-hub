@@ -2056,11 +2056,38 @@ function evHandleFile(input, key) {
   _renderEvMediaPreview(key);
 }
 
+// ── Mutual exclusion: close every ev media panel except the one being opened ──
+function _closeEvExcept(key, except) {
+  if (except !== "video") {
+    const vp = document.getElementById(`ev-vid-panel-${key}`);
+    if (vp && vp.style.display !== "none") {
+      vp.style.display = "none";
+      document.getElementById(`ev-vid-btn-${key}`)?.classList.remove("ev-toolbar-btn--active");
+    }
+  }
+  if (except !== "poll") {
+    const pp = document.getElementById(`ev-poll-${key}`);
+    if (pp && pp.style.display !== "none") {
+      pp.style.display = "none";
+      _evPollOpen[key] = false;
+      document.getElementById(`ev-poll-btn-${key}`)?.classList.remove("recording");
+    }
+  }
+  if (except !== "cam") {
+    if (_evCamPreviewKey === key) evCancelCamPreview(key);
+    if (_evCamKey === key && _evCamRec && _evCamRec.state !== "inactive") _evCamRec.stop();
+  }
+  if (except !== "voice") {
+    if (_evVoiceRec[key] && _evVoiceRec[key].state !== "inactive") _evVoiceRec[key].stop();
+  }
+}
+
 async function evToggleVoice(key) {
   if (_evVoiceRec[key]) {
     if (_evVoiceRec[key].state !== "inactive") _evVoiceRec[key].stop();
     return;
   }
+  _closeEvExcept(key, "voice");
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const chunks = [];
@@ -2111,6 +2138,7 @@ function evToggleVideoPanel(key) {
   const btn   = document.getElementById(`ev-vid-btn-${key}`);
   if (!panel) return;
   const open = panel.style.display === "none";
+  if (open) _closeEvExcept(key, "video");
   panel.style.display = open ? "" : "none";
   btn?.classList.toggle("ev-toolbar-btn--active", open);
   if (open) evSwitchVideoTab("upload", key);
@@ -2166,6 +2194,7 @@ async function evToggleCamRec(key) {
     alert("Stop the current camera recording first."); return;
   }
   if (_evCamPreviewStream) { evCancelCamPreview(_evCamPreviewKey); }
+  _closeEvExcept(key, "cam");
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { aspectRatio: 16/9 } });
@@ -2382,6 +2411,7 @@ function evTogglePoll(key) {
   const panel = document.getElementById(`ev-poll-${key}`);
   if (!panel) return;
   const open = panel.style.display === "none";
+  if (open) _closeEvExcept(key, "poll");
   panel.style.display = open ? "" : "none";
   _evPollOpen[key] = open;
   const btn = document.getElementById(`ev-poll-btn-${key}`);
