@@ -236,6 +236,30 @@
       display: flex; align-items: center; gap: 5px; }
     .vod-qa-text  { font-size: .88rem; color: #fff; line-height: 1.4; }
     .vod-qa-asker { font-size: .75rem; color: var(--text-muted); margin-top: 3px; }
+    /* ── VOD answered Q&A list ───────────────────────────────────────────────── */
+    .vod-qa-list { margin-top: 20px; }
+    .vod-qa-list-title {
+      font-size: .75rem; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .07em;
+      margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+    }
+    .vod-qa-row {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 0; border-top: 1px solid var(--border);
+    }
+    .vod-qa-row:last-child { border-bottom: 1px solid var(--border); }
+    .vod-qa-ts {
+      flex-shrink: 0; font-size: .75rem; font-weight: 600;
+      color: var(--accent); font-variant-numeric: tabular-nums;
+      background: rgba(201,168,76,.12); border-radius: 4px;
+      padding: 2px 7px; margin-top: 1px; white-space: nowrap;
+      cursor: pointer; border: none; font-family: inherit;
+    }
+    .vod-qa-ts:hover { background: rgba(201,168,76,.25); }
+    .vod-qa-ts.no-ts { color: var(--text-muted); background: var(--surface-2); cursor: default; }
+    .vod-qa-row-body { flex: 1; min-width: 0; }
+    .vod-qa-row-q { font-size: .88rem; color: var(--text); line-height: 1.4; }
+    .vod-qa-row-asker { font-size: .75rem; color: var(--text-muted); margin-top: 2px; }
     mux-player { width: 100%; display: block; background: transparent; --media-background-color: transparent; --media-object-fit: contain; }
     /* Hide broken poster/thumbnail until Mux finishes generating them */
     mux-player::part(poster) { background: var(--surface-2); }
@@ -1750,6 +1774,7 @@ async function renderDetailView(ev) {
           <div class="vod-qa-asker" id="vod-qa-asker"></div>
         </div>
       </div>
+      <div id="vod-qa-list-wrap"></div>
     </div>`
   : ev.status === "ended" ? `
     <div class="recording-processing">
@@ -1896,6 +1921,7 @@ async function renderDetailView(ev) {
   loadComments(ev.id);
   loadAttendees(ev.id);
   setupVodQaOverlay(ev);
+  setupVodQaList(ev);
 
   if (ev.status === "scheduled") {
     startCountdown(new Date(ev.scheduled_at));
@@ -3783,6 +3809,70 @@ async function setupVodQaOverlay(ev) {
       overlay.classList.remove("visible");
     }
   });
+}
+
+// ── VOD answered Q&A list ──────────────────────────────────────────────────────
+// Shows all answered questions below the recording with clickable timestamps
+// that seek the player to the moment they were featured.
+async function setupVodQaList(ev) {
+  const wrap = document.getElementById("vod-qa-list-wrap");
+  if (!wrap || !ev.mux_playback_id) return;
+
+  const { data: questions } = await db
+    .from("event_qa")
+    .select("id, question, name, email, featured_at, answered")
+    .eq("event_id", ev.id)
+    .eq("answered", true)
+    .order("featured_at", { ascending: true, nullsFirst: false });
+
+  if (!questions?.length) return;
+
+  const streamStart = ev.stream_started_at ? new Date(ev.stream_started_at).getTime() : null;
+
+  function fmtOffset(ts) {
+    if (!streamStart || !ts) return null;
+    const secs = Math.max(0, Math.round((new Date(ts).getTime() - streamStart) / 1000));
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`
+      : `${m}:${String(s).padStart(2,"0")}`;
+  }
+
+  const svgQ = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+
+  wrap.innerHTML = `
+    <div class="vod-qa-list">
+      <div class="vod-qa-list-title">${svgQ} Questions answered in this session</div>
+      ${questions.map(q => {
+        const offset = fmtOffset(q.featured_at);
+        const secs   = streamStart && q.featured_at
+          ? Math.max(0, Math.round((new Date(q.featured_at).getTime() - streamStart) / 1000))
+          : null;
+        const tsBtn  = offset
+          ? `<button class="vod-qa-ts" onclick="vodSeekTo(${secs})" title="Jump to this moment">${offset}</button>`
+          : `<span class="vod-qa-ts no-ts">—</span>`;
+        const asker  = esc(q.name || q.email?.split("@")[0] || "Anonymous");
+        return `
+          <div class="vod-qa-row">
+            ${tsBtn}
+            <div class="vod-qa-row-body">
+              <div class="vod-qa-row-q">${esc(q.question)}</div>
+              <div class="vod-qa-row-asker">${asker}</div>
+            </div>
+          </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function vodSeekTo(seconds) {
+  const player = document.getElementById("vod-mux-player");
+  if (!player) return;
+  player.currentTime = seconds;
+  player.play?.();
+  // Scroll the player into view smoothly
+  document.getElementById("vod-player-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function endStream() {
