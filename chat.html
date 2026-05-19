@@ -521,18 +521,27 @@
     }
     .chat-conv-row:hover { background: var(--surface-2); }
     .chat-conv-row.active { background: var(--surface-2); border-left-color: var(--accent); }
+    .chat-conv-row.unread .chat-conv-row-name { color: #fff; }
+    .chat-conv-row.unread .chat-conv-row-preview { color: var(--text); }
     .chat-conv-row-avatars { flex-shrink: 0; position: relative; }
     .chat-conv-row-body { flex: 1; min-width: 0; }
     .chat-conv-row-top {
-      display: flex; align-items: baseline; justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
       gap: 8px; margin-bottom: 2px;
     }
     .chat-conv-row-name {
       font-size: 0.9rem; font-weight: 700; color: var(--text);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
     }
     .chat-conv-row-time {
       font-size: 0.72rem; color: var(--text-muted); flex-shrink: 0;
+    }
+    .chat-conv-unread-badge {
+      background: var(--accent, #f5c518); color: #1a1410;
+      font-size: .68rem; font-weight: 800; line-height: 1;
+      min-width: 18px; height: 18px; border-radius: 99px;
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 0 4px; flex-shrink: 0;
     }
     .chat-conv-row-preview {
       font-size: 0.8rem; color: var(--text-muted);
@@ -2442,6 +2451,41 @@ let _chatRxMap       = {};            // messageId -> { emoji -> { count, mine }
 let _chatHasMore     = false;         // whether older messages exist beyond current page
 let _chatLoadingMore = false;         // guard against concurrent load-more requests
 const CHAT_PAGE_SIZE = 50;            // messages per page
+let _chatUnreadCounts = {};           // chat_id → unread count
+
+// ── Read-tracking (localStorage) ─────────────────────────────────────────────
+function _getChatReads() {
+  try { return JSON.parse(localStorage.getItem(`chatReads_${myEmail}`) || "{}"); } catch { return {}; }
+}
+function _markChatRead(chatId) {
+  const reads = _getChatReads();
+  reads[chatId] = new Date().toISOString();
+  try { localStorage.setItem(`chatReads_${myEmail}`, JSON.stringify(reads)); } catch {}
+}
+function _updateChatHeaderBadge() {
+  const total = Object.values(_chatUnreadCounts).reduce((a, b) => a + b, 0);
+  const badge = document.getElementById("chat-unread-badge");
+  if (!badge) return;
+  badge.textContent = total > 99 ? "99+" : String(total);
+  badge.style.display = total > 0 ? "" : "none";
+}
+function _updateConvRowBadge(chatId) {
+  const row = document.querySelector(`.chat-conv-row[data-chat-id="${CSS.escape(chatId)}"]`);
+  if (!row) return;
+  const count = _chatUnreadCounts[chatId] || 0;
+  let badge = row.querySelector(".chat-conv-unread-badge");
+  row.classList.toggle("unread", count > 0);
+  if (count > 0) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "chat-conv-unread-badge";
+      row.querySelector(".chat-conv-row-top")?.appendChild(badge);
+    }
+    badge.textContent = count > 99 ? "99+" : String(count);
+  } else if (badge) {
+    badge.remove();
+  }
+}
 
 // New-chat selection state
 let _newChatSelected = [];            // [{email, name, avatarUrl}]
@@ -2574,16 +2618,28 @@ async function _loadConversationsList() {
   const myRoomIds = new Set((participantRows || []).map(r => r.room_id));
 
   // 3. Deduplicate by chat_id — keep first (most recent) occurrence
+  //    Also count unread messages using localStorage read timestamps
+  const reads = _getChatReads();
+  const unreadTally = {}; // chat_id → count (from fetched msgs)
   const seen = new Map(); // chat_id -> msg
   for (const msg of (msgs || [])) {
-    if (seen.has(msg.chat_id)) continue;
     const cid = msg.chat_id;
-    // Include if: group chat, contains my email (DM), or is a room I'm in
     const isDM = cid !== "group" && cid.includes("|") && cid.includes(myEmail);
     const isRoom = myRoomIds.has(cid);
-    if (cid === "group" || isDM || isRoom) {
-      seen.set(cid, msg);
+    const isMine = cid === "group" || isDM || isRoom;
+    if (!isMine) continue;
+    // Count unread (messages not from me, newer than last read)
+    if (msg.email !== myEmail) {
+      const lastRead = reads[cid];
+      if (!lastRead || msg.created_at > lastRead) {
+        unreadTally[cid] = (unreadTally[cid] || 0) + 1;
+      }
     }
+    if (!seen.has(cid)) seen.set(cid, msg);
+  }
+  // Apply unread counts (keep current count for the active conversation which is always 0)
+  for (const [cid] of seen) {
+    _chatUnreadCounts[cid] = cid === _currentChatId ? 0 : (unreadTally[cid] || 0);
   }
 
   // Always include group chat even if no messages
@@ -2629,6 +2685,7 @@ async function _loadConversationsList() {
 
   _chatConversations = convList;
   _renderConvList(convList, roomNames);
+  _updateChatHeaderBadge();
 }
 
 function _renderConvList(convList, roomNames) {
@@ -2660,14 +2717,18 @@ function _renderConvList(convList, roomNames) {
     const preview = msg.content
       ? escHtml(msg.content).slice(0, 60)
       : (Array.isArray(msg.media) && msg.media.length ? "Attachment" : "");
-    const timeStr = msg.created_at ? relativeTime(msg.created_at) : "";
+    const timeStr   = msg.created_at ? relativeTime(msg.created_at) : "";
+    const unread    = _chatUnreadCounts[cid] || 0;
+    const unreadHtml = unread > 0
+      ? `<span class="chat-conv-unread-badge">${unread > 99 ? "99+" : unread}</span>` : "";
 
-    return `<button class="chat-conv-row" data-chat-id="${escHtml(cid)}" onclick="_openConversation('${escHtml(cid)}')">
+    return `<button class="chat-conv-row${unread > 0 ? " unread" : ""}" data-chat-id="${escHtml(cid)}" onclick="_openConversation('${escHtml(cid)}')">
       <div class="chat-conv-row-avatars">${avatarEl}</div>
       <div class="chat-conv-row-body">
         <div class="chat-conv-row-top">
           <span class="chat-conv-row-name">${escHtml(name)}</span>
           <span class="chat-conv-row-time">${timeStr}</span>
+          ${unreadHtml}
         </div>
         <div class="chat-conv-row-preview">${preview}</div>
       </div>
@@ -2763,6 +2824,12 @@ async function _openConversation(chatIdOrEmail, otherName) {
   _chatMessages = rows.reverse(); // back to chronological order
 
   await _fetchPollsAndReactions(_chatMessages.map(m => m.id), true);
+
+  // Mark conversation as read now that messages are loaded
+  _markChatRead(chatId);
+  _chatUnreadCounts[chatId] = 0;
+  _updateConvRowBadge(chatId);
+  _updateChatHeaderBadge();
 
   _renderChatMessages();
   _scrollChatToBottom(true);
@@ -3114,6 +3181,12 @@ function _subscribeGlobalRealtime() {
         _chatMessages.push(msg);
         _appendChatMessage(msg);
         _scrollChatToBottom();
+        _markChatRead(msg.chat_id); // still reading — keep marked as read
+      } else if (msg.email !== myEmail) {
+        // Background conversation — increment unread immediately
+        _chatUnreadCounts[msg.chat_id] = (_chatUnreadCounts[msg.chat_id] || 0) + 1;
+        _updateConvRowBadge(msg.chat_id);
+        _updateChatHeaderBadge();
       }
       // Refresh sidebar preview
       if (document.getElementById("view-chat").style.display !== "none") _loadConversationsList();
@@ -3129,6 +3202,11 @@ function _subscribeGlobalRealtime() {
         _chatMessages.push(msg);
         _appendChatMessage(msg);
         _scrollChatToBottom();
+        _markChatRead(msg.chat_id);
+      } else if (msg.email !== myEmail) {
+        _chatUnreadCounts[msg.chat_id] = (_chatUnreadCounts[msg.chat_id] || 0) + 1;
+        _updateConvRowBadge(msg.chat_id);
+        _updateChatHeaderBadge();
       }
       // Refresh sidebar preview
       if (document.getElementById("view-chat").style.display !== "none") _loadConversationsList();
