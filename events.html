@@ -3372,6 +3372,16 @@ async function joinStream(eventId) {
 
       // Register listeners BEFORE join() so events aren't missed
       window._callFrame.on("joined-meeting", async () => {
+        // On REJOIN (stream_started_at already set) don't restart recording or
+        // live streaming — the Mux RTMP stream reconnects automatically within
+        // the 5-minute reconnect window and we'd just get duplicate Daily recordings
+        // and an overwritten stream_started_at that would break VOD timestamps.
+        if (currentEvent.stream_started_at) {
+          console.log("[Mux] Rejoining existing stream — skipping startRecording/startLiveStreaming");
+          return;
+        }
+
+        // First join only ────────────────────────────────────────────────────
         // Start Daily cloud recording
         try { await window._callFrame.startRecording(); } catch(e) {
           console.warn("startRecording failed:", e.message);
@@ -3490,11 +3500,28 @@ function setupRealtimeStream(ev) {
   if (myEmail)    _streamAvatarCache[myEmail]    = myAvatarUrl;
   if (OWNER_EMAIL) _streamAvatarCache[OWNER_EMAIL] = ownerAvatarUrl;
 
-  // Chat and Q&A are both loaded inside their subscribe() callbacks below,
-  // so the fetch only happens once the channel is confirmed active.
-  // This closes the race window on rejoin (leave + rejoin Daily.co room).
+  // Reset typing state so stale _typingActive doesn't suppress the next broadcast
+  _typingActive = false;
+  clearTimeout(_typingTimeout);
+  Object.values(_typingClearTimers).forEach(t => clearTimeout(t));
+  _typingUsers = {};
+  _typingClearTimers = {};
+  updateTypingIndicator(); // hides the indicator if it was showing for a now-gone user
 
-  // Subscribe to new/updated discussion comments and poll votes — reload comments on any change
+  // ── Clear panels immediately for a clean start ──────────────────────────────
+  // We do this here (not inside the subscribe callbacks) so the user sees a
+  // clean slate right away, not after the async channel handshake (~1-2s).
+  const chatEl = document.getElementById("chat-messages");
+  const qaEl   = document.getElementById("qa-questions");
+  if (chatEl) chatEl.innerHTML = "";
+  if (qaEl)   qaEl.innerHTML   = "";
+  document.getElementById("featured-qa-bar")?.classList.remove("visible");
+
+  // ── Wire up channels (INSERT/UPDATE listeners active before history loads) ──
+  // This ensures no events are lost between the immediate history fetch below
+  // and the channel becoming fully subscribed.
+
+  // Subscribe to new/updated discussion comments and poll votes
   db.channel(`event-discussion-${ev.id}`)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_comments",
       filter: `event_id=eq.${ev.id}` }, () => loadComments(ev.id))
@@ -3527,17 +3554,14 @@ function setupRealtimeStream(ev) {
     })
     .subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;
-      // Load history once confirmed live — catches anything that arrived
-      // during the subscription gap after a rejoin.
+      // Second pass: catch any chat messages that arrived in the gap between
+      // our immediate load below and the channel becoming active.
+      // appendChatMsg deduplicates by data-id so no doubles appear.
       const { data } = await db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at");
       if (data) data.forEach(m => appendChatMsg(m, true));
     });
 
-  // Subscribe to new Q&A / updates.
-  // We load existing Q&A *inside* the subscribe callback so the fetch only
-  // happens once the channel is confirmed active — this closes the race window
-  // where a question arrives between teardown of the old channel and the new
-  // subscription becoming live (e.g. after the host leaves and rejoins).
+  // Subscribe to new/updated Q&A
   qaChannel = db.channel(`event-qa-${ev.id}`)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_qa",
       filter: `event_id=eq.${ev.id}` }, p => appendQAItem(p.new))
@@ -3545,9 +3569,29 @@ function setupRealtimeStream(ev) {
       filter: `event_id=eq.${ev.id}` }, p => updateQAItem(p.new))
     .subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;
-      // Now that we're definitely listening, load all existing Q&A — anything
-      // that arrived during the subscription gap will also appear here.
+      // Second pass: catch any Q&A that arrived in the gap.
+      // appendQAItem deduplicates/replaces by data-id so state is always current.
       const { data } = await db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at");
+      if (!data) return;
+      data.forEach(q => appendQAItem(q, true));
+      const featured = data.find(q => q.is_featured);
+      if (featured) {
+        document.getElementById("featured-qa-text").textContent = featured.question;
+        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
+        document.getElementById("featured-qa-bar").classList.add("visible");
+      }
+    });
+
+  // ── Immediate history load ────────────────────────────────────────────────────
+  // Load existing chat and Q&A right now without waiting for SUBSCRIBED.
+  // This makes messages visible immediately on (re)join instead of after the
+  // ~1-2 s channel handshake. The subscribe callbacks above will fill in
+  // anything that slips through the gap.
+  db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at")
+    .then(({ data }) => { if (data) data.forEach(m => appendChatMsg(m, true)); });
+
+  db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at")
+    .then(({ data }) => {
       if (!data) return;
       data.forEach(q => appendQAItem(q, true));
       const featured = data.find(q => q.is_featured);
@@ -3579,6 +3623,9 @@ function setupRealtimeStream(ev) {
 function appendChatMsg(msg, skipUnread = false) {
   const el = document.getElementById("chat-messages");
   if (!el) return;
+  // Deduplicate — the same message can arrive via both the realtime INSERT
+  // listener and the history reload in the subscribe callback
+  if (el.querySelector(`[data-id="${msg.id}"]`)) return;
   const mine = msg.email === myEmail;
 
   // Avatar: use cache, fall back to initials
@@ -3684,20 +3731,26 @@ function appendQAItem(q, skipUnread = false) {
   }
 }
 
-function updateQAItem(q) {
-  const el = document.getElementById("qa-questions");
-  if (!el) return;
-  const existing = el.querySelector(`[data-id="${q.id}"]`);
-  if (existing) existing.replaceWith(buildQAEl(q));
+function updateQAItem(partial) {
+  // Realtime UPDATE payloads only include changed columns + primary key, so
+  // we fetch the complete row before rebuilding to avoid rendering broken cards
+  // with missing question text, wrong button states, etc.
+  db.from("event_qa").select("*").eq("id", partial.id).single().then(({ data: q }) => {
+    if (!q) return;
+    const el = document.getElementById("qa-questions");
+    if (!el) return;
+    const existing = el.querySelector(`[data-id="${q.id}"]`);
+    if (existing) existing.replaceWith(buildQAEl(q));
 
-  // Update featured bar
-  if (q.is_featured) {
-    document.getElementById("featured-qa-text").textContent = q.question;
-    document.getElementById("featured-qa-asker").textContent = "— " + (q.name || q.email.split("@")[0]);
-    document.getElementById("featured-qa-bar").classList.add("visible");
-  } else {
-    document.getElementById("featured-qa-bar").classList.remove("visible");
-  }
+    // Update featured bar
+    if (q.is_featured) {
+      document.getElementById("featured-qa-text").textContent = q.question;
+      document.getElementById("featured-qa-asker").textContent = "— " + (q.name || q.email.split("@")[0]);
+      document.getElementById("featured-qa-bar").classList.add("visible");
+    } else {
+      document.getElementById("featured-qa-bar").classList.remove("visible");
+    }
+  });
 }
 
 function buildQAEl(q) {
@@ -3742,32 +3795,58 @@ async function featureQA(qaId, feature) {
   const now = new Date().toISOString();
   if (feature) {
     // Unfeature (and record unfeatured_at for) any currently featured question
-    await db.from("event_qa")
+    const { error: e1 } = await db.from("event_qa")
       .update({ is_featured: false, unfeatured_at: now })
       .eq("event_id", currentEvent.id)
       .eq("is_featured", true);
+    if (e1) { console.error("featureQA unfeature error:", e1); alert("Could not update question: " + e1.message); return; }
   }
-  await db.from("event_qa").update({
+  const { error: e2 } = await db.from("event_qa").update({
     is_featured:    feature,
     // Record timestamps for VOD overlay sync
     ...(feature ? { featured_at: now }   : {}),
     ...(!feature ? { unfeatured_at: now } : {})
   }).eq("id", qaId);
+  if (e2) { console.error("featureQA error:", e2); alert("Could not update question: " + e2.message); return; }
+
   if (!feature) {
     document.getElementById("featured-qa-bar").classList.remove("visible");
+  }
+
+  // Immediately refresh the whole Q&A list so buttons reflect the new state
+  // without having to wait for the realtime UPDATE event to arrive.
+  await _refreshQAList();
+}
+
+async function _refreshQAList() {
+  if (!currentEvent?.id) return;
+  const { data } = await db.from("event_qa").select("*").eq("event_id", currentEvent.id).order("created_at");
+  if (!data) return;
+  const el = document.getElementById("qa-questions");
+  if (!el) return;
+  el.innerHTML = "";
+  data.forEach(q => appendQAItem(q, true));
+  const featured = data.find(q => q.is_featured);
+  if (featured) {
+    document.getElementById("featured-qa-text").textContent = featured.question;
+    document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
+    document.getElementById("featured-qa-bar").classList.add("visible");
   }
 }
 
 async function markAnswered(qaId, currentState) {
   const nowAnswered = !currentState;
-  await db.from("event_qa").update({
+  const { error } = await db.from("event_qa").update({
     answered: nowAnswered,
     is_featured: false,
     ...(nowAnswered ? { unfeatured_at: new Date().toISOString() } : {})
   }).eq("id", qaId);
+  if (error) { console.error("markAnswered error:", error); alert("Could not update question: " + error.message); return; }
   if (nowAnswered) {
     document.getElementById("featured-qa-bar").classList.remove("visible");
   }
+  // Immediately refresh the Q&A list so the button state reflects the change
+  await _refreshQAList();
 }
 
 // ── VOD featured-question overlay ─────────────────────────────────────────────
@@ -3844,6 +3923,7 @@ async function setupVodQaOverlay(ev) {
   }
 
   let _controlsHideTimer = null;
+  let _fsControlsObserver = null;   // stored so we can disconnect on fullscreen exit
   function onControlsChange(visible) {
     clearTimeout(_controlsHideTimer);
     if (visible) {
@@ -3874,6 +3954,7 @@ async function setupVodQaOverlay(ev) {
   // position:fixed, then use positionVodOverlay() to compute pixel coords that
   // match the actual video render area (accounting for letterbox bars).
   const wrap = document.getElementById("vod-player-wrap");
+  let _fsEnterTimer = null; // store so we can cancel it if fullscreen is exited before it fires
 
   function positionVodOverlay(ov, controlsVisible = true) {
     // Use screen.width/height — these always reflect the physical screen size
@@ -3939,8 +4020,14 @@ async function setupVodQaOverlay(ev) {
     if (fs) {
       fs.appendChild(ov);
       ov.classList.add("fullscreen-mode");
-      // Small delay — browser needs time to finish the fullscreen transition
-      setTimeout(() => {
+      // Small delay — browser needs time to finish the fullscreen transition.
+      // Store the timer so the exit branch can cancel it if the user exits
+      // before the 150 ms are up (otherwise the timer fires after exit and
+      // re-applies large fullscreen pixel values to the normal-view overlay).
+      _fsEnterTimer = setTimeout(() => {
+        _fsEnterTimer = null;
+        // Safety check — abort if fullscreen was already exited
+        if (!(document.fullscreenElement || document.webkitFullscreenElement)) return;
         positionVodOverlay(ov, true);
 
         // Precompute the two bottom values for controls shown/hidden
@@ -3973,9 +4060,10 @@ async function setupVodQaOverlay(ev) {
         try {
           const ctrl = player.shadowRoot?.querySelector("media-controller");
           if (!ctrl) throw new Error();
-          new MutationObserver(() => {
+          _fsControlsObserver = new MutationObserver(() => {
             onFsControlsChange(!ctrl.hasAttribute("user-inactive"));
-          }).observe(ctrl, { attributes: true, attributeFilter: ["user-inactive"] });
+          });
+          _fsControlsObserver.observe(ctrl, { attributes: true, attributeFilter: ["user-inactive"] });
         } catch(e) {
           let hideTimer = null;
           const show = () => { onFsControlsChange(true); clearTimeout(hideTimer); hideTimer = setTimeout(() => onFsControlsChange(false), 2500); };
@@ -3984,6 +4072,14 @@ async function setupVodQaOverlay(ev) {
         }
       }, 150);
     } else if (wrap) {
+      // Cancel any pending fullscreen-enter setup (in case the 150ms timer
+      // hasn't fired yet — if it did fire it would re-apply fullscreen styles)
+      clearTimeout(_fsEnterTimer);
+      _fsEnterTimer = null;
+      // Disconnect the fullscreen controls observer so it can't interfere with
+      // the normal-view observer after exiting fullscreen
+      _fsControlsObserver?.disconnect();
+      _fsControlsObserver = null;
       wrap.appendChild(ov);
       ov.classList.remove("fullscreen-mode");
       // Clear all inline styles so CSS takes back over
@@ -4002,16 +4098,23 @@ async function setupVodQaOverlay(ev) {
 // that seek the player to the moment they were featured.
 async function setupVodQaList(ev) {
   const wrap = document.getElementById("vod-qa-list-wrap");
+  console.log("[VOD list] wrap:", !!wrap, "mux_playback_id:", ev.mux_playback_id, "ev.id:", ev.id);
   if (!wrap || !ev.mux_playback_id) return;
 
-  const { data: questions } = await db
+  const { data: questions, error: qErr } = await db
     .from("event_qa")
     .select("id, question, name, email, featured_at, unfeatured_at, answered")
     .eq("event_id", ev.id)
     .eq("answered", true)
     .order("featured_at", { ascending: true, nullsFirst: false });
 
-  if (!questions?.length) return;
+  console.log("[VOD list] answered=true query:", questions?.length, "rows, error:", qErr);
+  if (!questions?.length) {
+    // Diagnostic: check what's actually in the table for this event
+    db.from("event_qa").select("id, question, answered").eq("event_id", ev.id)
+      .then(({ data: all }) => console.log("[VOD list] all Q&A for event:", all?.map(q => ({ id: q.id.slice(0,8), answered: q.answered }))));
+    return;
+  }
 
   const streamStart = ev.stream_started_at ? new Date(ev.stream_started_at).getTime() : null;
 
