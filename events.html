@@ -3829,11 +3829,12 @@ async function setupVodQaOverlay(ev) {
   const wrap = document.getElementById("vod-player-wrap");
 
   function positionVodOverlay(ov) {
-    const sw = window.innerWidth;
-    const sh = window.innerHeight;
-    const vw = player.videoWidth  || 1920;
-    const vh = player.videoHeight || 1080;
-    const videoAspect  = vw / vh;
+    // Use screen.width/height — these always reflect the physical screen size
+    // even before window.innerWidth has updated after the fullscreen transition.
+    // Daily.co recordings are 16:9, so assume that aspect ratio.
+    const sw = screen.width;
+    const sh = screen.height;
+    const videoAspect  = 16 / 9;
     const screenAspect = sw / sh;
 
     let renderW, renderH, offsetX, offsetY;
@@ -3847,21 +3848,30 @@ async function setupVodQaOverlay(ev) {
       offsetX = (sw - renderW) / 2; offsetY = 0;
     }
 
-    // Position relative to the video render area
-    ov.style.bottom   = (offsetY + renderH * 0.07) + "px";
-    ov.style.left     = (offsetX + renderW * 0.015) + "px";
-    ov.style.maxWidth = (renderW * 0.28) + "px";
-    ov.style.padding  = (renderH * 0.012) + "px " + (renderW * 0.012) + "px";
-    ov.style.borderLeftWidth = Math.max(2, renderW * 0.002) + "px";
-    ov.style.borderRadius    = (renderW * 0.004) + "px";
+    const set = (el, prop, val) => el?.style.setProperty(prop, val, "important");
 
-    // Scale fonts proportionally to the video render width
+    set(ov, "bottom",      (offsetY + renderH * 0.07) + "px");
+    set(ov, "left",        (offsetX + renderW * 0.015) + "px");
+    set(ov, "max-width",   (renderW * 0.28) + "px");
+    set(ov, "padding",     (renderH * 0.012) + "px " + (renderW * 0.012) + "px");
+    set(ov, "border-left-width", Math.max(2, renderW * 0.002) + "px");
+    set(ov, "border-radius",     (renderW * 0.004) + "px");
+
     const label = ov.querySelector(".vod-qa-label");
     const text  = ov.querySelector(".vod-qa-text");
     const asker = ov.querySelector(".vod-qa-asker");
-    if (label) { label.style.fontSize = (renderW * 0.01) + "px"; label.style.marginBottom = (renderH * 0.008) + "px"; label.style.lineHeight = "1.4"; }
-    if (text)  { text.style.fontSize  = (renderW * 0.013) + "px"; text.style.lineHeight = "1.5"; }
-    if (asker) { asker.style.fontSize = (renderW * 0.01) + "px";  asker.style.marginTop = (renderH * 0.006) + "px"; asker.style.lineHeight = "1.4"; }
+    if (label) {
+      set(label, "font-size",     (renderW * 0.01)  + "px");
+      set(label, "line-height",   "1.4");
+      set(label, "margin-bottom", (renderH * 0.008) + "px");
+      set(label, "gap",           (renderW * 0.004) + "px");
+    }
+    if (text)  { set(text,  "font-size",   (renderW * 0.013) + "px"); set(text,  "line-height", "1.5"); }
+    if (asker) {
+      set(asker, "font-size",  (renderW * 0.01)  + "px");
+      set(asker, "line-height","1.4");
+      set(asker, "margin-top", (renderH * 0.006) + "px");
+    }
   }
 
   function handleFullscreenChange() {
@@ -3871,12 +3881,13 @@ async function setupVodQaOverlay(ev) {
     if (fs) {
       fs.appendChild(ov);
       ov.classList.add("fullscreen-mode");
-      // Defer one frame so window dimensions have updated
-      requestAnimationFrame(() => positionVodOverlay(ov));
+      // Small delay — browser needs time to finish the fullscreen transition
+      // before screen dimensions are reliable
+      setTimeout(() => positionVodOverlay(ov), 150);
     } else if (wrap) {
       wrap.appendChild(ov);
       ov.classList.remove("fullscreen-mode");
-      // Clear inline styles so CSS takes over again
+      // Clear all inline styles so CSS takes back over
       ov.style.cssText = "";
       ov.querySelectorAll(".vod-qa-label,.vod-qa-text,.vod-qa-asker")
         .forEach(el => el.style.cssText = "");
