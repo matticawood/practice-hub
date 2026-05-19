@@ -250,9 +250,15 @@
     }
     .vod-qa-row {
       display: flex; align-items: flex-start; gap: 10px;
-      padding: 10px 0; border-top: 1px solid var(--border);
+      padding: 10px 8px; border-top: 1px solid var(--border);
+      border-radius: 6px; margin: 0 -8px;
+      transition: background .2s ease;
     }
     .vod-qa-row:last-child { border-bottom: 1px solid var(--border); }
+    .vod-qa-row.active {
+      background: rgba(201,168,76,.1);
+    }
+    .vod-qa-row.active .vod-qa-row-q { color: #fff; }
     .vod-qa-ts {
       flex-shrink: 0; font-size: .75rem; font-weight: 600;
       color: var(--accent); font-variant-numeric: tabular-nums;
@@ -3950,7 +3956,7 @@ async function setupVodQaList(ev) {
           : `<span class="vod-qa-ts no-ts">—</span>`;
         const asker  = esc(q.name || q.email?.split("@")[0] || "Anonymous");
         return `
-          <div class="vod-qa-row">
+          <div class="vod-qa-row" data-qa-id="${q.id}">
             ${tsBtn}
             <div class="vod-qa-row-body">
               <div class="vod-qa-row-q">${esc(q.question)}</div>
@@ -3959,6 +3965,38 @@ async function setupVodQaList(ev) {
           </div>`;
       }).join("")}
     </div>`;
+
+  // Highlight the active question as the video plays, matching the overlay segments
+  if (streamStart) {
+    const toOffset = ts => (new Date(ts).getTime() - streamStart) / 1000;
+    const segments = questions
+      .filter(q => q.featured_at)
+      .map((q, i, arr) => ({
+        id:    q.id,
+        start: toOffset(q.featured_at),
+        end:   arr[i + 1]?.featured_at ? toOffset(arr[i + 1].featured_at) : Infinity
+      }));
+
+    const player = document.getElementById("vod-mux-player");
+    if (player && segments.length) {
+      let activeId = null;
+      player.addEventListener("timeupdate", () => {
+        const t = player.currentTime;
+        const seg = segments.find(s => t >= s.start && t < s.end) || null;
+        const newId = seg?.id || null;
+        if (newId === activeId) return;
+        activeId = newId;
+        wrap.querySelectorAll(".vod-qa-row").forEach(row => {
+          row.classList.toggle("active", row.dataset.qaId === String(newId));
+        });
+        // Scroll active row into view
+        if (newId) {
+          const activeRow = wrap.querySelector(`.vod-qa-row[data-qa-id="${newId}"]`);
+          activeRow?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      });
+    }
+  }
 }
 
 function vodSeekTo(seconds) {
