@@ -1852,12 +1852,17 @@ async function renderDetailView(ev) {
       })
       .subscribe();
 
-    // Polling fallback — checks every 15 s for up to 10 min in case realtime misses the event
-    const pollEventId = ev.id;
+    // Polling fallback — every 15 s checks the DB; every 2 min (if admin) also
+    // tries to pull the recording from Daily.co directly so we never rely solely
+    // on the Daily.co → Netlify webhook which can fail silently.
+    const pollEventId  = ev.id;
+    const pollRoomName = ev.daily_room_name || null;
     let pollAttempts = 0;
     _recordingPoller = setInterval(async () => {
       pollAttempts++;
-      if (pollAttempts > 40) { clearInterval(_recordingPoller); _recordingPoller = null; return; }
+      if (pollAttempts > 80) { clearInterval(_recordingPoller); _recordingPoller = null; return; } // 20 min max
+
+      // ① Check DB first — catches webhook if it fired
       const { data } = await db.from("live_events")
         .select("mux_playback_id, mux_asset_id")
         .eq("id", pollEventId)
@@ -1868,6 +1873,29 @@ async function renderDetailView(ev) {
         if (_recordingWatcher) { db.removeChannel(_recordingWatcher); _recordingWatcher = null; }
         currentEvent = { ...currentEvent, mux_playback_id: data.mux_playback_id, mux_asset_id: data.mux_asset_id };
         renderDetailView(currentEvent);
+        return;
+      }
+
+      // ② Every 8 attempts (~2 min), admin-only: fetch from Daily.co directly.
+      //    This is the real fallback when the webhook doesn't fire.
+      if (isAdmin && pollRoomName && pollAttempts % 8 === 0) {
+        try {
+          const { data: { session } } = await db.auth.getSession();
+          const token = session?.access_token || authToken;
+          const res = await fetch("/api/daily", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ action: "fetch-recording", roomName: pollRoomName, eventId: pollEventId })
+          });
+          const result = await res.json();
+          if (result.muxPlaybackId) {
+            clearInterval(_recordingPoller);
+            _recordingPoller = null;
+            if (_recordingWatcher) { db.removeChannel(_recordingWatcher); _recordingWatcher = null; }
+            currentEvent = { ...currentEvent, mux_asset_id: result.muxAssetId, mux_playback_id: result.muxPlaybackId };
+            renderDetailView(currentEvent);
+          }
+        } catch(e) { /* silent — will retry next cycle */ }
       }
     }, 15000);
   }
