@@ -218,7 +218,24 @@
       text-decoration: underline;
     }
     .btn-link:hover { opacity: .8; }
-    .mux-player-wrap { width: 100%; border-radius: var(--radius); overflow: hidden; }
+    .mux-player-wrap { width: 100%; border-radius: var(--radius); overflow: hidden; position: relative; }
+    /* ── VOD featured-question overlay ──────────────────────────────────────── */
+    #vod-qa-overlay {
+      display: none; position: absolute;
+      bottom: 54px; left: 12px; right: 12px;
+      background: rgba(0,0,0,0.82); backdrop-filter: blur(4px);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px; padding: 10px 14px;
+      pointer-events: none; z-index: 10;
+      animation: vod-qa-fadein .3s ease;
+    }
+    #vod-qa-overlay.visible { display: block; }
+    @keyframes vod-qa-fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .vod-qa-label { font-size: .68rem; color: var(--accent); font-weight: 700;
+      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px;
+      display: flex; align-items: center; gap: 5px; }
+    .vod-qa-text  { font-size: .88rem; color: #fff; line-height: 1.4; }
+    .vod-qa-asker { font-size: .75rem; color: var(--text-muted); margin-top: 3px; }
     mux-player { width: 100%; display: block; background: transparent; --media-background-color: transparent; --media-object-fit: contain; }
     /* Hide broken poster/thumbnail until Mux finishes generating them */
     mux-player::part(poster) { background: var(--surface-2); }
@@ -1716,13 +1733,22 @@ async function renderDetailView(ev) {
   const recordingHtml = ev.mux_playback_id ? `
     <div class="recording-block">
       <h3 style="display:flex;align-items:center;gap:7px"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg> Recording</h3>
-      <div class="mux-player-wrap">
+      <div class="mux-player-wrap" id="vod-player-wrap">
         <mux-player
+          id="vod-mux-player"
           playback-id="${ev.mux_playback_id}"
           metadata-video-title="${esc(ev.title)}"
           accent-color="#c9a84c"
           style="width:100%;border-radius:var(--radius);display:block;">
         </mux-player>
+        <div id="vod-qa-overlay">
+          <div class="vod-qa-label">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            Featured Question
+          </div>
+          <div class="vod-qa-text" id="vod-qa-text"></div>
+          <div class="vod-qa-asker" id="vod-qa-asker"></div>
+        </div>
       </div>
     </div>`
   : ev.status === "ended" ? `
@@ -1869,6 +1895,7 @@ async function renderDetailView(ev) {
 
   loadComments(ev.id);
   loadAttendees(ev.id);
+  setupVodQaOverlay(ev);
 
   if (ev.status === "scheduled") {
     startCountdown(new Date(ev.scheduled_at));
@@ -3320,6 +3347,10 @@ async function joinStream(eventId) {
               rtmpUrl: `rtmps://global-live.mux.com:443/app/${streamKey}`
             });
             console.log("[Mux] live streaming started successfully");
+            // Record the moment RTMP begins — this is VOD t=0 for Q&A timestamp sync
+            const streamStartedAt = new Date().toISOString();
+            currentEvent.stream_started_at = streamStartedAt;
+            db.from("live_events").update({ stream_started_at: streamStartedAt }).eq("id", currentEvent.id).then();
           } catch(e) {
             console.warn("[Mux] startLiveStreaming failed:", e.message);
           }
@@ -3666,7 +3697,11 @@ async function featureQA(qaId, feature) {
   if (feature) {
     await db.from("event_qa").update({ is_featured: false }).eq("event_id", currentEvent.id);
   }
-  await db.from("event_qa").update({ is_featured: feature }).eq("id", qaId);
+  await db.from("event_qa").update({
+    is_featured: feature,
+    // Record the moment this question is featured — used to sync with the VOD timestamp
+    ...(feature ? { featured_at: new Date().toISOString() } : {})
+  }).eq("id", qaId);
   if (!feature) {
     document.getElementById("featured-qa-bar").classList.remove("visible");
   }
@@ -3678,6 +3713,62 @@ async function markAnswered(qaId, currentState) {
   if (nowAnswered) {
     document.getElementById("featured-qa-bar").classList.remove("visible");
   }
+}
+
+// ── VOD featured-question overlay ─────────────────────────────────────────────
+// Loads all questions that were featured during the live stream (those with a
+// featured_at timestamp) and shows them as a timed overlay on the VOD player
+// at the moment they were featured, staying visible until the next one appears.
+async function setupVodQaOverlay(ev) {
+  if (!ev.mux_playback_id || !ev.stream_started_at) return;
+
+  const { data: questions } = await db
+    .from("event_qa")
+    .select("id, question, name, email, featured_at")
+    .eq("event_id", ev.id)
+    .not("featured_at", "is", null)
+    .order("featured_at", { ascending: true });
+
+  if (!questions?.length) return;
+
+  const streamStart = new Date(ev.stream_started_at).getTime();
+
+  // Build segments: each question is shown from its offset until the next one starts
+  const segments = questions
+    .map((q, i) => ({
+      start: (new Date(q.featured_at).getTime() - streamStart) / 1000,
+      end:   questions[i + 1]
+               ? (new Date(questions[i + 1].featured_at).getTime() - streamStart) / 1000
+               : Infinity,
+      question: q.question,
+      name:     q.name || q.email?.split("@")[0] || "Anonymous"
+    }))
+    .filter(s => s.start >= 0); // discard anything before the stream began
+
+  if (!segments.length) return;
+
+  const player  = document.getElementById("vod-mux-player");
+  const overlay = document.getElementById("vod-qa-overlay");
+  const textEl  = document.getElementById("vod-qa-text");
+  const askerEl = document.getElementById("vod-qa-asker");
+  if (!player || !overlay) return;
+
+  let currentQuestion = null;
+
+  player.addEventListener("timeupdate", () => {
+    const t = player.currentTime;
+    const active = segments.find(s => t >= s.start && t < s.end) || null;
+    if (active?.question === currentQuestion) return; // no change
+    currentQuestion = active?.question || null;
+
+    if (active) {
+      textEl.textContent  = active.question;
+      askerEl.textContent = "— " + active.name;
+      overlay.classList.add("visible");
+    } else {
+      overlay.classList.remove("visible");
+    }
+  });
 }
 
 async function endStream() {
