@@ -1678,9 +1678,9 @@ async function renderDetailView(ev) {
       <h4>${ev.mux_playback_id ? "Replace Recording" : "Add Recording"}</h4>
       <div class="mux-form-row">
         <button class="btn btn-sm btn-primary" id="fetch-rec-btn"
-          onclick="fetchRecordingFromDaily('${ev.id}', '${ev.daily_room_name || ""}')">
+          onclick="fetchRecordingFromDaily('${ev.id}')">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Fetch from Daily.co
+          Fetch Recording
         </button>
       </div>
       <div class="mux-form-row" style="margin-top:8px">
@@ -1986,16 +1986,17 @@ async function renderDetailView(ev) {
         return;
       }
 
-      // ② Every 4 attempts (~1 min), admin-only: fetch from Daily.co directly.
-      //    This is the real fallback when the webhook doesn't fire.
-      if (isAdmin && pollRoomName && pollAttempts % 4 === 0) {
+      // ② Every 4 attempts (~1 min), admin-only: ask Mux if the VOD is ready.
+      //    Mux auto-creates a VOD via new_asset_settings when the live stream
+      //    is completed. We check recent_asset_ids on the live stream.
+      if (isAdmin && pollAttempts % 4 === 0) {
         try {
           const { data: { session } } = await db.auth.getSession();
           const token = session?.access_token || authToken;
           const res = await fetch("/api/daily", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify({ action: "fetch-recording", roomName: pollRoomName, eventId: pollEventId })
+            body: JSON.stringify({ action: "fetch-recording", eventId: pollEventId })
           });
           const result = await res.json();
           if (result.muxPlaybackId) {
@@ -4059,8 +4060,7 @@ async function saveMuxPlaybackId(eventId) {
   renderDetailView(currentEvent);
 }
 
-async function fetchRecordingFromDaily(eventId, roomName) {
-  if (!roomName) { alert("No Daily.co room found for this event."); return; }
+async function fetchRecordingFromDaily(eventId) {
   const btn = document.getElementById("fetch-rec-btn");
   btn.disabled = true;
   btn.textContent = "Fetching…";
@@ -4072,7 +4072,7 @@ async function fetchRecordingFromDaily(eventId, roomName) {
     const res = await fetch("/api/daily", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-      body: JSON.stringify({ action: "fetch-recording", roomName, eventId })
+      body: JSON.stringify({ action: "fetch-recording", eventId })
     });
     const result = await res.json();
 
@@ -4080,7 +4080,7 @@ async function fetchRecordingFromDaily(eventId, roomName) {
       const detail = result.detail ? "\n\n" + JSON.stringify(result.detail, null, 2) : "";
       alert("Could not fetch recording: " + result.error + detail);
       btn.disabled = false;
-      btn.textContent = "Fetch from Daily.co";
+      btn.textContent = "Fetch Recording";
       return;
     }
 
@@ -4090,7 +4090,7 @@ async function fetchRecordingFromDaily(eventId, roomName) {
   } catch(e) {
     alert("Error: " + e.message);
     btn.disabled = false;
-    btn.textContent = "Fetch from Daily.co";
+    btn.textContent = "Fetch Recording";
   }
 }
 

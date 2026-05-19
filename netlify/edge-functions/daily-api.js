@@ -123,8 +123,11 @@ export default async (request) => {
         },
         body: JSON.stringify({
           playback_policy: ["public"],
-          latency_mode: "reduced",   // ~15-30s delay, good balance for preview
-          reconnect_window: 60,      // allow 60s reconnect window if stream drops
+          latency_mode: "reduced",
+          // 5 minutes: host can leave and rejoin without splitting the recording
+          reconnect_window: 300,
+          // Auto-create a VOD asset when the live stream is completed
+          new_asset_settings: { playback_policy: ["public"] },
         })
       })
     ]);
@@ -183,7 +186,8 @@ export default async (request) => {
       body: JSON.stringify({
         playback_policy: ["public"],
         latency_mode: "reduced",
-        reconnect_window: 60,
+        reconnect_window: 300,
+        new_asset_settings: { playback_policy: ["public"] },
       })
     });
     const muxLiveData = await muxLiveRes.json();
@@ -234,8 +238,11 @@ export default async (request) => {
   }
 
   // ── Action: delete-mux-livestream ──────────────────────────────────────────
-  // Admin only. Deletes the Mux live stream when an event ends, stopping
-  // billing and clearing the live preview.
+  // Admin only. Signals Mux that the live stream is complete, which triggers
+  // automatic VOD asset creation (via new_asset_settings). We do NOT delete
+  // the live stream — we need the mux_live_stream_id to find the recording
+  // later via recent_asset_ids. Only mux_live_playback_id is cleared so the
+  // live preview disappears for all viewers.
   if (action === "delete-mux-livestream") {
     if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
     const { eventId } = body;
@@ -254,13 +261,16 @@ export default async (request) => {
     const muxLiveStreamId = evData?.[0]?.mux_live_stream_id;
 
     if (muxLiveStreamId) {
-      await fetch(`https://api.mux.com/video/v1/live-streams/${muxLiveStreamId}`, {
-        method: "DELETE",
-        headers: { "Authorization": muxAuth }
-      }).catch(() => {});
+      // Signal Mux to finalize the stream → triggers new_asset_settings VOD creation
+      const completeRes = await fetch(
+        `https://api.mux.com/video/v1/live-streams/${muxLiveStreamId}/complete`,
+        { method: "PUT", headers: { "Authorization": muxAuth } }
+      );
+      console.log("[delete-mux-livestream] Mux complete status:", completeRes.status);
     }
 
-    // Clear from DB so the preview disappears for all viewers
+    // Clear only the live playback ID — the live preview disappears for viewers.
+    // Keep mux_live_stream_id so we can poll recent_asset_ids for the recording.
     await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`, {
       method: "PATCH",
       headers: {
@@ -269,7 +279,7 @@ export default async (request) => {
         "Content-Type": "application/json",
         "Prefer": "return=minimal"
       },
-      body: JSON.stringify({ mux_live_stream_id: null, mux_live_playback_id: null })
+      body: JSON.stringify({ mux_live_playback_id: null })
     });
 
     return json({ ok: true });
@@ -317,87 +327,88 @@ export default async (request) => {
   }
 
   // ── Action: fetch-recording ────────────────────────────────────────────────
-  // Admin only. Finds ALL Daily.co recordings for a room, picks the longest
-  // one (Mux does not support multi-video concatenation via multi-input),
-  // creates a Mux asset from it, and saves the playback ID to the event row.
-  // This handles the case where the host left and rejoined (multiple recordings).
+  // Admin only. Checks the Mux live stream's recent_asset_ids for a VOD that
+  // was automatically created when the stream was completed. This gives ONE
+  // complete recording of the entire session, even if the host left and
+  // rejoined multiple times (Mux reconnect_window keeps it as one stream).
   if (action === "fetch-recording") {
     if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
-    const { roomName: rn, eventId: eid } = body;
-    if (!rn || !eid) return json({ error: "roomName and eventId required" }, 400);
+    const { eventId: eid } = body;
+    if (!eid) return json({ error: "eventId required" }, 400);
 
     const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
     const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
     const SERVICE_KEY      = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    const muxAuth          = "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`);
 
-    // List ALL recordings for this room
-    const recRes = await fetch(
-      `https://api.daily.co/v1/recordings?room_name=${encodeURIComponent(rn)}`,
-      { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
+    // Get the event to find mux_live_stream_id
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}&select=mux_live_stream_id,daily_room_name`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
     );
-    const recData = await recRes.json();
-    const recordings = recData?.data || [];
-    if (!recordings.length) return json({ error: "No recordings found for this room" }, 404);
+    const evRows = await evRes.json();
+    const ev = evRows?.[0];
+    if (!ev) return json({ error: "Event not found" }, 404);
 
-    console.log(`fetch-recording: found ${recordings.length} recording(s) for room ${rn}`);
-    recordings.forEach(r => console.log(`  id=${r.id} duration=${r.duration} start_ts=${r.start_ts} status=${r.status}`));
+    const muxLiveStreamId = ev.mux_live_stream_id;
+    console.log(`fetch-recording: event ${eid}, mux_live_stream_id=${muxLiveStreamId}`);
 
-    // Pick the longest recording by duration (fall back to most recent if no duration)
-    // Mux only accepts one video input — concatenation via multi-input is not supported.
-    const bestRec = recordings.reduce((best, rec) => {
-      const bestDur = best.duration ?? -1;
-      const recDur  = rec.duration  ?? -1;
-      if (recDur > bestDur) return rec;
-      if (recDur === bestDur) return (rec.start_ts || 0) > (best.start_ts || 0) ? rec : best;
-      return best;
-    }, recordings[0]);
+    if (!muxLiveStreamId) {
+      return json({ error: "No Mux live stream ID on this event — was the stream created with this version of the code?" }, 404);
+    }
 
-    console.log(`fetch-recording: using recording id=${bestRec.id} duration=${bestRec.duration}`);
-
-    // Get a signed download link for the chosen recording
-    const linkRes  = await fetch(
-      `https://api.daily.co/v1/recordings/${bestRec.id}/access-link`,
-      { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
+    // Check Mux live stream for auto-created VOD assets (recent_asset_ids)
+    const lsRes = await fetch(
+      `https://api.mux.com/video/v1/live-streams/${muxLiveStreamId}`,
+      { headers: { "Authorization": muxAuth } }
     );
-    const linkData = await linkRes.json();
-    console.log("fetch-recording: access-link response:", JSON.stringify(linkData));
+    const lsData = await lsRes.json();
+    console.log("fetch-recording: Mux live stream:", JSON.stringify(lsData?.data));
 
-    // Daily.co may use download_link, link, or url — try all three
-    const url = linkData?.download_link || linkData?.link || linkData?.url || bestRec.download_link;
-    if (!url) return json({ error: "No download link available yet — recording may still be processing", recordings: recordings.length }, 404);
+    const recentAssetIds = lsData?.data?.recent_asset_ids || [];
+    if (!recentAssetIds.length) {
+      return json({
+        error: "Recording not ready yet — Mux hasn't finished creating the VOD. " +
+               "This usually takes 1-5 minutes after the stream ends. Try again shortly.",
+        muxStreamStatus: lsData?.data?.status
+      }, 404);
+    }
 
-    // Create Mux asset (single input only — Mux concatenation is not supported here)
-    const muxRes = await fetch("https://api.mux.com/video/v1/assets", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`)
-      },
-      body: JSON.stringify({ input: [{ url }], playback_policy: ["public"] })
-    });
-    const muxData = await muxRes.json();
-    console.log("fetch-recording: Mux response:", JSON.stringify(muxData));
-    const asset = muxData?.data;
-    if (!asset) return json({ error: "Mux asset creation failed", detail: muxData }, 500);
+    // Use the most recent asset (last element = most recently created)
+    const assetId = recentAssetIds[recentAssetIds.length - 1];
+    console.log(`fetch-recording: found Mux asset ${assetId}`);
 
-    const muxAssetId    = asset.id;
+    const assetRes = await fetch(
+      `https://api.mux.com/video/v1/assets/${assetId}`,
+      { headers: { "Authorization": muxAuth } }
+    );
+    const assetData = await assetRes.json();
+    const asset = assetData?.data;
+    console.log("fetch-recording: asset status:", asset?.status, "playback_ids:", JSON.stringify(asset?.playback_ids));
+
+    if (!asset) return json({ error: "Could not retrieve Mux asset", detail: assetData }, 500);
+    if (asset.status === "errored") return json({ error: "Mux asset errored", detail: asset.errors }, 500);
+    if (asset.status !== "ready") {
+      return json({ error: `Mux asset is still processing (status: ${asset.status}). Try again in a minute.` }, 404);
+    }
+
     const muxPlaybackId = asset.playback_ids?.[0]?.id || null;
+    if (!muxPlaybackId) return json({ error: "Mux asset has no playback ID yet" }, 404);
 
-    // Update event in Supabase
+    // Save to Supabase and clear the live stream ID (no longer needed)
     const supaHeaders = {
       "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json"
     };
     await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
       method: "PATCH", headers: supaHeaders,
-      body: JSON.stringify({ mux_asset_id: muxAssetId, mux_playback_id: muxPlaybackId })
+      body: JSON.stringify({
+        mux_asset_id:       assetId,
+        mux_playback_id:    muxPlaybackId,
+        mux_live_stream_id: null,   // recording is saved — live stream ID no longer needed
+      })
     });
 
-    return json({
-      ok: true, muxAssetId, muxPlaybackId,
-      totalRecordings: recordings.length,
-      usedRecording: bestRec.id,
-      usedDuration: bestRec.duration ?? null,
-    });
+    return json({ ok: true, muxAssetId: assetId, muxPlaybackId });
   }
 
   // ── Action: setup-webhook ──────────────────────────────────────────────────
