@@ -639,6 +639,25 @@
       .chat-bubble-cont-mine { max-width: 82%; }
     }
 
+    /* ── Reply quote inside bubble ──────────────────────────────────────────── */
+    .chat-reply-quote {
+      display: block; cursor: pointer;
+      border-left: 3px solid var(--accent);
+      background: rgba(0,0,0,.08);
+      border-radius: 4px; padding: 4px 8px;
+      margin-bottom: 5px; font-size: .8rem;
+      color: var(--text-muted); line-height: 1.35;
+      text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+      max-width: 100%;
+    }
+    .chat-reply-quote strong { color: var(--accent); display: block; font-size: .78rem; }
+    .chat-bubble.mine .chat-reply-quote { background: rgba(0,0,0,.12); }
+    @keyframes chat-msg-flash {
+      0%,100% { background: transparent; }
+      40% { background: rgba(245,197,24,.25); }
+    }
+    .chat-msg-group.flash { animation: chat-msg-flash .9s ease; }
+
     /* ── Chat reactions ──────────────────────────────────────────────────────── */
     /* Outer wrapper — just flex column, no relative so pills aren't clipped */
     .chat-bubble-wrap { display: inline-flex; flex-direction: column; max-width: 100%; }
@@ -982,6 +1001,13 @@
         </div>
         <div class="chat-composer">
           <div class="chat-toolbar-wrap" id="chat-toolbar-container"></div>
+          <div id="chat-reply-bar" style="display:none;align-items:center;gap:8px;padding:6px 12px 4px;border-top:1px solid var(--border);font-size:.82rem;color:var(--text-muted)">
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <span style="color:var(--accent);font-weight:600" id="chat-reply-bar-name"></span>
+              <span id="chat-reply-bar-preview"></span>
+            </span>
+            <button onclick="_chatCancelReply()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px 4px" title="Cancel reply">×</button>
+          </div>
           <div class="chat-input-row">
             <textarea class="chat-textarea" id="chat-input" rows="1"
               placeholder="Message…"
@@ -2063,6 +2089,7 @@ function _readInlinePoll(key) {
 function _clearInlineState(key) {
   _inlineMedia[key] = [];
   _inlinePollOpen[key] = false;
+  if (key === "chat_main") _chatCancelReply();
   if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") {
     _inlineVoiceRec[key].stop();
   }
@@ -3051,16 +3078,34 @@ function _chatPickerHtml(msgId, isMine) {
   return `<div class="chat-react-picker${isMine ? " mine" : ""}" id="chat-picker-${escHtml(msgId)}">${btns}</div>`;
 }
 
-function _chatReply(name) {
+let _pendingReply = null; // { id, name, preview }
+
+function _chatReply(name, msgId, preview) {
+  // Called from the reply button — msgId/preview injected via data attributes
+  _pendingReply = { id: msgId, name, preview: preview || "" };
+  const bar = document.getElementById("chat-reply-bar");
+  if (bar) {
+    document.getElementById("chat-reply-bar-name").textContent = `@${name}`;
+    document.getElementById("chat-reply-bar-preview").textContent = preview ? `  ${preview}` : "";
+    bar.style.display = "flex";
+  }
   const ta = document.getElementById("chat-input");
-  if (!ta) return;
-  const mention = `@${name} `;
-  ta.value = ta.value ? `${ta.value} ${mention}` : mention;
-  ta.focus();
-  ta.setSelectionRange(ta.value.length, ta.value.length);
-  // Trigger auto-resize on the textarea
-  ta.style.height = "auto";
-  ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
+  if (ta) ta.focus();
+}
+
+function _chatCancelReply() {
+  _pendingReply = null;
+  const bar = document.getElementById("chat-reply-bar");
+  if (bar) bar.style.display = "none";
+}
+
+function _scrollToMsg(msgId) {
+  const el = document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("flash");
+  void el.offsetWidth; // force reflow to restart animation
+  el.classList.add("flash");
 }
 
 function toggleChatReactPicker(msgId, ev) {
@@ -3365,9 +3410,16 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const name      = escHtml(dispName);
   const timeStr   = _chatTime(msg.created_at);
 
-  const mediaHtml = _renderCommentMedia({ media: nonPollMedia });
+  // Extract reply reference (stored as first media item with type "reply")
+  const replyItem    = nonPollMedia.find(m => m.type === "reply");
+  const nonReplyMedia = nonPollMedia.filter(m => m.type !== "reply");
+  const replyQuoteHtml = replyItem
+    ? `<div class="chat-reply-quote" onclick="_scrollToMsg('${escHtml(replyItem.toId)}')"><strong>↩ ${escHtml(replyItem.toName)}</strong>${replyItem.toPreview ? escHtml(replyItem.toPreview) : ""}</div>`
+    : "";
+
+  const mediaHtml = _renderCommentMedia({ media: nonReplyMedia });
   const contentHtml = msg.content ? `<div>${escHtml(msg.content).replace(/\n/g, "<br>")}</div>` : "";
-  const bubbleContent = contentHtml + (mediaHtml ? `<div class="chat-media">${mediaHtml}</div>` : "");
+  const bubbleContent = replyQuoteHtml + contentHtml + (mediaHtml ? `<div class="chat-media">${mediaHtml}</div>` : "");
 
   const pollHtml = pollItem ? (() => {
     const opts   = Array.isArray(pollItem.options) ? pollItem.options : [];
@@ -3413,7 +3465,8 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const rxHtml = `<div class="chat-rx-row" id="chat-rx-${escHtml(msg.id)}">${_chatRxHtml(msg.id)}</div>`;
   const pickerHtml = _chatPickerHtml(msg.id, isMine);
   const triggerBtn = `<button class="chat-react-trigger" onclick="toggleChatReactPicker('${escHtml(msg.id)}',event)" title="React">😊</button>`;
-  const replyBtn   = `<button class="chat-reply-trigger" data-name="${escHtml(dispName)}" onclick="_chatReply(this.dataset.name)" title="Reply">↩</button>`;
+  const replyPreview = escHtml((msg.content || "").slice(0, 80));
+  const replyBtn   = `<button class="chat-reply-trigger" data-name="${escHtml(dispName)}" data-id="${escHtml(msg.id)}" data-preview="${replyPreview}" onclick="_chatReply(this.dataset.name,this.dataset.id,this.dataset.preview)" title="Reply">↩</button>`;
 
   // chat-bubble-inner is position:relative so picker + trigger are anchored to the bubble
   const innerWrap = (bubbleHtml || pollHtml)
@@ -3473,6 +3526,12 @@ async function sendChatMessage() {
   // Include poll data (stored as a media item so it fits the existing schema)
   const pollData = _inlinePollOpen["chat_main"] ? _readInlinePoll("chat_main") : null;
   if (pollData) media = [...media, { type: "poll", question: pollData.question, options: pollData.options }];
+
+  // Include reply reference if the user hit the reply button
+  if (_pendingReply) {
+    media = [{ type: "reply", toId: _pendingReply.id, toName: _pendingReply.name, toPreview: _pendingReply.preview }, ...media];
+    _chatCancelReply();
+  }
 
   if (!content && !media.length) return;
 
