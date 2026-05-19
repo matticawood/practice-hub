@@ -1495,7 +1495,10 @@ let ownerAvatarUrl = null;
 let authToken    = null;
 let currentEvent = null;
 let editingEventId = null;
-let chatChannel  = null;
+let chatChannel         = null;
+let qaChannel           = null;
+let discussionChannel   = null;   // event_comments + poll_votes listener
+let streamStatusChannel = null;   // watches for stream-ended status update
 let _recordingWatcher   = null;
 let _recordingPoller    = null;
 let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
@@ -1506,7 +1509,6 @@ let _typingActive       = false; // true while we've broadcast typing:true
 let _typingUsers        = {};   // email → name (currently typing)
 let _typingClearTimers  = {};   // email → setTimeout handle
 let currentEvtTab = "upcoming";
-let qaChannel    = null;
 let countdownInterval = null;
 let isRecording  = false;
 
@@ -1555,8 +1557,10 @@ function showView(name) {
 
   if (name !== "stream") {
     // Clean up realtime channels when leaving stream
-    if (chatChannel) { db.removeChannel(chatChannel); chatChannel = null; }
-    if (qaChannel)   { db.removeChannel(qaChannel);   qaChannel   = null; }
+    if (chatChannel)         { db.removeChannel(chatChannel);         chatChannel         = null; }
+    if (qaChannel)           { db.removeChannel(qaChannel);           qaChannel           = null; }
+    if (discussionChannel)   { db.removeChannel(discussionChannel);   discussionChannel   = null; }
+    if (streamStatusChannel) { db.removeChannel(streamStatusChannel); streamStatusChannel = null; }
     // Clean up Daily.co call frame
     if (window._callFrame) { window._callFrame.destroy(); window._callFrame = null; }
   }
@@ -3489,10 +3493,23 @@ async function joinStream(eventId) {
 }
 
 // ── Realtime chat & Q&A ───────────────────────────────────────────────────────
+// Incremented on every setup call so channel names are unique (avoids stale-
+// channel conflicts when Supabase hasn't finished removing the old subscription).
+let _channelGen = 0;
+
 function setupRealtimeStream(ev) {
-  // Clean up any existing channels before re-subscribing
-  if (chatChannel) { db.removeChannel(chatChannel); chatChannel = null; }
-  if (qaChannel)   { db.removeChannel(qaChannel);   qaChannel   = null; }
+  console.log("[Stream] setupRealtimeStream for event", ev.id);
+
+  // ── Clean up ALL existing channels before re-subscribing ──────────────────
+  if (chatChannel)         { db.removeChannel(chatChannel);         chatChannel         = null; }
+  if (qaChannel)           { db.removeChannel(qaChannel);           qaChannel           = null; }
+  if (discussionChannel)   { db.removeChannel(discussionChannel);   discussionChannel   = null; }
+  if (streamStatusChannel) { db.removeChannel(streamStatusChannel); streamStatusChannel = null; }
+
+  // Each setup gets a fresh generation suffix so new channel names don't clash
+  // with channels the server may still be tearing down.
+  const gen = ++_channelGen;
+  console.log("[Stream] channel generation:", gen);
 
   // Seed avatar cache with known users
   _streamAvatarCache = {};
@@ -3506,35 +3523,65 @@ function setupRealtimeStream(ev) {
   Object.values(_typingClearTimers).forEach(t => clearTimeout(t));
   _typingUsers = {};
   _typingClearTimers = {};
-  updateTypingIndicator(); // hides the indicator if it was showing for a now-gone user
+  updateTypingIndicator();
 
   // ── Clear panels immediately for a clean start ──────────────────────────────
-  // We do this here (not inside the subscribe callbacks) so the user sees a
-  // clean slate right away, not after the async channel handshake (~1-2s).
   const chatEl = document.getElementById("chat-messages");
   const qaEl   = document.getElementById("qa-questions");
   if (chatEl) chatEl.innerHTML = "";
   if (qaEl)   qaEl.innerHTML   = "";
   document.getElementById("featured-qa-bar")?.classList.remove("visible");
 
-  // ── Wire up channels (INSERT/UPDATE listeners active before history loads) ──
-  // This ensures no events are lost between the immediate history fetch below
-  // and the channel becoming fully subscribed.
+  // ── Immediate history load ─────────────────────────────────────────────────
+  // Load existing records RIGHT NOW without waiting for channel SUBSCRIBED (~1-2s).
+  // The subscribe callbacks below catch anything that arrives in the gap.
+  console.log("[Stream] loading chat history for event", ev.id);
+  db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at")
+    .then(({ data, error }) => {
+      if (error) { console.error("[Stream] chat history load error:", error); return; }
+      console.log("[Stream] chat history loaded:", data?.length, "messages");
+      if (data) data.forEach(m => appendChatMsg(m, true));
+    });
 
-  // Subscribe to new/updated discussion comments and poll votes
-  db.channel(`event-discussion-${ev.id}`)
+  console.log("[Stream] loading Q&A history for event", ev.id);
+  db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at")
+    .then(({ data, error }) => {
+      if (error) { console.error("[Stream] Q&A history load error:", error); return; }
+      console.log("[Stream] Q&A history loaded:", data?.length, "questions");
+      if (!data) return;
+      data.forEach(q => appendQAItem(q, true));
+      const featured = data.find(q => q.is_featured);
+      if (featured) {
+        document.getElementById("featured-qa-text").textContent = featured.question;
+        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
+        document.getElementById("featured-qa-bar").classList.add("visible");
+      }
+    });
+
+  // Load discussion comments immediately
+  loadComments(ev.id);
+
+  // ── Wire up channels (INSERT/UPDATE listeners) ─────────────────────────────
+
+  // Discussion comments + poll votes
+  discussionChannel = db.channel(`event-discussion-${ev.id}-${gen}`)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_comments",
       filter: `event_id=eq.${ev.id}` }, () => loadComments(ev.id))
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_comment_poll_votes" },
       () => loadComments(ev.id))
-    .subscribe();
+    .subscribe((status) => {
+      console.log("[Stream] discussionChannel status:", status);
+    });
 
-  // Subscribe to new chat messages + broadcast (typing indicators)
-  chatChannel = db.channel(`event-chat-${ev.id}`, {
+  // Chat messages + typing broadcast
+  chatChannel = db.channel(`event-chat-${ev.id}-${gen}`, {
     config: { broadcast: { self: false } }
   })
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_chat",
-      filter: `event_id=eq.${ev.id}` }, p => appendChatMsg(p.new))
+      filter: `event_id=eq.${ev.id}` }, p => {
+        console.log("[Stream] chat INSERT received:", p.new?.id);
+        appendChatMsg(p.new);
+      })
     .on("broadcast", { event: "typing" }, ({ payload }) => {
       if (!payload?.email || payload.email === myEmail) return;
       if (payload.typing) {
@@ -3553,45 +3600,29 @@ function setupRealtimeStream(ev) {
       updateTypingIndicator();
     })
     .subscribe(async (status) => {
+      console.log("[Stream] chatChannel status:", status);
       if (status !== "SUBSCRIBED") return;
-      // Second pass: catch any chat messages that arrived in the gap between
-      // our immediate load below and the channel becoming active.
-      // appendChatMsg deduplicates by data-id so no doubles appear.
-      const { data } = await db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at");
+      // Second pass: catch any messages that arrived during the handshake gap.
+      const { data, error } = await db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at");
+      if (error) { console.error("[Stream] chat second-pass error:", error); return; }
       if (data) data.forEach(m => appendChatMsg(m, true));
     });
 
-  // Subscribe to new/updated Q&A
-  qaChannel = db.channel(`event-qa-${ev.id}`)
+  // Q&A questions
+  qaChannel = db.channel(`event-qa-${ev.id}-${gen}`)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_qa",
-      filter: `event_id=eq.${ev.id}` }, p => appendQAItem(p.new))
+      filter: `event_id=eq.${ev.id}` }, p => {
+        console.log("[Stream] Q&A INSERT received:", p.new?.id);
+        appendQAItem(p.new);
+      })
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "event_qa",
       filter: `event_id=eq.${ev.id}` }, p => updateQAItem(p.new))
     .subscribe(async (status) => {
+      console.log("[Stream] qaChannel status:", status);
       if (status !== "SUBSCRIBED") return;
-      // Second pass: catch any Q&A that arrived in the gap.
-      // appendQAItem deduplicates/replaces by data-id so state is always current.
-      const { data } = await db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at");
-      if (!data) return;
-      data.forEach(q => appendQAItem(q, true));
-      const featured = data.find(q => q.is_featured);
-      if (featured) {
-        document.getElementById("featured-qa-text").textContent = featured.question;
-        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
-        document.getElementById("featured-qa-bar").classList.add("visible");
-      }
-    });
-
-  // ── Immediate history load ────────────────────────────────────────────────────
-  // Load existing chat and Q&A right now without waiting for SUBSCRIBED.
-  // This makes messages visible immediately on (re)join instead of after the
-  // ~1-2 s channel handshake. The subscribe callbacks above will fill in
-  // anything that slips through the gap.
-  db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at")
-    .then(({ data }) => { if (data) data.forEach(m => appendChatMsg(m, true)); });
-
-  db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at")
-    .then(({ data }) => {
+      // Second pass: catch any Q&A that arrived during the handshake gap.
+      const { data, error } = await db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at");
+      if (error) { console.error("[Stream] Q&A second-pass error:", error); return; }
       if (!data) return;
       data.forEach(q => appendQAItem(q, true));
       const featured = data.find(q => q.is_featured);
@@ -3603,11 +3634,12 @@ function setupRealtimeStream(ev) {
     });
 
   // Watch for stream ending — send everyone back to the event detail page
-  const streamStatusChannel = db.channel(`stream-status-${ev.id}`)
+  streamStatusChannel = db.channel(`stream-status-${ev.id}-${gen}`)
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "live_events",
       filter: `id=eq.${ev.id}` }, payload => {
       if (payload.new.status === "ended") {
         db.removeChannel(streamStatusChannel);
+        streamStatusChannel = null;
         if (window._callFrame) {
           try { window._callFrame.destroy(); } catch(e) {}
           window._callFrame = null;
@@ -3617,7 +3649,9 @@ function setupRealtimeStream(ev) {
         renderDetailView(currentEvent);
       }
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log("[Stream] streamStatusChannel status:", status);
+    });
 }
 
 function appendChatMsg(msg, skipUnread = false) {
