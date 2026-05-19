@@ -2006,6 +2006,30 @@ async function _uploadInlineMedia(key) {
   }
   return result;
 }
+function parseYouTubeId(url) {
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([^&\s]+)/);
+  return m ? m[1] : null;
+}
+function parseVimeoId(url) {
+  const m = url.match(/vimeo\.com\/(\d+)/);
+  return m ? m[1] : null;
+}
+async function uploadToStorage(blob, filename) {
+  const MAX_MB = 500;
+  if (blob.size > MAX_MB * 1024 * 1024) {
+    const sizeMB = (blob.size / 1024 / 1024).toFixed(0);
+    throw new Error(`"${filename}" is ${sizeMB} MB — files must be under ${MAX_MB} MB.`);
+  }
+  const safe = `${myEmail}/${Date.now()}-${filename.replace(/[^a-z0-9._-]/gi, "_")}`;
+  const { data, error } = await db.storage.from("community-uploads").upload(safe, blob);
+  if (error) {
+    if (error.message?.toLowerCase().includes("size") || error.statusCode === 413) {
+      throw new Error(`"${filename}" is too large for storage. Try a smaller file or use a video embed link instead.`);
+    }
+    throw error;
+  }
+  return db.storage.from("community-uploads").getPublicUrl(data.path).data.publicUrl;
+}
 function escHtml(str) {
   return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
