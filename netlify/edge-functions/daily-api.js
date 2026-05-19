@@ -385,30 +385,43 @@ export default async (request) => {
   }
 
   // ── Action: setup-webhook ──────────────────────────────────────────────────
-  // One-time call to register the Daily.co recording.ready webhook.
+  // Deletes any existing webhook and re-registers at the current deploy URL.
+  // Safe to call any time — fixes stale URLs from old Netlify deploys.
   if (action === "setup-webhook") {
     if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
 
     const webhookUrl = new URL(request.url).origin + "/api/daily-webhook";
 
-    // Check if webhook already exists
-    const listRes = await fetch("https://api.daily.co/v1/webhooks", {
+    // List all existing webhooks
+    const listRes  = await fetch("https://api.daily.co/v1/webhooks", {
       headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
     });
     const listData = await listRes.json();
-    const existing = listData?.data?.find(w => w.url === webhookUrl);
-    if (existing) return json({ message: "Webhook already exists", webhook: existing });
+    const webhooks = listData?.data || [];
 
-    const res = await fetch("https://api.daily.co/v1/webhooks", {
+    // Delete any webhook not pointing at the current URL (stale deploys)
+    for (const wh of webhooks) {
+      if (wh.url !== webhookUrl) {
+        await fetch(`https://api.daily.co/v1/webhooks/${wh.id}`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+        });
+      }
+    }
+
+    // If one already exists at the correct URL, we're done
+    const alreadyCorrect = webhooks.find(w => w.url === webhookUrl);
+    if (alreadyCorrect) return json({ message: "Webhook already correct", url: webhookUrl, webhook: alreadyCorrect });
+
+    // Create fresh webhook at current URL
+    const res  = await fetch("https://api.daily.co/v1/webhooks", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
-      body: JSON.stringify({
-        url: webhookUrl
-      })
+      body: JSON.stringify({ url: webhookUrl })
     });
     const data = await res.json();
     if (!res.ok) return json({ error: data }, res.status);
-    return json({ message: "Webhook created", webhook: data });
+    return json({ message: "Webhook created", url: webhookUrl, webhook: data });
   }
 
   // ── Action: delete-mux-asset ──────────────────────────────────────────────
