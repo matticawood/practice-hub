@@ -3478,24 +3478,9 @@ function setupRealtimeStream(ev) {
   if (myEmail)    _streamAvatarCache[myEmail]    = myAvatarUrl;
   if (OWNER_EMAIL) _streamAvatarCache[OWNER_EMAIL] = ownerAvatarUrl;
 
-  // Load existing chat (skipUnread=true — don't badge for historical messages)
-  db.from("event_chat").select("*").eq("event_id", ev.id)
-    .order("created_at").then(({ data }) => {
-      if (data) data.forEach(m => appendChatMsg(m, true));
-    });
-
-  // Load existing Q&A and restore featured banner if one is active
-  db.from("event_qa").select("*").eq("event_id", ev.id)
-    .order("created_at").then(({ data }) => {
-      if (!data) return;
-      data.forEach(q => appendQAItem(q, true));
-      const featured = data.find(q => q.is_featured);
-      if (featured) {
-        document.getElementById("featured-qa-text").textContent = featured.question;
-        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
-        document.getElementById("featured-qa-bar").classList.add("visible");
-      }
-    });
+  // Chat and Q&A are both loaded inside their subscribe() callbacks below,
+  // so the fetch only happens once the channel is confirmed active.
+  // This closes the race window on rejoin (leave + rejoin Daily.co room).
 
   // Subscribe to new/updated discussion comments and poll votes — reload comments on any change
   db.channel(`event-discussion-${ev.id}`)
@@ -3528,15 +3513,38 @@ function setupRealtimeStream(ev) {
       }
       updateTypingIndicator();
     })
-    .subscribe();
+    .subscribe(async (status) => {
+      if (status !== "SUBSCRIBED") return;
+      // Load history once confirmed live — catches anything that arrived
+      // during the subscription gap after a rejoin.
+      const { data } = await db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at");
+      if (data) data.forEach(m => appendChatMsg(m, true));
+    });
 
-  // Subscribe to new Q&A / updates
+  // Subscribe to new Q&A / updates.
+  // We load existing Q&A *inside* the subscribe callback so the fetch only
+  // happens once the channel is confirmed active — this closes the race window
+  // where a question arrives between teardown of the old channel and the new
+  // subscription becoming live (e.g. after the host leaves and rejoins).
   qaChannel = db.channel(`event-qa-${ev.id}`)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_qa",
       filter: `event_id=eq.${ev.id}` }, p => appendQAItem(p.new))
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "event_qa",
       filter: `event_id=eq.${ev.id}` }, p => updateQAItem(p.new))
-    .subscribe();
+    .subscribe(async (status) => {
+      if (status !== "SUBSCRIBED") return;
+      // Now that we're definitely listening, load all existing Q&A — anything
+      // that arrived during the subscription gap will also appear here.
+      const { data } = await db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at");
+      if (!data) return;
+      data.forEach(q => appendQAItem(q, true));
+      const featured = data.find(q => q.is_featured);
+      if (featured) {
+        document.getElementById("featured-qa-text").textContent = featured.question;
+        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
+        document.getElementById("featured-qa-bar").classList.add("visible");
+      }
+    });
 
   // Watch for stream ending — send everyone back to the event detail page
   const streamStatusChannel = db.channel(`stream-status-${ev.id}`)
