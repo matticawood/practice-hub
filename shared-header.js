@@ -10,7 +10,7 @@
  * After auth, call:
  *   initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "events" });
  *
- * activePage values: "hub" | "resources" | "tools" | "studio" | "community" | "events"
+ * activePage values: "hub" | "resources" | "tools" | "studio" | "community" | "events" | "chat"
  */
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
@@ -30,8 +30,9 @@
       }
     }
 
-    /* ── Bell ── */
+    /* ── Bell / Chat button ── */
     .btn-bell { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+    #header-chat-btn.active { background: var(--accent, #f5c518); color: #1a1410; border-radius: 8px; }
     .notif-badge {
       position: absolute; top: -5px; right: -5px;
       background: #ef4444; color: #fff; font-size: 0.6rem; font-weight: 700;
@@ -607,7 +608,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   const chatBtn = document.getElementById("header-chat-btn");
   if (chatBtn) {
     chatBtn.style.display = "";
-    // Always navigate to /chat.html
+    chatBtn.classList.toggle("active", activePage === "chat");
   }
 
   // Show bell
