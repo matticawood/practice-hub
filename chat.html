@@ -422,11 +422,11 @@
       position: fixed;
       left: 0;
       right: 0;
-      /* top is set by JS via --hdr-h; height uses dvh so the browser
-         handles keyboard resize natively with no JS jank. */
+      /* --hdr-h: measured header height (set by JS on show)
+         --kb-h:  keyboard height (set by JS via visualViewport on every resize)
+         100vh is the stable layout viewport — keyboard is subtracted explicitly. */
       top: var(--hdr-h, 60px);
-      height: calc(100vh  - var(--hdr-h, 60px)); /* fallback (iOS 15 / old Chrome) */
-      height: calc(100dvh - var(--hdr-h, 60px)); /* dvh: adjusts for keyboard natively */
+      height: calc(100vh - var(--hdr-h, 60px) - var(--kb-h, 0px));
       z-index: 90;
       flex-direction: row;
       background: var(--bg);
@@ -2133,25 +2133,26 @@ function _setChatPanel(panel) {
 
 // Show the full chat view (switches away from posts/activity/members)
 let _chatViewportHandler = null;
-function _attachChatViewportListener(topPx) {
-  // Only needed as a fallback when dvh is not supported (iOS 15 / old Chrome).
-  // Modern browsers handle keyboard resize natively via the dvh CSS unit.
+function _attachChatViewportListener() {
   _detachChatViewportListener();
   if (!window.visualViewport) return;
   _chatViewportHandler = () => {
-    const chatEl = document.getElementById("view-chat");
-    if (!chatEl || chatEl.style.display === "none") return;
     const vv = window.visualViewport;
-    chatEl.style.height = (vv.height - topPx) + "px";
+    // Keyboard height = how much the visual viewport is shorter than the layout viewport.
+    // vv.offsetTop accounts for any iOS layout-viewport scroll (usually 0).
+    const kbH = Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height));
+    document.documentElement.style.setProperty("--kb-h", kbH + "px");
   };
   window.visualViewport.addEventListener("resize", _chatViewportHandler);
+  window.visualViewport.addEventListener("scroll", _chatViewportHandler);
+  _chatViewportHandler(); // set initial value immediately
 }
 function _detachChatViewportListener() {
   if (_chatViewportHandler && window.visualViewport) {
     window.visualViewport.removeEventListener("resize", _chatViewportHandler);
+    window.visualViewport.removeEventListener("scroll", _chatViewportHandler);
   }
-  const chatEl = document.getElementById("view-chat");
-  if (chatEl) chatEl.style.height = ""; // restore dvh from CSS
+  document.documentElement.style.setProperty("--kb-h", "0px");
   _chatViewportHandler = null;
 }
 
@@ -3085,15 +3086,16 @@ function _showChatView() {
   if (tb) tb.style.display = "none";
   const hdr   = document.getElementById("app-header");
   const topPx = hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 60;
-  // Push the CSS variable so #view-chat top/height (calc(100dvh - var(--hdr-h))) is correct
+  // Set CSS variables; #view-chat uses calc(100vh - --hdr-h - --kb-h)
   document.documentElement.style.setProperty("--hdr-h", topPx + "px");
   const chatEl = document.getElementById("view-chat");
+  // Clear any stale inline styles from previous renders
+  chatEl.style.top = "";
+  chatEl.style.height = "";
+  chatEl.style.bottom = "";
   chatEl.style.display = "flex";
-  // dvh handles keyboard resize natively on iOS 16+ / Chrome 108+.
-  // Fall back to visualViewport listener on older browsers.
-  if (!CSS.supports("height", "1dvh")) {
-    _attachChatViewportListener(topPx);
-  }
+  // Track keyboard height via visualViewport → updates --kb-h CSS variable
+  _attachChatViewportListener();
 }
 function _hideChatView() { /* no-op on chat.html — this IS the chat page */ }
 
