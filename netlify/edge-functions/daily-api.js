@@ -133,10 +133,12 @@ export default async (request) => {
     if (!roomRes.ok) return json({ error: roomData }, roomRes.status);
 
     const muxLiveData = await muxLiveRes.json();
+    console.log("[create-room] Mux live stream response:", JSON.stringify(muxLiveData));
     const muxLiveStream    = muxLiveData?.data;
     const muxLiveStreamId  = muxLiveStream?.id || null;
     const muxStreamKey     = muxLiveStream?.stream_key || null;
     const muxLivePlaybackId = muxLiveStream?.playback_ids?.[0]?.id || null;
+    console.log("[create-room] muxLiveStreamId:", muxLiveStreamId, "| muxStreamKey present:", !!muxStreamKey, "| muxLivePlaybackId:", muxLivePlaybackId);
 
     // Store Mux live stream IDs in the event row (server-side, via service key)
     if (muxLiveStreamId && muxLivePlaybackId && SERVICE_KEY) {
