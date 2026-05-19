@@ -422,8 +422,11 @@
       position: fixed;
       left: 0;
       right: 0;
-      bottom: 0;
-      top: 0; /* overridden by JS to sit below the header */
+      /* top is set by JS via --hdr-h; height uses dvh so the browser
+         handles keyboard resize natively with no JS jank. */
+      top: var(--hdr-h, 60px);
+      height: calc(100vh  - var(--hdr-h, 60px)); /* fallback (iOS 15 / old Chrome) */
+      height: calc(100dvh - var(--hdr-h, 60px)); /* dvh: adjusts for keyboard natively */
       z-index: 90;
       flex-direction: row;
       background: var(--bg);
@@ -500,7 +503,7 @@
     .chat-conv-list {
       flex: 1; overflow-y: auto;
       background: var(--surface);
-      overscroll-behavior: contain; /* prevent scroll chaining to page on iOS */
+      overscroll-behavior: none; /* no rubber-band on iOS */
     }
     .chat-conv-row {
       display: flex; align-items: center; gap: 12px;
@@ -567,7 +570,7 @@
       flex-direction: column;
       gap: 2px;
       background: var(--bg);
-      overscroll-behavior: contain; /* prevent scroll chaining to page on iOS */
+      overscroll-behavior: none; /* no rubber-band on iOS */
     }
     .chat-msg-group {
       display: flex;
@@ -2131,30 +2134,24 @@ function _setChatPanel(panel) {
 // Show the full chat view (switches away from posts/activity/members)
 let _chatViewportHandler = null;
 function _attachChatViewportListener(topPx) {
+  // Only needed as a fallback when dvh is not supported (iOS 15 / old Chrome).
+  // Modern browsers handle keyboard resize natively via the dvh CSS unit.
   _detachChatViewportListener();
   if (!window.visualViewport) return;
   _chatViewportHandler = () => {
     const chatEl = document.getElementById("view-chat");
     if (!chatEl || chatEl.style.display === "none") return;
     const vv = window.visualViewport;
-    // vv.offsetTop > 0 when iOS scrolls the layout viewport on input focus
-    chatEl.style.top    = (topPx + vv.offsetTop) + "px";
     chatEl.style.height = (vv.height - topPx) + "px";
-    chatEl.style.bottom = "auto"; // prevent CSS bottom:0 fighting explicit height on iOS
   };
   window.visualViewport.addEventListener("resize", _chatViewportHandler);
-  window.visualViewport.addEventListener("scroll", _chatViewportHandler);
 }
 function _detachChatViewportListener() {
   if (_chatViewportHandler && window.visualViewport) {
     window.visualViewport.removeEventListener("resize", _chatViewportHandler);
-    window.visualViewport.removeEventListener("scroll", _chatViewportHandler);
   }
   const chatEl = document.getElementById("view-chat");
-  if (chatEl) {
-    chatEl.style.height = ""; // restore CSS bottom:0
-    chatEl.style.bottom = "";
-  }
+  if (chatEl) chatEl.style.height = ""; // restore dvh from CSS
   _chatViewportHandler = null;
 }
 
@@ -3086,15 +3083,17 @@ function _showChatView() {
   // Hide the tab bar so chat fills the full viewport below the header
   const tb = document.getElementById("sh-tab-bar");
   if (tb) tb.style.display = "none";
+  const hdr   = document.getElementById("app-header");
+  const topPx = hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 60;
+  // Push the CSS variable so #view-chat top/height (calc(100dvh - var(--hdr-h))) is correct
+  document.documentElement.style.setProperty("--hdr-h", topPx + "px");
   const chatEl = document.getElementById("view-chat");
-  const hdr    = document.getElementById("app-header");
-  const topPx  = hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 0;
-  const vvH    = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  chatEl.style.top     = topPx + "px";
-  chatEl.style.height  = (vvH - topPx) + "px"; // explicit height from start — avoids iOS flash
-  chatEl.style.bottom  = "auto";                // neutralise CSS bottom:0 so height wins on iOS
   chatEl.style.display = "flex";
-  _attachChatViewportListener(topPx);
+  // dvh handles keyboard resize natively on iOS 16+ / Chrome 108+.
+  // Fall back to visualViewport listener on older browsers.
+  if (!CSS.supports("height", "1dvh")) {
+    _attachChatViewportListener(topPx);
+  }
 }
 function _hideChatView() { /* no-op on chat.html — this IS the chat page */ }
 
