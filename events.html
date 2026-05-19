@@ -192,6 +192,20 @@
       font-size: 1rem; font-weight: 700; color: var(--text);
       margin-bottom: 12px;
     }
+    .recording-processing {
+      display: flex; align-items: center; gap: 14px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 20px;
+      margin-bottom: 28px;
+    }
+    .recording-processing-spinner {
+      width: 22px; height: 22px; flex-shrink: 0;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .live-preview-block { margin-bottom: 28px; }
     .live-preview-label {
       display: flex; align-items: center; gap: 8px;
@@ -1347,6 +1361,7 @@ let currentEvent = null;
 let editingEventId = null;
 let chatChannel  = null;
 let _recordingWatcher = null;
+let _recordingPoller  = null;
 let currentEvtTab = "upcoming";
 let qaChannel    = null;
 let countdownInterval = null;
@@ -1590,8 +1605,16 @@ async function renderDetailView(ev) {
         <span class="live-dot"></span> Live preview
         <span style="font-size:.75rem;color:var(--text-muted);margin-left:auto">~15s delay · <button class="btn-link" onclick="joinStream('${ev.id}')">Join for real-time</button></span>
       </div>
-      <div class="mux-player-wrap">
+      <div class="mux-player-wrap" id="live-preview-wrap">
+        <div id="live-preview-starting" style="display:none;align-items:center;gap:12px;padding:20px;background:var(--surface-2);border-radius:var(--radius);border:1px solid var(--border)">
+          <div style="width:18px;height:18px;border:2px solid var(--border);border-top-color:#ff6b6b;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0"></div>
+          <div>
+            <div style="font-weight:600;font-size:.9rem">Stream is starting…</div>
+            <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">Video will appear automatically in a moment.</div>
+          </div>
+        </div>
         <mux-player
+          id="live-preview-player"
           playback-id="${ev.mux_live_playback_id}"
           stream-type="live"
           muted
@@ -1602,7 +1625,7 @@ async function renderDetailView(ev) {
       </div>
     </div>` : "";
 
-  // Recording player
+  // Recording player (or processing indicator)
   const recordingHtml = ev.mux_playback_id ? `
     <div class="recording-block">
       <h3 style="display:flex;align-items:center;gap:7px"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg> Recording</h3>
@@ -1613,6 +1636,14 @@ async function renderDetailView(ev) {
           accent-color="#c9a84c"
           style="width:100%;border-radius:var(--radius);display:block;">
         </mux-player>
+      </div>
+    </div>`
+  : ev.status === "ended" ? `
+    <div class="recording-processing">
+      <div class="recording-processing-spinner"></div>
+      <div>
+        <div style="font-weight:600;color:var(--text)">Recording is processing…</div>
+        <div style="font-size:.8rem;color:var(--text-muted);margin-top:3px">Usually ready within a few minutes. This will update automatically.</div>
       </div>
     </div>` : "";
 
@@ -1756,13 +1787,56 @@ async function renderDetailView(ev) {
     startCountdown(new Date(ev.scheduled_at));
   }
 
+  // Live preview: detect 412 "stream not active yet" and show a starting indicator
+  // that auto-retries until RTMP starts flowing.
+  if (ev.status === "live" && ev.mux_live_playback_id) {
+    const player   = document.getElementById("live-preview-player");
+    const starting = document.getElementById("live-preview-starting");
+    let retryTimer = null;
+
+    function showStarting() {
+      if (player)   player.style.display   = "none";
+      if (starting) starting.style.display = "flex";
+    }
+    function showPlayer() {
+      if (starting) starting.style.display = "none";
+      if (player)   player.style.display   = "block";
+    }
+    function scheduleRetry() {
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        // Reload the player by toggling the playback-id attribute
+        if (player) {
+          const pid = player.getAttribute("playback-id");
+          player.removeAttribute("playback-id");
+          requestAnimationFrame(() => player.setAttribute("playback-id", pid));
+        }
+      }, 10000);
+    }
+
+    if (player) {
+      player.addEventListener("playing", () => { clearTimeout(retryTimer); showPlayer(); });
+      player.addEventListener("error",   () => { showStarting(); scheduleRetry(); });
+      // If player stalls immediately (no canplay within 12s), assume stream not started
+      const stallTimer = setTimeout(() => {
+        if (player.readyState === 0) { showStarting(); scheduleRetry(); }
+      }, 12000);
+      player.addEventListener("canplay", () => clearTimeout(stallTimer));
+    }
+  }
+
   // For ended events without a recording yet, watch for the webhook to populate it
-  // Always clean up any existing watcher first to avoid duplicate channel errors
+  // Always clean up any existing watcher/poller first to avoid duplicates
   if (_recordingWatcher) {
     db.removeChannel(_recordingWatcher);
     _recordingWatcher = null;
   }
+  if (_recordingPoller) {
+    clearInterval(_recordingPoller);
+    _recordingPoller = null;
+  }
   if (ev.status === "ended" && !ev.mux_playback_id) {
+    // Realtime watcher — fires instantly when webhook updates the row
     _recordingWatcher = db.channel(`event-recording-${ev.id}`)
       .on("postgres_changes", {
         event: "UPDATE", schema: "public", table: "live_events",
@@ -1771,11 +1845,31 @@ async function renderDetailView(ev) {
         if (payload.new.mux_playback_id) {
           db.removeChannel(_recordingWatcher);
           _recordingWatcher = null;
+          if (_recordingPoller) { clearInterval(_recordingPoller); _recordingPoller = null; }
           currentEvent = { ...currentEvent, ...payload.new };
           renderDetailView(currentEvent);
         }
       })
       .subscribe();
+
+    // Polling fallback — checks every 15 s for up to 10 min in case realtime misses the event
+    const pollEventId = ev.id;
+    let pollAttempts = 0;
+    _recordingPoller = setInterval(async () => {
+      pollAttempts++;
+      if (pollAttempts > 40) { clearInterval(_recordingPoller); _recordingPoller = null; return; }
+      const { data } = await db.from("live_events")
+        .select("mux_playback_id, mux_asset_id")
+        .eq("id", pollEventId)
+        .single();
+      if (data?.mux_playback_id) {
+        clearInterval(_recordingPoller);
+        _recordingPoller = null;
+        if (_recordingWatcher) { db.removeChannel(_recordingWatcher); _recordingWatcher = null; }
+        currentEvent = { ...currentEvent, mux_playback_id: data.mux_playback_id, mux_asset_id: data.mux_asset_id };
+        renderDetailView(currentEvent);
+      }
+    }, 15000);
   }
 }
 
@@ -3370,8 +3464,10 @@ async function endStream() {
   const endedAt = new Date().toISOString();
   await db.from("live_events").update({ status: "ended", ended_at: endedAt }).eq("id", currentEvent.id);
   currentEvent = { ...currentEvent, status: "ended", ended_at: endedAt };
+  // showView already calls renderDetailView internally — don't call it twice or
+  // the _recordingWatcher is created then immediately torn down and recreated,
+  // which can cause the realtime subscription to miss the webhook update.
   showView("detail");
-  renderDetailView(currentEvent);
 }
 
 async function endStreamFromDetail(eventId) {
