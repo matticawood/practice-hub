@@ -743,9 +743,10 @@
     }
     #chat-img-modal.open { opacity: 1; pointer-events: all; }
     #chat-img-modal img {
-      max-width: min(92vw, 1200px); max-height: 88vh;
+      max-width: min(84vw, 1200px); max-height: 88vh;
       border-radius: 10px; object-fit: contain;
       box-shadow: 0 8px 48px rgba(0,0,0,.7);
+      transition: opacity .12s ease;
     }
     #chat-img-modal-close {
       position: absolute; top: 16px; right: 18px;
@@ -755,6 +756,23 @@
       transition: background .15s;
     }
     #chat-img-modal-close:hover { background: rgba(255,255,255,.22); }
+    .chat-img-modal-nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 44px; height: 44px; cursor: pointer; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s; flex-shrink: 0;
+    }
+    .chat-img-modal-nav:hover { background: rgba(255,255,255,.26); }
+    .chat-img-modal-nav:disabled { opacity: 0; pointer-events: none; }
+    #chat-img-modal-prev { left: 14px; }
+    #chat-img-modal-next { right: 14px; }
+    #chat-img-modal-counter {
+      position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,.6); font-size: .82rem; font-weight: 600;
+      background: rgba(0,0,0,.4); padding: 3px 10px; border-radius: 20px;
+      pointer-events: none;
+    }
     .chat-toolbar-wrap { padding: 0 2px; }
     .chat-empty {
       flex: 1; display: flex; align-items: center; justify-content: center;
@@ -937,7 +955,14 @@
 <!-- Image lightbox modal -->
 <div id="chat-img-modal" onclick="_chatImgModalClose()">
   <button id="chat-img-modal-close" onclick="_chatImgModalClose()" aria-label="Close">✕</button>
+  <button id="chat-img-modal-prev" class="chat-img-modal-nav" onclick="event.stopPropagation();_chatImgModalNav(-1)" aria-label="Previous">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
   <img id="chat-img-modal-img" src="" alt="" onclick="event.stopPropagation()">
+  <button id="chat-img-modal-next" class="chat-img-modal-nav" onclick="event.stopPropagation();_chatImgModalNav(1)" aria-label="Next">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <div id="chat-img-modal-counter" style="display:none"></div>
 </div>
 
 <script>
@@ -2057,8 +2082,9 @@ function _renderCommentMedia(c) {
   const others = media.filter(m => m.type !== "image");
   if (images.length) {
     const cols = Math.min(images.length, 2);
+    const gk = _chatImgGroupStore(images.map(m => m.url));
     html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:6px">` +
-      images.map(m => `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" style="width:100%;height:${cols > 1 ? "180px" : "auto"};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};border-radius:8px;display:block;cursor:pointer" onclick="_chatImgModalOpen('${escHtml(m.url)}')" loading="lazy">`).join("") +
+      images.map((m, i) => `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" style="width:100%;height:${cols > 1 ? "180px" : "auto"};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};border-radius:8px;display:block;cursor:pointer" onclick="_chatImgModalOpen('${gk}',${i})" loading="lazy">`).join("") +
       `</div>`;
   }
   others.forEach(m => {
@@ -2147,21 +2173,65 @@ function escHtml(str) {
 }
 
 // ── Image lightbox ────────────────────────────────────────────────────────────
-function _chatImgModalOpen(url) {
-  const modal = document.getElementById("chat-img-modal");
-  const img   = document.getElementById("chat-img-modal-img");
-  if (!modal || !img) { window.open(url, "_blank"); return; }
-  img.src = url;
-  modal.classList.add("open");
-  document.addEventListener("keydown", _chatImgModalKeyClose);
+const _chatImgGroups = {};  // groupKey → [url, ...]
+let _chatImgCurrentGroup = null;
+let _chatImgCurrentIdx   = 0;
+
+function _chatImgGroupStore(urls) {
+  const key = "g" + Date.now() + Math.random().toString(36).slice(2, 6);
+  _chatImgGroups[key] = urls;
+  return key;
 }
+
+function _chatImgModalOpen(groupKey, index = 0) {
+  const urls  = _chatImgGroups[groupKey];
+  if (!urls) return;
+  _chatImgCurrentGroup = groupKey;
+  _chatImgCurrentIdx   = index;
+  _chatImgModalShow();
+  document.addEventListener("keydown", _chatImgModalKeyHandler);
+}
+
+function _chatImgModalShow() {
+  const urls    = _chatImgGroups[_chatImgCurrentGroup] || [];
+  const idx     = _chatImgCurrentIdx;
+  const modal   = document.getElementById("chat-img-modal");
+  const img     = document.getElementById("chat-img-modal-img");
+  const prev    = document.getElementById("chat-img-modal-prev");
+  const next    = document.getElementById("chat-img-modal-next");
+  const counter = document.getElementById("chat-img-modal-counter");
+  if (!modal || !img) return;
+
+  img.src = urls[idx] || "";
+  modal.classList.add("open");
+
+  const multi = urls.length > 1;
+  if (prev)    prev.disabled    = !multi || idx === 0;
+  if (next)    next.disabled    = !multi || idx === urls.length - 1;
+  if (counter) { counter.style.display = multi ? "" : "none"; counter.textContent = `${idx + 1} / ${urls.length}`; }
+}
+
+function _chatImgModalNav(dir) {
+  const urls = _chatImgGroups[_chatImgCurrentGroup] || [];
+  const next = _chatImgCurrentIdx + dir;
+  if (next < 0 || next >= urls.length) return;
+  _chatImgCurrentIdx = next;
+  _chatImgModalShow();
+}
+
 function _chatImgModalClose() {
   const modal = document.getElementById("chat-img-modal");
   if (modal) modal.classList.remove("open");
-  document.removeEventListener("keydown", _chatImgModalKeyClose);
+  document.removeEventListener("keydown", _chatImgModalKeyHandler);
   setTimeout(() => { const img = document.getElementById("chat-img-modal-img"); if (img) img.src = ""; }, 200);
+  _chatImgCurrentGroup = null;
 }
-function _chatImgModalKeyClose(e) { if (e.key === "Escape") _chatImgModalClose(); }
+
+function _chatImgModalKeyHandler(e) {
+  if (e.key === "Escape")     _chatImgModalClose();
+  if (e.key === "ArrowRight") _chatImgModalNav(1);
+  if (e.key === "ArrowLeft")  _chatImgModalNav(-1);
+}
 
 function initials(name) {
   if (!name) return "?";
