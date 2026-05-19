@@ -1416,14 +1416,30 @@ async function loadEvents(tab) {
   const grid = document.getElementById("events-grid");
   grid.innerHTML = `<p style="color:var(--text-muted);font-size:.9rem">Loading…</p>`;
 
+  // Fetch all non-live events + live events; filter client-side so scheduled
+  // events past their end time (scheduled_at + duration_mins) appear in Past.
   let query = db.from("live_events").select("*").order("scheduled_at", { ascending: tab === "upcoming" });
   if (tab === "upcoming") {
     query = query.in("status", ["scheduled", "live"]);
   } else {
-    query = query.eq("status", "ended");
+    query = query.in("status", ["ended", "scheduled"]);
   }
 
-  const { data: events } = await query;
+  const { data: rawEvents } = await query;
+
+  const now = Date.now();
+  function _effectivelyEnded(ev) {
+    if (ev.status === "ended") return true;
+    if (ev.status === "live")  return false;
+    // scheduled: treat as past if scheduled_at + duration has passed
+    const endMs = new Date(ev.scheduled_at).getTime() + (ev.duration_mins || 60) * 60000;
+    return endMs <= now;
+  }
+
+  const events = (rawEvents || []).filter(ev =>
+    tab === "upcoming" ? !_effectivelyEnded(ev) : _effectivelyEnded(ev)
+  );
+
   if (!events || events.length === 0) {
     grid.innerHTML = `<div class="empty-state">
       <div class="empty-icon">${tab === "upcoming" ? "📅" : "🎬"}</div>
