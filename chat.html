@@ -749,8 +749,17 @@
       border-radius: 8px; overflow: hidden;
       position: relative; display: block;
     }
-    /* Multi-image: wrapper clips overflow; img height+object-fit set via inline style */
-    .chat-img-wrap.multi { height: 160px; overflow: hidden; }
+    /* Multi-image: background-image+background-size:cover — compositor-rendered,
+       never squashes during resize unlike <img> object-fit */
+    .chat-img-wrap.multi {
+      height: 160px;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      cursor: pointer;
+    }
+    /* Shimmer auto-removed once JS sets background-image (adds .loaded class) */
+    .chat-img-wrap.multi.loaded::after { display: none; }
     /* GPU-accelerated shimmer via transform (no paint per frame) */
     .chat-img-wrap::after {
       content: ""; position: absolute; inset: 0;
@@ -2197,14 +2206,20 @@ function _renderCommentMedia(c) {
     const gk = _chatImgGroupStore(images.map(m => m.url));
     const multi = cols > 1;
     html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:6px">` +
-      images.map((m, i) =>
-        `<div class="chat-img-wrap${multi ? " multi" : ""}">` +
+      images.map((m, i) => {
+        if (multi) {
+          // Use background-image for thumbnails: compositor-rendered, never squashes on resize
+          return `<div class="chat-img-wrap multi loaded" ` +
+            `style="background-image:url('${escHtml(m.url)}')" ` +
+            `onclick="_chatImgModalOpen('${gk}',${i})" title="${escHtml(m.name)}"></div>`;
+        }
+        return `<div class="chat-img-wrap">` +
           `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" decoding="async" ` +
-            `style="${multi ? "height:160px;object-fit:cover;" : "max-height:420px;object-fit:contain;"}width:100%;cursor:pointer" ` +
+            `style="max-height:420px;object-fit:contain;width:100%;cursor:pointer" ` +
             `onclick="_chatImgModalOpen('${gk}',${i})" loading="lazy" ` +
             `onload="this.closest('.chat-img-wrap').classList.add('loaded')">` +
-        `</div>`
-      ).join("") +
+        `</div>`;
+      }).join("") +
       `</div>`;
   }
   others.forEach(m => {
