@@ -231,16 +231,9 @@
       animation: vod-qa-fadein .3s ease;
     }
     #vod-qa-overlay.visible { display: block; }
-    /* In fullscreen the overlay is moved into the fullscreen element
-       and switched to position:fixed — use vw/vh so it scales with the screen */
-    #vod-qa-overlay.fullscreen-mode {
-      position: fixed; bottom: 5vh; left: 1.5vw;
-      max-width: 28vw; padding: 1vh 1.2vw;
-      border-left-width: 0.25vw; border-radius: 0.4vw;
-    }
-    #vod-qa-overlay.fullscreen-mode .vod-qa-label { font-size: 1vw;   line-height: 1.4; margin-bottom: 0.7vh; gap: 0.4vw; }
-    #vod-qa-overlay.fullscreen-mode .vod-qa-text  { font-size: 1.3vw; line-height: 1.5; }
-    #vod-qa-overlay.fullscreen-mode .vod-qa-asker { font-size: 1vw;   line-height: 1.4; margin-top: 0.5vh; }
+    /* In fullscreen the overlay is moved into the fullscreen element and
+       positioned via JS (positionVodOverlay) which accounts for letterboxing */
+    #vod-qa-overlay.fullscreen-mode { position: fixed; }
     @keyframes vod-qa-fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
     .vod-qa-label { font-size: .6rem; color: var(--accent); font-weight: 700;
       text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px;
@@ -3829,34 +3822,69 @@ async function setupVodQaOverlay(ev) {
     }
   });
 
-  // Fullscreen: mux-player's native fullscreen owns its own shadow DOM, so our
-  // overlay div would disappear. Fix: move it into the fullscreen element and
-  // switch to position:fixed so it stays visible over the video.
+  // Fullscreen: mux-player's native fullscreen owns its own shadow DOM so our
+  // overlay disappears. Fix: move it into the fullscreen element with
+  // position:fixed, then use positionVodOverlay() to compute pixel coords that
+  // match the actual video render area (accounting for letterbox bars).
   const wrap = document.getElementById("vod-player-wrap");
-  document.addEventListener("fullscreenchange", () => {
-    const ov = document.getElementById("vod-qa-overlay");
-    if (!ov) return;
-    if (document.fullscreenElement) {
-      document.fullscreenElement.appendChild(ov);
-      ov.classList.add("fullscreen-mode");
-    } else if (wrap) {
-      wrap.appendChild(ov);
-      ov.classList.remove("fullscreen-mode");
+
+  function positionVodOverlay(ov) {
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
+    const vw = player.videoWidth  || 1920;
+    const vh = player.videoHeight || 1080;
+    const videoAspect  = vw / vh;
+    const screenAspect = sw / sh;
+
+    let renderW, renderH, offsetX, offsetY;
+    if (videoAspect > screenAspect) {
+      // Pillarboxed — black bars left/right
+      renderW = sw; renderH = sw / videoAspect;
+      offsetX = 0;  offsetY = (sh - renderH) / 2;
+    } else {
+      // Letterboxed — black bars top/bottom
+      renderW = sh * videoAspect; renderH = sh;
+      offsetX = (sw - renderW) / 2; offsetY = 0;
     }
-  });
-  // Safari uses webkitfullscreenchange
-  document.addEventListener("webkitfullscreenchange", () => {
+
+    // Position relative to the video render area
+    ov.style.bottom   = (offsetY + renderH * 0.07) + "px";
+    ov.style.left     = (offsetX + renderW * 0.015) + "px";
+    ov.style.maxWidth = (renderW * 0.28) + "px";
+    ov.style.padding  = (renderH * 0.012) + "px " + (renderW * 0.012) + "px";
+    ov.style.borderLeftWidth = Math.max(2, renderW * 0.002) + "px";
+    ov.style.borderRadius    = (renderW * 0.004) + "px";
+
+    // Scale fonts proportionally to the video render width
+    const label = ov.querySelector(".vod-qa-label");
+    const text  = ov.querySelector(".vod-qa-text");
+    const asker = ov.querySelector(".vod-qa-asker");
+    if (label) { label.style.fontSize = (renderW * 0.01) + "px"; label.style.marginBottom = (renderH * 0.008) + "px"; label.style.lineHeight = "1.4"; }
+    if (text)  { text.style.fontSize  = (renderW * 0.013) + "px"; text.style.lineHeight = "1.5"; }
+    if (asker) { asker.style.fontSize = (renderW * 0.01) + "px";  asker.style.marginTop = (renderH * 0.006) + "px"; asker.style.lineHeight = "1.4"; }
+  }
+
+  function handleFullscreenChange() {
     const ov = document.getElementById("vod-qa-overlay");
     if (!ov) return;
     const fs = document.fullscreenElement || document.webkitFullscreenElement;
     if (fs) {
       fs.appendChild(ov);
       ov.classList.add("fullscreen-mode");
+      // Defer one frame so window dimensions have updated
+      requestAnimationFrame(() => positionVodOverlay(ov));
     } else if (wrap) {
       wrap.appendChild(ov);
       ov.classList.remove("fullscreen-mode");
+      // Clear inline styles so CSS takes over again
+      ov.style.cssText = "";
+      ov.querySelectorAll(".vod-qa-label,.vod-qa-text,.vod-qa-asker")
+        .forEach(el => el.style.cssText = "");
     }
-  });
+  }
+
+  document.addEventListener("fullscreenchange",       handleFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 }
 
 // ── VOD answered Q&A list ──────────────────────────────────────────────────────
