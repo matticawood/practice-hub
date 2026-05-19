@@ -81,41 +81,152 @@ export default async (request) => {
   }
 
   // ── Action: create-room ────────────────────────────────────────────────────
-  // Only admin. Creates a Daily.co room for an event.
+  // Only admin. Creates a Daily.co room + a Mux live stream for an event.
   if (action === "create-room") {
     if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
 
     const { eventId } = body;
     if (!eventId) return json({ error: "eventId required" }, 400);
 
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+    const SERVICE_KEY      = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
     // Shorten UUID to 8 chars for room name limit
     const roomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}`;
 
-    const res = await fetch("https://api.daily.co/v1/rooms", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${DAILY_API_KEY}`
-      },
-      body: JSON.stringify({
-        name: roomName,
-        properties: {
-          enable_chat: false,          // we use our own Supabase chat
-          enable_prejoin_ui: false,    // skip Daily.co's pre-join screen for everyone
-          start_video_off: false,
-          start_audio_off: false,
-          enable_screenshare: true,
-          enable_recording: "cloud",
-          max_participants: 200,
-          owner_only_broadcast: true,  // only host can have camera/mic on
-          exp: Math.floor(Date.now() / 1000) + 60 * 60 * 6, // expires 6h from now
-        }
+    // Create Daily room and Mux live stream in parallel
+    const [roomRes, muxLiveRes] = await Promise.all([
+      fetch("https://api.daily.co/v1/rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+        body: JSON.stringify({
+          name: roomName,
+          properties: {
+            enable_chat: false,
+            enable_prejoin_ui: false,
+            start_video_off: false,
+            start_audio_off: false,
+            enable_screenshare: true,
+            enable_recording: "cloud",
+            max_participants: 200,
+            owner_only_broadcast: true,
+            exp: Math.floor(Date.now() / 1000) + 60 * 60 * 6,
+          }
+        })
+      }),
+      fetch("https://api.mux.com/video/v1/live-streams", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`)
+        },
+        body: JSON.stringify({
+          playback_policy: ["public"],
+          latency_mode: "reduced",   // ~15-30s delay, good balance for preview
+          reconnect_window: 60,      // allow 60s reconnect window if stream drops
+        })
       })
+    ]);
+
+    const roomData = await roomRes.json();
+    if (!roomRes.ok) return json({ error: roomData }, roomRes.status);
+
+    const muxLiveData = await muxLiveRes.json();
+    const muxLiveStream    = muxLiveData?.data;
+    const muxLiveStreamId  = muxLiveStream?.id || null;
+    const muxStreamKey     = muxLiveStream?.stream_key || null;
+    const muxLivePlaybackId = muxLiveStream?.playback_ids?.[0]?.id || null;
+
+    // Store Mux live stream IDs in the event row (server-side, via service key)
+    if (muxLiveStreamId && muxLivePlaybackId && SERVICE_KEY) {
+      await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": SERVICE_KEY,
+          "Authorization": `Bearer ${SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
+        body: JSON.stringify({ mux_live_stream_id: muxLiveStreamId, mux_live_playback_id: muxLivePlaybackId })
+      });
+    }
+
+    return json({
+      roomName: roomData.name,
+      roomUrl:  roomData.url,
+      muxStreamKey,        // used by admin client to call startLiveStreaming()
+      muxLivePlaybackId,   // stored in currentEvent for immediate use
+    });
+  }
+
+  // ── Action: get-mux-stream-key ─────────────────────────────────────────────
+  // Admin only. Returns the RTMP stream key for an event's Mux live stream.
+  // Used when the host rejoins an already-live event after a page refresh.
+  if (action === "get-mux-stream-key") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { eventId } = body;
+    if (!eventId) return json({ error: "eventId required" }, 400);
+
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+    const SERVICE_KEY      = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=mux_live_stream_id`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const evData = await evRes.json();
+    const muxLiveStreamId = evData?.[0]?.mux_live_stream_id;
+    if (!muxLiveStreamId) return json({ streamKey: null });
+
+    const muxRes = await fetch(`https://api.mux.com/video/v1/live-streams/${muxLiveStreamId}`, {
+      headers: { "Authorization": "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`) }
+    });
+    const muxData = await muxRes.json();
+    return json({ streamKey: muxData?.data?.stream_key || null });
+  }
+
+  // ── Action: delete-mux-livestream ──────────────────────────────────────────
+  // Admin only. Deletes the Mux live stream when an event ends, stopping
+  // billing and clearing the live preview.
+  if (action === "delete-mux-livestream") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { eventId } = body;
+    if (!eventId) return json({ error: "eventId required" }, 400);
+
+    const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+    const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+    const SERVICE_KEY      = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    const muxAuth          = "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`);
+
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=mux_live_stream_id`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const evData = await evRes.json();
+    const muxLiveStreamId = evData?.[0]?.mux_live_stream_id;
+
+    if (muxLiveStreamId) {
+      await fetch(`https://api.mux.com/video/v1/live-streams/${muxLiveStreamId}`, {
+        method: "DELETE",
+        headers: { "Authorization": muxAuth }
+      }).catch(() => {});
+    }
+
+    // Clear from DB so the preview disappears for all viewers
+    await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`, {
+      method: "PATCH",
+      headers: {
+        "apikey": SERVICE_KEY,
+        "Authorization": `Bearer ${SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+      },
+      body: JSON.stringify({ mux_live_stream_id: null, mux_live_playback_id: null })
     });
 
-    const data = await res.json();
-    if (!res.ok) return json({ error: data }, res.status);
-    return json({ roomName: data.name, roomUrl: data.url });
+    return json({ ok: true });
   }
 
   // ── Action: get-token ──────────────────────────────────────────────────────

@@ -191,6 +191,18 @@
       font-size: 1rem; font-weight: 700; color: var(--text);
       margin-bottom: 12px;
     }
+    .live-preview-block { margin-bottom: 28px; }
+    .live-preview-label {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .8rem; font-weight: 700; color: #ff6b6b;
+      margin-bottom: 10px;
+    }
+    .btn-link {
+      background: none; border: none; padding: 0; cursor: pointer;
+      color: var(--accent); font-size: inherit; font-family: inherit;
+      text-decoration: underline;
+    }
+    .btn-link:hover { opacity: .8; }
     .mux-player-wrap { width: 100%; border-radius: var(--radius); overflow: hidden; }
     mux-player { width: 100%; display: block; background: transparent; --media-background-color: transparent; --media-object-fit: contain; }
     /* Shared Mux upload overlay styles (global fixed bar) */
@@ -1565,6 +1577,25 @@ async function renderDetailView(ev) {
       </div>
     </div>` : "";
 
+  // Live stream preview (muted, auto-play) — shown when event is live and Mux stream is active
+  const livePreviewHtml = ev.status === "live" && ev.mux_live_playback_id ? `
+    <div class="live-preview-block">
+      <div class="live-preview-label">
+        <span class="live-dot"></span> Live preview
+        <span style="font-size:.75rem;color:var(--text-muted);margin-left:auto">~15s delay · <button class="btn-link" onclick="joinStream('${ev.id}')">Join for real-time</button></span>
+      </div>
+      <div class="mux-player-wrap">
+        <mux-player
+          playback-id="${ev.mux_live_playback_id}"
+          stream-type="live"
+          muted
+          autoplay
+          accent-color="#c9a84c"
+          style="width:100%;border-radius:var(--radius);display:block;--media-background-color:transparent;--media-object-fit:contain;">
+        </mux-player>
+      </div>
+    </div>` : "";
+
   // Recording player
   const recordingHtml = ev.mux_playback_id ? `
     <div class="recording-block">
@@ -1646,11 +1677,12 @@ async function renderDetailView(ev) {
       </div><!-- /event-detail-top -->
 
       <!-- Bottom: admin controls, countdown, join, recording (omit if nothing to show) -->
-      ${(adminHtml || countdownHtml || joinBtn || muxHtml || recordingHtml) ? `
+      ${(adminHtml || countdownHtml || joinBtn || livePreviewHtml || muxHtml || recordingHtml) ? `
       <div class="event-detail-bottom">
         ${adminHtml}
         ${countdownHtml}
         ${joinBtn ? `<div class="event-actions">${joinBtn}</div>` : ""}
+        ${livePreviewHtml}
         ${muxHtml}
         ${recordingHtml}
       </div>` : ""}<!-- /event-detail-bottom -->
@@ -2881,6 +2913,16 @@ async function startStream(eventId) {
           enable_recording: "cloud"
         }})
       });
+      // Retrieve the Mux stream key (may have been lost on page refresh)
+      if (latestEv.mux_live_stream_id && !currentEvent._muxStreamKey) {
+        const skRes = await fetch("/api/daily", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+          body: JSON.stringify({ action: "get-mux-stream-key", eventId })
+        });
+        const skData = await skRes.json();
+        if (skData.streamKey) currentEvent._muxStreamKey = skData.streamKey;
+      }
       const ok = await joinStream(eventId);
       if (!ok) btn.disabled = false;
       return;
@@ -2907,7 +2949,14 @@ async function startStream(eventId) {
     }).eq("id", eventId);
 
     if (error) throw error;
-    currentEvent = { ...currentEvent, status: "live", daily_room_name: room.roomName, daily_room_url: room.roomUrl };
+    currentEvent = {
+      ...currentEvent,
+      status: "live",
+      daily_room_name:      room.roomName,
+      daily_room_url:       room.roomUrl,
+      mux_live_playback_id: room.muxLivePlaybackId || null,
+      _muxStreamKey:        room.muxStreamKey || null,  // client-only, not in DB
+    };
 
     // Notify everyone who RSVPed (except the host)
     const { data: rsvps } = await db.from("event_rsvps").select("email").eq("event_id", eventId);
@@ -2993,10 +3042,23 @@ async function joinStream(eventId) {
         token: result.token
       });
 
-      // Explicitly start cloud recording once joined — more reliable than token property
+      // Once joined: start cloud recording + Mux live streaming
       window._callFrame.on("joined-meeting", async () => {
+        // Start Daily cloud recording
         try { await window._callFrame.startRecording(); } catch(e) {
           console.warn("startRecording failed:", e.message);
+        }
+        // Start RTMP live streaming to Mux (for the preview on the event page)
+        const streamKey = currentEvent._muxStreamKey;
+        if (streamKey) {
+          try {
+            await window._callFrame.startLiveStreaming({
+              rtmpUrl: `rtmps://global-live.mux.com:443/app/${streamKey}`
+            });
+            console.log("Mux live streaming started");
+          } catch(e) {
+            console.warn("startLiveStreaming failed:", e.message);
+          }
         }
       });
 
@@ -3251,9 +3313,11 @@ async function endStream() {
   const btn = document.querySelector("#stream-admin-bar .btn-danger");
   if (btn) { btn.disabled = true; btn.textContent = "Ending…"; }
 
-  // Stop the recording cleanly and wait for Daily.co to acknowledge
-  // before destroying the call — otherwise the recording file gets cut off.
+  // Stop live streaming to Mux, then stop the recording cleanly
   if (window._callFrame) {
+    try { await window._callFrame.stopLiveStreaming(); } catch(e) {
+      console.warn("stopLiveStreaming:", e.message);
+    }
     try {
       await new Promise((resolve) => {
         const done = () => { clearTimeout(timer); resolve(); };
@@ -3264,6 +3328,13 @@ async function endStream() {
     } catch(e) { console.warn("stopRecording:", e); }
   }
 
+  // Delete the Mux live stream (stops billing, clears preview for all viewers)
+  fetch("/api/daily", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+    body: JSON.stringify({ action: "delete-mux-livestream", eventId: currentEvent.id })
+  }).catch(e => console.warn("delete-mux-livestream:", e));
+
   await db.from("live_events").update({ status: "ended" }).eq("id", currentEvent.id);
   currentEvent = { ...currentEvent, status: "ended" };
   showView("detail");
@@ -3273,8 +3344,11 @@ async function endStream() {
 async function endStreamFromDetail(eventId) {
   if (!confirm("End the live stream?")) return;
 
-  // Stop recording if the host still has an active call frame
+  // Stop live streaming + recording if the host still has an active call frame
   if (window._callFrame) {
+    try { await window._callFrame.stopLiveStreaming(); } catch(e) {
+      console.warn("stopLiveStreaming:", e.message);
+    }
     try {
       await new Promise((resolve) => {
         const done = () => { clearTimeout(timer); resolve(); };
@@ -3284,6 +3358,13 @@ async function endStreamFromDetail(eventId) {
       });
     } catch(e) { console.warn("stopRecording:", e); }
   }
+
+  // Delete the Mux live stream
+  fetch("/api/daily", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+    body: JSON.stringify({ action: "delete-mux-livestream", eventId })
+  }).catch(e => console.warn("delete-mux-livestream:", e));
 
   await db.from("live_events").update({ status: "ended" }).eq("id", eventId);
   currentEvent = { ...currentEvent, status: "ended" };
