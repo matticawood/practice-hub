@@ -32,7 +32,10 @@
 
     /* ── Bell / Chat button ── */
     .btn-bell { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
-    #header-chat-btn.active { background: var(--accent, #f5c518); color: #1a1410; border-radius: 8px; }
+    /* Pin header ghost-buttons to the dark header border so page-level --border overrides don't bleed in */
+    #app-header .btn-ghost { border-color: #2e2e2e; color: #888; }
+    #app-header .btn-ghost:hover { border-color: var(--accent, #f5c518); color: var(--accent, #f5c518); }
+    #header-chat-btn.active { background: var(--accent, #f5c518); color: #1a1410; border-radius: 8px; border-color: var(--accent, #f5c518); }
     .notif-badge {
       position: absolute; top: -5px; right: -5px;
       background: #ef4444; color: #fff; font-size: 0.6rem; font-weight: 700;
