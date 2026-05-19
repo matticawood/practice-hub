@@ -3693,14 +3693,19 @@ async function submitQA() {
 }
 
 async function featureQA(qaId, feature) {
-  // Unfeature all others first
+  const now = new Date().toISOString();
   if (feature) {
-    await db.from("event_qa").update({ is_featured: false }).eq("event_id", currentEvent.id);
+    // Unfeature (and record unfeatured_at for) any currently featured question
+    await db.from("event_qa")
+      .update({ is_featured: false, unfeatured_at: now })
+      .eq("event_id", currentEvent.id)
+      .eq("is_featured", true);
   }
   await db.from("event_qa").update({
-    is_featured: feature,
-    // Record the moment this question is featured — used to sync with the VOD timestamp
-    ...(feature ? { featured_at: new Date().toISOString() } : {})
+    is_featured:    feature,
+    // Record timestamps for VOD overlay sync
+    ...(feature ? { featured_at: now }   : {}),
+    ...(!feature ? { unfeatured_at: now } : {})
   }).eq("id", qaId);
   if (!feature) {
     document.getElementById("featured-qa-bar").classList.remove("visible");
@@ -3709,7 +3714,11 @@ async function featureQA(qaId, feature) {
 
 async function markAnswered(qaId, currentState) {
   const nowAnswered = !currentState;
-  await db.from("event_qa").update({ answered: nowAnswered, is_featured: false }).eq("id", qaId);
+  await db.from("event_qa").update({
+    answered: nowAnswered,
+    is_featured: false,
+    ...(nowAnswered ? { unfeatured_at: new Date().toISOString() } : {})
+  }).eq("id", qaId);
   if (nowAnswered) {
     document.getElementById("featured-qa-bar").classList.remove("visible");
   }
@@ -3724,7 +3733,7 @@ async function setupVodQaOverlay(ev) {
 
   const { data: questions } = await db
     .from("event_qa")
-    .select("id, question, name, email, featured_at")
+    .select("id, question, name, email, featured_at, unfeatured_at")
     .eq("event_id", ev.id)
     .not("featured_at", "is", null)
     .order("featured_at", { ascending: true });
@@ -3732,18 +3741,23 @@ async function setupVodQaOverlay(ev) {
   if (!questions?.length) return;
 
   const streamStart = new Date(ev.stream_started_at).getTime();
+  const toOffset = ts => (new Date(ts).getTime() - streamStart) / 1000;
 
-  // Build segments: each question is shown from its offset until the next one starts
+  // Build segments: each question is shown from featured_at until the earlier of
+  // unfeatured_at or the next question's featured_at (Infinity if neither exists)
   const segments = questions
-    .map((q, i) => ({
-      start: (new Date(q.featured_at).getTime() - streamStart) / 1000,
-      end:   questions[i + 1]
-               ? (new Date(questions[i + 1].featured_at).getTime() - streamStart) / 1000
-               : Infinity,
-      question: q.question,
-      name:     q.name || q.email?.split("@")[0] || "Anonymous"
-    }))
-    .filter(s => s.start >= 0); // discard anything before the stream began
+    .map((q, i) => {
+      const start       = toOffset(q.featured_at);
+      const nextStart   = questions[i + 1] ? toOffset(questions[i + 1].featured_at) : Infinity;
+      const unfeatureAt = q.unfeatured_at  ? toOffset(q.unfeatured_at)              : Infinity;
+      return {
+        start,
+        end:      Math.min(nextStart, unfeatureAt),
+        question: q.question,
+        name:     q.name || q.email?.split("@")[0] || "Anonymous"
+      };
+    })
+    .filter(s => s.start >= 0 && s.end > s.start);
 
   if (!segments.length) return;
 
