@@ -710,13 +710,16 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       const iUrl = new URL(raw, window.location.origin);
       if (iUrl.pathname !== _currPath) return;           // different page → skip
 
-      const iGoto = iUrl.searchParams.get("goto") || "";
-      const iHash = iUrl.hash;                            // e.g. "#library"
+      const iGoto   = iUrl.searchParams.get("goto")   || "";
+      const iFilter = iUrl.searchParams.get("filter") || "";
+      const iHash   = iUrl.hash;
 
-      // Require exact goto match (empty matches empty)
-      if (iGoto !== _currGoto) return;
-      // Require exact hash match (empty matches empty)
-      if (iHash !== _currHash) return;
+      const _currFilter = new URLSearchParams(window.location.search).get("filter") || "";
+
+      // Require exact goto, filter, and hash match (empty matches empty)
+      if (iGoto   !== _currGoto)   return;
+      if (iFilter !== _currFilter) return;
+      if (iHash   !== _currHash)   return;
 
       item.classList.add("active");
       activeGroup = item.closest(".sh-group");
