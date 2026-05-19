@@ -3233,30 +3233,44 @@ async function startStream(eventId) {
       let needNewStream = !latestEv.mux_live_stream_id;
       if (!needNewStream) {
         // Retrieve stream key + status for the existing live stream
-        const skRes = await fetch("/api/daily", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-          body: JSON.stringify({ action: "get-mux-stream-key", eventId })
-        });
-        const skData = await skRes.json();
-        if (skData.status === "disabled" || !skData.streamKey) {
-          // Stream is locked/completed — need a fresh one
-          needNewStream = true;
-        } else {
-          // Active or idle — safe to rejoin with same stream key
-          currentEvent._muxStreamKey        = skData.streamKey;
-          currentEvent.mux_live_playback_id = skData.playbackId || currentEvent.mux_live_playback_id;
+        try {
+          const skRes = await fetch("/api/daily", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+            body: JSON.stringify({ action: "get-mux-stream-key", eventId })
+          });
+          if (!skRes.ok) throw new Error(`HTTP ${skRes.status}`);
+          const skData = await skRes.json();
+          if (skData.status === "disabled" || !skData.streamKey) {
+            needNewStream = true;
+          } else {
+            currentEvent._muxStreamKey        = skData.streamKey;
+            currentEvent.mux_live_playback_id = skData.playbackId || currentEvent.mux_live_playback_id;
+          }
+        } catch(e) {
+          console.warn("get-mux-stream-key failed:", e.message);
+          alert("Could not reach the stream service — the hosting provider may be having a temporary outage. Please try again in a moment.");
+          btn.disabled = false;
+          return;
         }
       }
       if (needNewStream) {
-        const muxRes = await fetch("/api/daily", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-          body: JSON.stringify({ action: "create-mux-livestream", eventId })
-        });
-        const muxData = await muxRes.json();
-        currentEvent._muxStreamKey        = muxData.muxStreamKey || null;
-        currentEvent.mux_live_playback_id = muxData.muxLivePlaybackId || null;
+        try {
+          const muxRes = await fetch("/api/daily", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+            body: JSON.stringify({ action: "create-mux-livestream", eventId })
+          });
+          if (!muxRes.ok) throw new Error(`HTTP ${muxRes.status}`);
+          const muxData = await muxRes.json();
+          currentEvent._muxStreamKey        = muxData.muxStreamKey || null;
+          currentEvent.mux_live_playback_id = muxData.muxLivePlaybackId || null;
+        } catch(e) {
+          console.warn("create-mux-livestream failed:", e.message);
+          alert("Could not create a new stream — the hosting provider may be having a temporary outage. Please try again in a moment.");
+          btn.disabled = false;
+          return;
+        }
       }
       const ok = await joinStream(eventId);
       if (!ok) btn.disabled = false;
@@ -3340,12 +3354,22 @@ async function joinStream(eventId) {
   authToken = session.access_token;
 
   // Get a Daily.co token
-  const tokenRes = await fetch("/api/daily", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-    body: JSON.stringify({ action: "get-token", roomName: ev.daily_room_name, isOwner: isAdmin })
-  });
-  const result = await tokenRes.json();
+  let tokenRes, result;
+  try {
+    tokenRes = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+      body: JSON.stringify({ action: "get-token", roomName: ev.daily_room_name, isOwner: isAdmin })
+    });
+    if (!tokenRes.ok) {
+      alert(`Could not connect to the stream service (HTTP ${tokenRes.status}). The hosting provider may be having a temporary outage — please try again in a moment.`);
+      return false;
+    }
+    result = await tokenRes.json();
+  } catch (e) {
+    alert("Could not reach the stream service. Please check your connection and try again.");
+    return false;
+  }
   if (result.error || !result.token) {
     alert("Could not get stream token: " + JSON.stringify(result.error || "no token returned"));
     return false;
