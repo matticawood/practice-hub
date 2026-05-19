@@ -3843,19 +3843,30 @@ async function setupVodQaOverlay(ev) {
     ov.style.bottom = (controlsVisible ? BOTTOM_CONTROLS_SHOWN : BOTTOM_CONTROLS_HIDDEN) + "px";
   }
 
+  let _controlsHideTimer = null;
+  function onControlsChange(visible) {
+    clearTimeout(_controlsHideTimer);
+    if (visible) {
+      setOverlayBottom(true);
+    } else {
+      // Delay drop to match the controls fade-out animation (~400ms)
+      _controlsHideTimer = setTimeout(() => setOverlayBottom(false), 400);
+    }
+  }
+
   try {
     const controller = player.shadowRoot?.querySelector("media-controller");
     if (!controller) throw new Error("no controller");
     new MutationObserver(() => {
-      setOverlayBottom(!controller.hasAttribute("user-inactive"));
+      onControlsChange(!controller.hasAttribute("user-inactive"));
     }).observe(controller, { attributes: true, attributeFilter: ["user-inactive"] });
   } catch(e) {
     // Fallback: approximate with mouse events
     let hideTimer = null;
-    const show = () => { setOverlayBottom(true); clearTimeout(hideTimer); hideTimer = setTimeout(() => setOverlayBottom(false), 2500); };
+    const show = () => { onControlsChange(true); clearTimeout(hideTimer); hideTimer = setTimeout(() => onControlsChange(false), 2500); };
     player.addEventListener("mousemove",  show);
     player.addEventListener("touchstart", show);
-    player.addEventListener("mouseleave", () => { clearTimeout(hideTimer); setOverlayBottom(false); });
+    player.addEventListener("mouseleave", () => { clearTimeout(hideTimer); onControlsChange(false); });
   }
 
   // Fullscreen: mux-player's native fullscreen owns its own shadow DOM so our
@@ -3928,15 +3939,42 @@ async function setupVodQaOverlay(ev) {
       // Small delay — browser needs time to finish the fullscreen transition
       setTimeout(() => {
         positionVodOverlay(ov, true);
-        // Keep overlay in sync with controls visibility in fullscreen too
+
+        // Precompute the two bottom values for controls shown/hidden so we only
+        // need to update that one property on controls toggle (no full recalc)
+        const sw = screen.width, sh = screen.height;
+        const videoAspect = 16 / 9, screenAspect = sw / sh;
+        let renderH, offsetY;
+        if (videoAspect > screenAspect) {
+          renderH = sw / videoAspect; offsetY = (sh - renderH) / 2;
+        } else {
+          renderH = sh; offsetY = 0;
+        }
+        const bottomShown  = (offsetY + renderH * 0.07) + "px";
+        const bottomHidden = (offsetY + renderH * 0.02) + "px";
+
+        let _fsHideTimer = null;
+        function onFsControlsChange(visible) {
+          clearTimeout(_fsHideTimer);
+          if (visible) {
+            ov.style.setProperty("bottom", bottomShown,  "important");
+          } else {
+            _fsHideTimer = setTimeout(() => ov.style.setProperty("bottom", bottomHidden, "important"), 400);
+          }
+        }
+
         try {
           const ctrl = player.shadowRoot?.querySelector("media-controller");
-          if (ctrl) {
-            new MutationObserver(() => {
-              positionVodOverlay(ov, !ctrl.hasAttribute("user-inactive"));
-            }).observe(ctrl, { attributes: true, attributeFilter: ["user-inactive"] });
-          }
-        } catch(e) {}
+          if (!ctrl) throw new Error();
+          new MutationObserver(() => {
+            onFsControlsChange(!ctrl.hasAttribute("user-inactive"));
+          }).observe(ctrl, { attributes: true, attributeFilter: ["user-inactive"] });
+        } catch(e) {
+          let hideTimer = null;
+          const show = () => { onFsControlsChange(true); clearTimeout(hideTimer); hideTimer = setTimeout(() => onFsControlsChange(false), 2500); };
+          player.addEventListener("mousemove",  show);
+          player.addEventListener("touchstart", show);
+        }
       }, 150);
     } else if (wrap) {
       wrap.appendChild(ov);
