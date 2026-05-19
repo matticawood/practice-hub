@@ -732,6 +732,29 @@
     .chat-send-btn:hover { opacity: .85; }
     .chat-send-btn:disabled { opacity: .4; cursor: default; }
     .chat-send-btn svg { width: 16px; height: 16px; }
+
+    /* ── Image lightbox ── */
+    #chat-img-modal {
+      position: fixed; inset: 0; z-index: 9000;
+      background: rgba(0,0,0,.88);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity .18s ease;
+    }
+    #chat-img-modal.open { opacity: 1; pointer-events: all; }
+    #chat-img-modal img {
+      max-width: min(92vw, 1200px); max-height: 88vh;
+      border-radius: 10px; object-fit: contain;
+      box-shadow: 0 8px 48px rgba(0,0,0,.7);
+    }
+    #chat-img-modal-close {
+      position: absolute; top: 16px; right: 18px;
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 38px; height: 38px; cursor: pointer; color: #fff;
+      font-size: 1.3rem; display: flex; align-items: center; justify-content: center;
+      transition: background .15s;
+    }
+    #chat-img-modal-close:hover { background: rgba(255,255,255,.22); }
     .chat-toolbar-wrap { padding: 0 2px; }
     .chat-empty {
       flex: 1; display: flex; align-items: center; justify-content: center;
@@ -911,6 +934,12 @@
     <div class="mux-upload-overlay-status" id="mux-global-status">Starting…</div>
   </div>
 </div>
+<!-- Image lightbox modal -->
+<div id="chat-img-modal" onclick="_chatImgModalClose()">
+  <button id="chat-img-modal-close" onclick="_chatImgModalClose()" aria-label="Close">✕</button>
+  <img id="chat-img-modal-img" src="" alt="" onclick="event.stopPropagation()">
+</div>
+
 <script>
 // ── Real viewport height tracker ─────────────────────────────────────────────
 // On iOS Safari, CSS 100vh = large viewport (URL bar collapsed) which is bigger
@@ -2029,7 +2058,7 @@ function _renderCommentMedia(c) {
   if (images.length) {
     const cols = Math.min(images.length, 2);
     html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:6px">` +
-      images.map(m => `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" style="width:100%;height:${cols > 1 ? "180px" : "auto"};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};border-radius:8px;display:block;cursor:pointer" onclick="window.open('${escHtml(m.url)}','_blank')" loading="lazy">`).join("") +
+      images.map(m => `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" style="width:100%;height:${cols > 1 ? "180px" : "auto"};max-height:420px;object-fit:${cols > 1 ? "cover" : "contain"};border-radius:8px;display:block;cursor:pointer" onclick="_chatImgModalOpen('${escHtml(m.url)}')" loading="lazy">`).join("") +
       `</div>`;
   }
   others.forEach(m => {
@@ -2116,6 +2145,23 @@ async function uploadToStorage(blob, filename) {
 function escHtml(str) {
   return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
+
+// ── Image lightbox ────────────────────────────────────────────────────────────
+function _chatImgModalOpen(url) {
+  const modal = document.getElementById("chat-img-modal");
+  const img   = document.getElementById("chat-img-modal-img");
+  if (!modal || !img) { window.open(url, "_blank"); return; }
+  img.src = url;
+  modal.classList.add("open");
+  document.addEventListener("keydown", _chatImgModalKeyClose);
+}
+function _chatImgModalClose() {
+  const modal = document.getElementById("chat-img-modal");
+  if (modal) modal.classList.remove("open");
+  document.removeEventListener("keydown", _chatImgModalKeyClose);
+  setTimeout(() => { const img = document.getElementById("chat-img-modal-img"); if (img) img.src = ""; }, 200);
+}
+function _chatImgModalKeyClose(e) { if (e.key === "Escape") _chatImgModalClose(); }
 
 function initials(name) {
   if (!name) return "?";
@@ -2938,6 +2984,10 @@ function _scrollChatToBottom(instant) {
 // Send a message
 async function sendChatMessage() {
   if (!myEmail) return;
+  const sendBtn = document.getElementById("chat-send-btn");
+  if (sendBtn && sendBtn.disabled) return;
+  if (sendBtn) sendBtn.disabled = true;
+
   const input = document.getElementById("chat-input");
   const content = (input.value || "").trim();
 
@@ -2946,6 +2996,7 @@ async function sendChatMessage() {
     media = await _uploadInlineMedia("chat_main");
   } catch (e) {
     alert(e.message || "Upload error");
+    if (sendBtn) sendBtn.disabled = false;
     return;
   }
 
@@ -3009,6 +3060,7 @@ async function sendChatMessage() {
 
   // Refresh conversation list so new/updated convos always appear immediately
   _loadConversationsList();
+  if (sendBtn) sendBtn.disabled = false;
 }
 
 // Open a DM from a member card/name — called from existing member UI
