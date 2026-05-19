@@ -1901,6 +1901,21 @@ async function evSubmitReply(parentCommentId, textarea) {
 
   if (textarea) textarea.disabled = false;
   if (error) { alert("Couldn't post reply: " + error.message); return; }
+
+  // Notify the original commenter (unless replying to yourself)
+  const { data: parent } = await db.from("event_comments").select("email,name").eq("id", parentCommentId).single();
+  if (parent?.email && parent.email !== myEmail) {
+    const evTitle = currentEvent?.title || "an event";
+    await db.from("notifications").insert({
+      email:    parent.email,
+      type:     "comment_reply",
+      title:    `${myName || "Someone"} replied to your comment`,
+      body:     (content || "Sent an attachment").slice(0, 120),
+      link_url: `/events.html`,
+      metadata: { event_id: _currentEventId },
+    });
+  }
+
   _evClearState(parentCommentId);
   await loadComments(_currentEventId);
 }
@@ -2855,6 +2870,23 @@ async function startStream(eventId) {
 
     if (error) throw error;
     currentEvent = { ...currentEvent, status: "live", daily_room_name: room.roomName, daily_room_url: room.roomUrl };
+
+    // Notify everyone who RSVPed (except the host)
+    const { data: rsvps } = await db.from("event_rsvps").select("email").eq("event_id", eventId);
+    if (rsvps?.length) {
+      const evTitle = currentEvent?.title || "an event";
+      const notifs = rsvps
+        .filter(r => r.email && r.email.toLowerCase() !== myEmail.toLowerCase())
+        .map(r => ({
+          email:    r.email,
+          type:     "event_live",
+          title:    `${evTitle} is live now!`,
+          body:     "Join the session — it's happening right now.",
+          link_url: `/events.html`,
+          metadata: { event_id: eventId },
+        }));
+      if (notifs.length) await db.from("notifications").insert(notifs);
+    }
 
     const ok = await joinStream(eventId);
     if (!ok) {
