@@ -220,9 +220,11 @@
     .btn-link:hover { opacity: .8; }
     .mux-player-wrap { width: 100%; border-radius: var(--radius); overflow: hidden; }
     mux-player { width: 100%; display: block; background: transparent; --media-background-color: transparent; --media-object-fit: contain; }
-    /* Hide broken poster placeholder before Mux generates a thumbnail */
+    /* Hide broken poster/thumbnail until Mux finishes generating them */
     mux-player::part(poster) { background: var(--surface-2); }
-    mux-player::part(poster) img { display: none; }
+    mux-player::part(poster) img,
+    mux-player::part(thumbnail) img,
+    media-poster-image img { display: none !important; }
     /* Shared Mux upload overlay styles (global fixed bar) */
     .mux-upload-overlay-icon { font-size: 1.5rem; flex-shrink: 0; }
     .mux-upload-overlay-body { flex: 1; min-width: 0; }
@@ -1797,35 +1799,47 @@ async function renderDetailView(ev) {
     const starting = document.getElementById("live-preview-starting");
     let retryTimer = null;
 
+    const wrap = document.getElementById("live-preview-wrap");
+    const pid  = ev.mux_live_playback_id;
+
     function showStarting() {
       if (player)   player.style.display   = "none";
       if (starting) starting.style.display = "flex";
     }
-    function showPlayer() {
+    function showPlayer(p) {
       if (starting) starting.style.display = "none";
-      if (player)   player.style.display   = "block";
+      if (p) p.style.display = "block";
+    }
+    function spawnPlayer() {
+      // Fully replace the player element — attribute toggle doesn't work on iOS Safari
+      if (!wrap) return;
+      const old = document.getElementById("live-preview-player");
+      if (old) old.remove();
+      const p = document.createElement("mux-player");
+      p.id = "live-preview-player";
+      p.setAttribute("playback-id", pid);
+      p.setAttribute("stream-type", "live");
+      p.setAttribute("muted", "");
+      p.setAttribute("autoplay", "");
+      p.setAttribute("accent-color", "#c9a84c");
+      p.style.cssText = "width:100%;border-radius:var(--radius);display:block;--media-background-color:transparent;--media-object-fit:contain;";
+      attachPlayerListeners(p);
+      wrap.appendChild(p);
     }
     function scheduleRetry() {
       clearTimeout(retryTimer);
-      retryTimer = setTimeout(() => {
-        // Reload the player by toggling the playback-id attribute
-        if (player) {
-          const pid = player.getAttribute("playback-id");
-          player.removeAttribute("playback-id");
-          requestAnimationFrame(() => player.setAttribute("playback-id", pid));
-        }
-      }, 10000);
+      retryTimer = setTimeout(spawnPlayer, 10000);
+    }
+    function attachPlayerListeners(p) {
+      p.addEventListener("playing", () => { clearTimeout(retryTimer); showPlayer(p); });
+      p.addEventListener("error",   () => { showStarting(); scheduleRetry(); });
+      const stallTimer = setTimeout(() => {
+        if (p.readyState === 0) { showStarting(); scheduleRetry(); }
+      }, 12000);
+      p.addEventListener("canplay", () => clearTimeout(stallTimer));
     }
 
-    if (player) {
-      player.addEventListener("playing", () => { clearTimeout(retryTimer); showPlayer(); });
-      player.addEventListener("error",   () => { showStarting(); scheduleRetry(); });
-      // If player stalls immediately (no canplay within 12s), assume stream not started
-      const stallTimer = setTimeout(() => {
-        if (player.readyState === 0) { showStarting(); scheduleRetry(); }
-      }, 12000);
-      player.addEventListener("canplay", () => clearTimeout(stallTimer));
-    }
+    if (player) attachPlayerListeners(player);
   }
 
   // For ended events without a recording yet, watch for the webhook to populate it
