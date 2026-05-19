@@ -2452,16 +2452,30 @@ let _chatHasMore     = false;         // whether older messages exist beyond cur
 let _chatLoadingMore = false;         // guard against concurrent load-more requests
 const CHAT_PAGE_SIZE = 50;            // messages per page
 let _chatUnreadCounts = {};           // chat_id → unread count
+let _chatReadsCache   = {};           // chat_id → last_read_at ISO string (in-memory mirror of DB)
+let _chatReadsLoaded  = false;        // true once we've fetched from DB at least once
 
-// ── Read-tracking (localStorage) ─────────────────────────────────────────────
-function _getChatReads() {
-  try { return JSON.parse(localStorage.getItem(`chatReads_${myEmail}`) || "{}"); } catch { return {}; }
+// ── Read-tracking (DB-backed, cross-device) ───────────────────────────────────
+async function _loadChatReads() {
+  if (!myEmail) return;
+  const { data } = await db.from("community_chat_reads")
+    .select("chat_id, last_read_at")
+    .eq("email", myEmail);
+  _chatReadsCache = {};
+  (data || []).forEach(r => { _chatReadsCache[r.chat_id] = r.last_read_at; });
+  _chatReadsLoaded = true;
 }
+
 function _markChatRead(chatId) {
-  const reads = _getChatReads();
-  reads[chatId] = new Date().toISOString();
-  try { localStorage.setItem(`chatReads_${myEmail}`, JSON.stringify(reads)); } catch {}
+  const now = new Date().toISOString();
+  _chatReadsCache[chatId] = now;
+  // Fire-and-forget upsert — keeps DB in sync for other devices
+  db.from("community_chat_reads").upsert(
+    { email: myEmail, chat_id: chatId, last_read_at: now },
+    { onConflict: "email,chat_id" }
+  ).then(() => {});
 }
+
 function _updateChatHeaderBadge() {
   const total = Object.values(_chatUnreadCounts).reduce((a, b) => a + b, 0);
   const badge = document.getElementById("chat-unread-badge");
@@ -2618,8 +2632,9 @@ async function _loadConversationsList() {
   const myRoomIds = new Set((participantRows || []).map(r => r.room_id));
 
   // 3. Deduplicate by chat_id — keep first (most recent) occurrence
-  //    Also count unread messages using localStorage read timestamps
-  const reads = _getChatReads();
+  //    Also count unread messages using DB-backed read timestamps
+  if (!_chatReadsLoaded) await _loadChatReads();
+  const reads = _chatReadsCache;
   const unreadTally = {}; // chat_id → count (from fetched msgs)
   const seen = new Map(); // chat_id -> msg
   for (const msg of (msgs || [])) {
