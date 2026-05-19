@@ -1440,6 +1440,8 @@ let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
 let _chatUnread         = 0;
 let _qaUnread           = 0;
 let _typingTimeout      = null;
+let _typingUsers        = {};   // email → name (currently typing)
+let _typingClearTimers  = {};   // email → setTimeout handle
 let currentEvtTab = "upcoming";
 let qaChannel    = null;
 let countdownInterval = null;
@@ -3418,11 +3420,29 @@ function setupRealtimeStream(ev) {
       () => loadComments(ev.id))
     .subscribe();
 
-  // Subscribe to new chat messages + presence (typing indicators)
-  chatChannel = db.channel(`event-chat-${ev.id}`, { config: { presence: { key: myEmail } } })
+  // Subscribe to new chat messages + broadcast (typing indicators)
+  chatChannel = db.channel(`event-chat-${ev.id}`, {
+    config: { broadcast: { self: false } }
+  })
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_chat",
       filter: `event_id=eq.${ev.id}` }, p => appendChatMsg(p.new))
-    .on("presence", { event: "sync" }, updateTypingIndicator)
+    .on("broadcast", { event: "typing" }, ({ payload }) => {
+      if (!payload?.email || payload.email === myEmail) return;
+      if (payload.typing) {
+        _typingUsers[payload.email] = payload.name || "Someone";
+        clearTimeout(_typingClearTimers[payload.email]);
+        _typingClearTimers[payload.email] = setTimeout(() => {
+          delete _typingUsers[payload.email];
+          delete _typingClearTimers[payload.email];
+          updateTypingIndicator();
+        }, 3000);
+      } else {
+        clearTimeout(_typingClearTimers[payload.email]);
+        delete _typingUsers[payload.email];
+        delete _typingClearTimers[payload.email];
+      }
+      updateTypingIndicator();
+    })
     .subscribe();
 
   // Subscribe to new Q&A / updates
@@ -3500,24 +3520,20 @@ function appendChatMsg(msg, skipUnread = false) {
 
 function onChatTyping() {
   if (!chatChannel) return;
-  chatChannel.track({ typing: true, name: myName || myEmail });
+  chatChannel.send({ type: "broadcast", event: "typing",
+    payload: { email: myEmail, name: myName || myEmail, typing: true } });
   clearTimeout(_typingTimeout);
   _typingTimeout = setTimeout(() => {
-    if (chatChannel) chatChannel.track({ typing: false, name: myName || myEmail });
+    if (chatChannel) chatChannel.send({ type: "broadcast", event: "typing",
+      payload: { email: myEmail, name: myName || myEmail, typing: false } });
   }, 2500);
 }
 
 function updateTypingIndicator() {
   const el = document.getElementById("chat-typing");
-  if (!el || !chatChannel) return;
-  // Presence state is keyed by the presence key (myEmail for this client)
-  // so filtering out our own key cleanly excludes us
-  const typers = Object.entries(chatChannel.presenceState())
-    .filter(([key]) => key !== myEmail)
-    .flatMap(([, vals]) => vals)
-    .filter(p => p.typing);
-  if (!typers.length) { el.style.display = "none"; return; }
-  const names = [...new Set(typers.map(p => (p.name || "Someone").split(" ")[0]))].slice(0, 2);
+  if (!el) return;
+  const names = Object.values(_typingUsers).map(n => n.split(" ")[0]).slice(0, 2);
+  if (!names.length) { el.style.display = "none"; return; }
   el.textContent = names.length === 1 ? `${names[0]} is typing…` : `${names.join(" & ")} are typing…`;
   el.style.display = "block";
 }
@@ -3529,7 +3545,8 @@ async function sendChat() {
   input.value = "";
   // Clear typing indicator
   clearTimeout(_typingTimeout);
-  if (chatChannel) chatChannel.track({ typing: false, name: myName || myEmail });
+  if (chatChannel) chatChannel.send({ type: "broadcast", event: "typing",
+    payload: { email: myEmail, name: myName || myEmail, typing: false } });
   await db.from("event_chat").insert({
     event_id: currentEvent.id, email: myEmail, name: myName, message
   });
