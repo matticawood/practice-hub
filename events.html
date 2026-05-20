@@ -1844,6 +1844,39 @@ let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage
 let _recordingWatcher   = null;
 let _recordingPoller    = null;
 let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
+let _wmBgCache          = null; // cached watermark background CSS (built once)
+
+// Returns the background CSS value for the diagonal "The Practice Room" watermark.
+// Measures text via a real SVG element so metrics exactly match the data-URI render.
+function _getWatermarkBg() {
+  if (_wmBgCache) return _wmBgCache;
+  const _unit = "The Practice Room  •  ";
+  const _ms   = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  _ms.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;";
+  const _mt   = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  _mt.setAttribute("font-family", "system-ui,-apple-system,sans-serif");
+  _mt.setAttribute("font-size",   "13");
+  _mt.setAttribute("font-weight", "700");
+  _mt.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
+  _mt.textContent = _unit;
+  _ms.appendChild(_mt);
+  document.body.appendChild(_ms);
+  const _U = Math.ceil(_mt.getComputedTextLength());
+  document.body.removeChild(_ms);
+  const _W    = Math.round(_U * Math.cos(22 * Math.PI / 180));
+  const _H    = Math.round(_U * Math.sin(22 * Math.PI / 180));
+  const _line = _unit.repeat(8);
+  const _attr = `font-family='system-ui,-apple-system,sans-serif' font-size='13' ` +
+    `font-weight='700' fill='rgba(245,197,24,0.15)' xml:space='preserve'`;
+  const _svg  =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='${_W}' height='${_H * 2}'>` +
+    `<text x='${-_U}' y='${_H}'     transform='rotate(-22 0 ${_H})'     ${_attr}>${_line}</text>` +
+    `<text x='${-_U}' y='${_H * 2}' transform='rotate(-22 0 ${_H * 2})' ${_attr}>${_line}</text>` +
+    `</svg>`;
+  const _url  = `url("data:image/svg+xml,${encodeURIComponent(_svg)}")`;
+  _wmBgCache  = `#0f0e0c ${_url} repeat`;
+  return _wmBgCache + `;background-size:${_W}px ${_H * 2}px`;
+}
 let _chatUnread         = 0;
 let _qaUnread           = 0;
 let _typingTimeout      = null;
@@ -1967,6 +2000,11 @@ function showView(name) {
   }
   if (name === "detail" && currentEvent) {
     renderDetailView(currentEvent);
+  }
+  if (name === "stream") {
+    // Apply the same watermark background to the viewer video column
+    const _svc = document.getElementById("stream-video-col");
+    if (_svc) { _svc.style.background = _getWatermarkBg(); }
   }
   window.scrollTo(0, 0);
 }
@@ -5757,41 +5795,9 @@ function _renderBsGrid(call) {
     // no mid-word break regardless of viewport width or browser font metrics.
     // Letter-spacing is omitted so canvas measureText matches SVG rendering exactly.
     // Two lines per tile (each corner-to-corner in its own H-tall half) for density.
-    const _wmUnit = "The Practice Room  •  ";
-    // Measure via a real SVG text node (xml:space=preserve so spaces aren't
-    // trimmed) to get the exact width the browser uses in the data-URI SVG.
-    // Result is cached on the container so it only runs once per backstage session.
-    let _U = container._wmUnitPx;
-    if (!_U) {
-      const _mSvg  = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      _mSvg.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;";
-      const _mTxt = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      _mTxt.setAttribute("font-family", "system-ui,-apple-system,sans-serif");
-      _mTxt.setAttribute("font-size",   "13");
-      _mTxt.setAttribute("font-weight", "700");
-      _mTxt.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
-      _mTxt.textContent = _wmUnit;
-      _mSvg.appendChild(_mTxt);
-      document.body.appendChild(_mSvg);
-      _U = container._wmUnitPx = Math.ceil(_mTxt.getComputedTextLength());
-      document.body.removeChild(_mSvg);
-    }
-    const _W  = Math.round(_U * Math.cos(22 * Math.PI / 180));
-    const _H  = Math.round(_U * Math.sin(22 * Math.PI / 180));
-    const _wmLine = _wmUnit.repeat(8);
-    // xml:space='preserve' prevents SVG from collapsing the trailing spaces in
-    // each unit, keeping the bullet gap consistent across tile boundaries.
-    const _wmAttr = `font-family='system-ui,-apple-system,sans-serif' font-size='13' ` +
-      `font-weight='700' fill='rgba(245,197,24,0.15)' xml:space='preserve'`;
-    const _wmSvg  =
-      `<svg xmlns='http://www.w3.org/2000/svg' width='${_W}' height='${_H * 2}'>` +
-      `<text x='${-_U}' y='${_H}'     transform='rotate(-22 0 ${_H})'     ${_wmAttr}>${_wmLine}</text>` +
-      `<text x='${-_U}' y='${_H * 2}' transform='rotate(-22 0 ${_H * 2})' ${_wmAttr}>${_wmLine}</text>` +
-      `</svg>`;
-    const _wmUrl = `url("data:image/svg+xml,${encodeURIComponent(_wmSvg)}")`;
     grid.style.cssText =
       "position:absolute;inset:0;display:grid;gap:4px;padding:4px;" +
-      `background:#0f0e0c ${_wmUrl} repeat;background-size:${_W}px ${_H * 2}px;` +
+      `background:${_getWatermarkBg()};` +
       "border-radius:inherit;overflow:hidden;" +
       "transition:grid-template-columns .35s ease,grid-template-rows .35s ease;";
     container.appendChild(grid);
