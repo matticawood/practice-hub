@@ -1303,9 +1303,10 @@
         <!-- Chat panel -->
         <div id="backstage-panel-chat" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
           <div id="backstage-chat-messages"></div>
-          <div id="backstage-chat-typing"></div>
+          <div id="backstage-chat-typing" style="display:none"></div>
           <div class="chat-input-row">
             <input id="backstage-chat-input" placeholder="Say something…" maxlength="300"
+              oninput="onChatTyping()"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendBackstageChat()}" />
             <button class="btn btn-primary btn-sm" onclick="sendBackstageChat()">Send</button>
           </div>
@@ -1313,8 +1314,10 @@
         <!-- Q&A panel -->
         <div id="backstage-panel-qa" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
           <div id="backstage-qa-list"></div>
+          <div id="backstage-qa-typing" style="display:none"></div>
           <div class="qa-input-row">
             <input id="backstage-qa-input" placeholder="Ask a question…" maxlength="400"
+              oninput="onQATyping()"
               onkeydown="if(event.key==='Enter'){event.preventDefault();submitBackstageQA()}" />
             <button class="btn btn-primary btn-sm" onclick="submitBackstageQA()">Ask</button>
           </div>
@@ -1896,6 +1899,8 @@ function showView(name) {
       try { _cf.leave(); }   catch(e) {}
       try { _cf.destroy(); } catch(e) {}
     }
+    window._viewerSyncGrid = null;
+    window._viewerLayout   = null;
   }
   if (name !== "backstage") {
     // Clean up backstage channels and call object
@@ -4100,54 +4105,112 @@ async function joinStream(eventId, options = {}) {
 
     } else {
       // ── VIEWER: headless call object — no Daily.co UI whatsoever ───────────
-      // Build the video + audio elements first
       container.innerHTML = `
-        <video id="viewer-video" autoplay playsinline
-          style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:#000;border-radius:var(--radius)">
-        </video>
+        <div id="viewer-grid" style="position:absolute;inset:0;display:flex;flex-wrap:wrap;
+          background:#000;border-radius:var(--radius);overflow:hidden;align-content:center;
+          justify-content:center;gap:2px;"></div>
         <audio id="viewer-audio" autoplay></audio>
-        <div id="viewer-waiting" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-muted);pointer-events:none;">
-          <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.3"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        <div id="viewer-waiting" style="position:absolute;inset:0;display:flex;align-items:center;
+          justify-content:center;color:var(--text-muted);pointer-events:none;">
+          <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.3">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2"/>
+          </svg>
         </div>`;
 
       const call = DailyIframe.createCallObject({ videoSource: false, audioSource: false });
       window._callFrame = call;
 
+      // Track current layout so layout-change app-messages can re-render the grid
+      window._viewerLayout = { preset: "default", session_id: null };
+
       await call.join({ url: ev.daily_room_url, token: result.token });
 
-      // Wire up remote tracks to our video/audio elements
-      function syncTracks() {
-        const videoEl = document.getElementById("viewer-video");
+      // Build/update one <video> tile per visible remote participant.
+      // Each tile is keyed by session_id so we only create/destroy when membership changes.
+      function syncGrid() {
+        const grid   = document.getElementById("viewer-grid");
         const audioEl = document.getElementById("viewer-audio");
         const waitEl  = document.getElementById("viewer-waiting");
-        if (!videoEl) return;
+        if (!grid) return;
 
-        const videoTracks = [], audioTracks = [];
-        Object.values(call.participants()).forEach(p => {
-          if (p.local) return;
-          const vt = p.tracks?.video?.persistentTrack;
-          const at = p.tracks?.audio?.persistentTrack;
-          if (vt && p.tracks.video.state === "playable") videoTracks.push(vt);
-          if (at && p.tracks.audio.state === "playable") audioTracks.push(at);
-        });
+        const allRemote = Object.values(call.participants()).filter(p => !p.local);
 
-        if (videoTracks.length) {
-          videoEl.srcObject = new MediaStream(videoTracks);
-          if (waitEl) waitEl.style.display = "none";
-        } else {
-          videoEl.srcObject = null;
-          if (waitEl) waitEl.style.display = "flex";
-        }
-        if (audioTracks.length && audioEl) {
+        // ── Audio: mix all remote tracks into one <audio> element ──────────
+        const audioTracks = allRemote
+          .map(p => p.tracks?.audio?.persistentTrack)
+          .filter(t => t);
+        if (audioEl && audioTracks.length) {
           audioEl.srcObject = new MediaStream(audioTracks);
         }
+
+        // ── Determine visible participants based on current layout ──────────
+        const layout = window._viewerLayout || { preset: "default", session_id: null };
+        let visible;
+        if (layout.preset === "single-participant" && layout.session_id) {
+          // Spotlight: show only the spotlighted participant (fall back to all if not found)
+          const spotlit = allRemote.find(p => p.session_id === layout.session_id);
+          visible = spotlit ? [spotlit] : allRemote;
+        } else {
+          // Gallery / default: show everyone with a playable video track
+          visible = allRemote.filter(p =>
+            p.tracks?.video?.persistentTrack && p.tracks.video.state === "playable"
+          );
+        }
+
+        // ── Sync tiles ──────────────────────────────────────────────────────
+        // Index existing tiles by session_id
+        const existingTiles = new Map();
+        grid.querySelectorAll("[data-sid]").forEach(el => existingTiles.set(el.dataset.sid, el));
+
+        const visibleIds = new Set(visible.map(p => p.session_id));
+
+        // Remove tiles for participants no longer visible
+        existingTiles.forEach((el, sid) => {
+          if (!visibleIds.has(sid)) { el.remove(); }
+        });
+
+        // Add or update tiles for visible participants
+        visible.forEach(p => {
+          const vt = p.tracks?.video?.persistentTrack;
+          if (!vt || p.tracks.video.state !== "playable") return;
+
+          if (existingTiles.has(p.session_id)) {
+            // Update srcObject if the track changed
+            const vid = existingTiles.get(p.session_id).querySelector("video");
+            if (vid && (!vid.srcObject || !vid.srcObject.getVideoTracks().includes(vt))) {
+              vid.srcObject = new MediaStream([vt]);
+            }
+            return;
+          }
+
+          // Create new tile
+          const tile = document.createElement("div");
+          tile.dataset.sid  = p.session_id;
+          tile.style.cssText = "flex:1;min-width:240px;min-height:135px;background:#111;position:relative;";
+          const vid = document.createElement("video");
+          vid.autoplay     = true;
+          vid.playsInline  = true;
+          vid.style.cssText = "width:100%;height:100%;object-fit:contain;display:block;";
+          vid.srcObject    = new MediaStream([vt]);
+          tile.appendChild(vid);
+          grid.appendChild(tile);
+        });
+
+        // Show/hide waiting overlay
+        const hasVideo = grid.querySelectorAll("[data-sid]").length > 0;
+        if (waitEl) waitEl.style.display = hasVideo ? "none" : "flex";
       }
 
-      call.on("track-started",        syncTracks);
-      call.on("track-stopped",        syncTracks);
-      call.on("participant-joined",   syncTracks);
-      call.on("participant-updated",  syncTracks);
-      call.on("participant-left",     syncTracks);
+      // Expose so _handleAppMessage can trigger a re-render on layout changes
+      window._viewerSyncGrid = syncGrid;
+
+      call.on("track-started",        syncGrid);
+      call.on("track-stopped",        syncGrid);
+      call.on("participant-joined",   syncGrid);
+      call.on("participant-updated",  syncGrid);
+      call.on("participant-left",     syncGrid);
 
       // Announce ourselves to the host so we appear in the People tab
       call.on("joined-meeting", async () => {
@@ -4164,6 +4227,8 @@ async function joinStream(eventId, options = {}) {
       call.on("app-message", _handleAppMessage);
 
       call.on("left-meeting", () => {
+        window._viewerSyncGrid = null;
+        window._viewerLayout   = null;
         if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
         const c = document.getElementById("daily-container");
         if (c) c.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;"><p style="color:var(--text-muted)">You left the stream.</p><button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button></div>`;
@@ -4452,12 +4517,17 @@ function stopTypingBroadcast() {
 }
 
 function updateTypingIndicator() {
-  const el = document.getElementById("chat-typing");
-  if (!el) return;
   const names = Object.values(_typingUsers).map(n => n.split(" ")[0]).slice(0, 2);
-  if (!names.length) { el.style.display = "none"; return; }
-  el.textContent = names.length === 1 ? `${names[0]} is typing…` : `${names.join(" & ")} are typing…`;
-  el.style.display = "block";
+  const text = names.length === 0 ? ""
+    : names.length === 1 ? `${names[0]} is typing…`
+    : `${names.join(" & ")} are typing…`;
+  // Update both stream chat and backstage chat typing divs
+  ["chat-typing", "backstage-chat-typing"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.style.display = text ? "block" : "none";
+  });
 }
 
 function onQATyping() {
@@ -4482,12 +4552,17 @@ function stopQATypingBroadcast() {
 }
 
 function updateQATypingIndicator() {
-  const el = document.getElementById("qa-typing");
-  if (!el) return;
   const names = Object.values(_qaTypingUsers).map(n => n.split(" ")[0]).slice(0, 2);
-  if (!names.length) { el.style.display = "none"; return; }
-  el.textContent = names.length === 1 ? `${names[0]} is typing…` : `${names.join(" & ")} are typing…`;
-  el.style.display = "block";
+  const text = names.length === 0 ? ""
+    : names.length === 1 ? `${names[0]} is typing…`
+    : `${names.join(" & ")} are typing…`;
+  // Update both stream Q&A and backstage Q&A typing divs
+  ["qa-typing", "backstage-qa-typing"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.style.display = text ? "block" : "none";
+  });
 }
 
 async function sendChat() {
@@ -5151,6 +5226,50 @@ function _initBsChat(eventId) {
       const { data } = await db.from("event_chat").select("*").eq("event_id", eventId).order("created_at");
       if (data) data.forEach(m => _bsAppendChatMsg(m, true));
     });
+
+  // Set up the shared typing broadcast channel so onChatTyping() / onQATyping()
+  // work from backstage. Uses the same channel name as the stream view so
+  // typing indicators are visible across both backstage and stream participants.
+  if (!typingChannel) {
+    typingChannel = db.channel(`event-typing-${eventId}`, {
+      config: { broadcast: { self: false } }
+    })
+    .on("broadcast", { event: "typing" }, ({ payload }) => {
+      if (!payload?.email || payload.email === myEmail) return;
+      if (payload.typing) {
+        _typingUsers[payload.email] = payload.name || "Someone";
+        clearTimeout(_typingClearTimers[payload.email]);
+        _typingClearTimers[payload.email] = setTimeout(() => {
+          delete _typingUsers[payload.email];
+          delete _typingClearTimers[payload.email];
+          updateTypingIndicator();
+        }, 4000);
+      } else {
+        clearTimeout(_typingClearTimers[payload.email]);
+        delete _typingUsers[payload.email];
+        delete _typingClearTimers[payload.email];
+      }
+      updateTypingIndicator();
+    })
+    .on("broadcast", { event: "qa-typing" }, ({ payload }) => {
+      if (!payload?.email || payload.email === myEmail) return;
+      if (payload.typing) {
+        _qaTypingUsers[payload.email] = payload.name || "Someone";
+        clearTimeout(_qaTypingClearTimers[payload.email]);
+        _qaTypingClearTimers[payload.email] = setTimeout(() => {
+          delete _qaTypingUsers[payload.email];
+          delete _qaTypingClearTimers[payload.email];
+          updateQATypingIndicator();
+        }, 4000);
+      } else {
+        clearTimeout(_qaTypingClearTimers[payload.email]);
+        delete _qaTypingUsers[payload.email];
+        delete _qaTypingClearTimers[payload.email];
+      }
+      updateQATypingIndicator();
+    })
+    .subscribe();
+  }
 }
 
 // Same rendering style as appendChatMsg (avatars, dedup, .chat-msg classes)
@@ -5189,6 +5308,8 @@ async function sendBackstageChat() {
   const text = input.value.trim();
   if (!text || !currentEvent) return;
   input.value = "";
+  clearTimeout(_typingTimeout);
+  stopTypingBroadcast();
   const name = myName || myEmail?.split("@")[0] || "Host";
   await db.from("event_chat").insert({
     event_id: currentEvent.id, email: myEmail, name, message: text
@@ -5201,6 +5322,8 @@ async function submitBackstageQA() {
   const question = input.value.trim();
   if (!question || !currentEvent) return;
   input.value = "";
+  clearTimeout(_qaTypingTimeout);
+  stopQATypingBroadcast();
   const name = myName || myEmail?.split("@")[0] || "Host";
   await db.from("event_qa").insert({
     event_id: currentEvent.id, email: myEmail, name, question
@@ -6419,6 +6542,10 @@ function _handleAppMessage(e) {
     _refreshPeopleTab();
   } else if (msg.type === "stage-invite") {
     showStageInviteBanner(msg.fromName || "Host", msg.eventId, msg.cohostToken, msg.roomUrl);
+  } else if (msg.type === "layout-change") {
+    // Mirror the host's layout choice in the viewer's multi-tile grid
+    window._viewerLayout = { preset: msg.preset || "default", session_id: msg.session_id || null };
+    if (window._viewerSyncGrid) window._viewerSyncGrid();
   }
 }
 
