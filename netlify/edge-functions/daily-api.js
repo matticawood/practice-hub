@@ -612,6 +612,14 @@ export default async (request) => {
     const nameRows = await nameRes.json();
     const displayName = nameRows?.[0]?.name || userEmail.split("@")[0];
 
+    // Fetch the room to get its canonical URL (avoids hardcoding the Daily.co domain)
+    const roomRes = await fetch(`https://api.daily.co/v1/rooms/${backstageRoomName}`, {
+      headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+    });
+    const roomData = await roomRes.json();
+    if (!roomRes.ok) return json({ error: "Backstage room not found — please ask the host to open Backstage first." }, 404);
+    const roomUrl = roomData.url;
+
     const res = await fetch("https://api.daily.co/v1/meeting-tokens", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
@@ -628,7 +636,7 @@ export default async (request) => {
     });
     const data = await res.json();
     if (!res.ok) return json({ error: data }, res.status);
-    return json({ token: data.token, roomName: backstageRoomName });
+    return json({ token: data.token, roomName: backstageRoomName, roomUrl });
   }
 
   return json({ error: "Unknown action" }, 400);
