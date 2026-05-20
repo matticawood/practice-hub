@@ -796,6 +796,7 @@ export default async (request) => {
         properties: {
           room_name:             roomName,
           user_name:             displayName,
+          user_id:               userEmail,   // exposed as p.user_id — used for avatar lookup
           is_owner:              grantedOwner,
           // Show the device-picker prejoin screen for cohosts (viewers invited to stage)
           // so they can select camera/mic before appearing. Skip it for the host (already set up)
