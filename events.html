@@ -796,8 +796,11 @@
     .qa-item {
       background: var(--surface-2); border-radius: 8px; padding: 10px 12px;
       border: 1px solid var(--border);
+      display: flex; gap: 8px; align-items: flex-start;
     }
     .qa-item.featured { border-color: var(--accent); background: #1a1200; }
+    .qa-item-av { flex-shrink: 0; margin-top: 1px; }
+    .qa-item-body { flex: 1; min-width: 0; }
     .qa-item-asker { font-size: 0.75rem; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
     .qa-item-text  { font-size: 0.88rem; color: var(--text); line-height: 1.4; }
     .qa-item-actions {
@@ -4801,6 +4804,7 @@ function buildQAEl(q) {
   const div = document.createElement("div");
   div.className = "qa-item" + (q.is_featured ? " featured" : "");
   div.dataset.id = q.id;
+  div.dataset.email = q.email || "";
   let actions = "";
   const svgStar     = `<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
   const svgStarOut  = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
@@ -4816,11 +4820,32 @@ function buildQAEl(q) {
       </button>
     </div>`;
   }
+
+  // Avatar — use shared stream cache, fetch if not yet cached
+  const displayName = q.name || q.email?.split("@")[0] || "Anonymous";
+  const cachedUrl = q.email ? (_streamAvatarCache[q.email] ?? null) : null;
+  const av = avatarHtml(displayName, q.email || "", 26, cachedUrl);
+  if (q.email && !_streamAvatarCache.hasOwnProperty(q.email)) {
+    _streamAvatarCache[q.email] = null; // mark as fetching
+    db.from("allowed_emails").select("avatar_url").eq("email", q.email).maybeSingle()
+      .then(({ data }) => {
+        _streamAvatarCache[q.email] = data?.avatar_url || null;
+        if (data?.avatar_url) {
+          document.querySelectorAll(`.qa-item[data-email="${CSS.escape(q.email)}"] .qa-item-av`).forEach(avEl => {
+            avEl.outerHTML = `<span class="qa-item-av">${avatarHtml(displayName, q.email, 26, data.avatar_url)}</span>`;
+          });
+        }
+      });
+  }
+
   div.innerHTML = `
-    <div class="qa-item-asker">${esc(q.name || q.email?.split("@")[0] || "Anonymous")}</div>
-    <div class="qa-item-text">${esc(q.question)}</div>
-    ${q.answered ? `<div style="font-size:.72rem;color:var(--accent);margin-top:4px;display:flex;align-items:center;gap:4px">${svgCheck} Answered</div>` : ""}
-    ${actions}
+    <span class="qa-item-av">${av}</span>
+    <div class="qa-item-body">
+      <div class="qa-item-asker">${esc(displayName)}</div>
+      <div class="qa-item-text">${esc(q.question)}</div>
+      ${q.answered ? `<div style="font-size:.72rem;color:var(--accent);margin-top:4px;display:flex;align-items:center;gap:4px">${svgCheck} Answered</div>` : ""}
+      ${actions}
+    </div>
   `;
   return div;
 }
