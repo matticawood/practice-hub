@@ -5278,9 +5278,18 @@ async function _endStreamFromBackstage() {
     const { data: { session } } = await db.auth.getSession();
     if (session) authToken = session.access_token;
 
+    // Stop the RTMP stream from Daily
     if (window._backstageCall) {
       try { await window._backstageCall.stopLiveStreaming(); } catch(e) {}
     }
+
+    // Signal Mux to complete the live stream → triggers VOD creation via new_asset_settings
+    // This is what populates mux_playback_id and clears "recording is processing"
+    fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+      body: JSON.stringify({ action: "delete-mux-livestream", eventId: currentEvent.id })
+    }).catch(e => console.warn("delete-mux-livestream:", e));
 
     await db.from("live_events").update({ status: "ended" }).eq("id", currentEvent.id);
     currentEvent = { ...currentEvent, status: "ended" };
