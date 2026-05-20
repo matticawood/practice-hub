@@ -1247,10 +1247,25 @@
         <!-- Guests panel -->
         <div id="backstage-panel-guests">
           <div id="backstage-guest-list"></div>
-          <div class="backstage-invite-row" id="backstage-invite-row" style="display:none">
-            <input id="backstage-invite-input" placeholder="Invite by email…" type="email"
-              onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToBackstage()}" />
-            <button class="btn btn-sm btn-primary" onclick="inviteToBackstage()">Invite</button>
+          <div class="backstage-invite-row" id="backstage-invite-row" style="display:none;flex-direction:column;gap:6px">
+            <div style="display:flex;gap:6px">
+              <input id="backstage-invite-email" placeholder="Email address…" type="email"
+                style="flex:1;min-width:0"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToBackstage()}" />
+              <input id="backstage-invite-name" placeholder="Name" type="text"
+                style="flex:0 0 100px;min-width:0"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToBackstage()}" />
+              <button class="btn btn-sm btn-primary" onclick="inviteToBackstage()">Invite</button>
+            </div>
+            <!-- Shown after a non-member invite is created -->
+            <div id="backstage-invite-link-wrap" style="display:none;flex-direction:column;gap:4px;padding:8px 10px;background:var(--surface);border-radius:6px;border:1px solid var(--border)">
+              <span style="font-size:.72rem;color:var(--text-muted)">Email sent! Backup invite link:</span>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input id="backstage-invite-link-input" readonly
+                  style="flex:1;font-size:.7rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text-muted);min-width:0" />
+                <button class="btn btn-sm btn-ghost" onclick="copyBackstageLink()" style="flex-shrink:0">Copy</button>
+              </div>
+            </div>
           </div>
         </div>
         <!-- Q&A panel (host view with moderation) -->
@@ -1284,6 +1299,21 @@
       <!-- Video col -->
       <div id="stream-video-col">
         <div class="video-ratio-wrap" id="daily-container"></div>
+        <!-- Stage invite banner — shown to viewers when host invites them up -->
+        <div id="stage-invite-banner" style="display:none;position:absolute;bottom:64px;left:50%;transform:translateX(-50%);background:rgba(15,15,15,.96);border:1.5px solid var(--accent);border-radius:var(--radius);padding:18px 24px;z-index:20;text-align:center;min-width:280px;max-width:90%;box-shadow:0 8px 32px rgba(0,0,0,.6)">
+          <div style="font-weight:700;margin-bottom:4px;color:var(--text);font-size:.95rem">You're invited to speak!</div>
+          <div id="stage-invite-from" style="font-size:.82rem;color:var(--text-muted);margin-bottom:14px"></div>
+          <div style="display:flex;gap:8px;justify-content:center">
+            <button class="btn btn-primary btn-sm" onclick="acceptStageInvite()">Accept</button>
+            <button class="btn btn-ghost btn-sm" onclick="declineStageInvite()">Decline</button>
+          </div>
+        </div>
+        <!-- On-deck banner — shown after accepting a stage invite -->
+        <div id="on-deck-banner" style="display:none;position:absolute;bottom:64px;left:50%;transform:translateX(-50%);background:rgba(15,15,15,.96);border:1.5px solid #22c55e;border-radius:var(--radius);padding:12px 20px;z-index:20;align-items:center;gap:10px;min-width:240px;max-width:90%;box-shadow:0 8px 32px rgba(0,0,0,.6)">
+          <span style="color:#22c55e">●</span>
+          <span style="font-size:.83rem;color:var(--text);flex:1">You're on deck — the host can spotlight you at any time</span>
+          <button onclick="this.closest('#on-deck-banner').style.display='none'" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.2rem;line-height:1;padding:0;flex-shrink:0" title="Dismiss">×</button>
+        </div>
         <!-- Landscape fullscreen toggle -->
         <button id="stream-fullscreen-btn" onclick="toggleStreamSidebar()" title="Toggle chat">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -1313,6 +1343,11 @@
             Questions
             <span class="sid-tab-badge" id="qa-badge"></span>
           </button>
+          <button class="sid-tab" id="sid-tab-people" onclick="showSidebarTab('people', this)">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            People
+            <span class="sid-tab-badge" id="people-badge"></span>
+          </button>
         </div>
         <!-- Chat panel -->
         <div id="sidebar-chat" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
@@ -1335,6 +1370,10 @@
               onkeydown="if(event.key==='Enter'){event.preventDefault();submitQA()}" />
             <button class="btn btn-primary btn-sm" onclick="submitQA()">Ask</button>
           </div>
+        </div>
+        <!-- People panel — shows all call participants (host only sees Invite to Stage / Spotlight) -->
+        <div id="sidebar-people" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+          <div id="people-list" style="flex:1;overflow-y:auto;padding:8px 0;"></div>
         </div>
       </div>
     </div>
@@ -1700,6 +1739,8 @@ let discussionChannel   = null;   // event_comments + poll_votes listener
 let streamStatusChannel = null;   // watches for stream-ended status update
 let backstageChannel      = null;   // realtime Q&A watcher for backstage view
 let _backstageBcastChannel = null;  // broadcast channel for backstage coordination
+let _participantInfo      = {};     // sessionId → { name, email } from viewer-info messages
+let _pendingStageInviteEventId = null; // eventId of a pending stage invite for this viewer
 let _recordingWatcher   = null;
 let _recordingPoller    = null;
 let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
@@ -3595,6 +3636,9 @@ async function joinStream(eventId, options = {}) {
   if (sessErr || !session) { alert("Session expired — please sign in again."); window.location.href = "/practice-log.html"; return false; }
   authToken = session.access_token;
 
+  // Reset participant info for this new call session
+  _participantInfo = {};
+
   // Get a Daily.co token
   let tokenRes, result;
   try {
@@ -3699,6 +3743,9 @@ async function joinStream(eventId, options = {}) {
       window._callFrame.on("participant-updated", _refreshStreamParticipants);
       window._callFrame.on("participant-left",    _refreshStreamParticipants);
 
+      // Receive viewer-info and stage-invite-response messages
+      window._callFrame.on("app-message", _handleAppMessage);
+
       window._callFrame.on("left-meeting", () => {
         if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
         document.getElementById("stream-layout-controls")?.classList.remove("visible");
@@ -3761,6 +3808,20 @@ async function joinStream(eventId, options = {}) {
       call.on("participant-joined",   syncTracks);
       call.on("participant-updated",  syncTracks);
       call.on("participant-left",     syncTracks);
+
+      // Announce ourselves to the host so we appear in the People tab
+      call.on("joined-meeting", async () => {
+        try {
+          const myEmail2 = session?.user?.email || "";
+          const { data: nameRow2 } = await db.from("allowed_emails")
+            .select("name").eq("email", myEmail2).maybeSingle();
+          const myName2 = nameRow2?.name || myEmail2.split("@")[0] || "Guest";
+          call.sendAppMessage({ type: "viewer-info", name: myName2, email: myEmail2 }, "*");
+        } catch(e) { console.warn("viewer-info send:", e); }
+      });
+
+      // Receive stage invites from the host
+      call.on("app-message", _handleAppMessage);
 
       call.on("left-meeting", () => {
         if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
@@ -4807,25 +4868,81 @@ async function _joinMainStreamFromBackstage() {
 }
 
 async function inviteToBackstage() {
-  const input = document.getElementById("backstage-invite-input");
-  const email = (input?.value || "").trim().toLowerCase();
+  const emailInput = document.getElementById("backstage-invite-email");
+  const nameInput  = document.getElementById("backstage-invite-name");
+  const email = (emailInput?.value || "").trim().toLowerCase();
+  const nameVal = (nameInput?.value || "").trim();
+  const linkWrap  = document.getElementById("backstage-invite-link-wrap");
+
   if (!email || !email.includes("@")) { alert("Please enter a valid email address."); return; }
   if (!currentEvent) return;
+
+  // Hide any previous link
+  if (linkWrap) linkWrap.style.display = "none";
 
   // Check if already invited
   const { data: existing } = await db.from("event_backstage_guests")
     .select("id").eq("event_id", currentEvent.id).eq("email", email).maybeSingle();
   if (existing) { alert(`${email} is already invited.`); return; }
 
-  const { error } = await db.from("event_backstage_guests").insert({
-    event_id: currentEvent.id,
-    email,
-    name: email.split("@")[0]
-  });
-  if (error) { alert("Could not invite guest: " + error.message); return; }
+  // Check if this is a registered member
+  const { data: member } = await db.from("allowed_emails")
+    .select("name").eq("email", email).maybeSingle();
 
-  input.value = "";
-  await loadBackstageGuests(currentEvent.id);
+  if (member) {
+    // Member → direct DB insert; they'll see the "Join Backstage" banner on the event page
+    const { error } = await db.from("event_backstage_guests").insert({
+      event_id: currentEvent.id,
+      email,
+      name: member.name || email.split("@")[0]
+    });
+    if (error) { alert("Could not invite guest: " + error.message); return; }
+    if (emailInput) emailInput.value = "";
+    if (nameInput)  nameInput.value  = "";
+    await loadBackstageGuests(currentEvent.id);
+  } else {
+    // Non-member → create magic-link invite via edge function
+    const name = nameVal || email.split("@")[0];
+    const { data: { session: invSess } } = await db.auth.getSession();
+    if (!invSess) { alert("Session expired — please sign in again."); return; }
+
+    const btn = document.querySelector("#backstage-invite-row .btn-primary");
+    if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+
+    const res = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${invSess.access_token}` },
+      body: JSON.stringify({ action: "create-guest-invite", eventId: currentEvent.id, email, name })
+    });
+    const data = await res.json();
+
+    if (btn) { btn.disabled = false; btn.textContent = "Invite"; }
+
+    if (data.error) { alert("Could not create invite: " + (data.error || "unknown error")); return; }
+
+    // Clear inputs
+    if (emailInput) emailInput.value = "";
+    if (nameInput)  nameInput.value  = "";
+
+    // Show backup link
+    const linkInput = document.getElementById("backstage-invite-link-input");
+    if (linkWrap && linkInput) {
+      linkInput.value = data.inviteUrl;
+      linkWrap.style.display = "flex";
+    }
+
+    await loadBackstageGuests(currentEvent.id);
+  }
+}
+
+function copyBackstageLink() {
+  const input = document.getElementById("backstage-invite-link-input");
+  if (!input?.value) return;
+  navigator.clipboard.writeText(input.value).catch(() => {
+    input.select(); document.execCommand("copy");
+  });
+  const btn = input.nextElementSibling;
+  if (btn) { btn.textContent = "Copied!"; setTimeout(() => btn.textContent = "Copy", 2000); }
 }
 
 async function loadBackstageGuests(eventId) {
@@ -4961,6 +5078,133 @@ function _refreshStreamParticipants() {
   // Repopulate spotlight menu if it's open
   const menu = document.getElementById("spotlight-menu");
   if (menu && menu.style.display !== "none") _populateSpotlightMenu();
+  // Keep the People tab in sync
+  _refreshPeopleTab();
+}
+
+// ── People tab ─────────────────────────────────────────────────────────────────
+function _refreshPeopleTab() {
+  const el = document.getElementById("people-list");
+  if (!el) return;
+
+  if (!window._callFrame) {
+    el.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem;text-align:center;padding:24px 16px">Not connected.</p>`;
+    return;
+  }
+
+  const others = Object.values(window._callFrame.participants()).filter(p => !p.local);
+
+  // Update the badge count
+  const badge = document.getElementById("people-badge");
+  if (badge) {
+    badge.textContent = others.length || "";
+    badge.classList.toggle("visible", others.length > 0);
+  }
+
+  if (!others.length) {
+    el.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem;text-align:center;padding:24px 16px">No one else here yet.</p>`;
+    return;
+  }
+
+  el.innerHTML = others.map(p => {
+    const info      = _participantInfo?.[p.session_id] || {};
+    const name      = p.user_name || info.name || "Guest";
+    const hasVideo  = p.tracks?.video?.state === "playable";
+    const statusLabel = hasVideo ? "On deck" : "Watching";
+    const statusColor = hasVideo ? "#22c55e" : "var(--text-muted)";
+
+    let actionBtn = "";
+    if (isAdmin) {
+      actionBtn = hasVideo
+        ? `<button class="btn btn-sm btn-ghost" style="font-size:.72rem;padding:3px 8px"
+             onclick="setStreamLayout('single-participant','${p.session_id}')">Spotlight</button>`
+        : `<button class="btn btn-sm btn-ghost" style="font-size:.72rem;padding:3px 8px"
+             onclick="inviteToStage('${p.session_id}')">Invite to stage</button>`;
+    }
+
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px">
+        ${avatarHtml(name, info.email || "", 28, null)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.84rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</div>
+          <div style="font-size:.72rem;color:${statusColor}">${statusLabel}</div>
+        </div>
+        ${actionBtn}
+      </div>`;
+  }).join("");
+}
+
+// ── Stage invite flow ───────────────────────────────────────────────────────────
+async function inviteToStage(sessionId) {
+  if (!window._callFrame || !currentEvent) return;
+
+  const info   = _participantInfo?.[sessionId] || {};
+  const myName = window._callFrame.participants().local?.user_name || "Host";
+
+  // Add viewer to backstage guests so they can get a cohost token
+  if (info.email) {
+    await db.from("event_backstage_guests").insert({
+      event_id: currentEvent.id,
+      email:    info.email,
+      name:     info.name || info.email.split("@")[0]
+    }).then();   // fire-and-forget; ignore duplicate errors
+  }
+
+  try {
+    window._callFrame.sendAppMessage({
+      type:     "stage-invite",
+      fromName: myName,
+      eventId:  currentEvent.id
+    }, sessionId);
+  } catch(e) {
+    console.warn("sendAppMessage stage-invite:", e);
+    alert("Could not send invite — the viewer may have already left.");
+  }
+}
+
+function showStageInviteBanner(fromName, eventId) {
+  _pendingStageInviteEventId = eventId;
+  document.getElementById("stage-invite-from").textContent =
+    `${fromName} has invited you to speak on the stream`;
+  document.getElementById("stage-invite-banner").style.display = "block";
+}
+
+async function acceptStageInvite() {
+  document.getElementById("stage-invite-banner").style.display = "none";
+  const eventId = _pendingStageInviteEventId;
+  _pendingStageInviteEventId = null;
+  if (!eventId) return;
+
+  // Destroy the current headless viewer call
+  if (window._callFrame) {
+    try { await window._callFrame.destroy(); } catch(e) {}
+    window._callFrame = null;
+  }
+
+  // Join as a cohost (full iframe, camera + mic)
+  const ok = await joinStream(eventId, { asCohost: true });
+  if (ok !== false) {
+    // Show on-deck banner so they know they're live but not yet spotlighted
+    document.getElementById("on-deck-banner").style.display = "flex";
+  }
+}
+
+function declineStageInvite() {
+  document.getElementById("stage-invite-banner").style.display = "none";
+  _pendingStageInviteEventId = null;
+}
+
+// Shared handler for Daily.co app-message events
+function _handleAppMessage(e) {
+  const msg    = e.data;
+  const fromId = e.fromId;
+  if (!msg) return;
+  if (msg.type === "viewer-info") {
+    _participantInfo[fromId] = { name: msg.name || "", email: msg.email || "" };
+    _refreshPeopleTab();
+  } else if (msg.type === "stage-invite") {
+    showStageInviteBanner(msg.fromName || "Host", msg.eventId);
+  }
 }
 
 // Close spotlight menu when clicking outside
@@ -4986,13 +5230,16 @@ function showBackstageTab(tab, btn) {
 
 // ── Sidebar tabs ──────────────────────────────────────────────────────────────
 function showSidebarTab(tab, btn) {
-  document.querySelectorAll(".sid-tab").forEach(t => t.classList.remove("active"));
+  // Only deactivate tabs within the stream sidebar (not backstage tabs)
+  document.querySelectorAll("#stream-sidebar .sid-tab").forEach(t => t.classList.remove("active"));
   if (btn) btn.classList.add("active");
-  document.getElementById("sidebar-chat").style.display = tab === "chat" ? "flex" : "none";
-  document.getElementById("sidebar-qa").style.display   = tab === "qa"   ? "flex" : "none";
+  document.getElementById("sidebar-chat").style.display   = tab === "chat"   ? "flex" : "none";
+  document.getElementById("sidebar-qa").style.display     = tab === "qa"     ? "flex" : "none";
+  document.getElementById("sidebar-people").style.display = tab === "people" ? "flex" : "none";
   // Clear unread for the tab just opened
-  if (tab === "chat") { _chatUnread = 0; }
-  if (tab === "qa")   { _qaUnread   = 0; }
+  if (tab === "chat")   { _chatUnread = 0; }
+  if (tab === "qa")     { _qaUnread   = 0; }
+  if (tab === "people") { _refreshPeopleTab(); }
   updateUnreadBadges();
 }
 

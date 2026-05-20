@@ -25,7 +25,101 @@ export default async (request) => {
 
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  // Verify Supabase JWT by decoding the payload.
+  const DAILY_API_KEY = Netlify.env.get("DAILY_API_KEY");
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
+  const { action } = body;
+
+  // ── Pre-auth: get-guest-token ─────────────────────────────────────────────
+  // No Supabase JWT required — the invite token IS the credential.
+  if (action === "get-guest-token") {
+    const { inviteToken, eventId, forStream } = body;
+    if (!inviteToken || !eventId) return json({ error: "inviteToken and eventId required" }, 400);
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
+    // Validate the invite token against the database
+    const inviteRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/event_guest_invites?token=eq.${encodeURIComponent(inviteToken)}&event_id=eq.${eventId}&select=*`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const inviteRows = await inviteRes.json();
+    if (!Array.isArray(inviteRows) || inviteRows.length === 0) {
+      return json({ error: "Invalid or expired invite link." }, 403);
+    }
+    const invite     = inviteRows[0];
+    const guestName  = invite.name  || "Guest";
+    const guestEmail = invite.email || null;
+
+    // Get event details
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=daily_room_name,daily_room_url,status,title`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const evRows = await evRes.json();
+    if (!Array.isArray(evRows) || !evRows.length) return json({ error: "Event not found" }, 404);
+    const ev = evRows[0];
+
+    // Ensure guest is in event_backstage_guests (use synthetic email if none on invite)
+    const canonicalEmail = guestEmail || `guest-${invite.id}@invite.local`;
+    await fetch(`${SUPABASE_URL}/rest/v1/event_backstage_guests`, {
+      method: "POST",
+      headers: {
+        "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`,
+        "Content-Type": "application/json", "Prefer": "return=minimal"
+      },
+      body: JSON.stringify({ event_id: eventId, email: canonicalEmail, name: guestName })
+    }); // ignore duplicate errors — guest may already be present
+
+    // Determine which room to join
+    let roomName, roomUrl;
+    if (forStream && ev.status === "live" && ev.daily_room_name) {
+      // Guest is being moved to the main stream
+      roomName = ev.daily_room_name;
+      const roomRes = await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
+        headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+      });
+      if (!roomRes.ok) return json({ error: "Main room not found." }, 404);
+      roomUrl = (await roomRes.json()).url;
+    } else {
+      // Default: join backstage
+      roomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}-bk`;
+      const roomRes = await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
+        headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+      });
+      if (!roomRes.ok) return json({ error: "Backstage room not found — the host hasn’t opened it yet." }, 404);
+      roomUrl = (await roomRes.json()).url;
+    }
+
+    // Create a meeting token — is_owner so the guest can broadcast
+    const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        properties: {
+          room_name:         roomName,
+          user_name:         guestName,
+          is_owner:          true,
+          enable_prejoin_ui: false,
+          start_video_off:   false,
+          start_audio_off:   false,
+        }
+      })
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) return json({ error: tokenData }, tokenRes.status);
+
+    return json({
+      token:       tokenData.token,
+      roomName,
+      roomUrl,
+      guestName,
+      eventTitle:  ev.title  || "",
+      eventStatus: ev.status || "",
+    });
+  }
+
+  // ── All other actions require a valid Supabase JWT ────────────────────────
   // We decode without re-checking session existence (which fails when Supabase
   // has garbage-collected the session record) — the JWT signature is still valid
   // because RLS policies accept it, and we check expiry ourselves.
@@ -48,12 +142,6 @@ export default async (request) => {
     return json({ error: "Invalid token: " + e.message }, 401);
   }
 
-  const DAILY_API_KEY = Netlify.env.get("DAILY_API_KEY");
-  let body;
-  try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
-
-  const { action } = body;
-
   // ── Helper: is admin? ──────────────────────────────────────────────────────
   async function isAdmin() {
     const res = await fetch(
@@ -62,6 +150,79 @@ export default async (request) => {
     );
     const rows = await res.json();
     return Array.isArray(rows) && rows.length > 0;
+  }
+
+  // ── Action: create-guest-invite ───────────────────────────────────────────
+  // Admin only. Creates a magic-link invite for a non-member guest.
+  // Sends email via Resend (if RESEND_API_KEY is set) and returns inviteUrl + token.
+  if (action === "create-guest-invite") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { eventId, email, name } = body;
+    if (!eventId || !name) return json({ error: "eventId and name required" }, 400);
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
+    // Generate a cryptographically random invite token (48 hex chars)
+    const tokenBytes = new Uint8Array(24);
+    crypto.getRandomValues(tokenBytes);
+    const inviteToken = Array.from(tokenBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+
+    // Get event title for the email subject
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=title`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const evRows = await evRes.json();
+    const eventTitle = evRows?.[0]?.title || "Live Event";
+
+    // Insert the invite record
+    const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/event_guest_invites`, {
+      method: "POST",
+      headers: {
+        "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`,
+        "Content-Type": "application/json", "Prefer": "return=minimal"
+      },
+      body: JSON.stringify({ event_id: eventId, email: email || null, name, token: inviteToken })
+    });
+    if (!insertRes.ok) {
+      const err = await insertRes.json().catch(() => ({}));
+      return json({ error: "Could not create invite", detail: err }, insertRes.status);
+    }
+
+    // Build the invite URL
+    const origin = new URL(request.url).origin;
+    const inviteUrl = `${origin}/guest-join.html?token=${inviteToken}&event=${eventId}`;
+
+    // Send email via Resend if email provided and API key is configured
+    if (email) {
+      const RESEND_API_KEY = Netlify.env.get("RESEND_API_KEY");
+      const RESEND_FROM    = Netlify.env.get("RESEND_FROM_EMAIL") || "noreply@practiceroom.studio";
+      const escHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      if (RESEND_API_KEY) {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RESEND_API_KEY}` },
+          body: JSON.stringify({
+            from: RESEND_FROM,
+            to: [email],
+            subject: `You're invited backstage: ${eventTitle}`,
+            html: `
+              <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f0f0f;color:#e8e8e8;border-radius:12px">
+                <h2 style="margin:0 0 8px;font-size:1.3rem;color:#f5c518">You're invited backstage</h2>
+                <p style="color:#aaa;margin:0 0 8px">Hi ${escHtml(name)},</p>
+                <p style="color:#aaa;margin:0 0 24px">You've been invited to join <strong style="color:#e8e8e8">${escHtml(eventTitle)}</strong> as a guest speaker.</p>
+                <a href="${inviteUrl}" style="display:inline-block;background:#f5c518;color:#000;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:1rem">Join Backstage →</a>
+                <p style="color:#666;font-size:.8rem;margin:28px 0 0">Or copy this link:<br>
+                  <a href="${inviteUrl}" style="color:#f5c518;word-break:break-all">${inviteUrl}</a>
+                </p>
+              </div>
+            `
+          })
+        });
+      }
+    }
+
+    return json({ inviteUrl, token: inviteToken });
   }
 
   // ── Action: update-room ────────────────────────────────────────────────────
