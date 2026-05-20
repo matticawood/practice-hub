@@ -1270,7 +1270,7 @@
             <div style="display:flex;gap:6px">
               <!-- Email with member autocomplete dropdown -->
               <div style="flex:1;min-width:0;position:relative">
-                <input id="backstage-invite-email" placeholder="Email or name…" type="email"
+                <input id="backstage-invite-email" placeholder="Email or name…" type="text"
                   autocomplete="off" name="invite-email"
                   style="width:100%"
                   oninput="onBackstageInviteInput(this.value)"
@@ -1765,7 +1765,8 @@ let typingChannel       = null;   // fixed-name broadcast channel for chat + Q&A
 let discussionChannel   = null;   // event_comments + poll_votes listener
 let streamStatusChannel = null;   // watches for stream-ended status update
 let backstageChannel      = null;   // realtime Q&A watcher for backstage view
-let _backstageBcastChannel = null;  // broadcast channel for backstage coordination
+let _backstageBcastChannel  = null;  // broadcast channel for backstage coordination
+let _backstageEventChannel  = null;  // postgres_changes subscription for "event went live" (guests)
 let _participantInfo      = {};     // sessionId → { name, email } from viewer-info messages
 let _pendingStageInvite = null;  // { eventId, token, roomUrl } when a stage invite is pending for this viewer
 let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage invite (pending)
@@ -1843,8 +1844,9 @@ function showView(name) {
   }
   if (name !== "backstage") {
     // Clean up backstage channels and call frame
-    if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
-    if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
+    if (backstageChannel)        { db.removeChannel(backstageChannel);        backstageChannel        = null; }
+    if (_backstageBcastChannel)  { db.removeChannel(_backstageBcastChannel);  _backstageBcastChannel  = null; }
+    if (_backstageEventChannel)  { db.removeChannel(_backstageEventChannel);  _backstageEventChannel  = null; }
     if (window._backstageFrame) {
       try { window._backstageFrame.destroy(); } catch(e) {}
       window._backstageFrame = null;
@@ -3812,33 +3814,72 @@ async function joinStream(eventId, options = {}) {
       window._cohostMicOn = true;
       window._cohostCamOn = true;
 
-      // Render all participant video tiles into #cohost-grid
+      // Track which session_id is spotlighted (null = gallery / show everyone)
+      let _cohostFeaturedId = null;
+
+      // ── Render all participant video tiles into #cohost-grid ─────────────────
+      // Respects _cohostFeaturedId: if set, that person is shown full-size with
+      // everyone else in a small thumbnail strip at the bottom.
       function _renderCohostGrid() {
         const grid = document.getElementById("cohost-grid");
         if (!grid) return;
-        const parts = Object.values(cohostCall.participants());
-        const n = parts.length || 1;
-        const tileW = n <= 1 ? "100%" : n <= 2 ? "calc(50% - 1px)" : "calc(33.3% - 2px)";
 
-        // Remove old audio elements
+        // Purge stale audio elements
         document.querySelectorAll(".cohost-audio-el").forEach(el => el.remove());
 
-        grid.innerHTML = parts.map(p => {
-          const name = p.user_name || (p.local ? "You" : "Guest");
-          return `<div style="flex:1;min-width:${tileW};min-height:120px;position:relative;background:#1a1a1a;border-radius:3px;overflow:hidden">
-            <video id="cohost-vid-${p.session_id}" autoplay playsinline ${p.local ? "muted" : ""}
-              style="width:100%;height:100%;object-fit:cover;display:block"></video>
-            <div style="position:absolute;bottom:5px;left:7px;font-size:.73rem;color:#fff;background:rgba(0,0,0,.6);border-radius:3px;padding:2px 6px;pointer-events:none">${esc(name)}${p.local ? " (You)" : ""}</div>
-          </div>`;
-        }).join("");
+        const allParts = Object.values(cohostCall.participants());
 
-        // Wire video tracks
-        parts.forEach(p => {
+        // Build HTML depending on layout mode
+        let html = "";
+        const tileStyle = (full) =>
+          `position:relative;background:#111;border-radius:3px;overflow:hidden;` +
+          (full ? `flex:1;min-height:0;width:100%;` : `flex:1;min-width:60px;`);
+        const nameTag = (p, small) =>
+          `<div style="position:absolute;bottom:${small ? 2 : 5}px;left:${small ? 4 : 7}px;` +
+          `font-size:${small ? ".63" : ".73"}rem;color:#fff;background:rgba(0,0,0,.6);` +
+          `border-radius:3px;padding:${small ? "1px 3px" : "2px 6px"};pointer-events:none">` +
+          `${esc(p.user_name || (p.local ? "You" : "Guest"))}${p.local ? " (You)" : ""}</div>`;
+        const videoEl = (p, extra) =>
+          `<video id="cohost-vid-${p.session_id}" autoplay playsinline ${p.local ? "muted" : ""}` +
+          ` style="width:100%;height:100%;object-fit:contain;display:block;background:#000;${extra || ""}"></video>`;
+
+        if (_cohostFeaturedId) {
+          const feat   = allParts.find(p => p.session_id === _cohostFeaturedId);
+          const others = allParts.filter(p => p.session_id !== _cohostFeaturedId);
+          if (feat) {
+            // Featured participant fills the grid; others in a 80px strip below
+            html += `<div style="${tileStyle(true)}">${videoEl(feat)}${nameTag(feat, false)}</div>`;
+            if (others.length) {
+              html += `<div style="display:flex;gap:2px;height:80px;flex-shrink:0">`;
+              others.forEach(p => {
+                html += `<div style="${tileStyle(false)}">${videoEl(p)}${nameTag(p, true)}</div>`;
+              });
+              html += `</div>`;
+            }
+          } else {
+            // Featured participant left — fall back to gallery
+            _cohostFeaturedId = null;
+          }
+        }
+
+        if (!_cohostFeaturedId) {
+          // Gallery: equal-width tiles that wrap
+          const n    = allParts.length || 1;
+          const minW = n <= 1 ? "100%" : n <= 2 ? "calc(50% - 1px)" : "calc(33.3% - 2px)";
+          allParts.forEach(p => {
+            html += `<div style="${tileStyle(false)}min-width:${minW};min-height:120px">` +
+                    `${videoEl(p)}${nameTag(p, false)}</div>`;
+          });
+        }
+
+        grid.innerHTML = html;
+
+        // Wire tracks to all video elements
+        allParts.forEach(p => {
           const vid = document.getElementById(`cohost-vid-${p.session_id}`);
           if (!vid) return;
           const vt = p.tracks?.video?.persistentTrack;
           if (vt) vid.srcObject = new MediaStream([vt]);
-          // Audio for remote participants
           if (!p.local) {
             const at = p.tracks?.audio?.persistentTrack;
             if (at && p.tracks.audio.state === "playable") {
@@ -3874,10 +3915,14 @@ async function joinStream(eventId, options = {}) {
       cohostCall.on("app-message", e => {
         const msg = e.data;
         if (msg.type === "layout-change") {
-          // Show "featured" banner when we're the spotlighted participant
-          const banner  = document.getElementById("cohost-stream-banner");
-          const myId    = cohostCall.participants().local?.session_id;
-          if (banner) banner.style.display = (msg.session_id && msg.session_id === myId) ? "block" : "none";
+          // Update which participant is featured, then re-render the grid
+          _cohostFeaturedId = (msg.preset === "single-participant" && msg.session_id)
+            ? msg.session_id : null;
+          _renderCohostGrid();
+          // Also update the "featured" banner
+          const banner = document.getElementById("cohost-stream-banner");
+          const myId   = cohostCall.participants().local?.session_id;
+          if (banner) banner.style.display = (_cohostFeaturedId === myId) ? "block" : "none";
         } else {
           _handleAppMessage(e);
         }
@@ -4868,6 +4913,25 @@ async function joinBackstage(eventId) {
     if (!isAdmin) _joinMainStreamFromBackstage();
   })
   .subscribe();
+
+  // Guests also watch the DB directly for status → "live" changes.
+  // This is more reliable than the broadcast-only path because it doesn't
+  // depend on the channel being fully established before the host fires.
+  if (!isAdmin) {
+    if (_backstageEventChannel) { db.removeChannel(_backstageEventChannel); _backstageEventChannel = null; }
+    _backstageEventChannel = db.channel(`backstage-ev-${eventId}`)
+      .on("postgres_changes", {
+        event: "UPDATE", schema: "public", table: "live_events",
+        filter: `id=eq.${eventId}`
+      }, payload => {
+        // Only fire if we haven't already started the transition
+        if (payload.new?.status === "live" && !window._callFrame) {
+          console.log("[Backstage] Event went live (DB subscription) — joining main stream");
+          _joinMainStreamFromBackstage();
+        }
+      })
+      .subscribe();
+  }
 }
 
 function _updateBackstageGoLiveBtn() {
@@ -4965,15 +5029,20 @@ async function goLiveFromBackstage() {
       currentEvent = { ...currentEvent, status: "live" };
     }
 
-    // Signal guests that the host is going live
+    // Signal guests that the host is going live.
+    // The DB status change is the primary signal (postgres_changes subscription on guest side).
+    // The broadcast is a faster secondary signal; keep the channel alive for a few seconds
+    // so any guest whose subscription isn't fully established yet still receives it.
     if (_backstageBcastChannel) {
       try {
         await _backstageBcastChannel.send({
           type: "broadcast", event: "host-went-live", payload: {}
         });
       } catch(e) { console.warn("backstage broadcast:", e); }
-      db.removeChannel(_backstageBcastChannel);
-      _backstageBcastChannel = null;
+      // Don't remove immediately — give up to 5 s for late-subscribing guests
+      setTimeout(() => {
+        if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
+      }, 5000);
     }
 
     // Leave backstage cleanly, then join the main stream
@@ -5002,6 +5071,7 @@ async function leaveBackstage() {
   }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
   if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
+  if (_backstageEventChannel) { db.removeChannel(_backstageEventChannel); _backstageEventChannel = null; }
   showView("detail");
 }
 
@@ -5014,6 +5084,7 @@ async function _joinMainStreamFromBackstage() {
   }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
   if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
+  if (_backstageEventChannel) { db.removeChannel(_backstageEventChannel); _backstageEventChannel = null; }
   // Join main stream as a cohost (can broadcast camera/mic).
   // Brief delay so the host's DB update (status:"live", daily_room_name) has time
   // to propagate to all Supabase replicas before joinStream() reads it.
@@ -5033,13 +5104,17 @@ async function onBackstageInviteInput(value) {
   if (q.length < 2) { hideBackstageSuggestions(); return; }
 
   _memberSuggestDebounce = setTimeout(async () => {
-    // Search allowed_emails by email prefix OR name prefix (case-insensitive)
-    const { data } = await db.from("allowed_emails")
+    // Search allowed_emails by email prefix OR name prefix (case-insensitive).
+    // Use separate filter calls rather than .or() to avoid PostgREST syntax issues
+    // with special characters in the query string.
+    const safeQ = q.replace(/[%_]/g, "\\$&"); // escape SQL wildcard chars
+    const { data, error } = await db.from("allowed_emails")
       .select("name, email")
-      .or(`email.ilike.${q}%,name.ilike.${q}%`)
+      .or(`email.ilike.${safeQ}%,name.ilike.${safeQ}%`)
       .order("name")
       .limit(6);
 
+    if (error) console.warn("[autocomplete] allowed_emails query failed:", error);
     _memberSuggestions = data || [];
     _memberSuggestIdx  = -1;
     renderBackstageSuggestions();
@@ -5134,7 +5209,8 @@ async function inviteToBackstage() {
     .select("name").eq("email", email).maybeSingle();
 
   if (member) {
-    // Member → direct DB insert; they'll see the "Join Backstage" banner on the event page
+    // Member → direct DB insert; they'll see the "Join Backstage" banner on the event page.
+    // No email is sent for members — they already have an account and will see the invite there.
     const { error } = await db.from("event_backstage_guests").insert({
       event_id: currentEvent.id,
       email,
@@ -5143,8 +5219,24 @@ async function inviteToBackstage() {
     if (error) { alert("Could not invite guest: " + error.message); return; }
     if (emailInput) emailInput.value = "";
     if (nameInput)  nameInput.value  = "";
+    // Show confirmation in the link area (no link, but explains no email)
+    const linkWrapM  = document.getElementById("backstage-invite-link-wrap");
+    const linkInputM = document.getElementById("backstage-invite-link-input");
+    const linkLabelM = document.querySelector("#backstage-invite-link-wrap span");
+    if (linkWrapM && linkLabelM) {
+      if (linkInputM) linkInputM.style.display = "none";
+      document.querySelector("#backstage-invite-link-wrap div")?.style.setProperty("display","none");
+      linkLabelM.textContent = `✓ ${email} invited — they'll see a "Join Backstage" button on the event page.`;
+      linkLabelM.style.color = "#4ade80";
+      linkWrapM.style.display = "flex";
+    }
     await loadBackstageGuests(currentEvent.id);
   } else {
+    // Non-member → validate email format first
+    if (!email.includes("@")) {
+      alert("Please enter a valid email address to invite a non-member, or type a member's name/email for autocomplete.");
+      return;
+    }
     // Non-member → create magic-link invite via edge function
     const name = nameVal || email.split("@")[0];
     const { data: { session: invSess } } = await db.auth.getSession();
@@ -5169,9 +5261,13 @@ async function inviteToBackstage() {
     if (nameInput)  nameInput.value  = "";
 
     // Show backup link — always show it; update label based on whether email sent
-    const linkInput = document.getElementById("backstage-invite-link-input");
-    const linkLabel = document.querySelector("#backstage-invite-link-wrap span");
+    const linkInput   = document.getElementById("backstage-invite-link-input");
+    const linkLabel   = document.querySelector("#backstage-invite-link-wrap span");
+    const linkLinkRow = document.querySelector("#backstage-invite-link-wrap div");
     if (linkWrap && linkInput) {
+      // Restore visibility of the input row (may have been hidden by a previous member invite)
+      linkInput.style.display = "";
+      if (linkLinkRow) linkLinkRow.style.display = "";
       linkInput.value = data.inviteUrl;
       if (linkLabel) {
         if (data.emailSent) {
