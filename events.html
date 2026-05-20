@@ -6893,7 +6893,7 @@ function _refreshPeopleTab() {
 
   const others = Object.values(window._callFrame.participants()).filter(p => !p.local);
 
-  // Update the badge count
+  // Badge: total count of everyone in the call
   const badge = document.getElementById("people-badge");
   if (badge) {
     badge.textContent = others.length || "";
@@ -6905,17 +6905,37 @@ function _refreshPeopleTab() {
     return;
   }
 
-  el.innerHTML = others.map(p => {
-    const info      = _participantInfo?.[p.session_id] || {};
-    const name      = p.user_name || info.name || "Guest";
-    const hasVideo  = p.tracks?.video?.state === "playable";
-    const invited   = _invitedSessionIds.has(p.session_id);
+  // Split into on-stage (has live video) and watching (audio-only / headless viewers)
+  const onStage  = others.filter(p => p.tracks?.video?.state === "playable");
+  const watching = others.filter(p => p.tracks?.video?.state !== "playable");
 
-    // Once they're broadcasting, clear the pending-invite flag
+  // Section header matching backstage style
+  const sectionHdr = label =>
+    `<div style="font-size:.72rem;font-weight:600;color:var(--text-muted);
+                 text-transform:uppercase;letter-spacing:.06em;padding:10px 12px 4px">${label}</div>`;
+
+  // Build one participant row.
+  // Uses _streamAvatarCache — fetches async and re-renders if not yet loaded.
+  const buildRow = p => {
+    const info     = _participantInfo?.[p.session_id] || {};
+    const name     = p.user_name || info.name || "Guest";
+    const email    = info.email || "";
+    const hasVideo = p.tracks?.video?.state === "playable";
+    const invited  = _invitedSessionIds.has(p.session_id);
+
+    // Once broadcasting, clear pending-invite flag
     if (hasVideo && invited) _invitedSessionIds.delete(p.session_id);
 
-    const statusLabel = hasVideo  ? "On deck"  : invited ? "Invited…" : "Watching";
-    const statusColor = hasVideo  ? "#22c55e"  : invited ? "var(--accent)" : "var(--text-muted)";
+    // Avatar from cache (initials fallback); kick off fetch if not yet cached
+    const cachedUrl = email ? (_streamAvatarCache?.[email] ?? null) : null;
+    if (email && _streamAvatarCache && !_streamAvatarCache.hasOwnProperty(email)) {
+      _streamAvatarCache[email] = null; // mark as loading so we don't double-fetch
+      db.from("allowed_emails").select("avatar_url").eq("email", email).maybeSingle()
+        .then(({ data }) => {
+          if (_streamAvatarCache) _streamAvatarCache[email] = data?.avatar_url || null;
+          _refreshPeopleTab(); // re-render with real photo
+        });
+    }
 
     let actionBtn = "";
     if (isAdmin) {
@@ -6932,14 +6952,18 @@ function _refreshPeopleTab() {
 
     return `
       <div style="display:flex;align-items:center;gap:10px;padding:7px 12px">
-        ${avatarHtml(name, info.email || "", 28, null)}
+        ${avatarHtml(name, email, 28, cachedUrl)}
         <div style="flex:1;min-width:0">
           <div style="font-size:.84rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</div>
-          <div style="font-size:.72rem;color:${statusColor}">${statusLabel}</div>
         </div>
         ${actionBtn}
       </div>`;
-  }).join("");
+  };
+
+  let html = "";
+  if (onStage.length)  html += sectionHdr(`On Stage (${onStage.length})`)  + onStage.map(buildRow).join("");
+  if (watching.length) html += sectionHdr(`Watching (${watching.length})`) + watching.map(buildRow).join("");
+  el.innerHTML = html;
 }
 
 // ── Stage invite flow ───────────────────────────────────────────────────────────
