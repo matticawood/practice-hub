@@ -4125,6 +4125,7 @@ async function setupVodQaOverlay(ev) {
   const wrap = document.getElementById("vod-player-wrap");
   let _fsEnterTimer = null; // store so we can cancel it if fullscreen is exited before it fires
   let _fsHideTimer  = null; // hoisted here so the exit branch can cancel it too
+  let _inFsMode     = false; // guard: prevents late MutationObserver callbacks from firing after exit
 
   function positionVodOverlay(ov, controlsVisible = true) {
     // Use screen.width/height — these always reflect the physical screen size
@@ -4198,6 +4199,7 @@ async function setupVodQaOverlay(ev) {
         _fsEnterTimer = null;
         // Safety check — abort if fullscreen was already exited
         if (!(document.fullscreenElement || document.webkitFullscreenElement)) return;
+        _inFsMode = true;
         positionVodOverlay(ov, true);
 
         // Precompute the two bottom values for controls shown/hidden
@@ -4218,6 +4220,9 @@ async function setupVodQaOverlay(ev) {
         const bottomHidden = (offsetY + GAP) + "px";
 
         function onFsControlsChange(visible) {
+          // Guard: MutationObserver callbacks can fire after disconnect() if
+          // they were already queued — bail out if we've already exited fullscreen
+          if (!_inFsMode) return;
           clearTimeout(_fsHideTimer);
           _fsHideTimer = null;
           if (visible) {
@@ -4225,6 +4230,7 @@ async function setupVodQaOverlay(ev) {
           } else {
             _fsHideTimer = setTimeout(() => {
               _fsHideTimer = null;
+              if (!_inFsMode) return; // double-check in case exit happened during the 400ms
               ov.style.setProperty("bottom", bottomHidden, "important");
             }, 400);
           }
@@ -4245,11 +4251,13 @@ async function setupVodQaOverlay(ev) {
         }
       }, 150);
     } else if (wrap) {
-      // Cancel all pending fullscreen timers before touching the overlay
+      // Mark fullscreen as exited FIRST so any still-queued MutationObserver
+      // callbacks from onFsControlsChange become no-ops before they run
+      _inFsMode = false;
+      // Cancel all pending fullscreen timers
       clearTimeout(_fsEnterTimer);  _fsEnterTimer = null;
       clearTimeout(_fsHideTimer);   _fsHideTimer  = null;
-      // Disconnect the fullscreen controls observer so it can't interfere with
-      // the normal-view observer after exiting fullscreen
+      // Disconnect the fullscreen controls observer
       _fsControlsObserver?.disconnect();
       _fsControlsObserver = null;
       wrap.appendChild(ov);
