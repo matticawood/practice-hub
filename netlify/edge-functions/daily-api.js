@@ -538,6 +538,99 @@ export default async (request) => {
     return json({ status: upload.status });
   }
 
+  // ── Action: create-backstage-room ─────────────────────────────────────────
+  // Admin only. Creates (or retrieves existing) a private backstage Daily room
+  // where all participants can broadcast — no Mux streaming, no owner_only_broadcast.
+  if (action === "create-backstage-room") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { eventId } = body;
+    if (!eventId) return json({ error: "eventId required" }, 400);
+
+    // Backstage room name is deterministic: main room name + "-bk"
+    const backstageRoomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}-bk`;
+
+    // Try to fetch existing room first (idempotent)
+    const getRes = await fetch(`https://api.daily.co/v1/rooms/${backstageRoomName}`, {
+      headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+    });
+    if (getRes.ok) {
+      const existing = await getRes.json();
+      return json({ roomName: existing.name, roomUrl: existing.url });
+    }
+
+    // Create the backstage room — everyone can broadcast (no owner_only_broadcast)
+    const res = await fetch("https://api.daily.co/v1/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        name: backstageRoomName,
+        properties: {
+          enable_chat:          false,
+          enable_prejoin_ui:    false,
+          start_video_off:      false,
+          start_audio_off:      false,
+          enable_screenshare:   true,
+          owner_only_broadcast: false,   // all guests can have camera/mic on
+          max_participants:     20,
+          exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // 24-hour expiry
+        }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) return json({ error: data }, res.status);
+    return json({ roomName: data.name, roomUrl: data.url });
+  }
+
+  // ── Action: get-backstage-token ────────────────────────────────────────────
+  // Returns a Daily.co meeting token for the backstage room.
+  // Admin always allowed. Non-admin requires an entry in event_backstage_guests.
+  if (action === "get-backstage-token") {
+    const { eventId } = body;
+    if (!eventId) return json({ error: "eventId required" }, 400);
+
+    const backstageRoomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}-bk`;
+    const admin = await isAdmin();
+
+    if (!admin) {
+      // Verify the requester is on the guest list (using service key for RLS bypass)
+      const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+      const guestRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/event_backstage_guests?event_id=eq.${eventId}&email=eq.${encodeURIComponent(userEmail)}&select=id`,
+        { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+      );
+      const guestRows = await guestRes.json();
+      if (!Array.isArray(guestRows) || guestRows.length === 0) {
+        return json({ error: "You have not been invited to this backstage." }, 403);
+      }
+    }
+
+    // Get display name
+    const nameRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/allowed_emails?email=eq.${encodeURIComponent(userEmail)}&select=name`,
+      { headers: { "Authorization": `Bearer ${token}`, "apikey": SUPABASE_ANON } }
+    );
+    const nameRows = await nameRes.json();
+    const displayName = nameRows?.[0]?.name || userEmail.split("@")[0];
+
+    const res = await fetch("https://api.daily.co/v1/meeting-tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        properties: {
+          room_name:         backstageRoomName,
+          user_name:         displayName,
+          is_owner:          admin,
+          enable_prejoin_ui: false,
+          start_video_off:   false,  // everyone has camera on in backstage
+          start_audio_off:   false,
+        }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) return json({ error: data }, res.status);
+    return json({ token: data.token, roomName: backstageRoomName });
+  }
+
   return json({ error: "Unknown action" }, 400);
 };
 
