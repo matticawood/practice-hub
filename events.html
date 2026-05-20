@@ -1900,6 +1900,7 @@ function showView(name) {
     if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
     if (_guestRequestsChannel)  { db.removeChannel(_guestRequestsChannel);  _guestRequestsChannel  = null; }
     if (_bsChatChannel)         { db.removeChannel(_bsChatChannel);         _bsChatChannel         = null; }
+    if (_guestRequestPoller)    { clearInterval(_guestRequestPoller);       _guestRequestPoller    = null; }
     if (window._backstageFrame) {
       try { window._backstageFrame.leave(); }   catch(e) {}
       try { window._backstageFrame.destroy(); } catch(e) {}
@@ -5134,30 +5135,50 @@ async function submitBackstageQA() {
 }
 
 // ── Guest request approval notifications (admin only) ─────────────────────────
+let _guestRequestPoller = null;
+let _seenRequestIds     = new Set();
+
 async function _subscribeGuestRequests(eventId) {
   if (_guestRequestsChannel) { db.removeChannel(_guestRequestsChannel); _guestRequestsChannel = null; }
+  if (_guestRequestPoller)   { clearInterval(_guestRequestPoller);       _guestRequestPoller   = null; }
+  _seenRequestIds = new Set();
 
-  // Load any already-pending requests first (guest may have requested before host entered)
-  try {
-    const { data: existing } = await db
-      .from("event_guest_requests")
-      .select("*")
-      .eq("event_id", eventId)
-      .eq("status", "pending")
-      .order("created_at", { ascending: true });
-    (existing || []).forEach(row => _showGuestRequestChip(row));
-  } catch(e) { console.warn("_subscribeGuestRequests fetch:", e); }
+  async function _loadPendingRequests() {
+    try {
+      const { data } = await db
+        .from("event_guest_requests")
+        .select("*")
+        .eq("event_id", eventId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true });
+      (data || []).forEach(row => {
+        if (!_seenRequestIds.has(row.id)) {
+          _seenRequestIds.add(row.id);
+          _showGuestRequestChip(row);
+        }
+      });
+    } catch(e) { console.warn("_loadPendingRequests:", e); }
+  }
 
-  // Then listen for new incoming requests
+  // Load immediately (catches requests submitted before host entered backstage)
+  await _loadPendingRequests();
+
+  // Primary: postgres_changes INSERT subscription (instant when realtime is configured)
   _guestRequestsChannel = db.channel(`guest-requests-${eventId}`)
     .on("postgres_changes", {
       event: "INSERT", schema: "public", table: "event_guest_requests",
       filter: `event_id=eq.${eventId}`
     }, payload => {
       const row = payload.new;
-      if (row?.status === "pending") _showGuestRequestChip(row);
+      if (row?.status === "pending" && !_seenRequestIds.has(row.id)) {
+        _seenRequestIds.add(row.id);
+        _showGuestRequestChip(row);
+      }
     })
     .subscribe();
+
+  // Fallback: poll every 4 s in case realtime publication isn't configured
+  _guestRequestPoller = setInterval(_loadPendingRequests, 4000);
 }
 
 function _showGuestRequestChip(row) {

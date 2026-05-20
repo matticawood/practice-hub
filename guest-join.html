@@ -319,6 +319,8 @@
     let _bsSpotlightId = null;
     let _bsHiddenIds   = new Set();
     let _requestChannel = null; // postgres_changes subscription for approval
+    let _approvalPoller = null; // fallback poller — fires if realtime doesn't
+    let _approvalHandled = false; // guard: only act on approval once
 
     // ── UI helpers ───────────────────────────────────────────────────────────
     function setStatus(title, sub = "", spinner = true) {
@@ -370,22 +372,42 @@
       document.getElementById("guest-name-label").textContent = guestName;
       setStatus("Waiting for host…", `${guestName} — the host has been notified and will let you in shortly`, false);
 
-      // Subscribe to our request row — when status changes to 'approved' or 'rejected', act on it
+      _approvalHandled = false;
+
+      function handleApproval(row) {
+        if (_approvalHandled) return;
+        _approvalHandled = true;
+        if (_requestChannel) { db.removeChannel(_requestChannel); _requestChannel = null; }
+        if (_approvalPoller) { clearInterval(_approvalPoller); _approvalPoller = null; }
+        if (row.status === "approved" && row.daily_token && row.room_url) {
+          joinWithToken(row.daily_token, row.room_url, data.eventTitle, data.eventStatus);
+        } else if (row.status === "rejected") {
+          showError("Request declined", "The host declined your request to join. Contact the host if you think this is a mistake.");
+        }
+      }
+
+      // Primary: postgres_changes subscription (instant when realtime publication is configured)
       _requestChannel = db.channel(`guest-req-${data.requestId}`)
         .on("postgres_changes", {
           event: "UPDATE", schema: "public", table: "event_guest_requests",
           filter: `id=eq.${data.requestId}`
-        }, payload => {
-          const row = payload.new;
-          if (row.status === "approved" && row.daily_token && row.room_url) {
-            if (_requestChannel) { db.removeChannel(_requestChannel); _requestChannel = null; }
-            joinWithToken(row.daily_token, row.room_url, data.eventTitle, data.eventStatus);
-          } else if (row.status === "rejected") {
-            if (_requestChannel) { db.removeChannel(_requestChannel); _requestChannel = null; }
-            showError("Request declined", "The host declined your request to join. Contact the host if you think this is a mistake.");
-          }
-        })
+        }, payload => { handleApproval(payload.new); })
         .subscribe();
+
+      // Fallback: poll the DB every 3 s in case realtime isn't set up
+      _approvalPoller = setInterval(async () => {
+        if (_approvalHandled) { clearInterval(_approvalPoller); _approvalPoller = null; return; }
+        try {
+          const { data: row } = await db
+            .from("event_guest_requests")
+            .select("status, daily_token, room_url")
+            .eq("id", data.requestId)
+            .single();
+          if (row && (row.status === "approved" || row.status === "rejected")) {
+            handleApproval(row);
+          }
+        } catch(e) { /* silent — will retry */ }
+      }, 3000);
     }
 
     // ── Step 2: Join the Daily room with an approved token ────────────────────
