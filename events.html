@@ -1771,6 +1771,8 @@ let _bsMicMuted             = false; // backstage mic mute state
 let _bsCamOff               = false; // backstage camera off state
 let _bsSpotlightId          = null;  // session_id of spotlighted participant, or null for gallery
 let _bsHiddenIds            = new Set(); // session_ids hidden from the local view
+let _bsJoining              = false; // guard: prevent concurrent joinBackstage calls
+let _bsTransitioning        = false; // guard: prevent double-fire of _joinMainStreamFromBackstage
 let _participantInfo      = {};     // sessionId → { name, email } from viewer-info messages
 let _pendingStageInvite = null;  // { eventId, token, roomUrl } when a stage invite is pending for this viewer
 let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage invite (pending)
@@ -3745,10 +3747,21 @@ async function joinStream(eventId, options = {}) {
     return false;
   }
 
-  // Destroy any existing call
+  // Destroy ALL existing Daily.co instances before creating a new one
   if (window._callFrame) {
+    try { await window._callFrame.leave(); }   catch(e) {}
     try { await window._callFrame.destroy(); } catch(e) {}
     window._callFrame = null;
+  }
+  if (window._backstageCall) {
+    try { await window._backstageCall.leave(); }   catch(e) {}
+    try { await window._backstageCall.destroy(); } catch(e) {}
+    window._backstageCall = null;
+  }
+  if (window._backstageFrame) {
+    try { await window._backstageFrame.leave(); }   catch(e) {}
+    try { await window._backstageFrame.destroy(); } catch(e) {}
+    window._backstageFrame = null;
   }
 
   const container = document.getElementById("daily-container");
@@ -4810,6 +4823,17 @@ async function endStreamFromDetail(eventId) {
 
 // ── Backstage ─────────────────────────────────────────────────────────────────
 async function joinBackstage(eventId) {
+  // Prevent concurrent calls (double-click, etc.)
+  if (_bsJoining) return;
+  _bsJoining = true;
+  try {
+    await _joinBackstageImpl(eventId);
+  } finally {
+    _bsJoining = false;
+  }
+}
+
+async function _joinBackstageImpl(eventId) {
   // Refresh auth token
   const { data: { session } } = await db.auth.getSession();
   if (!session) { alert("Session expired — please sign in again."); window.location.href = "/practice-log.html"; return; }
@@ -4899,10 +4923,11 @@ async function joinBackstage(eventId) {
   const backstageUrl = tokenData.roomUrl;
 
   // ── Both host and guest: headless call object with custom equal-tile grid ──
-  _bsMicMuted    = false;
-  _bsCamOff      = false;
-  _bsSpotlightId = null;
-  _bsHiddenIds   = new Set();
+  _bsMicMuted      = false;
+  _bsCamOff        = false;
+  _bsSpotlightId   = null;
+  _bsHiddenIds     = new Set();
+  _bsTransitioning = false; // reset so "host went live" transition can fire again
 
   window._backstageCall = DailyIframe.createCallObject();
   const call = window._backstageCall;
@@ -5172,6 +5197,10 @@ async function leaveBackstage() {
 }
 
 async function _joinMainStreamFromBackstage() {
+  // Guard: both broadcast channel AND DB subscription can fire this — only run once
+  if (_bsTransitioning) return;
+  _bsTransitioning = true;
+
   // Leave backstage Daily.co room (handles both frame and call-object paths)
   if (window._backstageFrame) {
     try { await window._backstageFrame.leave(); } catch(e) {}
