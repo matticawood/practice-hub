@@ -220,28 +220,23 @@
     .btn-link:hover { opacity: .8; }
     .mux-player-wrap { width: 100%; border-radius: var(--radius); overflow: hidden; position: relative; }
     /* ── VOD featured-question overlay ──────────────────────────────────────── */
-    #vod-qa-overlay {
-      display: none; position: absolute;
-      bottom: 48px; left: 10px;
-      max-width: 220px;
-      background: rgba(0,0,0,0.68); backdrop-filter: blur(4px);
-      border-left: 2px solid var(--accent);
-      border-radius: 5px; padding: 6px 10px;
-      pointer-events: none; z-index: 10;
-      animation: vod-qa-fadein .3s ease;
-      transition: bottom .3s ease;
-    }
-    #vod-qa-overlay.visible { display: block; }
-    /* In fullscreen the overlay is moved into the fullscreen element and
-       positioned via JS (positionVodOverlay) which accounts for letterboxing */
-    #vod-qa-overlay.fullscreen-mode { position: fixed; }
     @keyframes vod-qa-fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-    .vod-qa-label { font-size: .6rem; color: var(--accent); font-weight: 700;
-      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px;
-      display: flex; align-items: center; gap: 4px; }
-    .vod-qa-text  { font-size: .78rem; color: #fff; line-height: 1.35;
-      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    .vod-qa-asker { font-size: .68rem; color: rgba(255,255,255,.55); margin-top: 2px; }
+    /* ── Now Featured banner (below video, synced to playback) ─────────────── */
+    #vod-now-featured {
+      display: none; margin-top: 10px;
+      background: rgba(201,168,76,.08);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px; padding: 10px 14px;
+      animation: vod-qa-fadein .25s ease;
+    }
+    #vod-now-featured.visible { display: block; }
+    .vod-now-featured-label {
+      font-size: .65rem; color: var(--accent); font-weight: 700;
+      text-transform: uppercase; letter-spacing: .07em;
+      display: flex; align-items: center; gap: 5px; margin-bottom: 5px;
+    }
+    #vod-now-featured-text  { font-size: .9rem; color: #fff; line-height: 1.4; }
+    #vod-now-featured-asker { font-size: .75rem; color: var(--text-muted); margin-top: 3px; }
     /* ── VOD answered Q&A list ───────────────────────────────────────────────── */
     .vod-qa-list { margin-top: 20px; }
     .vod-qa-list-title {
@@ -1792,14 +1787,14 @@ async function renderDetailView(ev) {
           accent-color="#c9a84c"
           style="width:100%;border-radius:var(--radius);display:block;">
         </mux-player>
-        <div id="vod-qa-overlay">
-          <div class="vod-qa-label">
-            <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-            Featured Question
-          </div>
-          <div class="vod-qa-text" id="vod-qa-text"></div>
-          <div class="vod-qa-asker" id="vod-qa-asker"></div>
+      </div>
+      <div id="vod-now-featured">
+        <div class="vod-now-featured-label">
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          Now Featured
         </div>
+        <div id="vod-now-featured-text"></div>
+        <div id="vod-now-featured-asker"></div>
       </div>
       <div id="vod-qa-list-wrap"></div>
     </div>`
@@ -1947,7 +1942,6 @@ async function renderDetailView(ev) {
 
   loadComments(ev.id);
   loadAttendees(ev.id);
-  setupVodQaOverlay(ev);
   setupVodQaList(ev);
 
   if (ev.status === "scheduled") {
@@ -4017,327 +4011,6 @@ async function markAnswered(qaId, currentState) {
   await _refreshQAList();
 }
 
-// ── VOD featured-question overlay ─────────────────────────────────────────────
-// Loads all feature windows from event_qa_features (one row per feature event)
-// and shows each as a timed overlay on the VOD player.  This correctly handles
-// the same question being featured multiple times — each window is independent.
-async function setupVodQaOverlay(ev) {
-  if (!ev.mux_playback_id || !ev.stream_started_at) return;
-
-  const { data: features } = await db
-    .from("event_qa_features")
-    .select("id, qa_id, featured_at, unfeatured_at, event_qa(question, name, email)")
-    .eq("event_id", ev.id)
-    .order("featured_at", { ascending: true });
-
-  if (!features?.length) return;
-
-  const streamStart = new Date(ev.stream_started_at).getTime();
-  const toOffset = ts => (new Date(ts).getTime() - streamStart) / 1000;
-
-  // Build one segment per feature window.  Each window ends at the earlier of
-  // its own unfeatured_at or the start of the very next window (any question).
-  const segments = features
-    .map((f, i) => {
-      const q = f.event_qa;
-      if (!q) return null;
-      const start       = toOffset(f.featured_at);
-      const nextStart   = features[i + 1] ? toOffset(features[i + 1].featured_at) : Infinity;
-      const unfeatureAt = f.unfeatured_at  ? toOffset(f.unfeatured_at)             : Infinity;
-      return {
-        start,
-        end:      Math.min(nextStart, unfeatureAt),
-        question: q.question,
-        name:     q.name || q.email?.split("@")[0] || "Anonymous"
-      };
-    })
-    .filter(s => s && s.start >= 0 && s.end > s.start);
-
-  if (!segments.length) return;
-
-  const player  = document.getElementById("vod-mux-player");
-  const overlay = document.getElementById("vod-qa-overlay");
-  const textEl  = document.getElementById("vod-qa-text");
-  const askerEl = document.getElementById("vod-qa-asker");
-  if (!player || !overlay) return;
-
-  let currentQuestion = null;
-
-  player.addEventListener("timeupdate", () => {
-    const t = player.currentTime;
-    const active = segments.find(s => t >= s.start && t < s.end) || null;
-    if (active?.question === currentQuestion) return; // no change
-    currentQuestion = active?.question || null;
-
-    if (active) {
-      textEl.textContent  = active.question;
-      askerEl.textContent = "— " + active.name;
-      overlay.classList.add("visible");
-    } else {
-      overlay.classList.remove("visible");
-    }
-  });
-
-  // Move overlay up/down with the player controls bar.
-  // mux-player uses media-chrome internally — the media-controller element gets
-  // a "user-inactive" attribute when controls hide. Watch that with a
-  // MutationObserver so we stay perfectly in sync with the controls animation.
-  const BOTTOM_CONTROLS_SHOWN = 48;
-  const BOTTOM_CONTROLS_HIDDEN = 10;
-
-  function setOverlayBottom(controlsVisible) {
-    const ov = document.getElementById("vod-qa-overlay");
-    if (!ov || ov.classList.contains("fullscreen-mode")) return;
-    ov.style.bottom = (controlsVisible ? BOTTOM_CONTROLS_SHOWN : BOTTOM_CONTROLS_HIDDEN) + "px";
-  }
-
-  let _controlsHideTimer = null;
-  let _fsControlsObserver = null;   // stored so we can disconnect on fullscreen exit
-  function onControlsChange(visible) {
-    clearTimeout(_controlsHideTimer);
-    if (visible) {
-      setOverlayBottom(true);
-    } else {
-      // Delay drop to match the controls fade-out animation (~400ms)
-      _controlsHideTimer = setTimeout(() => setOverlayBottom(false), 400);
-    }
-  }
-
-  try {
-    const controller = player.shadowRoot?.querySelector("media-controller");
-    if (!controller) throw new Error("no controller");
-    new MutationObserver(() => {
-      onControlsChange(!controller.hasAttribute("user-inactive"));
-    }).observe(controller, { attributes: true, attributeFilter: ["user-inactive"] });
-  } catch(e) {
-    // Fallback: approximate with mouse events
-    let hideTimer = null;
-    const show = () => { onControlsChange(true); clearTimeout(hideTimer); hideTimer = setTimeout(() => onControlsChange(false), 2500); };
-    player.addEventListener("mousemove",  show);
-    player.addEventListener("touchstart", show);
-    player.addEventListener("mouseleave", () => { clearTimeout(hideTimer); onControlsChange(false); });
-  }
-
-  // Fullscreen: mux-player's native fullscreen owns its own shadow DOM so our
-  // overlay disappears. Fix: move it into the fullscreen element with
-  // position:fixed, then use positionVodOverlay() to compute pixel coords that
-  // match the actual video render area (accounting for letterbox bars).
-  const wrap = document.getElementById("vod-player-wrap");
-  let _fsEnterTimer = null; // store so we can cancel it if fullscreen is exited before it fires
-  let _fsHideTimer  = null; // hoisted here so the exit branch can cancel it too
-  let _inFsMode     = false; // guard: prevents late MutationObserver callbacks from firing after exit
-
-  function positionVodOverlay(ov, controlsVisible = true) {
-    // Use screen.width/height — these always reflect the physical screen size
-    // even before window.innerWidth has updated after the fullscreen transition.
-    // Daily.co recordings are 16:9, so assume that aspect ratio.
-    const sw = screen.width;
-    const sh = screen.height;
-    const videoAspect  = 16 / 9;
-    const screenAspect = sw / sh;
-
-    let renderW, renderH, offsetX, offsetY;
-    if (videoAspect > screenAspect) {
-      // Pillarboxed — black bars left/right
-      renderW = sw; renderH = sw / videoAspect;
-      offsetX = 0;  offsetY = (sh - renderH) / 2;
-    } else {
-      // Letterboxed — black bars top/bottom
-      renderW = sh * videoAspect; renderH = sh;
-      offsetX = (sw - renderW) / 2; offsetY = 0;
-    }
-
-    const set = (el, prop, val) => el?.style.setProperty(prop, val, "important");
-
-    const ctrlBar = player.shadowRoot?.querySelector("media-control-bar");
-    const ctrlBarH = ctrlBar ? Math.max(40, ctrlBar.getBoundingClientRect().height) : Math.round(renderH * 0.055);
-    const GAP = 10;
-    set(ov, "bottom",     (offsetY + (controlsVisible ? ctrlBarH + GAP : GAP)) + "px");
-    set(ov, "transition", "bottom .3s ease");
-    set(ov, "left",        (offsetX + renderW * 0.015) + "px");
-    set(ov, "max-width",   (renderW * 0.28) + "px");
-    set(ov, "padding",     (renderH * 0.012) + "px " + (renderW * 0.012) + "px");
-    set(ov, "border-left-width", Math.max(2, renderW * 0.002) + "px");
-    set(ov, "border-radius",     (renderW * 0.004) + "px");
-
-    const label = ov.querySelector(".vod-qa-label");
-    const text  = ov.querySelector(".vod-qa-text");
-    const asker = ov.querySelector(".vod-qa-asker");
-    if (label) {
-      set(label, "font-size",     (renderW * 0.01)  + "px");
-      set(label, "line-height",   "1.4");
-      set(label, "margin-bottom", (renderH * 0.008) + "px");
-      set(label, "gap",           (renderW * 0.004) + "px");
-    }
-    if (text)  {
-      set(text, "font-size",          (renderW * 0.013) + "px");
-      set(text, "line-height",        "1.5");
-      set(text, "-webkit-line-clamp", "3");
-      set(text, "display",            "-webkit-box");
-      set(text, "-webkit-box-orient", "vertical");
-      set(text, "overflow",           "hidden");
-    }
-    if (asker) {
-      set(asker, "font-size",  (renderW * 0.01)  + "px");
-      set(asker, "line-height","1.4");
-      set(asker, "margin-top", (renderH * 0.006) + "px");
-    }
-  }
-
-  function handleFullscreenChange() {
-    const ov = document.getElementById("vod-qa-overlay");
-    if (!ov) return;
-    const fs = document.fullscreenElement || document.webkitFullscreenElement;
-    if (fs) {
-      fs.appendChild(ov);
-      ov.classList.add("fullscreen-mode");
-      // Small delay — browser needs time to finish the fullscreen transition.
-      // Store the timer so the exit branch can cancel it if the user exits
-      // before the 150 ms are up (otherwise the timer fires after exit and
-      // re-applies large fullscreen pixel values to the normal-view overlay).
-      _fsEnterTimer = setTimeout(() => {
-        _fsEnterTimer = null;
-        // Safety check — abort if fullscreen was already exited
-        if (!(document.fullscreenElement || document.webkitFullscreenElement)) return;
-        _inFsMode = true;
-        positionVodOverlay(ov, true);
-
-        // Precompute the two bottom values for controls shown/hidden
-        const sw = screen.width, sh = screen.height;
-        const videoAspect = 16 / 9, screenAspect = sw / sh;
-        let renderH, offsetY;
-        if (videoAspect > screenAspect) {
-          renderH = sw / videoAspect; offsetY = (sh - renderH) / 2;
-        } else {
-          renderH = sh; offsetY = 0;
-        }
-        // Measure the actual controls bar height from the shadow DOM so the
-        // overlay sits just above it rather than a fixed % of the video height
-        const ctrlBar = player.shadowRoot?.querySelector("media-control-bar");
-        const ctrlBarH = ctrlBar ? Math.max(40, ctrlBar.getBoundingClientRect().height) : Math.round(renderH * 0.055);
-        const GAP = 10; // px gap between overlay bottom and controls bar top
-        const bottomShown  = (offsetY + ctrlBarH + GAP) + "px";
-        const bottomHidden = (offsetY + GAP) + "px";
-
-        function onFsControlsChange(visible) {
-          // Guard: MutationObserver callbacks can fire after disconnect() if
-          // they were already queued — bail out if we've already exited fullscreen
-          if (!_inFsMode) return;
-          clearTimeout(_fsHideTimer);
-          _fsHideTimer = null;
-          if (visible) {
-            ov.style.setProperty("bottom", bottomShown,  "important");
-          } else {
-            _fsHideTimer = setTimeout(() => {
-              _fsHideTimer = null;
-              if (!_inFsMode) return; // double-check in case exit happened during the 400ms
-              ov.style.setProperty("bottom", bottomHidden, "important");
-            }, 400);
-          }
-        }
-
-        try {
-          const ctrl = player.shadowRoot?.querySelector("media-controller");
-          if (!ctrl) throw new Error();
-          _fsControlsObserver = new MutationObserver(() => {
-            onFsControlsChange(!ctrl.hasAttribute("user-inactive"));
-          });
-          _fsControlsObserver.observe(ctrl, { attributes: true, attributeFilter: ["user-inactive"] });
-        } catch(e) {
-          let hideTimer = null;
-          const show = () => { onFsControlsChange(true); clearTimeout(hideTimer); hideTimer = setTimeout(() => onFsControlsChange(false), 2500); };
-          player.addEventListener("mousemove",  show);
-          player.addEventListener("touchstart", show);
-        }
-      }, 150);
-    } else if (wrap) {
-      // Mark fullscreen as exited FIRST so any still-queued MutationObserver
-      // callbacks from onFsControlsChange become no-ops before they run
-      _inFsMode = false;
-      // Cancel all pending fullscreen timers
-      clearTimeout(_fsEnterTimer);  _fsEnterTimer = null;
-      clearTimeout(_fsHideTimer);   _fsHideTimer  = null;
-      // Disconnect the fullscreen controls observer
-      _fsControlsObserver?.disconnect();
-      _fsControlsObserver = null;
-      wrap.appendChild(ov);
-      ov.classList.remove("fullscreen-mode");
-      // Clear all inline styles so CSS takes back over
-      ov.style.cssText = "";
-      ov.querySelectorAll(".vod-qa-label,.vod-qa-text,.vod-qa-asker")
-        .forEach(el => el.style.cssText = "");
-    }
-  }
-
-  document.addEventListener("fullscreenchange",       handleFullscreenChange);
-  document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-
-  // ── iOS native fullscreen: show questions as WebVTT captions ─────────────
-  // On iPhone/iPad, tapping fullscreen hands the video to the OS native player
-  // (webkitEnterFullscreen). Our DOM overlay can't appear there, but the native
-  // player honours <track> elements.
-  //
-  // We do NOT add the track in advance (mux-player auto-enables tracks and
-  // shows a grey caption box in normal view). Instead we create and inject the
-  // track on-demand when webkitbeginfullscreen fires, and remove it on exit so
-  // it never interferes with normal playback.
-
-  function fmtVtt(secs) {
-    const h  = Math.floor(secs / 3600);
-    const m  = Math.floor((secs % 3600) / 60);
-    const s  = Math.floor(secs % 60);
-    const ms = Math.round((secs % 1) * 1000);
-    return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
-  }
-
-  // Pre-build the VTT text (no blob/track yet — deferred until iOS fullscreen)
-  const vttLines = ["WEBVTT", ""];
-  segments.forEach(seg => {
-    const endSecs = isFinite(seg.end) ? seg.end : seg.start + 600;
-    vttLines.push(
-      `${fmtVtt(seg.start)} --> ${fmtVtt(endSecs)}`,
-      seg.question,
-      `— ${seg.name}`,
-      ""
-    );
-  });
-  const vttContent = vttLines.join("\n");
-
-  // Find the underlying <video> element inside mux-player's shadow DOM
-  const mc      = player.shadowRoot?.querySelector("media-controller");
-  const videoEl = mc?.media || mc?.shadowRoot?.querySelector("video") || player.shadowRoot?.querySelector("video");
-
-  if (videoEl) {
-    let iosTrackEl  = null;
-    let iosVttUrl   = null;
-
-    videoEl.addEventListener("webkitbeginfullscreen", () => {
-      // Inject track only now — avoids any interference with normal view
-      if (!iosTrackEl) {
-        iosVttUrl  = URL.createObjectURL(new Blob([vttContent], { type: "text/vtt" }));
-        iosTrackEl = document.createElement("track");
-        iosTrackEl.kind    = "subtitles";
-        iosTrackEl.label   = "Featured Questions";
-        iosTrackEl.srclang = "en";
-        iosTrackEl.default = true;
-        iosTrackEl.src     = iosVttUrl;
-        videoEl.appendChild(iosTrackEl);
-      }
-      if (iosTrackEl.track) iosTrackEl.track.mode = "showing";
-    });
-
-    videoEl.addEventListener("webkitendfullscreen", () => {
-      // Remove the track entirely so it can't bleed into normal view
-      if (iosTrackEl) {
-        if (iosTrackEl.track) iosTrackEl.track.mode = "disabled";
-        iosTrackEl.remove();
-        iosTrackEl = null;
-      }
-      if (iosVttUrl) { URL.revokeObjectURL(iosVttUrl); iosVttUrl = null; }
-    });
-  }
-}
-
 // ── VOD Q&A list ──────────────────────────────────────────────────────────────
 // Shows all questions that were featured during the stream (whether or not they
 // were explicitly marked "answered") with clickable timestamps to seek the player.
@@ -4458,6 +4131,14 @@ async function setupVodQaList(ev) {
       .filter(s => s.start >= 0 && s.end > s.start);
 
     const player = document.getElementById("vod-mux-player");
+    const nowFeaturedEl    = document.getElementById("vod-now-featured");
+    const nowFeaturedText  = document.getElementById("vod-now-featured-text");
+    const nowFeaturedAsker = document.getElementById("vod-now-featured-asker");
+
+    // Build a quick lookup: qa_id → question object
+    const questionById = {};
+    questions.forEach(q => { questionById[q.id] = q; });
+
     if (player && segments.length) {
       let activeId = null;
       player.addEventListener("timeupdate", () => {
@@ -4466,10 +4147,23 @@ async function setupVodQaList(ev) {
         const newId = seg?.id || null;
         if (newId === activeId) return;
         activeId = newId;
+
+        // Update "Now Featured" banner below the video
+        if (nowFeaturedEl) {
+          if (newId && questionById[newId]) {
+            const q = questionById[newId];
+            nowFeaturedText.textContent  = q.question;
+            nowFeaturedAsker.textContent = "— " + (q.name || q.email?.split("@")[0] || "Anonymous");
+            nowFeaturedEl.classList.add("visible");
+          } else {
+            nowFeaturedEl.classList.remove("visible");
+          }
+        }
+
+        // Highlight and scroll matching row in the list
         wrap.querySelectorAll(".vod-qa-row").forEach(row => {
           row.classList.toggle("active", row.dataset.qaId === String(newId));
         });
-        // Scroll active row into view
         if (newId) {
           const activeRow = wrap.querySelector(`.vod-qa-row[data-qa-id="${newId}"]`);
           activeRow?.scrollIntoView({ behavior: "smooth", block: "nearest" });
