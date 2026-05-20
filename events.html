@@ -2092,9 +2092,33 @@ let isRecording  = false;
 })();
 
 // ── View routing ──────────────────────────────────────────────────────────────
+// ── Screen Wake Lock ─────────────────────────────────────────────────────────
+let _wakeLock = null;
+async function _acquireWakeLock() {
+  if (!navigator.wakeLock || _wakeLock) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request("screen");
+    _wakeLock.addEventListener("release", () => { _wakeLock = null; });
+  } catch(e) { /* unsupported or denied — silently ignore */ }
+}
+function _releaseWakeLock() {
+  if (_wakeLock) { _wakeLock.release(); _wakeLock = null; }
+}
+// Re-acquire after returning to the tab (wake lock is auto-released on hide)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    const cur = document.querySelector(".view.active")?.id?.replace("view-", "");
+    if (cur === "stream" || cur === "backstage") _acquireWakeLock();
+  }
+});
+
 function showView(name) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("view-" + name).classList.add("active");
+
+  // Manage wake lock — keep screen on during stream/backstage, release otherwise
+  if (name === "stream" || name === "backstage") _acquireWakeLock();
+  else _releaseWakeLock();
 
   // Hide the shared app header when in stream/backstage (they have their own top bar)
   const appHeader = document.getElementById("app-header");
