@@ -348,24 +348,35 @@
       );
 
       let data;
-      try {
-        const res = await fetch("/api/daily", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "get-guest-token", inviteToken, eventId, forStream })
-        });
-        data = await res.json();
-      } catch(e) {
-        showError("Connection failed", "Could not reach the server — check your internet and refresh.");
-        return;
-      }
-      if (data.error) {
-        const notReady = data.error.includes("hasn't opened");
-        showError(
-          notReady ? "Backstage isn't open yet" : "Could not join",
-          notReady ? "The host hasn't opened the backstage yet. Try refreshing in a moment." : data.error
-        );
-        return;
+      // Retry loop: if forStream=true but the event isn't live in the DB yet, wait and retry
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const res = await fetch("/api/daily", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "get-guest-token", inviteToken, eventId, forStream })
+          });
+          data = await res.json();
+        } catch(e) {
+          showError("Connection failed", "Could not reach the server — check your internet and refresh.");
+          return;
+        }
+        if (data.error) {
+          const notReady = data.error.includes("hasn't opened");
+          showError(
+            notReady ? "Backstage isn't open yet" : "Could not join",
+            notReady ? "The host hasn't opened the backstage yet. Try refreshing in a moment." : data.error
+          );
+          return;
+        }
+        // If we requested stream access but the DB isn't live yet, wait and retry
+        if (forStream && data.eventStatus !== "live") {
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+        }
+        break;
       }
 
       guestName = data.guestName || "Guest";
@@ -897,6 +908,9 @@
           callObject = null;
         }
         _layout = { preset: "default", session_id: null };
+        // Wait for DB replication so get-guest-token sees status="live" and daily_room_name
+        // (same delay used on the member-guest path in events.html)
+        await new Promise(r => setTimeout(r, 1500));
         await joinCall(true);
       })
       .subscribe();
