@@ -1142,7 +1142,9 @@
       font-size: .85rem; font-weight: 600; color: var(--text);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
     }
-    #backstage-panel-guests,
+    #backstage-panel-guests {
+      flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: visible;
+    }
     #backstage-panel-qa {
       flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
     }
@@ -1172,10 +1174,10 @@
     }
     .backstage-invite-row input:focus { outline: none; border-color: var(--accent); }
     #backstage-member-suggestions {
-      position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+      position: absolute; bottom: 100%; left: 0; right: 0; z-index: 200;
       background: var(--surface); border: 1.5px solid var(--border);
-      border-radius: 8px; margin-top: 3px;
-      box-shadow: 0 6px 20px rgba(0,0,0,.5);
+      border-radius: 8px; margin-bottom: 3px;
+      box-shadow: 0 -6px 20px rgba(0,0,0,.5);
       overflow: hidden;
     }
     .member-suggestion {
@@ -3715,8 +3717,8 @@ async function joinStream(eventId, options = {}) {
   container.innerHTML = "";
 
   try {
-    if (isAdmin || asCohost) {
-      // ── HOST / COHOST: full Daily.co iframe with camera + mic ───────────────
+    if (isAdmin) {
+      // ── HOST: full Daily.co iframe with camera + mic + admin controls ────────
       window._callFrame = DailyIframe.createFrame(container, {
         showLeaveButton:      true,
         showFullscreenButton: true,
@@ -3727,9 +3729,6 @@ async function joinStream(eventId, options = {}) {
       window._callFrame.on("joined-meeting", async () => {
         // Refresh participant list for layout controls
         _refreshStreamParticipants();
-
-        // Cohosts never start recording or streaming — only the host does
-        if (asCohost) return;
 
         // On REJOIN (stream_started_at already set) don't restart recording or
         // live streaming — the Mux RTMP stream reconnects automatically within
@@ -3790,6 +3789,126 @@ async function joinStream(eventId, options = {}) {
         url: ev.daily_room_url,
         token: result.token
       });
+
+    } else if (asCohost) {
+      // ── COHOST: headless call object — custom video UI, NO recording controls ─
+      // Using createCallObject (not createFrame) means is_owner:true on the token
+      // does NOT expose the Daily recording/streaming buttons in any UI.
+      container.innerHTML = `
+        <div id="cohost-ui" style="position:absolute;inset:0;display:flex;flex-direction:column;background:#111;border-radius:var(--radius);overflow:hidden">
+          <div id="cohost-stream-banner" style="display:none;background:rgba(245,197,24,.18);border-bottom:1.5px solid var(--accent);padding:6px 14px;font-size:.82rem;font-weight:600;color:var(--accent);text-align:center">
+            ★ You're featured on stream
+          </div>
+          <div id="cohost-grid" style="flex:1;min-height:0;display:flex;flex-wrap:wrap;gap:2px;padding:2px;align-content:flex-start;overflow:hidden"></div>
+          <div style="flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;background:rgba(0,0,0,.7)">
+            <button id="cohost-mic-btn" class="btn btn-sm btn-ghost" onclick="cohostToggleMic()">🎤 Mute</button>
+            <button id="cohost-cam-btn" class="btn btn-sm btn-ghost" onclick="cohostToggleCam()">📷 Stop Cam</button>
+            <button class="btn btn-sm btn-ghost" style="color:#ff6b6b" onclick="cohostLeave()">Leave</button>
+          </div>
+        </div>`;
+
+      const cohostCall = DailyIframe.createCallObject();
+      window._callFrame = cohostCall;
+      window._cohostMicOn = true;
+      window._cohostCamOn = true;
+
+      // Render all participant video tiles into #cohost-grid
+      function _renderCohostGrid() {
+        const grid = document.getElementById("cohost-grid");
+        if (!grid) return;
+        const parts = Object.values(cohostCall.participants());
+        const n = parts.length || 1;
+        const tileW = n <= 1 ? "100%" : n <= 2 ? "calc(50% - 1px)" : "calc(33.3% - 2px)";
+
+        // Remove old audio elements
+        document.querySelectorAll(".cohost-audio-el").forEach(el => el.remove());
+
+        grid.innerHTML = parts.map(p => {
+          const name = p.user_name || (p.local ? "You" : "Guest");
+          return `<div style="flex:1;min-width:${tileW};min-height:120px;position:relative;background:#1a1a1a;border-radius:3px;overflow:hidden">
+            <video id="cohost-vid-${p.session_id}" autoplay playsinline ${p.local ? "muted" : ""}
+              style="width:100%;height:100%;object-fit:cover;display:block"></video>
+            <div style="position:absolute;bottom:5px;left:7px;font-size:.73rem;color:#fff;background:rgba(0,0,0,.6);border-radius:3px;padding:2px 6px;pointer-events:none">${esc(name)}${p.local ? " (You)" : ""}</div>
+          </div>`;
+        }).join("");
+
+        // Wire video tracks
+        parts.forEach(p => {
+          const vid = document.getElementById(`cohost-vid-${p.session_id}`);
+          if (!vid) return;
+          const vt = p.tracks?.video?.persistentTrack;
+          if (vt) vid.srcObject = new MediaStream([vt]);
+          // Audio for remote participants
+          if (!p.local) {
+            const at = p.tracks?.audio?.persistentTrack;
+            if (at && p.tracks.audio.state === "playable") {
+              const ael = document.createElement("audio");
+              ael.className = "cohost-audio-el";
+              ael.autoplay  = true;
+              ael.srcObject = new MediaStream([at]);
+              document.body.appendChild(ael);
+            }
+          }
+        });
+      }
+
+      cohostCall.on("joined-meeting", async () => {
+        _renderCohostGrid();
+        _refreshStreamParticipants();
+        // Announce ourselves to the host so we appear in the People tab
+        try {
+          const myEmail2 = session?.user?.email || "";
+          const { data: nameRow2 } = await db.from("allowed_emails")
+            .select("name").eq("email", myEmail2).maybeSingle();
+          const myName2 = nameRow2?.name || myEmail2.split("@")[0] || "Guest";
+          cohostCall.sendAppMessage({ type: "viewer-info", name: myName2, email: myEmail2 }, "*");
+        } catch(e) { console.warn("cohost viewer-info send:", e); }
+      });
+
+      cohostCall.on("participant-joined",  _renderCohostGrid);
+      cohostCall.on("participant-updated", _renderCohostGrid);
+      cohostCall.on("participant-left",    _renderCohostGrid);
+      cohostCall.on("track-started",       _renderCohostGrid);
+      cohostCall.on("track-stopped",       _renderCohostGrid);
+
+      cohostCall.on("app-message", e => {
+        const msg = e.data;
+        if (msg.type === "layout-change") {
+          // Show "featured" banner when we're the spotlighted participant
+          const banner  = document.getElementById("cohost-stream-banner");
+          const myId    = cohostCall.participants().local?.session_id;
+          if (banner) banner.style.display = (msg.session_id && msg.session_id === myId) ? "block" : "none";
+        } else {
+          _handleAppMessage(e);
+        }
+      });
+
+      cohostCall.on("left-meeting", () => {
+        document.querySelectorAll(".cohost-audio-el").forEach(el => el.remove());
+        if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
+        const c = document.getElementById("daily-container");
+        if (c) c.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;"><p style="color:var(--text-muted)">You left the stream.</p><button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button></div>`;
+      });
+
+      // Mic / cam helpers (called from onclick attributes above)
+      window.cohostToggleMic = () => {
+        window._cohostMicOn = !window._cohostMicOn;
+        cohostCall.setLocalAudio(window._cohostMicOn);
+        const btn = document.getElementById("cohost-mic-btn");
+        if (btn) btn.textContent = window._cohostMicOn ? "🎤 Mute" : "🔇 Unmute";
+      };
+      window.cohostToggleCam = () => {
+        window._cohostCamOn = !window._cohostCamOn;
+        cohostCall.setLocalVideo(window._cohostCamOn);
+        const btn = document.getElementById("cohost-cam-btn");
+        if (btn) btn.textContent = window._cohostCamOn ? "📷 Stop Cam" : "📷 Start Cam";
+      };
+      window.cohostLeave = async () => {
+        document.querySelectorAll(".cohost-audio-el").forEach(el => el.remove());
+        try { await cohostCall.leave(); } catch(e) {}
+      };
+
+      await cohostCall.join({ url: ev.daily_room_url, token: result.token });
 
     } else {
       // ── VIEWER: headless call object — no Daily.co UI whatsoever ───────────
@@ -4895,8 +5014,11 @@ async function _joinMainStreamFromBackstage() {
   }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
   if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
-  // Join main stream as a cohost (can broadcast camera/mic)
+  // Join main stream as a cohost (can broadcast camera/mic).
+  // Brief delay so the host's DB update (status:"live", daily_room_name) has time
+  // to propagate to all Supabase replicas before joinStream() reads it.
   if (!currentEvent?.id) { showView("detail"); return; }
+  await new Promise(r => setTimeout(r, 1500));
   await joinStream(currentEvent.id, { asCohost: true });
 }
 
@@ -4945,7 +5067,7 @@ function selectBackstageMember(idx) {
   const m = _memberSuggestions[idx];
   if (!m) return;
   document.getElementById("backstage-invite-email").value = m.email;
-  document.getElementById("backstage-invite-name").value  = m.name || "";
+  document.getElementById("backstage-invite-name").value  = m.name || m.email.split("@")[0] || "";
   hideBackstageSuggestions();
 }
 
@@ -4985,7 +5107,7 @@ function highlightSuggestion() {
   if (_memberSuggestIdx >= 0 && _memberSuggestions[_memberSuggestIdx]) {
     const m = _memberSuggestions[_memberSuggestIdx];
     document.getElementById("backstage-invite-email").value = m.email;
-    document.getElementById("backstage-invite-name").value  = m.name || "";
+    document.getElementById("backstage-invite-name").value  = m.name || m.email.split("@")[0] || "";
   }
 }
 
