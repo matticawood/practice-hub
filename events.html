@@ -1766,6 +1766,9 @@ let streamStatusChannel = null;   // watches for stream-ended status update
 let backstageChannel      = null;   // realtime Q&A watcher for backstage view
 let _backstageBcastChannel  = null;  // broadcast channel for backstage coordination
 let _backstageEventChannel  = null;  // postgres_changes subscription for "event went live" (guests)
+let _backstageCall          = null;  // createCallObject for guest backstage (headless custom UI)
+let _bsMicMuted             = false; // guest backstage mic mute state
+let _bsCamOff               = false; // guest backstage camera off state
 let _participantInfo      = {};     // sessionId → { name, email } from viewer-info messages
 let _pendingStageInvite = null;  // { eventId, token, roomUrl } when a stage invite is pending for this viewer
 let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage invite (pending)
@@ -1870,6 +1873,11 @@ function showView(name) {
       try { window._backstageFrame.leave(); }   catch(e) {}
       try { window._backstageFrame.destroy(); } catch(e) {}
       window._backstageFrame = null;
+    }
+    if (window._backstageCall) {
+      try { window._backstageCall.leave(); }   catch(e) {}
+      try { window._backstageCall.destroy(); } catch(e) {}
+      window._backstageCall = null;
     }
   }
   if (name === "detail" && currentEvent) {
@@ -4853,11 +4861,16 @@ async function joinBackstage(eventId) {
   const liveIndicator = document.getElementById("backstage-stream-indicator");
   if (liveIndicator) liveIndicator.style.display = (ev.status === "live") ? "inline-flex" : "none";
 
-  // Leave and destroy any existing backstage call frame before creating a new one
+  // Leave and destroy any existing backstage call before creating a new one
   if (window._backstageFrame) {
     try { await window._backstageFrame.leave(); }   catch(e) {}
     try { await window._backstageFrame.destroy(); } catch(e) {}
     window._backstageFrame = null;
+  }
+  if (window._backstageCall) {
+    try { await window._backstageCall.leave(); }   catch(e) {}
+    try { window._backstageCall.destroy(); } catch(e) {}
+    window._backstageCall = null;
   }
 
   const container = document.getElementById("backstage-container");
@@ -4868,36 +4881,84 @@ async function joinBackstage(eventId) {
     return;
   }
 
-  window._backstageFrame = DailyIframe.createFrame(container, {
-    showLeaveButton:      false,  // "Leave Backstage" button in our own bar
-    showFullscreenButton: true,
-    iframeStyle: {
-      position: "absolute", top: 0, left: 0,
-      width: "100%", height: "100%", border: "none"
-    }
-  });
-
-  window._backstageFrame.on("left-meeting", () => {
-    if (window._backstageFrame) {
-      try { window._backstageFrame.destroy(); } catch(e) {}
-      window._backstageFrame = null;
-    }
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
-        <p style="color:var(--text-muted)">You left the backstage.</p>
-        <button class="btn btn-primary" onclick="joinBackstage('${eventId}')">Rejoin</button>
-      </div>`;
-  });
-
   // Use the canonical room URL returned by the edge function
   const backstageUrl = tokenData.roomUrl;
 
-  try {
-    await window._backstageFrame.join({ url: backstageUrl, token: tokenData.token });
-  } catch(e) {
-    console.error("Backstage join failed:", e);
-    alert("Could not join the backstage room: " + e.message);
-    return;
+  if (isAdmin) {
+    // ── Host: prebuilt Daily iframe with full controls ─────────────
+    window._backstageFrame = DailyIframe.createFrame(container, {
+      showLeaveButton:      false,
+      showFullscreenButton: true,
+      iframeStyle: {
+        position: "absolute", top: 0, left: 0,
+        width: "100%", height: "100%", border: "none"
+      }
+    });
+
+    window._backstageFrame.on("left-meeting", () => {
+      if (window._backstageFrame) {
+        try { window._backstageFrame.destroy(); } catch(e) {}
+        window._backstageFrame = null;
+      }
+      container.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
+          <p style="color:var(--text-muted)">You left the backstage.</p>
+          <button class="btn btn-primary" onclick="joinBackstage('${eventId}')">Rejoin</button>
+        </div>`;
+    });
+
+    try {
+      await window._backstageFrame.join({ url: backstageUrl, token: tokenData.token });
+    } catch(e) {
+      console.error("Backstage join failed:", e);
+      alert("Could not join the backstage room: " + e.message);
+      return;
+    }
+
+  } else {
+    // ── Guest: headless call object with custom equal-tile grid ─────
+    _bsMicMuted = false;
+    _bsCamOff   = false;
+
+    window._backstageCall = DailyIframe.createCallObject();
+    const call = window._backstageCall;
+
+    function _refreshBsGrid() { _renderBsGrid(call); }
+
+    call
+      .on("participant-joined",  _refreshBsGrid)
+      .on("participant-updated", _refreshBsGrid)
+      .on("participant-left",    _refreshBsGrid)
+      .on("track-started",       _refreshBsGrid)
+      .on("track-stopped",       _refreshBsGrid)
+      .on("left-meeting", () => {
+        if (window._backstageCall) {
+          try { window._backstageCall.destroy(); } catch(e) {}
+          window._backstageCall = null;
+        }
+        const c = document.getElementById("backstage-container");
+        if (c) c.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
+            <p style="color:var(--text-muted)">You left the backstage.</p>
+            <button class="btn btn-primary" onclick="joinBackstage('${eventId}')">Rejoin</button>
+          </div>`;
+        const bar = document.getElementById("backstage-guest-bar");
+        if (bar) bar.innerHTML = `
+          <span style="font-size:.82rem;color:var(--text-muted);flex:1">You're in the backstage green room.</span>
+          <button class="btn btn-sm btn-ghost" onclick="leaveBackstage()">Leave</button>`;
+      });
+
+    try {
+      await call.join({ url: backstageUrl, token: tokenData.token });
+    } catch(e) {
+      console.error("Backstage join failed:", e);
+      alert("Could not join the backstage room: " + e.message);
+      return;
+    }
+
+    // Initial grid render + populate device controls in guest bar
+    _renderBsGrid(call);
+    await _initBsGuestControls(call);
   }
 
   // Load the sidebar data
@@ -5090,6 +5151,11 @@ async function leaveBackstage() {
     try { await window._backstageFrame.destroy(); } catch(e) {}
     window._backstageFrame = null;
   }
+  if (window._backstageCall) {
+    try { await window._backstageCall.leave(); } catch(e) {}
+    try { window._backstageCall.destroy(); } catch(e) {}
+    window._backstageCall = null;
+  }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
   if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
   if (_backstageEventChannel) { db.removeChannel(_backstageEventChannel); _backstageEventChannel = null; }
@@ -5097,11 +5163,16 @@ async function leaveBackstage() {
 }
 
 async function _joinMainStreamFromBackstage() {
-  // Leave backstage Daily.co room
+  // Leave backstage Daily.co room (handles both frame and call-object paths)
   if (window._backstageFrame) {
     try { await window._backstageFrame.leave(); } catch(e) {}
     try { await window._backstageFrame.destroy(); } catch(e) {}
     window._backstageFrame = null;
+  }
+  if (window._backstageCall) {
+    try { await window._backstageCall.leave(); } catch(e) {}
+    try { window._backstageCall.destroy(); } catch(e) {}
+    window._backstageCall = null;
   }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
   if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
@@ -5113,6 +5184,241 @@ async function _joinMainStreamFromBackstage() {
   await new Promise(r => setTimeout(r, 1500));
   await joinStream(currentEvent.id, { asCohost: true });
 }
+
+// ── Guest backstage: headless custom-UI helpers ───────────────────────────────
+
+/**
+ * Renders an equal-tile grid inside #backstage-container for all participants
+ * in the headless `call` (createCallObject). Called on every participant event.
+ */
+function _renderBsGrid(call) {
+  const container = document.getElementById("backstage-container");
+  if (!container || !call) return;
+
+  const parts = Object.values(call.participants());
+
+  // Build or reuse grid wrapper
+  let grid = document.getElementById("bs-guest-grid");
+  if (!grid) {
+    container.innerHTML = "";
+    grid = document.createElement("div");
+    grid.id = "bs-guest-grid";
+    grid.style.cssText =
+      "position:absolute;inset:0;display:grid;gap:4px;padding:4px;" +
+      "background:var(--bg);border-radius:inherit;overflow:hidden;";
+    container.appendChild(grid);
+  }
+
+  // Equal columns: 1 for solo, 2 for 2-4 participants
+  const cols = parts.length <= 1 ? 1 : 2;
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  const rendered = new Set();
+
+  parts.forEach(p => {
+    rendered.add(p.session_id);
+    let tile = document.getElementById(`bs-tile-${p.session_id}`);
+
+    if (!tile) {
+      tile = document.createElement("div");
+      tile.id = `bs-tile-${p.session_id}`;
+      tile.style.cssText =
+        "position:relative;background:#111;border-radius:6px;overflow:hidden;" +
+        "display:flex;align-items:center;justify-content:center;min-height:0;";
+
+      // Video element
+      const video = document.createElement("video");
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = !!p.local; // avoid echo on local tile
+      video.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
+      tile.appendChild(video);
+
+      // Camera-off overlay
+      const camOff = document.createElement("div");
+      camOff.className = "bs-cam-off-overlay";
+      camOff.style.cssText =
+        "position:absolute;inset:0;display:flex;flex-direction:column;" +
+        "align-items:center;justify-content:center;gap:6px;" +
+        "color:var(--text-muted);font-size:.75rem;";
+      camOff.innerHTML =
+        `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">` +
+        `<path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/>` +
+        `<line x1="1" y1="1" x2="23" y2="23"/></svg><span>Camera off</span>`;
+      tile.appendChild(camOff);
+
+      // Name label
+      const nameLabel = document.createElement("div");
+      nameLabel.className = "bs-tile-name";
+      nameLabel.style.cssText =
+        "position:absolute;bottom:6px;left:8px;font-size:.72rem;font-weight:600;" +
+        "color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none;" +
+        "background:rgba(0,0,0,.45);border-radius:4px;padding:1px 5px;";
+      tile.appendChild(nameLabel);
+
+      grid.appendChild(tile);
+    }
+
+    // Update name label
+    const nameLabel = tile.querySelector(".bs-tile-name");
+    if (nameLabel) nameLabel.textContent = p.user_name || (p.local ? "You" : "Guest");
+
+    // Update video
+    const video    = tile.querySelector("video");
+    const camOff   = tile.querySelector(".bs-cam-off-overlay");
+    const hasVideo = p.tracks?.video?.state === "playable";
+
+    if (hasVideo && video) {
+      const track = p.tracks.video.persistentTrack;
+      if (track) {
+        const needsNew = !video.srcObject ||
+          video.srcObject.getVideoTracks()[0] !== track;
+        if (needsNew) video.srcObject = new MediaStream([track]);
+        video.style.display = "block";
+      }
+      if (camOff) camOff.style.display = "none";
+    } else {
+      if (video) { video.style.display = "none"; video.srcObject = null; }
+      if (camOff) camOff.style.display = "flex";
+    }
+
+    // Audio for remote participants
+    if (!p.local && p.tracks?.audio?.state === "playable") {
+      let audio = tile.querySelector("audio");
+      if (!audio) {
+        audio = document.createElement("audio");
+        audio.autoplay = true;
+        tile.appendChild(audio);
+      }
+      const track = p.tracks.audio.persistentTrack;
+      if (track) {
+        const needsNew = !audio.srcObject ||
+          audio.srcObject.getAudioTracks()[0] !== track;
+        if (needsNew) audio.srcObject = new MediaStream([track]);
+      }
+    }
+  });
+
+  // Remove tiles for departed participants
+  grid.querySelectorAll("[id^='bs-tile-']").forEach(el => {
+    const sid = el.id.replace("bs-tile-", "");
+    if (!rendered.has(sid)) el.remove();
+  });
+}
+
+/**
+ * Populates the guest bottom bar with mic/cam controls and device selectors.
+ */
+async function _initBsGuestControls(call) {
+  const bar = document.getElementById("backstage-guest-bar");
+  if (!bar) return;
+
+  let devices = [];
+  try {
+    const result = await call.enumerateDevices();
+    devices = result.devices || [];
+  } catch(e) { /* permissions not yet granted — controls still render */ }
+
+  const mics = devices.filter(d => d.kind === "audioinput");
+  const cams = devices.filter(d => d.kind === "videoinput");
+
+  const micOpts = mics.map(m =>
+    `<option value="${m.deviceId}">${m.label || "Microphone"}</option>`).join("");
+  const camOpts = cams.map(c =>
+    `<option value="${c.deviceId}">${c.label || "Camera"}</option>`).join("");
+
+  bar.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;min-width:0;">
+      <button id="bs-mic-btn" class="btn btn-sm btn-ghost"
+              onclick="_bsToggleMic()"
+              style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;">
+        <svg id="bs-mic-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <span id="bs-mic-label">Mute Mic</span>
+      </button>
+      ${micOpts ? `<select id="bs-mic-select" title="Microphone" onchange="_bsChangeMic(this.value)"
+          style="font-size:.78rem;padding:4px 6px;background:var(--surface-2);
+                 border:1.5px solid var(--border);border-radius:6px;color:var(--text);
+                 max-width:150px;cursor:pointer;">${micOpts}</select>` : ""}
+      <div style="width:1px;height:18px;background:var(--border);flex-shrink:0;"></div>
+      <button id="bs-cam-btn" class="btn btn-sm btn-ghost"
+              onclick="_bsToggleCam()"
+              style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;">
+        <svg id="bs-cam-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="23 7 16 12 23 17 23 7"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+        <span id="bs-cam-label">Stop Cam</span>
+      </button>
+      ${camOpts ? `<select id="bs-cam-select" title="Camera" onchange="_bsChangeCam(this.value)"
+          style="font-size:.78rem;padding:4px 6px;background:var(--surface-2);
+                 border:1.5px solid var(--border);border-radius:6px;color:var(--text);
+                 max-width:150px;cursor:pointer;">${camOpts}</select>` : ""}
+    </div>
+    <button class="btn btn-sm btn-ghost" onclick="leaveBackstage()">Leave</button>
+  `;
+}
+
+/** Toggle mic mute for guest backstage. */
+function _bsToggleMic() {
+  if (!window._backstageCall) return;
+  _bsMicMuted = !_bsMicMuted;
+  window._backstageCall.setLocalAudio(!_bsMicMuted);
+  const label = document.getElementById("bs-mic-label");
+  const btn   = document.getElementById("bs-mic-btn");
+  const icon  = document.getElementById("bs-mic-icon");
+  if (label) label.textContent = _bsMicMuted ? "Unmute Mic" : "Mute Mic";
+  if (btn)   btn.style.color   = _bsMicMuted ? "var(--danger, #ef4444)" : "";
+  if (icon)  icon.innerHTML = _bsMicMuted
+    ? `<line x1="1" y1="1" x2="23" y2="23"/>
+       <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+       <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+       <line x1="12" y1="19" x2="12" y2="23"/>
+       <line x1="8" y1="23" x2="16" y2="23"/>`
+    : `<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+       <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+       <line x1="12" y1="19" x2="12" y2="23"/>
+       <line x1="8" y1="23" x2="16" y2="23"/>`;
+}
+
+/** Toggle camera on/off for guest backstage. */
+function _bsToggleCam() {
+  if (!window._backstageCall) return;
+  _bsCamOff = !_bsCamOff;
+  window._backstageCall.setLocalVideo(!_bsCamOff);
+  const label = document.getElementById("bs-cam-label");
+  const btn   = document.getElementById("bs-cam-btn");
+  const icon  = document.getElementById("bs-cam-icon");
+  if (label) label.textContent = _bsCamOff ? "Start Cam" : "Stop Cam";
+  if (btn)   btn.style.color   = _bsCamOff ? "var(--danger, #ef4444)" : "";
+  if (icon)  icon.innerHTML = _bsCamOff
+    ? `<line x1="1" y1="1" x2="23" y2="23"/>
+       <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/>
+       <path d="M11 5H9"/>`
+    : `<polygon points="23 7 16 12 23 17 23 7"/>
+       <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>`;
+}
+
+/** Switch microphone device for guest backstage. */
+async function _bsChangeMic(deviceId) {
+  if (!window._backstageCall || !deviceId) return;
+  try { await window._backstageCall.setInputDevicesAsync({ audioDeviceId: deviceId }); }
+  catch(e) { console.warn("Could not switch microphone:", e); }
+}
+
+/** Switch camera device for guest backstage. */
+async function _bsChangeCam(deviceId) {
+  if (!window._backstageCall || !deviceId) return;
+  try { await window._backstageCall.setInputDevicesAsync({ videoDeviceId: deviceId }); }
+  catch(e) { console.warn("Could not switch camera:", e); }
+}
+
 
 // ── Backstage invite — single search input with member autocomplete ───────────
 let _memberSuggestDebounce = null;
