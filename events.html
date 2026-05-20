@@ -1267,22 +1267,22 @@
         <div id="backstage-panel-guests">
           <div id="backstage-guest-list"></div>
           <div class="backstage-invite-row" id="backstage-invite-row" style="display:none;flex-direction:column;gap:6px">
-            <!-- position:relative here so the dropdown spans the full row width -->
+            <!-- Single search input + Invite button. Dropdown spans full row width. -->
             <div style="display:flex;gap:6px;position:relative">
-              <input id="backstage-invite-email" placeholder="Email or name…" type="text"
+              <input id="backstage-invite-email" placeholder="Invite by name or email…" type="text"
                 autocomplete="new-password"
                 style="flex:1;min-width:0"
                 oninput="onBackstageInviteInput(this.value)"
                 onkeydown="onBackstageInviteKeydown(event)"
                 onblur="setTimeout(hideBackstageSuggestions, 150)" />
-              <input id="backstage-invite-name" placeholder="Name" type="text"
-                autocomplete="new-password"
-                style="flex:0 0 100px;min-width:0"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToBackstage()}" />
               <button class="btn btn-sm btn-primary" onclick="inviteToBackstage()">Invite</button>
-              <!-- Dropdown is positioned from the row, so left:0/right:0 spans everything -->
               <div id="backstage-member-suggestions" style="display:none"></div>
             </div>
+            <!-- Name field: only shown for non-member (custom email) invites -->
+            <input id="backstage-invite-name" placeholder="Their name (for the invite email)…" type="text"
+              autocomplete="new-password"
+              style="display:none;width:100%;box-sizing:border-box"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToBackstage()}" />
             <!-- Shown after a non-member invite is created -->
             <div id="backstage-invite-link-wrap" style="display:none;flex-direction:column;gap:4px;padding:8px 10px;background:var(--surface);border-radius:6px;border:1px solid var(--border)">
               <span style="font-size:.72rem;color:var(--text-muted)">Email sent! Backup invite link:</span>
@@ -5114,19 +5114,29 @@ async function _joinMainStreamFromBackstage() {
   await joinStream(currentEvent.id, { asCohost: true });
 }
 
-// ── Backstage invite member autocomplete ──────────────────────────────────────
+// ── Backstage invite — single search input with member autocomplete ───────────
 let _memberSuggestDebounce = null;
-let _memberSuggestions     = [];   // [{ name, email }]
-let _memberSuggestIdx      = -1;   // keyboard-focused row index
+let _memberSuggestions     = [];         // [{ name, email }]
+let _memberSuggestIdx      = -1;         // keyboard-focused row index
+let _selectedMember        = null;       // { name, email } when picked from dropdown
+
+function _setInviteNameFieldVisible(visible) {
+  const el = document.getElementById("backstage-invite-name");
+  if (el) el.style.display = visible ? "" : "none";
+}
 
 async function onBackstageInviteInput(value) {
+  // Any typing clears a previously selected member
+  _selectedMember = null;
   clearTimeout(_memberSuggestDebounce);
   const q = value.trim();
+
+  // Show name field only when the user has typed a full-looking email with no match
+  _setInviteNameFieldVisible(q.includes("@"));
+
   if (q.length < 2) { hideBackstageSuggestions(); return; }
 
   _memberSuggestDebounce = setTimeout(async () => {
-    // Search via the edge function (service key) so RLS doesn't restrict results
-    // to the current user's own row — client-side queries can't see other members.
     try {
       const res  = await fetch("/api/daily", {
         method: "POST",
@@ -5164,8 +5174,10 @@ function renderBackstageSuggestions() {
 function selectBackstageMember(idx) {
   const m = _memberSuggestions[idx];
   if (!m) return;
-  document.getElementById("backstage-invite-email").value = m.email;
-  document.getElementById("backstage-invite-name").value  = m.name || m.email.split("@")[0] || "";
+  _selectedMember = m;
+  // Show their name in the input (friendly display), hide the name field
+  document.getElementById("backstage-invite-email").value = m.name || m.email.split("@")[0];
+  _setInviteNameFieldVisible(false);
   hideBackstageSuggestions();
 }
 
@@ -5176,7 +5188,7 @@ function hideBackstageSuggestions() {
 }
 
 function onBackstageInviteKeydown(e) {
-  const el = document.getElementById("backstage-member-suggestions");
+  const el      = document.getElementById("backstage-member-suggestions");
   const visible = el && el.style.display !== "none";
 
   if (e.key === "ArrowDown" && visible) {
@@ -5204,19 +5216,30 @@ function highlightSuggestion() {
     .forEach((row, i) => row.classList.toggle("focused", i === _memberSuggestIdx));
   if (_memberSuggestIdx >= 0 && _memberSuggestions[_memberSuggestIdx]) {
     const m = _memberSuggestions[_memberSuggestIdx];
-    document.getElementById("backstage-invite-email").value = m.email;
-    document.getElementById("backstage-invite-name").value  = m.name || m.email.split("@")[0] || "";
+    _selectedMember = m;
+    document.getElementById("backstage-invite-email").value = m.name || m.email.split("@")[0];
+    _setInviteNameFieldVisible(false);
   }
 }
 
 async function inviteToBackstage() {
   const emailInput = document.getElementById("backstage-invite-email");
   const nameInput  = document.getElementById("backstage-invite-name");
-  const email = (emailInput?.value || "").trim().toLowerCase();
-  const nameVal = (nameInput?.value || "").trim();
-  const linkWrap  = document.getElementById("backstage-invite-link-wrap");
+  const linkWrap   = document.getElementById("backstage-invite-link-wrap");
 
-  if (!email || !email.includes("@")) { alert("Please enter a valid email address."); return; }
+  // Resolve email + name — either from a selected member or from typed input
+  let email, nameVal;
+  if (_selectedMember) {
+    email   = _selectedMember.email.toLowerCase();
+    nameVal = _selectedMember.name || _selectedMember.email.split("@")[0];
+  } else {
+    email   = (emailInput?.value || "").trim().toLowerCase();
+    nameVal = (nameInput?.value || "").trim();
+    if (!email || !email.includes("@")) {
+      alert("Please select a member from the list, or type a full email address for a non-member invite.");
+      return;
+    }
+  }
   if (!currentEvent) return;
 
   // Hide any previous link
@@ -5241,7 +5264,8 @@ async function inviteToBackstage() {
     });
     if (error) { alert("Could not invite guest: " + error.message); return; }
     if (emailInput) emailInput.value = "";
-    if (nameInput)  nameInput.value  = "";
+    if (nameInput)  { nameInput.value = ""; nameInput.style.display = "none"; }
+    _selectedMember = null;
 
     // Send email notification (non-blocking — show result in link area)
     const linkWrapM  = document.getElementById("backstage-invite-link-wrap");
@@ -5306,7 +5330,8 @@ async function inviteToBackstage() {
 
     // Clear inputs
     if (emailInput) emailInput.value = "";
-    if (nameInput)  nameInput.value  = "";
+    if (nameInput)  { nameInput.value = ""; nameInput.style.display = "none"; }
+    _selectedMember = null;
 
     // Show backup link — always show it; update label based on whether email sent
     const linkInput   = document.getElementById("backstage-invite-link-input");
