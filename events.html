@@ -2117,8 +2117,9 @@ function showView(name) {
       try { _cf.leave(); }   catch(e) {}
       try { _cf.destroy(); } catch(e) {}
     }
-    window._viewerSyncGrid = null;
-    window._viewerLayout   = null;
+    window._viewerSyncGrid  = null;
+    window._viewerLayout    = null;
+    window._viewerHiddenIds = null;
   }
   if (name !== "backstage") {
     // Clean up backstage channels and call object
@@ -4424,7 +4425,8 @@ async function joinStream(eventId, options = {}) {
       window._callFrame = call;
 
       // Track current layout so layout-change app-messages can re-render the grid
-      window._viewerLayout = { preset: "default", session_id: null };
+      window._viewerLayout    = { preset: "default", session_id: null };
+      window._viewerHiddenIds = new Set();
 
       await call.join({ url: ev.daily_room_url, token: result.token });
       // Immediately sync — host may already be in the room so participant-joined
@@ -4459,9 +4461,12 @@ async function joinStream(eventId, options = {}) {
           const spotlit = allRemote.find(p => p.session_id === layout.session_id);
           visible = spotlit ? [spotlit] : allRemote;
         } else {
-          // Gallery / default: show everyone with a playable video track
+          // Gallery / default: show everyone with a playable video track, minus any hidden by host
+          const hiddenIds = window._viewerHiddenIds || new Set();
           visible = allRemote.filter(p =>
-            p.tracks?.video?.persistentTrack && p.tracks.video.state === "playable"
+            p.tracks?.video?.persistentTrack &&
+            p.tracks.video.state === "playable" &&
+            !hiddenIds.has(p.session_id)
           );
         }
 
@@ -4592,8 +4597,9 @@ async function joinStream(eventId, options = {}) {
       call.on("left-meeting", () => {
         clearTimeout(_syncRetry1);
         clearTimeout(_syncRetry2);
-        window._viewerSyncGrid = null;
-        window._viewerLayout   = null;
+        window._viewerSyncGrid  = null;
+        window._viewerLayout    = null;
+        window._viewerHiddenIds = null;
         if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
         const c = document.getElementById("daily-container");
         if (c) c.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;"><p style="color:var(--text-muted)">You left the stream.</p><button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button></div>`;
@@ -6786,12 +6792,15 @@ function _updateBsTileLabel(tile) {
   nameLabel.style.left     = `${Math.round(size * 0.7)}px`;
 }
 
-/** Toggle spotlight on a participant tile — synced to all backstage participants. */
+/** Toggle spotlight on a participant tile — synced to all backstage participants and viewers. */
 function _bsSetSpotlight(sessionId) {
   _bsSpotlightId = (_bsSpotlightId === sessionId) ? null : sessionId;
   _renderBsGrid(window._backstageCall);
+  // Backstage guests: bs-spotlight keeps their grid in sync
   try { window._backstageCall?.sendAppMessage({ type: "bs-spotlight", session_id: _bsSpotlightId }, "*"); } catch(e) {}
-  // Update RTMP stream layout
+  // Viewers: layout-change triggers syncGrid with hidden_ids
+  _bsBroadcastLayout();
+  // RTMP stream
   if (window._backstageCall) {
     const layout = _bsSpotlightId
       ? { preset: "single-participant", session_id: _bsSpotlightId }
@@ -6817,22 +6826,37 @@ function _bsShowTile(sessionId) {
   _bsUpdateStreamLayout();
 }
 
+/** Broadcast current spotlight+hidden state to viewers via layout-change. */
+function _bsBroadcastLayout() {
+  const call = window._backstageCall;
+  if (!call) return;
+  const preset     = _bsSpotlightId ? "single-participant" : "default";
+  const session_id = _bsSpotlightId || null;
+  const hidden_ids = [..._bsHiddenIds];
+  try {
+    call.sendAppMessage({ type: "layout-change", preset, session_id, hidden_ids }, "*");
+  } catch(e) { console.warn("sendAppMessage layout-change:", e); }
+}
+
 /** Push current spotlight/hidden state to the RTMP stream layout. */
 function _bsUpdateStreamLayout() {
   const call = window._backstageCall;
   if (!call) return;
+  // Also tell viewers which participants are hidden
+  _bsBroadcastLayout();
   let layout;
   if (_bsSpotlightId) {
     layout = { preset: "single-participant", session_id: _bsSpotlightId };
   } else if (_bsHiddenIds.size > 0) {
-    // Build list of visible backstage participant session IDs
-    const allParts = Object.values(call.participants() || {});
+    // Daily layout API doesn't support arbitrary participant filtering;
+    // fall back to single-participant if only 1 visible, otherwise default
+    const allParts   = Object.values(call.participants() || {});
     const visibleIds = allParts
       .filter(p => !_bsHiddenIds.has(p.session_id))
       .map(p => p.session_id);
     layout = visibleIds.length === 1
       ? { preset: "single-participant", session_id: visibleIds[0] }
-      : { preset: "default", session_ids: visibleIds };
+      : { preset: "default" };
   } else {
     layout = { preset: "default" };
   }
@@ -7437,7 +7461,8 @@ function _handleAppMessage(e) {
     showStageInviteBanner(msg.fromName || "Host", msg.eventId, msg.cohostToken, msg.roomUrl);
   } else if (msg.type === "layout-change") {
     // Mirror the host's layout choice in the viewer's multi-tile grid
-    window._viewerLayout = { preset: msg.preset || "default", session_id: msg.session_id || null };
+    window._viewerLayout    = { preset: msg.preset || "default", session_id: msg.session_id || null };
+    window._viewerHiddenIds = new Set(Array.isArray(msg.hidden_ids) ? msg.hidden_ids : []);
     if (window._viewerSyncGrid) window._viewerSyncGrid();
   }
 }
