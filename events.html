@@ -5282,16 +5282,25 @@ async function _joinRoomImpl(eventId) {
     })
     // 9a. Live-streaming status events — gives the host real RTMP feedback
     .on("live-streaming-started", () => {
+      clearTimeout(window._rtmpWatchdog);
       console.log("[Mux] RTMP streaming started ✓");
       const ind = document.getElementById("backstage-stream-indicator");
-      if (ind) { ind.style.display = "inline-flex"; ind.title = "RTMP streaming to Mux ✓"; }
+      if (ind) {
+        ind.style.display      = "inline-flex";
+        ind.style.background   = "";   // reset any watchdog yellow
+        ind.style.color        = "";
+        ind.style.borderColor  = "";
+        ind.title = "RTMP streaming to Mux ✓";
+      }
     })
     .on("live-streaming-stopped", () => {
+      clearTimeout(window._rtmpWatchdog);
       console.log("[Mux] RTMP streaming stopped");
       const ind = document.getElementById("backstage-stream-indicator");
       if (ind) ind.style.display = "none";
     })
     .on("live-streaming-error", e => {
+      clearTimeout(window._rtmpWatchdog);
       console.error("[Mux] RTMP streaming error:", e);
       const ind = document.getElementById("backstage-stream-indicator");
       if (ind) {
@@ -5692,13 +5701,38 @@ async function goLiveFromBackstage() {
     const { data: { session } } = await db.auth.getSession();
     if (session) authToken = session.access_token;
 
-    // Refresh event
+    // Refresh event (gets mux_live_stream_id if one already exists)
     const { data: latestEv } = await db.from("live_events").select("*").eq("id", currentEvent.id).single();
     currentEvent = { ...currentEvent, ...latestEv };
 
-    // 1. If no Mux stream yet: create one
+    // 1. Get or create a Mux stream key
     let streamKey = currentEvent._muxStreamKey || null;
+
+    if (!streamKey && currentEvent.mux_live_stream_id) {
+      // A Mux live stream already exists in the DB (e.g. host refreshed the page).
+      // Recover the stream key from the server instead of creating a duplicate stream.
+      console.log("[Mux] Recovering stream key for existing live stream", currentEvent.mux_live_stream_id, "…");
+      const keyRes = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+        body: JSON.stringify({ action: "get-mux-stream-key", eventId: currentEvent.id })
+      });
+      const keyData = await keyRes.json();
+      console.log("[Mux] get-mux-stream-key response:", { hasKey: !!keyData.streamKey, status: keyData.status });
+      if (keyData.streamKey && keyData.status !== "disabled") {
+        streamKey = keyData.streamKey;
+        currentEvent._muxStreamKey = streamKey;
+        console.log("[Mux] Stream key recovered ✓ (stream status:", keyData.status, ")");
+      } else {
+        // Stream is disabled/completed or key unavailable — clear the stale ID and create fresh
+        console.warn("[Mux] Existing stream is unusable (status:", keyData.status, ") — will create new stream");
+        currentEvent.mux_live_stream_id = null;
+      }
+    }
+
     if (!streamKey) {
+      // No existing stream or recovery failed — create a fresh Mux live stream
+      console.log("[Mux] Creating new Mux live stream...");
       const muxRes = await fetch("/api/daily", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
@@ -5709,16 +5743,30 @@ async function goLiveFromBackstage() {
       streamKey = muxData.muxStreamKey || null;
       currentEvent._muxStreamKey        = streamKey;
       currentEvent.mux_live_playback_id = muxData.muxLivePlaybackId || null;
+      console.log("[Mux] New live stream created. Playback ID:", currentEvent.mux_live_playback_id);
     }
 
     if (!streamKey) throw new Error("No Mux stream key available.");
 
     // 2. Start RTMP live streaming from within the Daily room
     if (!window._backstageCall) throw new Error("Not in a Daily room — rejoin first.");
-    await window._backstageCall.startLiveStreaming({
-      rtmpUrl: `rtmps://global-live.mux.com:443/app/${streamKey}`,
-      layout: { preset: "default" }
-    });
+    const rtmpUrl = `rtmps://global-live.mux.com:443/app/${streamKey}`;
+    console.log("[Mux] Calling startLiveStreaming… key length:", streamKey.length, "| playback:", currentEvent.mux_live_playback_id || "none");
+    await window._backstageCall.startLiveStreaming({ rtmpUrl, layout: { preset: "default" } });
+    console.log("[Mux] startLiveStreaming() accepted by Daily — waiting for live-streaming-started event…");
+
+    // Watchdog: if live-streaming-started doesn't fire within 20s, RTMP likely isn't flowing
+    clearTimeout(window._rtmpWatchdog);
+    window._rtmpWatchdog = setTimeout(() => {
+      console.warn("[Mux] ⚠ live-streaming-started did NOT fire within 20 s — RTMP may not be reaching Mux.");
+      const ind = document.getElementById("backstage-stream-indicator");
+      if (ind && ind.style.display !== "none") {
+        ind.style.background  = "rgba(255,200,0,.2)";
+        ind.style.color       = "#ffd700";
+        ind.style.borderColor = "#ffd700";
+        ind.title = "RTMP status uncertain — viewers may not see the preview yet";
+      }
+    }, 20000);
 
     // 3. Update DB status to live
     await db.from("live_events").update({ status: "live" }).eq("id", currentEvent.id);
@@ -5727,9 +5775,12 @@ async function goLiveFromBackstage() {
     // 4. Update button UI
     _updateBackstageGoLiveBtn();
 
-    // Show live indicator
+    // Show live indicator (will be styled green once live-streaming-started fires)
     const liveIndicator = document.getElementById("backstage-stream-indicator");
-    if (liveIndicator) liveIndicator.style.display = "inline-flex";
+    if (liveIndicator) {
+      liveIndicator.style.display = "inline-flex";
+      liveIndicator.title = "Starting RTMP stream…";
+    }
 
     if (btn) { btn.disabled = false; }
 
