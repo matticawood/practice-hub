@@ -193,13 +193,22 @@ export default async (request) => {
     const origin = new URL(request.url).origin;
     const inviteUrl = `${origin}/guest-join.html?token=${inviteToken}&event=${eventId}`;
 
-    // Send email via Resend if email provided and API key is configured
+    // Send email via Resend if email provided
+    let emailSent = false;
+    let emailError = null;
     if (email) {
       const RESEND_API_KEY = Netlify.env.get("RESEND_API_KEY");
-      const RESEND_FROM    = Netlify.env.get("RESEND_FROM_EMAIL") || "noreply@practiceroom.studio";
+      const RESEND_FROM    = Netlify.env.get("RESEND_FROM_EMAIL");
       const escHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      if (RESEND_API_KEY) {
-        await fetch("https://api.resend.com/emails", {
+
+      if (!RESEND_API_KEY) {
+        emailError = "RESEND_API_KEY is not set in Netlify environment variables.";
+        console.error("[create-guest-invite]", emailError);
+      } else if (!RESEND_FROM) {
+        emailError = "RESEND_FROM_EMAIL is not set in Netlify environment variables.";
+        console.error("[create-guest-invite]", emailError);
+      } else {
+        const emailRes = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RESEND_API_KEY}` },
           body: JSON.stringify({
@@ -219,10 +228,18 @@ export default async (request) => {
             `
           })
         });
+        const emailData = await emailRes.json();
+        if (!emailRes.ok) {
+          emailError = emailData?.message || emailData?.name || JSON.stringify(emailData);
+          console.error("[create-guest-invite] Resend error:", emailError, "| from:", RESEND_FROM, "| to:", email);
+        } else {
+          emailSent = true;
+          console.log("[create-guest-invite] Email sent via Resend, id:", emailData?.id);
+        }
       }
     }
 
-    return json({ inviteUrl, token: inviteToken });
+    return json({ inviteUrl, token: inviteToken, emailSent, emailError });
   }
 
   // ── Action: update-room ────────────────────────────────────────────────────
