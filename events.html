@@ -821,7 +821,7 @@
     .sid-tab-badge.visible { display: flex; }
 
     /* Typing indicator */
-    #chat-typing {
+    #chat-typing, #qa-typing {
       display: none; padding: 4px 12px 2px;
       font-size: .75rem; color: var(--text-muted); font-style: italic;
       flex-shrink: 0;
@@ -1157,8 +1157,10 @@
         <!-- Q&A panel -->
         <div id="sidebar-qa" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
           <div id="qa-questions"></div>
+          <div id="qa-typing"></div>
           <div class="qa-input-row">
             <input id="qa-input" placeholder="Ask a question…" maxlength="400"
+              oninput="onQATyping()"
               onkeydown="if(event.key==='Enter'){event.preventDefault();submitQA()}" />
             <button class="btn btn-primary btn-sm" onclick="submitQA()">Ask</button>
           </div>
@@ -1506,8 +1508,12 @@ let _chatUnread         = 0;
 let _qaUnread           = 0;
 let _typingTimeout      = null;
 let _typingActive       = false; // true while we've broadcast typing:true
-let _typingUsers        = {};   // email → name (currently typing)
-let _typingClearTimers  = {};   // email → setTimeout handle
+let _typingUsers        = {};   // email → name (currently typing in CHAT)
+let _typingClearTimers  = {};   // email → setTimeout handle (chat)
+let _qaTypingTimeout    = null;
+let _qaTypingActive     = false; // true while we've broadcast qa-typing:true
+let _qaTypingUsers      = {};   // email → name (currently typing in Q&A)
+let _qaTypingClearTimers = {};  // email → setTimeout handle (Q&A)
 let currentEvtTab = "upcoming";
 let countdownInterval = null;
 let isRecording  = false;
@@ -3548,6 +3554,12 @@ function setupRealtimeStream(ev) {
   _typingUsers = {};
   _typingClearTimers = {};
   updateTypingIndicator();
+  _qaTypingActive = false;
+  clearTimeout(_qaTypingTimeout);
+  Object.values(_qaTypingClearTimers).forEach(t => clearTimeout(t));
+  _qaTypingUsers = {};
+  _qaTypingClearTimers = {};
+  updateQATypingIndicator();
 
   // ── Clear panels immediately for a clean start ──────────────────────────────
   const chatEl = document.getElementById("chat-messages");
@@ -3633,7 +3645,7 @@ function setupRealtimeStream(ev) {
     });
 
   // Q&A questions
-  qaChannel = db.channel(`event-qa-${ev.id}-${gen}`)
+  qaChannel = db.channel(`event-qa-${ev.id}-${gen}`, { config: { broadcast: { self: false } } })
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_qa",
       filter: `event_id=eq.${ev.id}` }, p => {
         console.log("[Stream] Q&A INSERT received:", p.new?.id);
@@ -3641,6 +3653,23 @@ function setupRealtimeStream(ev) {
       })
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "event_qa",
       filter: `event_id=eq.${ev.id}` }, p => updateQAItem(p.new))
+    .on("broadcast", { event: "qa-typing" }, ({ payload }) => {
+      if (!payload?.email || payload.email === myEmail) return;
+      if (payload.typing) {
+        _qaTypingUsers[payload.email] = payload.name || "Someone";
+        clearTimeout(_qaTypingClearTimers[payload.email]);
+        _qaTypingClearTimers[payload.email] = setTimeout(() => {
+          delete _qaTypingUsers[payload.email];
+          delete _qaTypingClearTimers[payload.email];
+          updateQATypingIndicator();
+        }, 4000);
+      } else {
+        clearTimeout(_qaTypingClearTimers[payload.email]);
+        delete _qaTypingUsers[payload.email];
+        delete _qaTypingClearTimers[payload.email];
+      }
+      updateQATypingIndicator();
+    })
     .subscribe(async (status) => {
       console.log("[Stream] qaChannel status:", status);
       if (status !== "SUBSCRIBED") return;
@@ -3757,6 +3786,33 @@ function updateTypingIndicator() {
   el.style.display = "block";
 }
 
+function onQATyping() {
+  if (!qaChannel) return;
+  if (!_qaTypingActive) {
+    _qaTypingActive = true;
+    qaChannel.send({ type: "broadcast", event: "qa-typing",
+      payload: { email: myEmail, name: myName || myEmail, typing: true } });
+  }
+  clearTimeout(_qaTypingTimeout);
+  _qaTypingTimeout = setTimeout(stopQATypingBroadcast, 3000);
+}
+
+function stopQATypingBroadcast() {
+  if (!_qaTypingActive) return;
+  _qaTypingActive = false;
+  if (qaChannel) qaChannel.send({ type: "broadcast", event: "qa-typing",
+    payload: { email: myEmail, name: myName || myEmail, typing: false } });
+}
+
+function updateQATypingIndicator() {
+  const el = document.getElementById("qa-typing");
+  if (!el) return;
+  const names = Object.values(_qaTypingUsers).map(n => n.split(" ")[0]).slice(0, 2);
+  if (!names.length) { el.style.display = "none"; return; }
+  el.textContent = names.length === 1 ? `${names[0]} is typing…` : `${names.join(" & ")} are typing…`;
+  el.style.display = "block";
+}
+
 async function sendChat() {
   const input = document.getElementById("chat-input");
   const message = input.value.trim();
@@ -3844,6 +3900,8 @@ async function submitQA() {
   const question = input.value.trim();
   if (!question || !currentEvent) return;
   input.value = "";
+  clearTimeout(_qaTypingTimeout);
+  stopQATypingBroadcast();
   await db.from("event_qa").insert({
     event_id: currentEvent.id, email: myEmail, name: myName, question
   });
@@ -3852,22 +3910,44 @@ async function submitQA() {
 async function featureQA(qaId, feature) {
   const now = new Date().toISOString();
   if (feature) {
-    // Unfeature (and record unfeatured_at for) any currently featured question
-    const { error: e1 } = await db.from("event_qa")
+    // Close any open feature windows in event_qa_features (the question being bumped)
+    const { data: openWindows } = await db
+      .from("event_qa_features")
+      .select("id")
+      .eq("event_id", currentEvent.id)
+      .is("unfeatured_at", null);
+    if (openWindows?.length) {
+      await db.from("event_qa_features")
+        .update({ unfeatured_at: now })
+        .in("id", openWindows.map(w => w.id));
+    }
+    // Unfeature currently featured question in event_qa
+    await db.from("event_qa")
       .update({ is_featured: false, unfeatured_at: now })
       .eq("event_id", currentEvent.id)
       .eq("is_featured", true);
-    if (e1) { console.error("featureQA unfeature error:", e1); alert("Could not update question: " + e1.message); return; }
-  }
-  const { error: e2 } = await db.from("event_qa").update({
-    is_featured:    feature,
-    // Record timestamps for VOD overlay sync
-    ...(feature ? { featured_at: now }   : {}),
-    ...(!feature ? { unfeatured_at: now } : {})
-  }).eq("id", qaId);
-  if (e2) { console.error("featureQA error:", e2); alert("Could not update question: " + e2.message); return; }
-
-  if (!feature) {
+    // Insert a new feature window for the newly featured question
+    const { error: eInsert } = await db.from("event_qa_features").insert({
+      qa_id:       qaId,
+      event_id:    currentEvent.id,
+      featured_at: now
+    });
+    if (eInsert) { console.error("featureQA insert error:", eInsert); alert("Could not feature question: " + eInsert.message); return; }
+    // Mark the question as featured in event_qa (keep featured_at for legacy compat)
+    const { error: e2 } = await db.from("event_qa")
+      .update({ is_featured: true, featured_at: now })
+      .eq("id", qaId);
+    if (e2) { console.error("featureQA error:", e2); alert("Could not update question: " + e2.message); return; }
+  } else {
+    // Unfeature: close open windows for this specific question
+    await db.from("event_qa_features")
+      .update({ unfeatured_at: now })
+      .eq("qa_id", qaId)
+      .is("unfeatured_at", null);
+    const { error: e2 } = await db.from("event_qa")
+      .update({ is_featured: false, unfeatured_at: now })
+      .eq("id", qaId);
+    if (e2) { console.error("featureQA error:", e2); alert("Could not update question: " + e2.message); return; }
     document.getElementById("featured-qa-bar").classList.remove("visible");
   }
 
@@ -3894,10 +3974,18 @@ async function _refreshQAList() {
 
 async function markAnswered(qaId, currentState) {
   const nowAnswered = !currentState;
+  const now = new Date().toISOString();
+  if (nowAnswered) {
+    // Close any open feature windows for this question so VOD overlay ends cleanly
+    await db.from("event_qa_features")
+      .update({ unfeatured_at: now })
+      .eq("qa_id", qaId)
+      .is("unfeatured_at", null);
+  }
   const { error } = await db.from("event_qa").update({
-    answered: nowAnswered,
+    answered:    nowAnswered,
     is_featured: false,
-    ...(nowAnswered ? { unfeatured_at: new Date().toISOString() } : {})
+    ...(nowAnswered ? { unfeatured_at: now } : {})
   }).eq("id", qaId);
   if (error) { console.error("markAnswered error:", error); alert("Could not update question: " + error.message); return; }
   if (nowAnswered) {
@@ -3908,31 +3996,32 @@ async function markAnswered(qaId, currentState) {
 }
 
 // ── VOD featured-question overlay ─────────────────────────────────────────────
-// Loads all questions that were featured during the live stream (those with a
-// featured_at timestamp) and shows them as a timed overlay on the VOD player
-// at the moment they were featured, staying visible until the next one appears.
+// Loads all feature windows from event_qa_features (one row per feature event)
+// and shows each as a timed overlay on the VOD player.  This correctly handles
+// the same question being featured multiple times — each window is independent.
 async function setupVodQaOverlay(ev) {
   if (!ev.mux_playback_id || !ev.stream_started_at) return;
 
-  const { data: questions } = await db
-    .from("event_qa")
-    .select("id, question, name, email, featured_at, unfeatured_at")
+  const { data: features } = await db
+    .from("event_qa_features")
+    .select("id, qa_id, featured_at, unfeatured_at, event_qa(question, name, email)")
     .eq("event_id", ev.id)
-    .not("featured_at", "is", null)
     .order("featured_at", { ascending: true });
 
-  if (!questions?.length) return;
+  if (!features?.length) return;
 
   const streamStart = new Date(ev.stream_started_at).getTime();
   const toOffset = ts => (new Date(ts).getTime() - streamStart) / 1000;
 
-  // Build segments: each question is shown from featured_at until the earlier of
-  // unfeatured_at or the next question's featured_at (Infinity if neither exists)
-  const segments = questions
-    .map((q, i) => {
-      const start       = toOffset(q.featured_at);
-      const nextStart   = questions[i + 1] ? toOffset(questions[i + 1].featured_at) : Infinity;
-      const unfeatureAt = q.unfeatured_at  ? toOffset(q.unfeatured_at)              : Infinity;
+  // Build one segment per feature window.  Each window ends at the earlier of
+  // its own unfeatured_at or the start of the very next window (any question).
+  const segments = features
+    .map((f, i) => {
+      const q = f.event_qa;
+      if (!q) return null;
+      const start       = toOffset(f.featured_at);
+      const nextStart   = features[i + 1] ? toOffset(features[i + 1].featured_at) : Infinity;
+      const unfeatureAt = f.unfeatured_at  ? toOffset(f.unfeatured_at)             : Infinity;
       return {
         start,
         end:      Math.min(nextStart, unfeatureAt),
@@ -3940,7 +4029,7 @@ async function setupVodQaOverlay(ev) {
         name:     q.name || q.email?.split("@")[0] || "Anonymous"
       };
     })
-    .filter(s => s.start >= 0 && s.end > s.start);
+    .filter(s => s && s.start >= 0 && s.end > s.start);
 
   if (!segments.length) return;
 
@@ -4159,20 +4248,43 @@ async function setupVodQaList(ev) {
   console.log("[VOD list] wrap:", !!wrap, "mux_playback_id:", ev.mux_playback_id, "ev.id:", ev.id);
   if (!wrap || !ev.mux_playback_id) return;
 
+  // Fetch answered questions (no ordering by featured_at — we'll sort below)
   const { data: questions, error: qErr } = await db
     .from("event_qa")
-    .select("id, question, name, email, featured_at, unfeatured_at, answered")
+    .select("id, question, name, email, answered")
     .eq("event_id", ev.id)
-    .eq("answered", true)
-    .order("featured_at", { ascending: true, nullsFirst: false });
+    .eq("answered", true);
 
   console.log("[VOD list] answered=true query:", questions?.length, "rows, error:", qErr);
   if (!questions?.length) {
-    // Diagnostic: check what's actually in the table for this event
     db.from("event_qa").select("id, question, answered").eq("event_id", ev.id)
       .then(({ data: all }) => console.log("[VOD list] all Q&A for event:", all?.map(q => ({ id: q.id.slice(0,8), answered: q.answered }))));
     return;
   }
+
+  // Fetch all feature windows ordered by time — one row per feature event
+  const { data: featureWindows } = await db
+    .from("event_qa_features")
+    .select("id, qa_id, featured_at, unfeatured_at")
+    .eq("event_id", ev.id)
+    .order("featured_at", { ascending: true });
+
+  // Build a map: qa_id → sorted array of feature windows
+  const windowsByQa = {};
+  (featureWindows || []).forEach(w => {
+    if (!windowsByQa[w.qa_id]) windowsByQa[w.qa_id] = [];
+    windowsByQa[w.qa_id].push(w);
+  });
+
+  // Sort questions by their first feature window time
+  questions.sort((a, b) => {
+    const aTs = windowsByQa[a.id]?.[0]?.featured_at || null;
+    const bTs = windowsByQa[b.id]?.[0]?.featured_at || null;
+    if (!aTs && !bTs) return 0;
+    if (!aTs) return 1;
+    if (!bTs) return -1;
+    return new Date(aTs) - new Date(bTs);
+  });
 
   const streamStart = ev.stream_started_at ? new Date(ev.stream_started_at).getTime() : null;
 
@@ -4193,9 +4305,11 @@ async function setupVodQaList(ev) {
     <div class="vod-qa-list">
       <div class="vod-qa-list-title">${svgQ} Questions answered in this session</div>
       ${questions.map(q => {
-        const offset = fmtOffset(q.featured_at);
-        const secs   = streamStart && q.featured_at
-          ? Math.max(0, Math.round((new Date(q.featured_at).getTime() - streamStart) / 1000))
+        // Use the first feature window's timestamp for the "jump to" button
+        const firstFeaturedAt = windowsByQa[q.id]?.[0]?.featured_at || null;
+        const offset = fmtOffset(firstFeaturedAt);
+        const secs   = streamStart && firstFeaturedAt
+          ? Math.max(0, Math.round((new Date(firstFeaturedAt).getTime() - streamStart) / 1000))
           : null;
         const tsBtn  = offset
           ? `<button class="vod-qa-ts" onclick="vodSeekTo(${secs})" title="Jump to this moment">${offset}</button>`
@@ -4212,17 +4326,19 @@ async function setupVodQaList(ev) {
       }).join("")}
     </div>`;
 
-  // Highlight the active question as the video plays, matching the overlay segments
-  if (streamStart) {
+  // Highlight the active question as the video plays.
+  // Uses all feature windows so re-featuring a question highlights it each time.
+  if (streamStart && featureWindows?.length) {
     const toOffset = ts => (new Date(ts).getTime() - streamStart) / 1000;
-    const segments = questions
-      .filter(q => q.featured_at)
-      .map((q, i, arr) => {
-        const start       = toOffset(q.featured_at);
-        const nextStart   = arr[i + 1]?.featured_at ? toOffset(arr[i + 1].featured_at) : Infinity;
-        const unfeatureAt = q.unfeatured_at ? toOffset(q.unfeatured_at) : Infinity;
-        return { id: q.id, start, end: Math.min(nextStart, unfeatureAt) };
-      });
+    const allWindows = featureWindows;
+    const segments = allWindows
+      .map((w, i) => {
+        const start       = toOffset(w.featured_at);
+        const nextStart   = allWindows[i + 1] ? toOffset(allWindows[i + 1].featured_at) : Infinity;
+        const unfeatureAt = w.unfeatured_at ? toOffset(w.unfeatured_at) : Infinity;
+        return { id: w.qa_id, start, end: Math.min(nextStart, unfeatureAt) };
+      })
+      .filter(s => s.start >= 0 && s.end > s.start);
 
     const player = document.getElementById("vod-mux-player");
     if (player && segments.length) {
