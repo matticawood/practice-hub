@@ -23,3 +23,9 @@ create policy "Anyone can read guest requests"
   using (true);
 
 -- All inserts/updates go through the edge function with the service key (bypasses RLS).
+
+-- Required for postgres_changes realtime subscriptions to fire on this table.
+alter publication supabase_realtime add table event_guest_requests;
+
+-- Required for filtered UPDATE subscriptions (id=eq.X) to work reliably.
+alter table event_guest_requests replica identity full;
