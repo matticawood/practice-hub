@@ -2593,6 +2593,33 @@ async function renderDetailView(ev) {
   }
 }
 
+// ── Recording ready — visibility check (mobile) ───────────────────────────────
+// iOS/Android throttle or kill setInterval and drop WebSocket connections when
+// the tab is backgrounded or the screen locks. When the user returns, do an
+// immediate DB check so the "Recording is processing" block is replaced without
+// waiting for the next 15 s tick.
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible") return;
+  if (!_recordingPoller) return;                     // not waiting for a recording
+  if (currentEvent?.mux_playback_id) return;         // already resolved
+
+  const eventId = currentEvent?.id;
+  if (!eventId) return;
+
+  try {
+    const { data } = await db.from("live_events")
+      .select("mux_playback_id, mux_asset_id")
+      .eq("id", eventId)
+      .single();
+    if (data?.mux_playback_id) {
+      clearInterval(_recordingPoller); _recordingPoller = null;
+      if (_recordingWatcher) { db.removeChannel(_recordingWatcher); _recordingWatcher = null; }
+      currentEvent = { ...currentEvent, mux_playback_id: data.mux_playback_id, mux_asset_id: data.mux_asset_id };
+      renderDetailView(currentEvent);
+    }
+  } catch(e) { /* silent — next poll tick will retry */ }
+});
+
 // ── Countdown ─────────────────────────────────────────────────────────────────
 function startCountdown(targetDate) {
   if (countdownInterval) clearInterval(countdownInterval);
