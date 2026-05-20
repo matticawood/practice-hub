@@ -1743,6 +1743,7 @@ let backstageChannel      = null;   // realtime Q&A watcher for backstage view
 let _backstageBcastChannel = null;  // broadcast channel for backstage coordination
 let _participantInfo      = {};     // sessionId → { name, email } from viewer-info messages
 let _pendingStageInviteEventId = null; // eventId of a pending stage invite for this viewer
+let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage invite (pending)
 let _recordingWatcher   = null;
 let _recordingPoller    = null;
 let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
@@ -3638,8 +3639,9 @@ async function joinStream(eventId, options = {}) {
   if (sessErr || !session) { alert("Session expired — please sign in again."); window.location.href = "/practice-log.html"; return false; }
   authToken = session.access_token;
 
-  // Reset participant info for this new call session
-  _participantInfo = {};
+  // Reset per-session state
+  _participantInfo   = {};
+  _invitedSessionIds = new Set();
 
   // Get a Daily.co token
   let tokenRes, result;
@@ -5133,16 +5135,25 @@ function _refreshPeopleTab() {
     const info      = _participantInfo?.[p.session_id] || {};
     const name      = p.user_name || info.name || "Guest";
     const hasVideo  = p.tracks?.video?.state === "playable";
-    const statusLabel = hasVideo ? "On deck" : "Watching";
-    const statusColor = hasVideo ? "#22c55e" : "var(--text-muted)";
+    const invited   = _invitedSessionIds.has(p.session_id);
+
+    // Once they're broadcasting, clear the pending-invite flag
+    if (hasVideo && invited) _invitedSessionIds.delete(p.session_id);
+
+    const statusLabel = hasVideo  ? "On deck"  : invited ? "Invited…" : "Watching";
+    const statusColor = hasVideo  ? "#22c55e"  : invited ? "var(--accent)" : "var(--text-muted)";
 
     let actionBtn = "";
     if (isAdmin) {
-      actionBtn = hasVideo
-        ? `<button class="btn btn-sm btn-ghost" style="font-size:.72rem;padding:3px 8px"
-             onclick="setStreamLayout('single-participant','${p.session_id}')">Spotlight</button>`
-        : `<button class="btn btn-sm btn-ghost" style="font-size:.72rem;padding:3px 8px"
-             onclick="inviteToStage('${p.session_id}')">Invite to stage</button>`;
+      if (hasVideo) {
+        actionBtn = `<button class="btn btn-sm btn-ghost" style="font-size:.72rem;padding:3px 8px"
+                       onclick="setStreamLayout('single-participant','${p.session_id}')">Spotlight</button>`;
+      } else if (invited) {
+        actionBtn = `<span style="font-size:.72rem;color:var(--accent)">Invite sent</span>`;
+      } else {
+        actionBtn = `<button class="btn btn-sm btn-ghost" style="font-size:.72rem;padding:3px 8px"
+                       onclick="inviteToStage('${p.session_id}')">Invite to stage</button>`;
+      }
     }
 
     return `
@@ -5164,14 +5175,24 @@ async function inviteToStage(sessionId) {
   const info   = _participantInfo?.[sessionId] || {};
   const myName = window._callFrame.participants().local?.user_name || "Host";
 
-  // Add viewer to backstage guests so they can get a cohost token
+  // MUST await this before sending the invite — the viewer will immediately
+  // call get-token with isCohost:true and the DB row must exist by then.
   if (info.email) {
-    await db.from("event_backstage_guests").insert({
+    const { error } = await db.from("event_backstage_guests").insert({
       event_id: currentEvent.id,
       email:    info.email,
       name:     info.name || info.email.split("@")[0]
-    }).then();   // fire-and-forget; ignore duplicate errors
+    });
+    // Ignore duplicate-key errors (already invited); fail on anything else
+    if (error && !error.message?.includes("duplicate") && !error.code?.startsWith("23")) {
+      alert("Could not prepare invite: " + error.message);
+      return;
+    }
   }
+
+  // Mark as invited immediately so the People tab shows pending state
+  _invitedSessionIds.add(sessionId);
+  _refreshPeopleTab();
 
   try {
     window._callFrame.sendAppMessage({
@@ -5181,6 +5202,8 @@ async function inviteToStage(sessionId) {
     }, sessionId);
   } catch(e) {
     console.warn("sendAppMessage stage-invite:", e);
+    _invitedSessionIds.delete(sessionId);
+    _refreshPeopleTab();
     alert("Could not send invite — the viewer may have already left.");
   }
 }

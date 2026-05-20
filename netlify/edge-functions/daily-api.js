@@ -515,7 +515,10 @@ export default async (request) => {
           room_name:             roomName,
           user_name:             displayName,
           is_owner:              grantedOwner,
-          enable_prejoin_ui:     false,
+          // Show the device-picker prejoin screen for cohosts (viewers invited to stage)
+          // so they can select camera/mic before appearing. Skip it for the host (already set up)
+          // and for plain viewers (headless — no UI at all).
+          enable_prejoin_ui:     isCohost && !admin,
           start_video_off:       !grantedOwner,    // cohosts + host start with camera on
           start_audio_off:       !grantedOwner,
           start_cloud_recording: admin && isOwner  // only the actual host starts recording
