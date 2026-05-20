@@ -242,6 +242,34 @@ export default async (request) => {
     return json({ inviteUrl, token: inviteToken, emailSent, emailError });
   }
 
+  // ── Action: create-stage-token ────────────────────────────────────────────
+  // Admin only. Generates a Daily.co meeting token with is_owner:true for
+  // a guest who has been invited to the stage. Avoids any DB lookup on the
+  // viewer side — the token is delivered directly via sendAppMessage.
+  if (action === "create-stage-token") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { roomName, targetName } = body;
+    if (!roomName) return json({ error: "roomName required" }, 400);
+
+    const res = await fetch("https://api.daily.co/v1/meeting-tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        properties: {
+          room_name:         roomName,
+          user_name:         targetName || "Guest",
+          is_owner:          true,
+          enable_prejoin_ui: false,
+          start_video_off:   false,
+          start_audio_off:   false,
+        }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) return json({ error: data }, res.status);
+    return json({ token: data.token });
+  }
+
   // ── Action: update-room ────────────────────────────────────────────────────
   // Patch properties on an existing room (admin only).
   if (action === "update-room") {

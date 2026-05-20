@@ -1765,7 +1765,7 @@ let streamStatusChannel = null;   // watches for stream-ended status update
 let backstageChannel      = null;   // realtime Q&A watcher for backstage view
 let _backstageBcastChannel = null;  // broadcast channel for backstage coordination
 let _participantInfo      = {};     // sessionId → { name, email } from viewer-info messages
-let _pendingStageInviteEventId = null; // eventId of a pending stage invite for this viewer
+let _pendingStageInvite = null;  // { eventId, token, roomUrl } when a stage invite is pending for this viewer
 let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage invite (pending)
 let _recordingWatcher   = null;
 let _recordingPoller    = null;
@@ -3645,9 +3645,10 @@ async function startStream(eventId) {
 
 // ── Join stream ───────────────────────────────────────────────────────────────
 // Returns true on success, false on any failure (caller should restore UI).
-// options.asCohost = true  →  backstage guest joining as a broadcaster
+// options.asCohost  = true        →  backstage guest joining as a broadcaster
+// options.preToken  = "tok_..."   →  skip get-token; use this pre-issued token directly
 async function joinStream(eventId, options = {}) {
-  const { asCohost = false } = options;
+  const { asCohost = false, preToken = null } = options;
 
   // Refresh event to get latest room details
   const { data: ev } = await db.from("live_events").select("*").eq("id", eventId).single();
@@ -3666,32 +3667,37 @@ async function joinStream(eventId, options = {}) {
   _participantInfo   = {};
   _invitedSessionIds = new Set();
 
-  // Get a Daily.co token
-  let tokenRes, result;
-  try {
-    tokenRes = await fetch("/api/daily", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-      body: JSON.stringify({
-        action:    "get-token",
-        roomName:  ev.daily_room_name,
-        isOwner:   isAdmin,
-        isCohost:  asCohost,
-        eventId:   asCohost ? eventId : undefined
-      })
-    });
-    if (!tokenRes.ok) {
-      alert(`Could not connect to the stream service (HTTP ${tokenRes.status}). The hosting provider may be having a temporary outage — please try again in a moment.`);
+  // Get a Daily.co token — use a pre-issued one (stage invite) or fetch fresh
+  let result;
+  if (preToken) {
+    result = { token: preToken };
+  } else {
+    let tokenRes;
+    try {
+      tokenRes = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+        body: JSON.stringify({
+          action:    "get-token",
+          roomName:  ev.daily_room_name,
+          isOwner:   isAdmin,
+          isCohost:  asCohost,
+          eventId:   asCohost ? eventId : undefined
+        })
+      });
+      if (!tokenRes.ok) {
+        alert(`Could not connect to the stream service (HTTP ${tokenRes.status}). The hosting provider may be having a temporary outage — please try again in a moment.`);
+        return false;
+      }
+      result = await tokenRes.json();
+    } catch (e) {
+      alert("Could not reach the stream service. Please check your connection and try again.");
       return false;
     }
-    result = await tokenRes.json();
-  } catch (e) {
-    alert("Could not reach the stream service. Please check your connection and try again.");
-    return false;
-  }
-  if (result.error || !result.token) {
-    alert("Could not get stream token: " + JSON.stringify(result.error || "no token returned"));
-    return false;
+    if (result.error || !result.token) {
+      alert("Could not get stream token: " + JSON.stringify(result.error || "no token returned"));
+      return false;
+    }
   }
 
   if (typeof DailyIframe === "undefined") {
@@ -5284,33 +5290,43 @@ function _refreshPeopleTab() {
 async function inviteToStage(sessionId) {
   if (!window._callFrame || !currentEvent) return;
 
-  const info   = _participantInfo?.[sessionId] || {};
-  const myName = window._callFrame.participants().local?.user_name || "Host";
+  const info       = _participantInfo?.[sessionId] || {};
+  const myName     = window._callFrame.participants().local?.user_name || "Host";
+  const targetName = info.name || info.email?.split("@")[0] || "Guest";
 
-  // MUST await this before sending the invite — the viewer will immediately
-  // call get-token with isCohost:true and the DB row must exist by then.
-  if (info.email) {
-    const { error } = await db.from("event_backstage_guests").insert({
-      event_id: currentEvent.id,
-      email:    info.email,
-      name:     info.name || info.email.split("@")[0]
+  // Generate a cohost token server-side (admin privilege).
+  // We deliver this token directly to the viewer in the app-message so they
+  // never need to do their own DB lookup — eliminates all race conditions.
+  let cohostToken;
+  try {
+    const res = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+      body: JSON.stringify({
+        action:     "create-stage-token",
+        roomName:   currentEvent.daily_room_name,
+        targetName
+      })
     });
-    // Ignore duplicate-key errors (already invited); fail on anything else
-    if (error && !error.message?.includes("duplicate") && !error.code?.startsWith("23")) {
-      alert("Could not prepare invite: " + error.message);
-      return;
-    }
+    const data = await res.json();
+    if (data.error || !data.token) throw new Error(data.error || "no token returned");
+    cohostToken = data.token;
+  } catch(e) {
+    alert("Could not create stage invite: " + e.message);
+    return;
   }
 
-  // Mark as invited immediately so the People tab shows pending state
+  // Mark as invited so People tab updates immediately
   _invitedSessionIds.add(sessionId);
   _refreshPeopleTab();
 
   try {
     window._callFrame.sendAppMessage({
-      type:     "stage-invite",
-      fromName: myName,
-      eventId:  currentEvent.id
+      type:        "stage-invite",
+      fromName:    myName,
+      eventId:     currentEvent.id,
+      cohostToken,                       // pre-generated is_owner:true token
+      roomUrl:     currentEvent.daily_room_url  // so viewer doesn't need to fetch the event
     }, sessionId);
   } catch(e) {
     console.warn("sendAppMessage stage-invite:", e);
@@ -5320,8 +5336,8 @@ async function inviteToStage(sessionId) {
   }
 }
 
-function showStageInviteBanner(fromName, eventId) {
-  _pendingStageInviteEventId = eventId;
+function showStageInviteBanner(fromName, eventId, cohostToken, roomUrl) {
+  _pendingStageInvite = { eventId, token: cohostToken, roomUrl };
   document.getElementById("stage-invite-from").textContent =
     `${fromName} has invited you to speak on the stream`;
   document.getElementById("stage-invite-banner").style.display = "block";
@@ -5329,9 +5345,9 @@ function showStageInviteBanner(fromName, eventId) {
 
 async function acceptStageInvite() {
   document.getElementById("stage-invite-banner").style.display = "none";
-  const eventId = _pendingStageInviteEventId;
-  _pendingStageInviteEventId = null;
-  if (!eventId) return;
+  const invite = _pendingStageInvite;
+  _pendingStageInvite = null;
+  if (!invite?.eventId) return;
 
   // Destroy the current headless viewer call
   if (window._callFrame) {
@@ -5339,17 +5355,17 @@ async function acceptStageInvite() {
     window._callFrame = null;
   }
 
-  // Join as a cohost (full iframe, camera + mic)
-  const ok = await joinStream(eventId, { asCohost: true });
+  // Join using the pre-generated cohost token (is_owner:true, camera+mic on).
+  // Passing preToken skips the get-token fetch entirely — no DB lookup needed.
+  const ok = await joinStream(invite.eventId, { asCohost: true, preToken: invite.token });
   if (ok !== false) {
-    // Show on-deck banner so they know they're live but not yet spotlighted
     document.getElementById("on-deck-banner").style.display = "flex";
   }
 }
 
 function declineStageInvite() {
   document.getElementById("stage-invite-banner").style.display = "none";
-  _pendingStageInviteEventId = null;
+  _pendingStageInvite = null;
 }
 
 // Shared handler for Daily.co app-message events
@@ -5361,7 +5377,7 @@ function _handleAppMessage(e) {
     _participantInfo[fromId] = { name: msg.name || "", email: msg.email || "" };
     _refreshPeopleTab();
   } else if (msg.type === "stage-invite") {
-    showStageInviteBanner(msg.fromName || "Host", msg.eventId);
+    showStageInviteBanner(msg.fromName || "Host", msg.eventId, msg.cohostToken, msg.roomUrl);
   }
 }
 
