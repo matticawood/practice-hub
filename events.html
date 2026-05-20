@@ -5209,26 +5209,51 @@ async function inviteToBackstage() {
     .select("name").eq("email", email).maybeSingle();
 
   if (member) {
-    // Member → direct DB insert; they'll see the "Join Backstage" banner on the event page.
-    // No email is sent for members — they already have an account and will see the invite there.
+    // Member → DB insert + email notification
+    const memberName = member.name || nameVal || email.split("@")[0];
     const { error } = await db.from("event_backstage_guests").insert({
       event_id: currentEvent.id,
       email,
-      name: member.name || email.split("@")[0]
+      name: memberName
     });
     if (error) { alert("Could not invite guest: " + error.message); return; }
     if (emailInput) emailInput.value = "";
     if (nameInput)  nameInput.value  = "";
-    // Show confirmation in the link area (no link, but explains no email)
+
+    // Send email notification (non-blocking — show result in link area)
     const linkWrapM  = document.getElementById("backstage-invite-link-wrap");
     const linkInputM = document.getElementById("backstage-invite-link-input");
     const linkLabelM = document.querySelector("#backstage-invite-link-wrap span");
+    const linkLinkRow = document.querySelector("#backstage-invite-link-wrap div");
     if (linkWrapM && linkLabelM) {
       if (linkInputM) linkInputM.style.display = "none";
-      document.querySelector("#backstage-invite-link-wrap div")?.style.setProperty("display","none");
-      linkLabelM.textContent = `✓ ${email} invited — they'll see a "Join Backstage" button on the event page.`;
-      linkLabelM.style.color = "#4ade80";
+      if (linkLinkRow) linkLinkRow.style.display = "none";
+      linkLabelM.textContent = `Sending invite to ${email}…`;
+      linkLabelM.style.color = "var(--text-muted)";
       linkWrapM.style.display = "flex";
+    }
+    try {
+      const { data: { session: invSess } } = await db.auth.getSession();
+      const emailRes = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${invSess.access_token}` },
+        body: JSON.stringify({ action: "notify-member-invite", eventId: currentEvent.id, email, name: memberName })
+      });
+      const emailData = await emailRes.json();
+      if (linkLabelM) {
+        if (emailData.emailSent) {
+          linkLabelM.textContent = `✓ Invite sent to ${email}`;
+          linkLabelM.style.color = "#4ade80";
+        } else {
+          linkLabelM.textContent = `Invited! Email failed (${emailData.emailError || "unknown"}) — they'll see a Join Backstage button when they log in.`;
+          linkLabelM.style.color = "#f87171";
+        }
+      }
+    } catch(e) {
+      if (linkLabelM) {
+        linkLabelM.textContent = `Invited! Could not send email — they'll see a Join Backstage button when they log in.`;
+        linkLabelM.style.color = "#f87171";
+      }
     }
     await loadBackstageGuests(currentEvent.id);
   } else {

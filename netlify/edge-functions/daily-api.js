@@ -152,6 +152,59 @@ export default async (request) => {
     return Array.isArray(rows) && rows.length > 0;
   }
 
+  // ── Action: notify-member-invite ──────────────────────────────────────────
+  // Admin only. Sends a backstage-invite notification email to a registered
+  // member (who already has an account — no magic link needed).
+  if (action === "notify-member-invite") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { eventId, email, name } = body;
+    if (!eventId || !email) return json({ error: "eventId and email required" }, 400);
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=title`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const evRows = await evRes.json();
+    const eventTitle = evRows?.[0]?.title || "Live Event";
+
+    const RESEND_API_KEY = Netlify.env.get("RESEND_API_KEY");
+    const RESEND_FROM    = Netlify.env.get("RESEND_FROM_EMAIL");
+    const escHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const origin  = new URL(request.url).origin;
+    const eventUrl = `${origin}/events.html`;
+
+    if (!RESEND_API_KEY) return json({ emailSent: false, emailError: "RESEND_API_KEY not set" });
+    if (!RESEND_FROM)    return json({ emailSent: false, emailError: "RESEND_FROM_EMAIL not set" });
+
+    const emailRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RESEND_API_KEY}` },
+      body: JSON.stringify({
+        from: RESEND_FROM,
+        to: [email],
+        subject: `You're invited backstage: ${eventTitle}`,
+        html: `
+          <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f0f0f;color:#e8e8e8;border-radius:12px">
+            <h2 style="margin:0 0 8px;font-size:1.3rem;color:#f5c518">You're invited backstage</h2>
+            <p style="color:#aaa;margin:0 0 8px">Hi ${escHtml(name || email.split("@")[0])},</p>
+            <p style="color:#aaa;margin:0 0 24px">You've been invited to join <strong style="color:#e8e8e8">${escHtml(eventTitle)}</strong> as a guest speaker.</p>
+            <a href="${eventUrl}" style="display:inline-block;background:#f5c518;color:#000;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:1rem">Go to Events →</a>
+            <p style="color:#666;font-size:.8rem;margin:28px 0 0">Log in and look for the <strong style="color:#aaa">Join Backstage</strong> button on the event.</p>
+          </div>
+        `
+      })
+    });
+    const emailData = await emailRes.json();
+    if (!emailRes.ok) {
+      const emailError = emailData?.message || emailData?.name || JSON.stringify(emailData);
+      console.error("[notify-member-invite] Resend error:", emailError);
+      return json({ emailSent: false, emailError });
+    }
+    return json({ emailSent: true });
+  }
+
   // ── Action: create-guest-invite ───────────────────────────────────────────
   // Admin only. Creates a magic-link invite for a non-member guest.
   // Sends email via Resend (if RESEND_API_KEY is set) and returns inviteUrl + token.
