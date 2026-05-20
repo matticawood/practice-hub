@@ -1766,9 +1766,11 @@ let streamStatusChannel = null;   // watches for stream-ended status update
 let backstageChannel      = null;   // realtime Q&A watcher for backstage view
 let _backstageBcastChannel  = null;  // broadcast channel for backstage coordination
 let _backstageEventChannel  = null;  // postgres_changes subscription for "event went live" (guests)
-let _backstageCall          = null;  // createCallObject for guest backstage (headless custom UI)
-let _bsMicMuted             = false; // guest backstage mic mute state
-let _bsCamOff               = false; // guest backstage camera off state
+let _backstageCall          = null;  // createCallObject for backstage (headless custom UI — both host and guest)
+let _bsMicMuted             = false; // backstage mic mute state
+let _bsCamOff               = false; // backstage camera off state
+let _bsSpotlightId          = null;  // session_id of spotlighted participant, or null for gallery
+let _bsHiddenIds            = new Set(); // session_ids hidden from the local view
 let _participantInfo      = {};     // sessionId → { name, email } from viewer-info messages
 let _pendingStageInvite = null;  // { eventId, token, roomUrl } when a stage invite is pending for this viewer
 let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage invite (pending)
@@ -4884,82 +4886,59 @@ async function joinBackstage(eventId) {
   // Use the canonical room URL returned by the edge function
   const backstageUrl = tokenData.roomUrl;
 
-  if (isAdmin) {
-    // ── Host: prebuilt Daily iframe with full controls ─────────────
-    window._backstageFrame = DailyIframe.createFrame(container, {
-      showLeaveButton:      false,
-      showFullscreenButton: true,
-      iframeStyle: {
-        position: "absolute", top: 0, left: 0,
-        width: "100%", height: "100%", border: "none"
-      }
-    });
+  // ── Both host and guest: headless call object with custom equal-tile grid ──
+  _bsMicMuted    = false;
+  _bsCamOff      = false;
+  _bsSpotlightId = null;
+  _bsHiddenIds   = new Set();
 
-    window._backstageFrame.on("left-meeting", () => {
-      if (window._backstageFrame) {
-        try { window._backstageFrame.destroy(); } catch(e) {}
-        window._backstageFrame = null;
+  window._backstageCall = DailyIframe.createCallObject();
+  const call = window._backstageCall;
+
+  function _refreshBsGrid() { _renderBsGrid(call); }
+
+  call
+    .on("participant-joined",  _refreshBsGrid)
+    .on("participant-updated", _refreshBsGrid)
+    .on("participant-left",    e => {
+      // If spotlighted/hidden person left, clear their state
+      if (e.participant?.session_id === _bsSpotlightId) _bsSpotlightId = null;
+      _bsHiddenIds.delete(e.participant?.session_id);
+      _refreshBsGrid();
+    })
+    .on("track-started",  _refreshBsGrid)
+    .on("track-stopped",  _refreshBsGrid)
+    .on("left-meeting", () => {
+      if (window._backstageCall) {
+        try { window._backstageCall.destroy(); } catch(e) {}
+        window._backstageCall = null;
       }
-      container.innerHTML = `
+      const c = document.getElementById("backstage-container");
+      if (c) c.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
           <p style="color:var(--text-muted)">You left the backstage.</p>
           <button class="btn btn-primary" onclick="joinBackstage('${eventId}')">Rejoin</button>
         </div>`;
+      // Reset bars
+      const gbar = document.getElementById("backstage-guest-bar");
+      if (gbar) gbar.innerHTML = `
+        <span style="font-size:.82rem;color:var(--text-muted);flex:1">You're in the backstage green room.</span>
+        <button class="btn btn-sm btn-ghost" onclick="leaveBackstage()">Leave</button>`;
+      const ctrl = document.getElementById("bs-call-controls");
+      if (ctrl) ctrl.remove();
     });
 
-    try {
-      await window._backstageFrame.join({ url: backstageUrl, token: tokenData.token });
-    } catch(e) {
-      console.error("Backstage join failed:", e);
-      alert("Could not join the backstage room: " + e.message);
-      return;
-    }
-
-  } else {
-    // ── Guest: headless call object with custom equal-tile grid ─────
-    _bsMicMuted = false;
-    _bsCamOff   = false;
-
-    window._backstageCall = DailyIframe.createCallObject();
-    const call = window._backstageCall;
-
-    function _refreshBsGrid() { _renderBsGrid(call); }
-
-    call
-      .on("participant-joined",  _refreshBsGrid)
-      .on("participant-updated", _refreshBsGrid)
-      .on("participant-left",    _refreshBsGrid)
-      .on("track-started",       _refreshBsGrid)
-      .on("track-stopped",       _refreshBsGrid)
-      .on("left-meeting", () => {
-        if (window._backstageCall) {
-          try { window._backstageCall.destroy(); } catch(e) {}
-          window._backstageCall = null;
-        }
-        const c = document.getElementById("backstage-container");
-        if (c) c.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;">
-            <p style="color:var(--text-muted)">You left the backstage.</p>
-            <button class="btn btn-primary" onclick="joinBackstage('${eventId}')">Rejoin</button>
-          </div>`;
-        const bar = document.getElementById("backstage-guest-bar");
-        if (bar) bar.innerHTML = `
-          <span style="font-size:.82rem;color:var(--text-muted);flex:1">You're in the backstage green room.</span>
-          <button class="btn btn-sm btn-ghost" onclick="leaveBackstage()">Leave</button>`;
-      });
-
-    try {
-      await call.join({ url: backstageUrl, token: tokenData.token });
-    } catch(e) {
-      console.error("Backstage join failed:", e);
-      alert("Could not join the backstage room: " + e.message);
-      return;
-    }
-
-    // Initial grid render + populate device controls in guest bar
-    _renderBsGrid(call);
-    await _initBsGuestControls(call);
+  try {
+    await call.join({ url: backstageUrl, token: tokenData.token });
+  } catch(e) {
+    console.error("Backstage join failed:", e);
+    alert("Could not join the backstage room: " + e.message);
+    return;
   }
+
+  // Initial grid render + device controls
+  _renderBsGrid(call);
+  await _initBsCallControls(call);
 
   // Load the sidebar data
   await Promise.all([
@@ -5188,16 +5167,19 @@ async function _joinMainStreamFromBackstage() {
 // ── Guest backstage: headless custom-UI helpers ───────────────────────────────
 
 /**
- * Renders an equal-tile grid inside #backstage-container for all participants
- * in the headless `call` (createCallObject). Called on every participant event.
+ * Renders an equal-tile grid (with spotlight and hide support) inside
+ * #backstage-container for all participants. Works for both host and guest.
+ * Host additionally gets per-tile hover controls (spotlight, hide).
  */
 function _renderBsGrid(call) {
   const container = document.getElementById("backstage-container");
   if (!container || !call) return;
 
-  const parts = Object.values(call.participants());
+  const allParts     = Object.values(call.participants());
+  const visibleParts = allParts.filter(p => !_bsHiddenIds.has(p.session_id));
+  const hiddenParts  = allParts.filter(p =>  _bsHiddenIds.has(p.session_id));
 
-  // Build or reuse grid wrapper
+  // ── Build / reuse wrapper ──────────────────────────────────────────
   let grid = document.getElementById("bs-guest-grid");
   if (!grid) {
     container.innerHTML = "";
@@ -5209,16 +5191,34 @@ function _renderBsGrid(call) {
     container.appendChild(grid);
   }
 
-  // Equal columns: 1 for solo, 2 for 2-4 participants
-  const cols = parts.length <= 1 ? 1 : 2;
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  // ── Spotlight vs gallery layout ────────────────────────────────────
+  const spotPart  = _bsSpotlightId
+    ? visibleParts.find(p => p.session_id === _bsSpotlightId) : null;
+  const otherParts = spotPart
+    ? visibleParts.filter(p => p.session_id !== _bsSpotlightId)
+    : visibleParts;
+  const stripCount = spotPart ? otherParts.length : 0;
 
+  if (spotPart) {
+    // Spotlight: big tile on top, thumbnail strip below
+    const cols = Math.max(1, stripCount);
+    grid.style.gridTemplateRows    = stripCount ? "1fr 80px" : "1fr";
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  } else {
+    // Gallery: equal tiles
+    const cols = visibleParts.length <= 1 ? 1 : 2;
+    grid.style.gridTemplateRows    = "";
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  }
+
+  // ── Render visible tiles ───────────────────────────────────────────
   const rendered = new Set();
 
-  parts.forEach(p => {
+  visibleParts.forEach(p => {
     rendered.add(p.session_id);
-    let tile = document.getElementById(`bs-tile-${p.session_id}`);
+    const isSpotlit = spotPart?.session_id === p.session_id;
 
+    let tile = document.getElementById(`bs-tile-${p.session_id}`);
     if (!tile) {
       tile = document.createElement("div");
       tile.id = `bs-tile-${p.session_id}`;
@@ -5226,11 +5226,10 @@ function _renderBsGrid(call) {
         "position:relative;background:#111;border-radius:6px;overflow:hidden;" +
         "display:flex;align-items:center;justify-content:center;min-height:0;";
 
-      // Video element
+      // Video
       const video = document.createElement("video");
-      video.autoplay = true;
-      video.playsInline = true;
-      video.muted = !!p.local; // avoid echo on local tile
+      video.autoplay = true; video.playsInline = true;
+      video.muted = !!p.local;
       video.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
       tile.appendChild(video);
 
@@ -5256,24 +5255,45 @@ function _renderBsGrid(call) {
         "background:rgba(0,0,0,.45);border-radius:4px;padding:1px 5px;";
       tile.appendChild(nameLabel);
 
+      // Admin hover-controls overlay
+      if (isAdmin) {
+        const actions = document.createElement("div");
+        actions.className = "bs-tile-actions";
+        actions.style.cssText =
+          "position:absolute;top:5px;right:5px;display:flex;gap:3px;" +
+          "opacity:0;transition:opacity .15s;";
+        tile.appendChild(actions);
+        tile.addEventListener("mouseenter", () => actions.style.opacity = "1");
+        tile.addEventListener("mouseleave", () => actions.style.opacity = "0");
+      }
+
       grid.appendChild(tile);
     }
 
-    // Update name label
+    // Grid position for spotlight layout
+    if (isSpotlit) {
+      tile.style.gridRow    = "1";
+      tile.style.gridColumn = "1 / -1";
+    } else if (spotPart) {
+      tile.style.gridRow    = "2";
+      tile.style.gridColumn = "auto";
+    } else {
+      tile.style.gridRow = tile.style.gridColumn = "";
+    }
+
+    // Name label
     const nameLabel = tile.querySelector(".bs-tile-name");
     if (nameLabel) nameLabel.textContent = p.user_name || (p.local ? "You" : "Guest");
 
-    // Update video
+    // Video track
     const video    = tile.querySelector("video");
     const camOff   = tile.querySelector(".bs-cam-off-overlay");
     const hasVideo = p.tracks?.video?.state === "playable";
-
     if (hasVideo && video) {
       const track = p.tracks.video.persistentTrack;
       if (track) {
-        const needsNew = !video.srcObject ||
-          video.srcObject.getVideoTracks()[0] !== track;
-        if (needsNew) video.srcObject = new MediaStream([track]);
+        if (!video.srcObject || video.srcObject.getVideoTracks()[0] !== track)
+          video.srcObject = new MediaStream([track]);
         video.style.display = "block";
       }
       if (camOff) camOff.style.display = "none";
@@ -5282,37 +5302,92 @@ function _renderBsGrid(call) {
       if (camOff) camOff.style.display = "flex";
     }
 
-    // Audio for remote participants
+    // Audio track (remote only)
     if (!p.local && p.tracks?.audio?.state === "playable") {
       let audio = tile.querySelector("audio");
-      if (!audio) {
-        audio = document.createElement("audio");
-        audio.autoplay = true;
-        tile.appendChild(audio);
-      }
+      if (!audio) { audio = document.createElement("audio"); audio.autoplay = true; tile.appendChild(audio); }
       const track = p.tracks.audio.persistentTrack;
-      if (track) {
-        const needsNew = !audio.srcObject ||
-          audio.srcObject.getAudioTracks()[0] !== track;
-        if (needsNew) audio.srcObject = new MediaStream([track]);
+      if (track && (!audio.srcObject || audio.srcObject.getAudioTracks()[0] !== track))
+        audio.srcObject = new MediaStream([track]);
+    }
+
+    // Admin per-tile action buttons (rebuilt each render so labels stay current)
+    if (isAdmin) {
+      const actions = tile.querySelector(".bs-tile-actions");
+      if (actions) {
+        const sid      = p.session_id;
+        const spotIcon = isSpotlit
+          ? `<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
+          : `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+        actions.innerHTML = `
+          <button title="${isSpotlit ? "Remove spotlight" : "Spotlight"}"
+            onclick="_bsSetSpotlight('${sid}')"
+            style="display:inline-flex;align-items:center;gap:3px;padding:3px 7px;
+                   font-size:.7rem;background:rgba(0,0,0,.7);color:${isSpotlit ? "var(--accent)" : "#fff"};
+                   border:1px solid rgba(255,255,255,.2);border-radius:4px;cursor:pointer;white-space:nowrap;">
+            ${spotIcon}${isSpotlit ? "Unspotlight" : "Spotlight"}
+          </button>
+          <button title="Hide"
+            onclick="_bsHideTile('${sid}')"
+            style="display:inline-flex;align-items:center;gap:3px;padding:3px 7px;
+                   font-size:.7rem;background:rgba(0,0,0,.7);color:#fff;
+                   border:1px solid rgba(255,255,255,.2);border-radius:4px;cursor:pointer;">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>Hide
+          </button>`;
       }
     }
   });
 
-  // Remove tiles for departed participants
+  // ── Remove tiles for departed / now-hidden participants ────────────
   grid.querySelectorAll("[id^='bs-tile-']").forEach(el => {
     const sid = el.id.replace("bs-tile-", "");
     if (!rendered.has(sid)) el.remove();
   });
+
+  // ── Hidden participants strip (admin only) ─────────────────────────
+  if (isAdmin) {
+    let hiddenStrip = document.getElementById("bs-hidden-strip");
+    if (!hiddenStrip) {
+      hiddenStrip = document.createElement("div");
+      hiddenStrip.id = "bs-hidden-strip";
+      hiddenStrip.style.cssText =
+        "position:absolute;bottom:6px;left:6px;right:6px;" +
+        "display:flex;gap:4px;flex-wrap:wrap;z-index:10;pointer-events:none;";
+      container.appendChild(hiddenStrip);
+    }
+    if (hiddenParts.length) {
+      hiddenStrip.style.display = "flex";
+      hiddenStrip.innerHTML = hiddenParts.map(p => `
+        <div style="pointer-events:auto;display:inline-flex;align-items:center;gap:5px;
+                    background:rgba(0,0,0,.75);border:1px solid rgba(255,255,255,.2);
+                    border-radius:20px;padding:3px 10px 3px 8px;
+                    font-size:.72rem;color:var(--text-muted);">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+          ${p.user_name || "Guest"}
+          <button onclick="_bsShowTile('${p.session_id}')"
+            style="background:none;border:none;color:var(--accent);cursor:pointer;
+                   padding:0 0 0 2px;font-size:.72rem;font-family:inherit;">Show</button>
+        </div>`).join("");
+    } else {
+      hiddenStrip.style.display = "none";
+      hiddenStrip.innerHTML = "";
+    }
+  }
 }
 
 /**
- * Populates the guest bottom bar with mic/cam controls and device selectors.
+ * Injects mic/cam controls into the appropriate bottom bar.
+ * For guest: replaces guest bar content.
+ * For admin: prepends a controls block before the Go Live button.
  */
-async function _initBsGuestControls(call) {
-  const bar = document.getElementById("backstage-guest-bar");
-  if (!bar) return;
-
+async function _initBsCallControls(call) {
   let devices = [];
   try {
     const result = await call.enumerateDevices();
@@ -5327,8 +5402,8 @@ async function _initBsGuestControls(call) {
   const camOpts = cams.map(c =>
     `<option value="${c.deviceId}">${c.label || "Camera"}</option>`).join("");
 
-  bar.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;min-width:0;">
+  const controlsHtml = `
+    <div id="bs-call-controls" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;">
       <button id="bs-mic-btn" class="btn btn-sm btn-ghost"
               onclick="_bsToggleMic()"
               style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;">
@@ -5360,9 +5435,23 @@ async function _initBsGuestControls(call) {
           style="font-size:.78rem;padding:4px 6px;background:var(--surface-2);
                  border:1.5px solid var(--border);border-radius:6px;color:var(--text);
                  max-width:150px;cursor:pointer;">${camOpts}</select>` : ""}
-    </div>
-    <button class="btn btn-sm btn-ghost" onclick="leaveBackstage()">Leave</button>
-  `;
+    </div>`;
+
+  if (isAdmin) {
+    // Prepend controls before the "Go Live" button in the admin bar
+    const existing = document.getElementById("bs-call-controls");
+    if (existing) existing.remove();
+    const goliveBtn = document.getElementById("backstage-golive-btn");
+    if (goliveBtn) goliveBtn.insertAdjacentHTML("beforebegin", controlsHtml);
+  } else {
+    // Replace guest bar content
+    const bar = document.getElementById("backstage-guest-bar");
+    if (bar) bar.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;min-width:0;">
+        ${controlsHtml}
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick="leaveBackstage()">Leave</button>`;
+  }
 }
 
 /** Toggle mic mute for guest backstage. */
@@ -5412,11 +5501,30 @@ async function _bsChangeMic(deviceId) {
   catch(e) { console.warn("Could not switch microphone:", e); }
 }
 
-/** Switch camera device for guest backstage. */
+/** Switch camera device for backstage. */
 async function _bsChangeCam(deviceId) {
   if (!window._backstageCall || !deviceId) return;
   try { await window._backstageCall.setInputDevicesAsync({ videoDeviceId: deviceId }); }
   catch(e) { console.warn("Could not switch camera:", e); }
+}
+
+/** Toggle spotlight on a participant tile (admin only). */
+function _bsSetSpotlight(sessionId) {
+  _bsSpotlightId = (_bsSpotlightId === sessionId) ? null : sessionId;
+  _renderBsGrid(window._backstageCall);
+}
+
+/** Hide a participant tile from the local view (admin only). */
+function _bsHideTile(sessionId) {
+  if (_bsSpotlightId === sessionId) _bsSpotlightId = null;
+  _bsHiddenIds.add(sessionId);
+  _renderBsGrid(window._backstageCall);
+}
+
+/** Restore a previously hidden tile (admin only). */
+function _bsShowTile(sessionId) {
+  _bsHiddenIds.delete(sessionId);
+  _renderBsGrid(window._backstageCall);
 }
 
 
