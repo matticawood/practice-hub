@@ -4273,12 +4273,14 @@ async function setupVodQaOverlay(ev) {
   document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 
   // ── iOS native fullscreen: show questions as WebVTT captions ─────────────
-  // On iPhone/iPad, tapping the fullscreen button hands video off to the OS
-  // native player (webkitEnterFullscreen). Our DOM overlay can't appear there,
-  // but the native player DOES honour <track> elements.  We generate a VTT
-  // blob from the same segments, attach it as a hidden subtitle track, and
-  // toggle it on/off when the iOS fullscreen begins/ends so desktop visitors
-  // don't see double text.
+  // On iPhone/iPad, tapping fullscreen hands the video to the OS native player
+  // (webkitEnterFullscreen). Our DOM overlay can't appear there, but the native
+  // player honours <track> elements.
+  //
+  // We do NOT add the track in advance (mux-player auto-enables tracks and
+  // shows a grey caption box in normal view). Instead we create and inject the
+  // track on-demand when webkitbeginfullscreen fires, and remove it on exit so
+  // it never interferes with normal playback.
 
   function fmtVtt(secs) {
     const h  = Math.floor(secs / 3600);
@@ -4288,47 +4290,51 @@ async function setupVodQaOverlay(ev) {
     return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
   }
 
-  // Build VTT — skip open-ended windows (Infinity end) since VTT needs real timestamps
+  // Pre-build the VTT text (no blob/track yet — deferred until iOS fullscreen)
   const vttLines = ["WEBVTT", ""];
   segments.forEach(seg => {
-    const endSecs = isFinite(seg.end) ? seg.end : seg.start + 600; // cap at 10 min
+    const endSecs = isFinite(seg.end) ? seg.end : seg.start + 600;
     vttLines.push(
       `${fmtVtt(seg.start)} --> ${fmtVtt(endSecs)}`,
       seg.question,
-      `— ${seg.name}`,   // — name
+      `— ${seg.name}`,
       ""
     );
   });
-
-  const vttBlob = new Blob([vttLines.join("\n")], { type: "text/vtt" });
-  const vttUrl  = URL.createObjectURL(vttBlob);
-
-  const trackEl = document.createElement("track");
-  trackEl.kind    = "subtitles";
-  trackEl.label   = "Featured Questions";
-  trackEl.srclang = "en";
-  trackEl.src     = vttUrl;
-  // Hidden by default — JS overlay handles desktop; iOS native fullscreen enables it
-  player.appendChild(trackEl);
+  const vttContent = vttLines.join("\n");
 
   // Find the underlying <video> element inside mux-player's shadow DOM
-  const getVideoEl = () => {
-    const mc = player.shadowRoot?.querySelector("media-controller");
-    return mc?.media
-        || mc?.shadowRoot?.querySelector("video")
-        || player.shadowRoot?.querySelector("video");
-  };
+  const mc      = player.shadowRoot?.querySelector("media-controller");
+  const videoEl = mc?.media || mc?.shadowRoot?.querySelector("video") || player.shadowRoot?.querySelector("video");
 
-  const videoEl = getVideoEl();
   if (videoEl) {
-    const setQaTrack = (mode) => {
-      for (const tt of Array.from(videoEl.textTracks || [])) {
-        if (tt.label === "Featured Questions") { tt.mode = mode; break; }
+    let iosTrackEl  = null;
+    let iosVttUrl   = null;
+
+    videoEl.addEventListener("webkitbeginfullscreen", () => {
+      // Inject track only now — avoids any interference with normal view
+      if (!iosTrackEl) {
+        iosVttUrl  = URL.createObjectURL(new Blob([vttContent], { type: "text/vtt" }));
+        iosTrackEl = document.createElement("track");
+        iosTrackEl.kind    = "subtitles";
+        iosTrackEl.label   = "Featured Questions";
+        iosTrackEl.srclang = "en";
+        iosTrackEl.default = true;
+        iosTrackEl.src     = iosVttUrl;
+        videoEl.appendChild(iosTrackEl);
       }
-    };
-    // iOS native fullscreen events fire on the <video> element, not on document
-    videoEl.addEventListener("webkitbeginfullscreen", () => setQaTrack("showing"));
-    videoEl.addEventListener("webkitendfullscreen",   () => setQaTrack("hidden"));
+      if (iosTrackEl.track) iosTrackEl.track.mode = "showing";
+    });
+
+    videoEl.addEventListener("webkitendfullscreen", () => {
+      // Remove the track entirely so it can't bleed into normal view
+      if (iosTrackEl) {
+        if (iosTrackEl.track) iosTrackEl.track.mode = "disabled";
+        iosTrackEl.remove();
+        iosTrackEl = null;
+      }
+      if (iosVttUrl) { URL.revokeObjectURL(iosVttUrl); iosVttUrl = null; }
+    });
   }
 }
 
