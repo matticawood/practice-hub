@@ -4938,14 +4938,15 @@ async function _joinRoomImpl(eventId) {
   _bsSpotlightId = null;
   _bsHiddenIds   = new Set();
 
-  // Guest request notification area (admin only)
+  // Guest request notification area — lives at top of the Guests panel (admin only)
   if (isAdmin) {
     let guestReqArea = document.getElementById("bs-guest-requests");
     if (!guestReqArea) {
       guestReqArea = document.createElement("div");
       guestReqArea.id = "bs-guest-requests";
-      guestReqArea.style.cssText = "display:flex;flex-direction:column;gap:6px;padding:8px 12px;";
-      container.parentNode.insertBefore(guestReqArea, container);
+      guestReqArea.style.cssText = "display:flex;flex-direction:column;gap:6px;padding:6px 0 2px;";
+      const guestPanel = document.getElementById("backstage-panel-guests");
+      if (guestPanel) guestPanel.insertBefore(guestReqArea, guestPanel.firstChild);
     }
     guestReqArea.innerHTML = "";
   }
@@ -5104,17 +5105,28 @@ function onBackstageChatInput() {
 }
 
 // ── Guest request approval notifications (admin only) ─────────────────────────
-function _subscribeGuestRequests(eventId) {
+async function _subscribeGuestRequests(eventId) {
   if (_guestRequestsChannel) { db.removeChannel(_guestRequestsChannel); _guestRequestsChannel = null; }
+
+  // Load any already-pending requests first (guest may have requested before host entered)
+  try {
+    const { data: existing } = await db
+      .from("event_guest_requests")
+      .select("*")
+      .eq("event_id", eventId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: true });
+    (existing || []).forEach(row => _showGuestRequestChip(row));
+  } catch(e) { console.warn("_subscribeGuestRequests fetch:", e); }
+
+  // Then listen for new incoming requests
   _guestRequestsChannel = db.channel(`guest-requests-${eventId}`)
     .on("postgres_changes", {
       event: "INSERT", schema: "public", table: "event_guest_requests",
       filter: `event_id=eq.${eventId}`
     }, payload => {
       const row = payload.new;
-      if (row?.status === "pending") {
-        _showGuestRequestChip(row);
-      }
+      if (row?.status === "pending") _showGuestRequestChip(row);
     })
     .subscribe();
 }
