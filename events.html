@@ -1171,6 +1171,23 @@
       font-family: inherit;
     }
     .backstage-invite-row input:focus { outline: none; border-color: var(--accent); }
+    #backstage-member-suggestions {
+      position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 8px; margin-top: 3px;
+      box-shadow: 0 6px 20px rgba(0,0,0,.5);
+      overflow: hidden;
+    }
+    .member-suggestion {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; cursor: pointer;
+      transition: background .1s;
+    }
+    .member-suggestion:hover, .member-suggestion.focused {
+      background: rgba(245,197,24,.08);
+    }
+    .member-suggestion .sug-name  { font-size: .85rem; font-weight: 600; color: var(--text); }
+    .member-suggestion .sug-email { font-size: .74rem; color: var(--text-muted); }
     #backstage-admin-bar, #backstage-guest-bar {
       background: #0f0a00; border-top: 1.5px solid #3d3200;
       padding: 10px 16px; flex-shrink: 0;
@@ -1249,10 +1266,16 @@
           <div id="backstage-guest-list"></div>
           <div class="backstage-invite-row" id="backstage-invite-row" style="display:none;flex-direction:column;gap:6px">
             <div style="display:flex;gap:6px">
-              <input id="backstage-invite-email" placeholder="Email address…" type="email"
-                autocomplete="email" name="invite-email"
-                style="flex:1;min-width:0"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToBackstage()}" />
+              <!-- Email with member autocomplete dropdown -->
+              <div style="flex:1;min-width:0;position:relative">
+                <input id="backstage-invite-email" placeholder="Email or name…" type="email"
+                  autocomplete="off" name="invite-email"
+                  style="width:100%"
+                  oninput="onBackstageInviteInput(this.value)"
+                  onkeydown="onBackstageInviteKeydown(event)"
+                  onblur="setTimeout(hideBackstageSuggestions, 150)" />
+                <div id="backstage-member-suggestions" style="display:none"></div>
+              </div>
               <input id="backstage-invite-name" placeholder="Name" type="text"
                 autocomplete="name" name="invite-name"
                 style="flex:0 0 100px;min-width:0"
@@ -4869,6 +4892,95 @@ async function _joinMainStreamFromBackstage() {
   // Join main stream as a cohost (can broadcast camera/mic)
   if (!currentEvent?.id) { showView("detail"); return; }
   await joinStream(currentEvent.id, { asCohost: true });
+}
+
+// ── Backstage invite member autocomplete ──────────────────────────────────────
+let _memberSuggestDebounce = null;
+let _memberSuggestions     = [];   // [{ name, email }]
+let _memberSuggestIdx      = -1;   // keyboard-focused row index
+
+async function onBackstageInviteInput(value) {
+  clearTimeout(_memberSuggestDebounce);
+  const q = value.trim();
+  if (q.length < 2) { hideBackstageSuggestions(); return; }
+
+  _memberSuggestDebounce = setTimeout(async () => {
+    // Search allowed_emails by email prefix OR name prefix (case-insensitive)
+    const { data } = await db.from("allowed_emails")
+      .select("name, email")
+      .or(`email.ilike.${q}%,name.ilike.${q}%`)
+      .order("name")
+      .limit(6);
+
+    _memberSuggestions = data || [];
+    _memberSuggestIdx  = -1;
+    renderBackstageSuggestions();
+  }, 220);
+}
+
+function renderBackstageSuggestions() {
+  const el = document.getElementById("backstage-member-suggestions");
+  if (!el) return;
+  if (!_memberSuggestions.length) { el.style.display = "none"; return; }
+
+  el.innerHTML = _memberSuggestions.map((m, i) => `
+    <div class="member-suggestion" data-idx="${i}"
+      onmousedown="selectBackstageMember(${i})">
+      ${avatarHtml(m.name, m.email, 26, null)}
+      <div>
+        <div class="sug-name">${esc(m.name || m.email.split("@")[0])}</div>
+        <div class="sug-email">${esc(m.email)}</div>
+      </div>
+    </div>`).join("");
+  el.style.display = "block";
+}
+
+function selectBackstageMember(idx) {
+  const m = _memberSuggestions[idx];
+  if (!m) return;
+  document.getElementById("backstage-invite-email").value = m.email;
+  document.getElementById("backstage-invite-name").value  = m.name || "";
+  hideBackstageSuggestions();
+}
+
+function hideBackstageSuggestions() {
+  const el = document.getElementById("backstage-member-suggestions");
+  if (el) el.style.display = "none";
+  _memberSuggestIdx = -1;
+}
+
+function onBackstageInviteKeydown(e) {
+  const el = document.getElementById("backstage-member-suggestions");
+  const visible = el && el.style.display !== "none";
+
+  if (e.key === "ArrowDown" && visible) {
+    e.preventDefault();
+    _memberSuggestIdx = Math.min(_memberSuggestIdx + 1, _memberSuggestions.length - 1);
+    highlightSuggestion();
+  } else if (e.key === "ArrowUp" && visible) {
+    e.preventDefault();
+    _memberSuggestIdx = Math.max(_memberSuggestIdx - 1, -1);
+    highlightSuggestion();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (visible && _memberSuggestIdx >= 0) {
+      selectBackstageMember(_memberSuggestIdx);
+    } else {
+      inviteToBackstage();
+    }
+  } else if (e.key === "Escape") {
+    hideBackstageSuggestions();
+  }
+}
+
+function highlightSuggestion() {
+  document.querySelectorAll("#backstage-member-suggestions .member-suggestion")
+    .forEach((row, i) => row.classList.toggle("focused", i === _memberSuggestIdx));
+  if (_memberSuggestIdx >= 0 && _memberSuggestions[_memberSuggestIdx]) {
+    const m = _memberSuggestions[_memberSuggestIdx];
+    document.getElementById("backstage-invite-email").value = m.email;
+    document.getElementById("backstage-invite-name").value  = m.name || "";
+  }
 }
 
 async function inviteToBackstage() {
