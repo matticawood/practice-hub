@@ -4234,13 +4234,11 @@ async function joinStream(eventId, options = {}) {
           background:transparent;border-radius:var(--radius);overflow:hidden;align-content:center;
           justify-content:center;gap:2px;"></div>
         <audio id="viewer-audio" autoplay></audio>
-        <div id="viewer-waiting" style="position:absolute;inset:0;display:flex;align-items:center;
-          justify-content:center;color:var(--text-muted);pointer-events:none;">
-          <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor"
-            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.3">
-            <polygon points="23 7 16 12 23 17 23 7"/>
-            <rect x="1" y="5" width="15" height="14" rx="2"/>
-          </svg>
+        <div id="viewer-waiting" style="position:absolute;inset:0;display:flex;flex-direction:column;
+          align-items:center;justify-content:center;gap:14px;color:var(--text-muted);pointer-events:none;">
+          <div style="width:32px;height:32px;border:2.5px solid var(--border);border-top-color:var(--accent);
+            border-radius:50%;animation:spin .8s linear infinite;"></div>
+          <div style="font-size:.82rem;text-align:center;">Connecting to stream…</div>
         </div>`;
 
       const call = DailyIframe.createCallObject({ videoSource: false, audioSource: false });
@@ -4250,6 +4248,11 @@ async function joinStream(eventId, options = {}) {
       window._viewerLayout = { preset: "default", session_id: null };
 
       await call.join({ url: ev.daily_room_url, token: result.token });
+      // Immediately sync — host may already be in the room so participant-joined
+      // won't fire again; also kick off periodic retries for slow mobile connections.
+      syncGrid();
+      const _syncRetry1 = setTimeout(syncGrid, 2000);
+      const _syncRetry2 = setTimeout(syncGrid, 6000);
 
       // Build/update one <video> tile per visible remote participant.
       // Each tile is keyed by session_id so we only create/destroy when membership changes.
@@ -4316,8 +4319,10 @@ async function joinStream(eventId, options = {}) {
           const vid = document.createElement("video");
           vid.autoplay     = true;
           vid.playsInline  = true;
+          vid.muted        = true;  // Required for autoplay on iOS Safari
           vid.style.cssText = "width:100%;height:100%;object-fit:contain;display:block;";
           vid.srcObject    = new MediaStream([vt]);
+          vid.play().catch(() => {}); // Explicit play() required on iOS after srcObject set
           tile.appendChild(vid);
           grid.appendChild(tile);
         });
@@ -4351,6 +4356,8 @@ async function joinStream(eventId, options = {}) {
       call.on("app-message", _handleAppMessage);
 
       call.on("left-meeting", () => {
+        clearTimeout(_syncRetry1);
+        clearTimeout(_syncRetry2);
         window._viewerSyncGrid = null;
         window._viewerLayout   = null;
         if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
