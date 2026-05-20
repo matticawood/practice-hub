@@ -884,9 +884,9 @@ export default async (request) => {
 
     // Save to Supabase and clear the live stream ID (no longer needed)
     const supaHeaders = {
-      "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json"
+      "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal"
     };
-    await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
+    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
       method: "PATCH", headers: supaHeaders,
       body: JSON.stringify({
         mux_asset_id:       assetId,
@@ -894,6 +894,11 @@ export default async (request) => {
         mux_live_stream_id: null,   // recording is saved — live stream ID no longer needed
       })
     });
+    if (!patchRes.ok) {
+      const patchErr = await patchRes.text().catch(() => patchRes.status);
+      console.error("fetch-recording: Supabase PATCH failed:", patchErr);
+      return json({ error: "Recording found but could not save to database: " + patchErr }, 500);
+    }
 
     return json({ ok: true, muxAssetId: assetId, muxPlaybackId });
   }
