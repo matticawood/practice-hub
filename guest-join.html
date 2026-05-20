@@ -309,17 +309,16 @@
 
     let db           = null;
     let callObject   = null;
-    let bcastChannel = null;
     let guestName    = "";
 
-    // Layout state — mirrors what the host is driving (stream phase)
+    // Layout state
     let _layout        = { preset: "default", session_id: null };
     let _micOn         = true;
     let _camOn         = true;
-    // Backstage grid state — synced from host via sendAppMessage
-    let _inBackstage   = false;
+    // Backstage/room grid state
     let _bsSpotlightId = null;
     let _bsHiddenIds   = new Set();
+    let _requestChannel = null; // postgres_changes subscription for approval
 
     // ── UI helpers ───────────────────────────────────────────────────────────
     function setStatus(title, sub = "", spinner = true) {
@@ -341,65 +340,72 @@
       badge.style.color         = isLive ? "#ef4444"              : "var(--accent)";
     }
 
-    // ── Fetch token and join ─────────────────────────────────────────────────
-    async function joinCall(forStream) {
-      setStatus(
-        forStream ? "Moving you to the main stream…" : "Connecting to backstage…"
-      );
+    // ── Step 1: Request access — creates a pending row, host must approve ───────
+    async function requestAccess() {
+      setStatus("Requesting access…", "Waiting for the host to let you in");
 
       let data;
-      // Retry loop: if forStream=true but the event isn't live in the DB yet, wait and retry
-      for (let attempt = 0; attempt < 4; attempt++) {
-        try {
-          const res = await fetch("/api/daily", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "get-guest-token", inviteToken, eventId, forStream })
-          });
-          data = await res.json();
-        } catch(e) {
-          showError("Connection failed", "Could not reach the server — check your internet and refresh.");
-          return;
-        }
-        if (data.error) {
-          const notReady = data.error.includes("hasn't opened");
-          showError(
-            notReady ? "Backstage isn't open yet" : "Could not join",
-            notReady ? "The host hasn't opened the backstage yet. Try refreshing in a moment." : data.error
-          );
-          return;
-        }
-        // If we requested stream access but the DB isn't live yet, wait and retry
-        if (forStream && data.eventStatus !== "live") {
-          if (attempt < 3) {
-            await new Promise(r => setTimeout(r, 1000));
-            continue;
-          }
-        }
-        break;
+      try {
+        const res = await fetch("/api/daily", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "request-guest-access", inviteToken, eventId })
+        });
+        data = await res.json();
+      } catch(e) {
+        showError("Connection failed", "Could not reach the server — check your internet and refresh.");
+        return;
+      }
+      if (data.error) {
+        const notReady = data.error.includes("hasn't opened") || data.error.includes("room not");
+        showError(
+          notReady ? "Host isn't ready yet" : "Could not connect",
+          notReady ? "The host hasn't opened the room yet. Try again in a moment." : data.error
+        );
+        return;
       }
 
       guestName = data.guestName || "Guest";
-      setHeader(data.eventTitle, forStream);
+      setHeader(data.eventTitle, data.eventStatus === "live");
       document.getElementById("guest-name-label").textContent = guestName;
+      setStatus("Waiting for host…", `${guestName} — the host has been notified and will let you in shortly`, false);
 
-      // Set mode before creating call so renderers know which path to use
-      _inBackstage   = !forStream;
+      // Subscribe to our request row — when status changes to 'approved' or 'rejected', act on it
+      _requestChannel = db.channel(`guest-req-${data.requestId}`)
+        .on("postgres_changes", {
+          event: "UPDATE", schema: "public", table: "event_guest_requests",
+          filter: `id=eq.${data.requestId}`
+        }, payload => {
+          const row = payload.new;
+          if (row.status === "approved" && row.daily_token && row.room_url) {
+            if (_requestChannel) { db.removeChannel(_requestChannel); _requestChannel = null; }
+            joinWithToken(row.daily_token, row.room_url, data.eventTitle, data.eventStatus);
+          } else if (row.status === "rejected") {
+            if (_requestChannel) { db.removeChannel(_requestChannel); _requestChannel = null; }
+            showError("Request declined", "The host declined your request to join. Contact the host if you think this is a mistake.");
+          }
+        })
+        .subscribe();
+    }
+
+    // ── Step 2: Join the Daily room with an approved token ────────────────────
+    async function joinWithToken(dailyToken, roomUrl, eventTitle, eventStatus) {
+      setStatus("Joining…", "");
+
       _bsSpotlightId = null;
       _bsHiddenIds   = new Set();
 
-      // Tear down any existing call (must leave before destroy to avoid duplicate-instance error)
+      // Tear down any existing call
       if (callObject) {
-        try { await callObject.leave(); }   catch(e) {}
-        try { await callObject.destroy(); } catch(e) {}
+        const old = callObject;
         callObject = null;
+        try { await old.leave(); }   catch(e) {}
+        try { await old.destroy(); } catch(e) {}
       }
 
-      // Create headless call object (we render video ourselves)
       callObject = DailyIframe.createCallObject();
 
-      // Dispatch to the right renderer based on which phase we're in
-      const renderAll = () => { if (_inBackstage) renderBsGrid(); else renderLayout(); };
+      const renderAll = () => renderBsGrid();
 
       callObject.on("joined-meeting",    renderAll);
       callObject.on("participant-joined",  renderAll);
@@ -412,49 +418,32 @@
       callObject.on("track-started",  renderAll);
       callObject.on("track-stopped",  renderAll);
 
-      callObject.on("active-speaker-change", (e) => {
-        _activeSpeakerId = e.activeSpeaker?.peerId || null;
-        if (!_inBackstage && _layout.preset === "spotlight") renderLayout();
-      });
-
       callObject.on("app-message", (e) => {
         const msg = e.data;
         if (!msg?.type) return;
-        if (msg.type === "layout-change") {
-          // Main stream layout change (stream phase)
-          _layout = { preset: msg.preset || "default", session_id: msg.session_id || null };
-          if (!_inBackstage) {
-            renderLayout();
-            const local = callObject.participants().local;
-            const isFeatured = _layout.preset === "single-participant" && _layout.session_id === local?.session_id;
-            document.getElementById("featured-banner").style.display = isFeatured ? "block" : "none";
-          }
-        } else if (msg.type === "bs-spotlight") {
-          // Host spotlighted someone in backstage
+        if (msg.type === "bs-spotlight") {
           _bsSpotlightId = msg.session_id || null;
-          if (_inBackstage) renderBsGrid();
+          renderBsGrid();
         } else if (msg.type === "bs-hide") {
-          // Host hid/showed someone in backstage
           if (msg.hidden) _bsHiddenIds.add(msg.session_id);
           else            _bsHiddenIds.delete(msg.session_id);
-          if (_inBackstage) renderBsGrid();
+          renderBsGrid();
         }
       });
 
       callObject.on("left-meeting", () => {
-        // If callObject is already null we intentionally cleared it (transition/cleanup) — don't show error
-        if (!callObject) return;
+        if (!callObject) return; // intentional cleanup — don't show error
         callObject = null;
         showError("You left the call", "Refresh the page to rejoin.");
       });
 
-      // Show the call UI
+      // Show call UI
       document.getElementById("status-screen").style.display = "none";
       document.getElementById("call-wrap").style.display = "flex";
       document.getElementById("transition-overlay").style.display = "none";
 
       try {
-        await callObject.join({ url: data.roomUrl, token: data.token });
+        await callObject.join({ url: roomUrl, token: dailyToken });
         _micOn = true; _camOn = true;
         updateCtrlBtns();
       } catch(e) {
@@ -462,19 +451,13 @@
         return;
       }
 
-      if (forStream) {
-        document.getElementById("on-deck-banner").style.display = "flex";
-      } else {
-        subscribeToBackstageBroadcast();
-        // Inject device selectors into the controls bar
-        await injectDeviceSelectors();
-      }
+      await injectDeviceSelectors();
     }
 
     // ── Backstage grid renderer (matches member-guest view in events.html) ───
 
     function renderBsGrid() {
-      if (!callObject || !_inBackstage) return;
+      if (!callObject) return;
 
       // Switch visible elements
       document.getElementById("video-gallery").style.display  = "none";
@@ -673,10 +656,10 @@
       }
     }
 
-    // ── Stream video rendering (used when forStream = true) ──────────────────
+    // ── (Stream rendering removed — guests always see the room grid) ─────────
+    function renderLayout() { renderBsGrid(); } // fallback alias, not normally called
     let _activeSpeakerId = null;
-
-    function renderLayout() {
+    function _unusedRenderLayout() {
       if (!callObject) return;
       const all    = Object.values(callObject.participants());
       const local  = callObject.participants().local;
@@ -899,33 +882,6 @@
       }
     }
 
-    // ── Backstage broadcast — auto-move when host goes live ──────────────────
-    function subscribeToBackstageBroadcast() {
-      if (bcastChannel) { db.removeChannel(bcastChannel); bcastChannel = null; }
-      bcastChannel = db.channel(`backstage-bcast-${eventId}`, {
-        config: { broadcast: { self: false } }
-      })
-      .on("broadcast", { event: "host-went-live" }, async () => {
-        document.getElementById("transition-overlay").style.display = "flex";
-        if (bcastChannel) { db.removeChannel(bcastChannel); bcastChannel = null; }
-
-        // Null callObject BEFORE leave() so the left-meeting handler is a no-op
-        // (otherwise it calls showError and may block the stream transition)
-        const oldCall = callObject;
-        callObject = null;
-        if (oldCall) {
-          try { await oldCall.leave(); }   catch(e) {}
-          try { await oldCall.destroy(); } catch(e) {}
-        }
-
-        _layout = { preset: "default", session_id: null };
-        // Wait for DB replication so get-guest-token sees status="live" and daily_room_name
-        await new Promise(r => setTimeout(r, 1500));
-        await joinCall(true);
-      })
-      .subscribe();
-    }
-
     // ── Init ─────────────────────────────────────────────────────────────────
     async function init() {
       if (!inviteToken || !eventId) {
@@ -933,7 +889,7 @@
         return;
       }
       db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-      await joinCall(false);
+      await requestAccess();
     }
 
     init();

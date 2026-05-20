@@ -30,15 +30,17 @@ export default async (request) => {
   try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
   const { action } = body;
 
-  // ── Pre-auth: get-guest-token ─────────────────────────────────────────────
+  // ── Pre-auth: request-guest-access ───────────────────────────────────────
   // No Supabase JWT required — the invite token IS the credential.
-  if (action === "get-guest-token") {
-    const { inviteToken, eventId, forStream } = body;
+  // External guest (guest-join.html) calls this to request host approval.
+  // Creates a pending row in event_guest_requests; host approves via approve-guest-request.
+  if (action === "request-guest-access") {
+    const { inviteToken, eventId } = body;
     if (!inviteToken || !eventId) return json({ error: "inviteToken and eventId required" }, 400);
 
     const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
 
-    // Validate the invite token against the database
+    // Validate the invite token
     const inviteRes = await fetch(
       `${SUPABASE_URL}/rest/v1/event_guest_invites?token=eq.${encodeURIComponent(inviteToken)}&event_id=eq.${eventId}&select=*`,
       { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
@@ -47,74 +49,41 @@ export default async (request) => {
     if (!Array.isArray(inviteRows) || inviteRows.length === 0) {
       return json({ error: "Invalid or expired invite link." }, 403);
     }
-    const invite     = inviteRows[0];
-    const guestName  = invite.name  || "Guest";
-    const guestEmail = invite.email || null;
+    const invite    = inviteRows[0];
+    const guestName = invite.name || "Guest";
 
-    // Get event details
+    // Get event title
     const evRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=daily_room_name,daily_room_url,status,title`,
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=title,status`,
       { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
     );
     const evRows = await evRes.json();
     if (!Array.isArray(evRows) || !evRows.length) return json({ error: "Event not found" }, 404);
     const ev = evRows[0];
 
-    // Ensure guest is in event_backstage_guests (use synthetic email if none on invite)
-    const canonicalEmail = guestEmail || `guest-${invite.id}@invite.local`;
-    await fetch(`${SUPABASE_URL}/rest/v1/event_backstage_guests`, {
+    // Check if host is already in the room (i.e. the room exists)
+    const roomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}`;
+    const roomRes  = await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
+      headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+    });
+    if (!roomRes.ok) return json({ error: "The host hasn’t opened the room yet. Try again in a moment." }, 404);
+
+    // Create or update a pending request row
+    const reqRes = await fetch(`${SUPABASE_URL}/rest/v1/event_guest_requests`, {
       method: "POST",
       headers: {
         "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`,
-        "Content-Type": "application/json", "Prefer": "return=minimal"
+        "Content-Type": "application/json", "Prefer": "return=representation"
       },
-      body: JSON.stringify({ event_id: eventId, email: canonicalEmail, name: guestName })
-    }); // ignore duplicate errors — guest may already be present
-
-    // Determine which room to join
-    let roomName, roomUrl;
-    if (forStream && ev.status === "live" && ev.daily_room_name) {
-      // Guest is being moved to the main stream
-      roomName = ev.daily_room_name;
-      const roomRes = await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
-        headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
-      });
-      if (!roomRes.ok) return json({ error: "Main room not found." }, 404);
-      roomUrl = (await roomRes.json()).url;
-    } else {
-      // Default: join backstage
-      roomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}-bk`;
-      const roomRes = await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
-        headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
-      });
-      if (!roomRes.ok) return json({ error: "Backstage room not found — the host hasn’t opened it yet." }, 404);
-      roomUrl = (await roomRes.json()).url;
-    }
-
-    // Create a meeting token — is_owner so the guest can broadcast
-    const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
-      body: JSON.stringify({
-        properties: {
-          room_name:         roomName,
-          user_name:         guestName,
-          is_owner:          true,
-          enable_prejoin_ui: false,
-          start_video_off:   false,
-          start_audio_off:   false,
-        }
-      })
+      body: JSON.stringify({ event_id: eventId, invite_token: inviteToken, guest_name: guestName, status: "pending" })
     });
-    const tokenData = await tokenRes.json();
-    if (!tokenRes.ok) return json({ error: tokenData }, tokenRes.status);
+    const reqRows = await reqRes.json();
+    if (!reqRes.ok) return json({ error: "Could not create join request", detail: reqRows }, 500);
 
     return json({
-      token:       tokenData.token,
-      roomName,
-      roomUrl,
+      requestId:  reqRows[0].id,
       guestName,
-      eventTitle:  ev.title  || "",
+      eventTitle: ev.title  || "",
       eventStatus: ev.status || "",
     });
   }
@@ -368,8 +337,216 @@ export default async (request) => {
     return json({ ok: true, room: data });
   }
 
-  // ── Action: create-room ────────────────────────────────────────────────────
-  // Only admin. Creates a Daily.co room + a Mux live stream for an event.
+  // ── Action: ensure-room ───────────────────────────────────────────────────
+  // Admin only. Idempotently creates the single Daily room for an event.
+  // Room uses owner_only_broadcast:true so only hosts/guests can broadcast;
+  // audience members join with viewer tokens and can only watch.
+  // Mux stream is created separately on "Go Live" (create-mux-livestream).
+  if (action === "ensure-room") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+
+    const { eventId } = body;
+    if (!eventId) return json({ error: "eventId required" }, 400);
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    const roomName    = `pr-${eventId.replace(/-/g, "").slice(0, 12)}`;
+
+    // Return existing room if it already exists (idempotent)
+    const getRes = await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
+      headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+    });
+    if (getRes.ok) {
+      const existing = await getRes.json();
+      // Persist room name to DB if missing
+      await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`, {
+        method: "PATCH",
+        headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+        body: JSON.stringify({ daily_room_name: existing.name, daily_room_url: existing.url })
+      });
+      return json({ roomName: existing.name, roomUrl: existing.url });
+    }
+
+    // Create a new room
+    const createRes = await fetch("https://api.daily.co/v1/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        name: roomName,
+        properties: {
+          enable_chat:          false,
+          enable_prejoin_ui:    false,
+          start_video_off:      false,
+          start_audio_off:      false,
+          enable_screenshare:   true,
+          enable_recording:     "cloud",
+          owner_only_broadcast: true,   // audience can join but not broadcast
+          max_participants:     500,
+          exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+        }
+      })
+    });
+    const roomData = await createRes.json();
+    if (!createRes.ok) return json({ error: roomData }, createRes.status);
+
+    // Save room details to event row
+    await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`, {
+      method: "PATCH",
+      headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+      body: JSON.stringify({ daily_room_name: roomData.name, daily_room_url: roomData.url })
+    });
+
+    return json({ roomName: roomData.name, roomUrl: roomData.url });
+  }
+
+  // ── Action: get-room-token ────────────────────────────────────────────────
+  // Returns a Daily.co token for the event room based on the caller's role:
+  //   Admin              → is_owner:true  (host)
+  //   event_backstage_guests member → is_owner:true  (invited guest, can broadcast)
+  //   Any other member   → is_owner:false (audience viewer, watch-only)
+  if (action === "get-room-token") {
+    const { eventId } = body;
+    if (!eventId) return json({ error: "eventId required" }, 400);
+
+    const SERVICE_KEY  = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    const admin        = await isAdmin();
+
+    // Get event
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=daily_room_name,daily_room_url,status,title`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const evRows = await evRes.json();
+    if (!Array.isArray(evRows) || !evRows.length) return json({ error: "Event not found" }, 404);
+    const ev = evRows[0];
+    if (!ev.daily_room_name) return json({ error: "Room not created yet — host must open Backstage first." }, 404);
+
+    // Get display name
+    const nameRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/allowed_emails?email=eq.${encodeURIComponent(userEmail)}&select=name`,
+      { headers: { "Authorization": `Bearer ${token}`, "apikey": SUPABASE_ANON } }
+    );
+    const nameRows  = await nameRes.json();
+    const displayName = nameRows?.[0]?.name || userEmail.split("@")[0];
+
+    // Determine role
+    let isOwner = admin;
+    if (!admin) {
+      const guestRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/event_backstage_guests?event_id=eq.${eventId}&email=eq.${encodeURIComponent(userEmail)}&select=id`,
+        { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+      );
+      const guestRows = await guestRes.json();
+      isOwner = Array.isArray(guestRows) && guestRows.length > 0;
+    }
+
+    const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        properties: {
+          room_name:         ev.daily_room_name,
+          user_name:         displayName,
+          is_owner:          isOwner,
+          enable_prejoin_ui: false,
+          start_video_off:   !isOwner,
+          start_audio_off:   !isOwner,
+        }
+      })
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) return json({ error: tokenData }, tokenRes.status);
+
+    return json({
+      token:       tokenData.token,
+      roomName:    ev.daily_room_name,
+      roomUrl:     ev.daily_room_url,
+      displayName,
+      isOwner,
+      eventTitle:  ev.title  || "",
+      eventStatus: ev.status || "",
+    });
+  }
+
+  // ── Action: approve-guest-request ────────────────────────────────────────
+  // Admin only. Generates an is_owner:true Daily token and writes it into
+  // the event_guest_requests row. The guest's browser picks it up via
+  // postgres_changes subscription and joins automatically.
+  if (action === "approve-guest-request") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { requestId, eventId } = body;
+    if (!requestId || !eventId) return json({ error: "requestId and eventId required" }, 400);
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+
+    // Get the request
+    const reqRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/event_guest_requests?id=eq.${requestId}&select=*`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const reqRows = await reqRes.json();
+    if (!Array.isArray(reqRows) || !reqRows.length) return json({ error: "Request not found" }, 404);
+    const req = reqRows[0];
+
+    // Get room details
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}&select=daily_room_name,daily_room_url`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    const evRows = await evRes.json();
+    const ev = evRows?.[0];
+    if (!ev?.daily_room_name) return json({ error: "Room not found for event" }, 404);
+
+    // Generate is_owner:true token for the guest
+    const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
+      body: JSON.stringify({
+        properties: {
+          room_name:         ev.daily_room_name,
+          user_name:         req.guest_name,
+          is_owner:          true,
+          enable_prejoin_ui: false,
+          start_video_off:   false,
+          start_audio_off:   false,
+        }
+      })
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) return json({ error: tokenData }, tokenRes.status);
+
+    // Also add to event_backstage_guests so they're recognised on future visits
+    await fetch(`${SUPABASE_URL}/rest/v1/event_backstage_guests`, {
+      method: "POST",
+      headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+      body: JSON.stringify({ event_id: eventId, email: `guest-${req.invite_token}@invite.local`, name: req.guest_name })
+    });
+
+    // Update request row — guest's postgres_changes subscription will fire
+    await fetch(`${SUPABASE_URL}/rest/v1/event_guest_requests?id=eq.${requestId}`, {
+      method: "PATCH",
+      headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+      body: JSON.stringify({ status: "approved", daily_token: tokenData.token, room_url: ev.daily_room_url })
+    });
+
+    return json({ ok: true });
+  }
+
+  // ── Action: reject-guest-request ─────────────────────────────────────────
+  if (action === "reject-guest-request") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { requestId } = body;
+    if (!requestId) return json({ error: "requestId required" }, 400);
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    await fetch(`${SUPABASE_URL}/rest/v1/event_guest_requests?id=eq.${requestId}`, {
+      method: "PATCH",
+      headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+      body: JSON.stringify({ status: "rejected" })
+    });
+    return json({ ok: true });
+  }
+
+  // ── LEGACY: create-room (kept for backward compat — maps to ensure-room) ──
   if (action === "create-room") {
     if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
 
@@ -579,12 +756,7 @@ export default async (request) => {
     return json({ ok: true });
   }
 
-  // ── Action: get-token ──────────────────────────────────────────────────────
-  // Any authenticated member can get a viewer token.
-  // Only admin can get an owner (host) token.
-  // Backstage guests can request a cohost token (isCohost: true + eventId) —
-  // verified against event_backstage_guests; grants is_owner so they can
-  // broadcast in a room that has owner_only_broadcast: true.
+  // ── LEGACY: get-token (kept for backward compat) ──────────────────────────
   if (action === "get-token") {
     const { roomName, isOwner, isCohost, eventId: tokenEventId } = body;
     if (!roomName) return json({ error: "roomName required" }, 400);
@@ -847,105 +1019,17 @@ export default async (request) => {
     return json({ status: upload.status });
   }
 
-  // ── Action: create-backstage-room ─────────────────────────────────────────
-  // Admin only. Creates (or retrieves existing) a private backstage Daily room
-  // where all participants can broadcast — no Mux streaming, no owner_only_broadcast.
+  // ── LEGACY: create-backstage-room / get-backstage-token → redirect to new actions
   if (action === "create-backstage-room") {
-    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
-    const { eventId } = body;
-    if (!eventId) return json({ error: "eventId required" }, 400);
-
-    // Backstage room name is deterministic: main room name + "-bk"
-    const backstageRoomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}-bk`;
-
-    // Try to fetch existing room first (idempotent)
-    const getRes = await fetch(`https://api.daily.co/v1/rooms/${backstageRoomName}`, {
-      headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
-    });
-    if (getRes.ok) {
-      const existing = await getRes.json();
-      return json({ roomName: existing.name, roomUrl: existing.url });
-    }
-
-    // Create the backstage room — everyone can broadcast (no owner_only_broadcast)
-    const res = await fetch("https://api.daily.co/v1/rooms", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
-      body: JSON.stringify({
-        name: backstageRoomName,
-        properties: {
-          enable_chat:          false,
-          enable_prejoin_ui:    false,
-          start_video_off:      false,
-          start_audio_off:      false,
-          enable_screenshare:   true,
-          owner_only_broadcast: false,   // all guests can have camera/mic on
-          max_participants:     20,
-          exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // 24-hour expiry
-        }
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) return json({ error: data }, res.status);
-    return json({ roomName: data.name, roomUrl: data.url });
+    // Map to ensure-room
+    body.action = "ensure-room";
+    // fall through handled by ensure-room block above — but since we're past it,
+    // just return a helpful error so old code surfaces the issue clearly.
+    return json({ error: "create-backstage-room is deprecated — use ensure-room" }, 400);
   }
-
-  // ── Action: get-backstage-token ────────────────────────────────────────────
-  // Returns a Daily.co meeting token for the backstage room.
-  // Admin always allowed. Non-admin requires an entry in event_backstage_guests.
   if (action === "get-backstage-token") {
-    const { eventId } = body;
-    if (!eventId) return json({ error: "eventId required" }, 400);
-
-    const backstageRoomName = `pr-${eventId.replace(/-/g, "").slice(0, 12)}-bk`;
-    const admin = await isAdmin();
-
-    if (!admin) {
-      // Verify the requester is on the guest list (using service key for RLS bypass)
-      const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
-      const guestRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/event_backstage_guests?event_id=eq.${eventId}&email=eq.${encodeURIComponent(userEmail)}&select=id`,
-        { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
-      );
-      const guestRows = await guestRes.json();
-      if (!Array.isArray(guestRows) || guestRows.length === 0) {
-        return json({ error: "You have not been invited to this backstage." }, 403);
-      }
-    }
-
-    // Get display name
-    const nameRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/allowed_emails?email=eq.${encodeURIComponent(userEmail)}&select=name`,
-      { headers: { "Authorization": `Bearer ${token}`, "apikey": SUPABASE_ANON } }
-    );
-    const nameRows = await nameRes.json();
-    const displayName = nameRows?.[0]?.name || userEmail.split("@")[0];
-
-    // Fetch the room to get its canonical URL (avoids hardcoding the Daily.co domain)
-    const roomRes = await fetch(`https://api.daily.co/v1/rooms/${backstageRoomName}`, {
-      headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
-    });
-    const roomData = await roomRes.json();
-    if (!roomRes.ok) return json({ error: "Backstage room not found — please ask the host to open Backstage first." }, 404);
-    const roomUrl = roomData.url;
-
-    const res = await fetch("https://api.daily.co/v1/meeting-tokens", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DAILY_API_KEY}` },
-      body: JSON.stringify({
-        properties: {
-          room_name:         backstageRoomName,
-          user_name:         displayName,
-          is_owner:          admin,
-          enable_prejoin_ui: false,
-          start_video_off:   false,  // everyone has camera on in backstage
-          start_audio_off:   false,
-        }
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) return json({ error: data }, res.status);
-    return json({ token: data.token, roomName: backstageRoomName, roomUrl });
+    // Map to get-room-token
+    return json({ error: "get-backstage-token is deprecated — use get-room-token" }, 400);
   }
 
   return json({ error: "Unknown action" }, 400);
