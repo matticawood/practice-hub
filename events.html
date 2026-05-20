@@ -1267,22 +1267,21 @@
         <div id="backstage-panel-guests">
           <div id="backstage-guest-list"></div>
           <div class="backstage-invite-row" id="backstage-invite-row" style="display:none;flex-direction:column;gap:6px">
-            <div style="display:flex;gap:6px">
-              <!-- Email with member autocomplete dropdown -->
-              <div style="flex:1;min-width:0;position:relative">
-                <input id="backstage-invite-email" placeholder="Email or name…" type="text"
-                  autocomplete="new-password"
-                  style="width:100%"
-                  oninput="onBackstageInviteInput(this.value)"
-                  onkeydown="onBackstageInviteKeydown(event)"
-                  onblur="setTimeout(hideBackstageSuggestions, 150)" />
-                <div id="backstage-member-suggestions" style="display:none"></div>
-              </div>
+            <!-- position:relative here so the dropdown spans the full row width -->
+            <div style="display:flex;gap:6px;position:relative">
+              <input id="backstage-invite-email" placeholder="Email or name…" type="text"
+                autocomplete="new-password"
+                style="flex:1;min-width:0"
+                oninput="onBackstageInviteInput(this.value)"
+                onkeydown="onBackstageInviteKeydown(event)"
+                onblur="setTimeout(hideBackstageSuggestions, 150)" />
               <input id="backstage-invite-name" placeholder="Name" type="text"
                 autocomplete="new-password"
                 style="flex:0 0 100px;min-width:0"
                 onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToBackstage()}" />
               <button class="btn btn-sm btn-primary" onclick="inviteToBackstage()">Invite</button>
+              <!-- Dropdown is positioned from the row, so left:0/right:0 spans everything -->
+              <div id="backstage-member-suggestions" style="display:none"></div>
             </div>
             <!-- Shown after a non-member invite is created -->
             <div id="backstage-invite-link-wrap" style="display:none;flex-direction:column;gap:4px;padding:8px 10px;background:var(--surface);border-radius:6px;border:1px solid var(--border)">
@@ -5124,18 +5123,23 @@ async function onBackstageInviteInput(value) {
   if (q.length < 2) { hideBackstageSuggestions(); return; }
 
   _memberSuggestDebounce = setTimeout(async () => {
-    // Search allowed_emails by email prefix OR name prefix (case-insensitive).
-    // Use separate filter calls rather than .or() to avoid PostgREST syntax issues
-    // with special characters in the query string.
-    const safeQ = q.replace(/[%_]/g, "\\$&"); // escape SQL wildcard chars
-    const { data, error } = await db.from("allowed_emails")
-      .select("name, email")
-      .or(`email.ilike.${safeQ}%,name.ilike.${safeQ}%`)
-      .order("name")
-      .limit(6);
+    // Run email-prefix and name-prefix searches in parallel using separate
+    // .ilike() calls — avoids PostgREST .or() wildcard encoding issues.
+    const [emailRes, nameRes] = await Promise.all([
+      db.from("allowed_emails").select("name, email").ilike("email", `${q}%`).order("name").limit(6),
+      db.from("allowed_emails").select("name, email").ilike("name",  `${q}%`).order("name").limit(6),
+    ]);
+    if (emailRes.error) console.warn("[autocomplete] email query:", emailRes.error);
+    if (nameRes.error)  console.warn("[autocomplete] name query:",  nameRes.error);
 
-    if (error) console.warn("[autocomplete] allowed_emails query failed:", error);
-    _memberSuggestions = data || [];
+    // Merge, deduplicate by email, cap at 6
+    const seen = new Set();
+    const merged = [];
+    for (const row of [...(emailRes.data || []), ...(nameRes.data || [])]) {
+      if (!seen.has(row.email)) { seen.add(row.email); merged.push(row); }
+      if (merged.length === 6) break;
+    }
+    _memberSuggestions = merged;
     _memberSuggestIdx  = -1;
     renderBackstageSuggestions();
   }, 220);
