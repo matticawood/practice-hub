@@ -236,7 +236,8 @@
       display: flex; align-items: center; gap: 5px; margin-bottom: 5px;
     }
     #vod-now-featured-text  { font-size: .9rem; color: #fff; line-height: 1.4; }
-    #vod-now-featured-asker { font-size: .75rem; color: var(--text-muted); margin-top: 3px; }
+    #vod-now-featured-asker { font-size: .75rem; color: var(--text-muted); margin-top: 5px;
+                              display: flex; align-items: center; gap: 6px; }
     /* ── VOD answered Q&A list ───────────────────────────────────────────────── */
     .vod-qa-list { margin-top: 20px; }
     .vod-qa-list-title {
@@ -267,7 +268,8 @@
     .vod-qa-ts.no-ts { color: var(--text-muted); background: var(--surface-2); cursor: default; }
     .vod-qa-row-body { flex: 1; min-width: 0; }
     .vod-qa-row-q { font-size: .88rem; color: var(--text); line-height: 1.4; }
-    .vod-qa-row-asker { font-size: .75rem; color: var(--text-muted); margin-top: 2px; }
+    .vod-qa-row-asker { font-size: .75rem; color: var(--text-muted); margin-top: 4px;
+                        display: flex; align-items: center; gap: 5px; }
     mux-player { width: 100%; display: block; background: transparent; --media-background-color: transparent; --media-object-fit: contain; }
     /* Hide broken poster/thumbnail until Mux finishes generating them */
     mux-player::part(poster) { background: var(--surface-2); }
@@ -734,7 +736,8 @@
                          text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px;
                          display: flex; align-items: center; gap: 5px; }
     .featured-qa-text  { font-size: 0.88rem; color: #fff; line-height: 1.4; }
-    .featured-qa-asker { font-size: 0.75rem; color: var(--text-muted); margin-top: 3px; }
+    .featured-qa-asker { font-size: 0.75rem; color: var(--text-muted); margin-top: 5px;
+                         display: flex; align-items: center; gap: 6px; }
 
     #stream-sidebar {
       width: 320px; flex-shrink: 0;
@@ -4494,11 +4497,7 @@ function setupRealtimeStream(ev) {
       if (!data) return;
       data.forEach(q => appendQAItem(q, true));
       const featured = data.find(q => q.is_featured);
-      if (featured) {
-        document.getElementById("featured-qa-text").textContent = featured.question;
-        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
-        document.getElementById("featured-qa-bar").classList.add("visible");
-      }
+      if (featured) _setFeaturedQA(featured);
     });
 
   // Load discussion comments immediately
@@ -4550,11 +4549,7 @@ function setupRealtimeStream(ev) {
       if (!data) return;
       data.forEach(q => appendQAItem(q, true));
       const featured = data.find(q => q.is_featured);
-      if (featured) {
-        document.getElementById("featured-qa-text").textContent = featured.question;
-        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
-        document.getElementById("featured-qa-bar").classList.add("visible");
-      }
+      if (featured) _setFeaturedQA(featured);
     });
 
   // Typing broadcasts — fixed channel name (no gen suffix) so host + participants
@@ -4791,13 +4786,41 @@ function updateQAItem(partial) {
 
     // Update featured bar
     if (q.is_featured) {
-      document.getElementById("featured-qa-text").textContent = q.question;
-      document.getElementById("featured-qa-asker").textContent = "— " + (q.name || q.email.split("@")[0]);
-      document.getElementById("featured-qa-bar").classList.add("visible");
+      _setFeaturedQA(q);
     } else {
       document.getElementById("featured-qa-bar").classList.remove("visible");
     }
   });
+}
+
+// Show a question in the live featured bar with the asker's avatar.
+// Called whenever the featured question changes (history load, realtime update, refresh).
+function _setFeaturedQA(q) {
+  const textEl  = document.getElementById("featured-qa-text");
+  const askerEl = document.getElementById("featured-qa-asker");
+  const barEl   = document.getElementById("featured-qa-bar");
+  if (!textEl || !askerEl || !barEl) return;
+
+  const name      = q.name || q.email?.split("@")[0] || "Anonymous";
+  const cachedUrl = q.email ? (_streamAvatarCache?.[q.email] ?? null) : null;
+
+  textEl.textContent = q.question;
+  askerEl.innerHTML  = `${avatarHtml(name, q.email || "", 20, cachedUrl)}<span>— ${esc(name)}</span>`;
+  barEl.classList.add("visible");
+
+  // Fetch avatar if not yet cached, then backfill
+  if (q.email && _streamAvatarCache && !_streamAvatarCache.hasOwnProperty(q.email)) {
+    _streamAvatarCache[q.email] = null;
+    db.from("allowed_emails").select("avatar_url").eq("email", q.email).maybeSingle()
+      .then(({ data }) => {
+        if (_streamAvatarCache) _streamAvatarCache[q.email] = data?.avatar_url || null;
+        // Only update if this question is still the one showing
+        const curAskerEl = document.getElementById("featured-qa-asker");
+        if (curAskerEl && document.getElementById("featured-qa-text")?.textContent === q.question) {
+          curAskerEl.innerHTML = `${avatarHtml(name, q.email, 20, data?.avatar_url || null)}<span>— ${esc(name)}</span>`;
+        }
+      });
+  }
 }
 
 function buildQAEl(q) {
@@ -4920,11 +4943,7 @@ async function _refreshQAList() {
   el.innerHTML = "";
   data.forEach(q => appendQAItem(q, true));
   const featured = data.find(q => q.is_featured);
-  if (featured) {
-    document.getElementById("featured-qa-text").textContent = featured.question;
-    document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
-    document.getElementById("featured-qa-bar").classList.add("visible");
-  }
+  if (featured) _setFeaturedQA(featured);
 }
 
 async function markAnswered(qaId, currentState) {
@@ -5016,6 +5035,29 @@ async function setupVodQaList(ev) {
 
   const streamStart = ev.stream_started_at ? new Date(ev.stream_started_at).getTime() : null;
 
+  // Pre-warm avatar cache for all Q&A askers so rows show photos immediately.
+  // Re-renders the whole list once all fetches settle (only fires if any were missing).
+  {
+    const uncachedEmails = [...new Set(questions.map(q => q.email).filter(
+      e => e && !_streamAvatarCache?.hasOwnProperty(e)
+    ))];
+    if (uncachedEmails.length && _streamAvatarCache) {
+      uncachedEmails.forEach(e => { _streamAvatarCache[e] = null; }); // mark as loading
+      db.from("allowed_emails").select("email, avatar_url").in("email", uncachedEmails)
+        .then(({ data: avRows }) => {
+          (avRows || []).forEach(r => { if (_streamAvatarCache) _streamAvatarCache[r.email] = r.avatar_url || null; });
+          // Re-render each asker line now that we have real URLs
+          questions.forEach(q => {
+            if (!q.email) return;
+            const url = _streamAvatarCache?.[q.email] || null;
+            const name = q.name || q.email?.split("@")[0] || "Anonymous";
+            const row = wrap.querySelector(`.vod-qa-row[data-qa-id="${q.id}"] .vod-qa-row-asker`);
+            if (row) row.innerHTML = `${avatarHtml(name, q.email, 18, url)}<span>${esc(name)}</span>`;
+          });
+        });
+    }
+  }
+
   function fmtOffset(ts) {
     if (!streamStart || !ts) return null;
     const secs = Math.max(0, Math.round((new Date(ts).getTime() - streamStart) / 1000));
@@ -5043,13 +5085,14 @@ async function setupVodQaList(ev) {
               return `<button class="vod-qa-ts" onclick="vodSeekTo(${secs})" title="Jump to this moment">${offset}</button>`;
             }).filter(Boolean).join("")
           : `<span class="vod-qa-ts no-ts">—</span>`;
-        const asker = esc(q.name || q.email?.split("@")[0] || "Anonymous");
+        const askerName = q.name || q.email?.split("@")[0] || "Anonymous";
+        const askerUrl  = q.email ? (_streamAvatarCache?.[q.email] ?? null) : null;
         return `
           <div class="vod-qa-row" data-qa-id="${q.id}">
             <div class="vod-qa-ts-group">${tsBtns}</div>
             <div class="vod-qa-row-body">
               <div class="vod-qa-row-q">${esc(q.question)}</div>
-              <div class="vod-qa-row-asker">${asker}</div>
+              <div class="vod-qa-row-asker">${avatarHtml(askerName, q.email || "", 18, askerUrl)}<span>${esc(askerName)}</span></div>
             </div>
           </div>`;
       }).join("")}
@@ -5090,9 +5133,11 @@ async function setupVodQaList(ev) {
         // Update "Now Featured" banner below the video
         if (nowFeaturedEl) {
           if (newId && questionById[newId]) {
-            const q = questionById[newId];
-            nowFeaturedText.textContent  = q.question;
-            nowFeaturedAsker.textContent = "— " + (q.name || q.email?.split("@")[0] || "Anonymous");
+            const q    = questionById[newId];
+            const name = q.name || q.email?.split("@")[0] || "Anonymous";
+            const url  = q.email ? (_streamAvatarCache?.[q.email] ?? null) : null;
+            nowFeaturedText.textContent = q.question;
+            nowFeaturedAsker.innerHTML  = `${avatarHtml(name, q.email || "", 20, url)}<span>— ${esc(name)}</span>`;
             nowFeaturedEl.classList.add("visible");
           } else {
             nowFeaturedEl.classList.remove("visible");
