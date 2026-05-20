@@ -442,6 +442,8 @@
       });
 
       callObject.on("left-meeting", () => {
+        // If callObject is already null we intentionally cleared it (transition/cleanup) — don't show error
+        if (!callObject) return;
         callObject = null;
         showError("You left the call", "Refresh the page to rejoin.");
       });
@@ -890,7 +892,11 @@
 
     function confirmLeave() {
       if (!confirm("Leave the " + (document.getElementById("header-badge")?.textContent === "Live" ? "stream" : "backstage") + "?")) return;
-      if (callObject) { callObject.leave().catch(() => {}); }
+      if (callObject) {
+        // Keep callObject set so left-meeting knows it was a user-initiated leave
+        // (the handler will null it and show the "you left" message as expected)
+        callObject.leave().catch(() => {});
+      }
     }
 
     // ── Backstage broadcast — auto-move when host goes live ──────────────────
@@ -902,14 +908,18 @@
       .on("broadcast", { event: "host-went-live" }, async () => {
         document.getElementById("transition-overlay").style.display = "flex";
         if (bcastChannel) { db.removeChannel(bcastChannel); bcastChannel = null; }
-        if (callObject) {
-          try { await callObject.leave(); } catch(e) {}
-          try { await callObject.destroy(); } catch(e) {}
-          callObject = null;
+
+        // Null callObject BEFORE leave() so the left-meeting handler is a no-op
+        // (otherwise it calls showError and may block the stream transition)
+        const oldCall = callObject;
+        callObject = null;
+        if (oldCall) {
+          try { await oldCall.leave(); }   catch(e) {}
+          try { await oldCall.destroy(); } catch(e) {}
         }
+
         _layout = { preset: "default", session_id: null };
         // Wait for DB replication so get-guest-token sees status="live" and daily_room_name
-        // (same delay used on the member-guest path in events.html)
         await new Promise(r => setTimeout(r, 1500));
         await joinCall(true);
       })
