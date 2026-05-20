@@ -1272,6 +1272,7 @@
         <!-- Guests panel -->
         <div id="backstage-panel-guests">
           <div id="backstage-guest-list"></div>
+          <div id="bs-watching-section" style="display:none;border-top:1px solid var(--border);margin-top:4px;"></div>
           <div class="backstage-invite-row" id="backstage-invite-row" style="display:none;flex-direction:column;gap:6px">
             <!-- Single search input + Invite button. Dropdown spans full row width. -->
             <div style="display:flex;gap:6px;position:relative">
@@ -5571,18 +5572,38 @@ function _renderBsGrid(call) {
 
   const allParts = Object.values(call.participants());
 
-  // Exclude headless viewers: they join with videoSource:false + audioSource:false so
-  // Daily marks both tracks as "blocked" (no device was ever requested). Backstage
-  // participants always have at least one track that is playable or sendable.
-  const backstageParts = allParts.filter(p => {
-    if (p.local) return true;
-    const vs = p.tracks?.video?.state;
-    const as = p.tracks?.audio?.state;
-    return (vs && vs !== "blocked") || (as && as !== "blocked");
-  });
+  // Only show participants who have is_owner:true (host + backstage guests).
+  // Audience viewers join with is_owner:false → p.owner === false, so they are
+  // excluded from the backstage tile grid entirely.
+  const backstageParts = allParts.filter(p => p.local || p.owner === true);
 
   const visibleParts = backstageParts.filter(p => !_bsHiddenIds.has(p.session_id));
   const hiddenParts  = backstageParts.filter(p =>  _bsHiddenIds.has(p.session_id));
+
+  // ── Audience viewers panel (Guests tab, bottom section) ───────────────────
+  const viewerParts = allParts.filter(p => !p.local && p.owner !== true);
+  const watchSection = document.getElementById("bs-watching-section");
+  if (watchSection) {
+    if (viewerParts.length) {
+      watchSection.style.display = "block";
+      watchSection.innerHTML = `
+        <div style="font-size:.72rem;font-weight:600;color:var(--text-muted);
+                    text-transform:uppercase;letter-spacing:.06em;padding:10px 12px 4px;">
+          Watching (${viewerParts.length})
+        </div>` +
+        viewerParts.map(p => {
+          const name = p.user_name || "Viewer";
+          return `<div style="display:flex;align-items:center;gap:9px;padding:5px 12px;">
+            ${avatarHtml(name, "", 24, null)}
+            <span style="font-size:.83rem;color:var(--text);white-space:nowrap;
+                         overflow:hidden;text-overflow:ellipsis;">${esc(name)}</span>
+          </div>`;
+        }).join("");
+    } else {
+      watchSection.style.display = "none";
+      watchSection.innerHTML = "";
+    }
+  }
 
   // ── Build / reuse wrapper ──────────────────────────────────────────
   let grid = document.getElementById("bs-guest-grid");
