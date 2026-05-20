@@ -5255,6 +5255,9 @@ function _renderBsGrid(call) {
       video.autoplay = true; video.playsInline = true;
       video.muted = !!p.local;
       video.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
+      // Reposition label whenever the video dimensions become known or change
+      video.addEventListener("loadedmetadata", () => _updateBsTileLabel(tile));
+      video.addEventListener("resize",         () => _updateBsTileLabel(tile));
       tile.appendChild(video);
 
       // Camera-off overlay
@@ -5270,7 +5273,7 @@ function _renderBsGrid(call) {
         `<line x1="1" y1="1" x2="23" y2="23"/></svg><span>Camera off</span>`;
       tile.appendChild(camOff);
 
-      // Name label
+      // Name label — bottom/left set dynamically by _updateBsTileLabel
       const nameLabel = document.createElement("div");
       nameLabel.className = "bs-tile-name";
       nameLabel.style.cssText =
@@ -5325,6 +5328,8 @@ function _renderBsGrid(call) {
       if (video) { video.style.display = "none"; video.srcObject = null; }
       if (camOff) camOff.style.display = "flex";
     }
+    // Reposition name label to corner of actual video frame (not tile edge)
+    _updateBsTileLabel(tile);
 
     // Audio track (remote only)
     if (!p.local && p.tracks?.audio?.state === "playable") {
@@ -5530,6 +5535,44 @@ async function _bsChangeCam(deviceId) {
   if (!window._backstageCall || !deviceId) return;
   try { await window._backstageCall.setInputDevicesAsync({ videoDeviceId: deviceId }); }
   catch(e) { console.warn("Could not switch camera:", e); }
+}
+
+/**
+ * Positions the name label at the bottom-left corner of the *actual* video
+ * frame inside a tile, accounting for letterbox/pillarbox bars from object-fit:contain.
+ * Falls back to the tile corner when the camera is off or dimensions aren't ready.
+ */
+function _updateBsTileLabel(tile) {
+  const video     = tile.querySelector("video");
+  const nameLabel = tile.querySelector(".bs-tile-name");
+  if (!nameLabel) return;
+
+  const camOff = (video?.style.display === "none") || !video?.videoWidth;
+  if (camOff || !video) {
+    // Camera off — anchor to tile corner (no bars to worry about)
+    nameLabel.style.bottom = "6px";
+    nameLabel.style.left   = "8px";
+    return;
+  }
+
+  // Compute how the video frame sits inside the element under object-fit:contain
+  const vAR = video.videoWidth  / video.videoHeight;   // video aspect ratio
+  const eAR = video.clientWidth / video.clientHeight;  // element aspect ratio
+
+  let offsetX = 0, offsetY = 0;
+  if (vAR > eAR) {
+    // Video is wider than element → letterbox bars top & bottom
+    const renderH = video.clientWidth / vAR;
+    offsetY = (video.clientHeight - renderH) / 2;
+  } else {
+    // Video is taller than element → pillarbox bars left & right
+    const renderW = video.clientHeight * vAR;
+    offsetX = (video.clientWidth - renderW) / 2;
+  }
+
+  // Place label just inside the corner of the actual video frame
+  nameLabel.style.bottom = `${Math.round(offsetY) + 6}px`;
+  nameLabel.style.left   = `${Math.round(offsetX) + 8}px`;
 }
 
 /** Toggle spotlight on a participant tile — synced to all backstage participants. */
