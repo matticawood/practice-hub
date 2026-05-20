@@ -445,6 +445,7 @@ export default async (request) => {
         properties: {
           room_name:         ev.daily_room_name,
           user_name:         displayName,
+          user_id:           userEmail,   // exposed as p.user_id to other participants
           is_owner:          isOwner,
           enable_prejoin_ui: false,
           start_video_off:   !isOwner,

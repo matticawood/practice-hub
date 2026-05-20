@@ -5585,6 +5585,19 @@ function _renderBsGrid(call) {
   const watchSection = document.getElementById("bs-watching-section");
   if (watchSection) {
     if (viewerParts.length) {
+      // Warm the avatar cache for any viewer emails we haven't fetched yet.
+      // Re-renders on completion so avatars fill in automatically.
+      viewerParts.forEach(p => {
+        const email = p.user_id || "";
+        if (!email || _streamAvatarCache?.hasOwnProperty(email)) return;
+        if (_streamAvatarCache) _streamAvatarCache[email] = null; // mark as loading
+        db.from("allowed_emails").select("avatar_url").eq("email", email).maybeSingle()
+          .then(({ data }) => {
+            if (_streamAvatarCache) _streamAvatarCache[email] = data?.avatar_url || null;
+            if (window._backstageCall) _renderBsGrid(window._backstageCall);
+          });
+      });
+
       watchSection.style.display = "block";
       watchSection.innerHTML = `
         <div style="font-size:.72rem;font-weight:600;color:var(--text-muted);
@@ -5592,9 +5605,11 @@ function _renderBsGrid(call) {
           Watching (${viewerParts.length})
         </div>` +
         viewerParts.map(p => {
-          const name = p.user_name || "Viewer";
+          const name      = p.user_name || "Viewer";
+          const email     = p.user_id   || "";
+          const cachedUrl = _streamAvatarCache?.[email] || null;
           return `<div style="display:flex;align-items:center;gap:9px;padding:5px 12px;">
-            ${avatarHtml(name, "", 24, null)}
+            ${avatarHtml(name, email, 24, cachedUrl)}
             <span style="font-size:.83rem;color:var(--text);white-space:nowrap;
                          overflow:hidden;text-overflow:ellipsis;">${esc(name)}</span>
           </div>`;
