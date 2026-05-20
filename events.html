@@ -5125,24 +5125,21 @@ async function onBackstageInviteInput(value) {
   if (q.length < 2) { hideBackstageSuggestions(); return; }
 
   _memberSuggestDebounce = setTimeout(async () => {
-    // Run email-prefix and name-prefix searches in parallel using separate
-    // .ilike() calls — avoids PostgREST .or() wildcard encoding issues.
-    const [emailRes, nameRes] = await Promise.all([
-      db.from("allowed_emails").select("name, email").ilike("email", `${q}%`).order("name").limit(6),
-      db.from("allowed_emails").select("name, email").ilike("name",  `${q}%`).order("name").limit(6),
-    ]);
-    if (emailRes.error) console.warn("[autocomplete] email query:", emailRes.error);
-    if (nameRes.error)  console.warn("[autocomplete] name query:",  nameRes.error);
-
-    // Merge, deduplicate by email, cap at 6
-    const seen = new Set();
-    const merged = [];
-    for (const row of [...(emailRes.data || []), ...(nameRes.data || [])]) {
-      if (!seen.has(row.email)) { seen.add(row.email); merged.push(row); }
-      if (merged.length === 6) break;
+    // Search via the edge function (service key) so RLS doesn't restrict results
+    // to the current user's own row — client-side queries can't see other members.
+    try {
+      const res  = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+        body: JSON.stringify({ action: "search-members", query: q })
+      });
+      const data = await res.json();
+      _memberSuggestions = data.members || [];
+    } catch(e) {
+      console.warn("[autocomplete] search-members failed:", e);
+      _memberSuggestions = [];
     }
-    _memberSuggestions = merged;
-    _memberSuggestIdx  = -1;
+    _memberSuggestIdx = -1;
     renderBackstageSuggestions();
   }, 220);
 }

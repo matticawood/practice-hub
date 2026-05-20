@@ -152,6 +152,30 @@ export default async (request) => {
     return Array.isArray(rows) && rows.length > 0;
   }
 
+  // ── Action: search-members ────────────────────────────────────────────────
+  // Admin only. Searches allowed_emails using the service key so RLS is
+  // bypassed — client-side queries are restricted to the current user's own
+  // row and can't search other members' names/emails.
+  if (action === "search-members") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { query: q } = body;
+    if (!q || q.length < 2) return json({ members: [] });
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    // PostgREST or() in URL: use * as the wildcard for ilike
+    const safe = encodeURIComponent(q.replace(/[*%]/g, ""));
+    const url  = `${SUPABASE_URL}/rest/v1/allowed_emails` +
+      `?select=name,email` +
+      `&or=(email.ilike.${safe}*,name.ilike.${safe}*)` +
+      `&order=name` +
+      `&limit=8`;
+    const res  = await fetch(url, {
+      headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` }
+    });
+    const rows = await res.json();
+    return json({ members: Array.isArray(rows) ? rows : [] });
+  }
+
   // ── Action: notify-member-invite ──────────────────────────────────────────
   // Admin only. Sends a backstage-invite notification email to a registered
   // member (who already has an account — no magic link needed).
