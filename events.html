@@ -1887,6 +1887,8 @@ function showView(name) {
     if (typingChannel)       { db.removeChannel(typingChannel);       typingChannel       = null; }
     if (discussionChannel)   { db.removeChannel(discussionChannel);   discussionChannel   = null; }
     if (streamStatusChannel) { db.removeChannel(streamStatusChannel); streamStatusChannel = null; }
+    if (_earlyJoinChannel)   { db.removeChannel(_earlyJoinChannel);   _earlyJoinChannel   = null; }
+    if (_earlyJoinPoller)    { clearInterval(_earlyJoinPoller);        _earlyJoinPoller    = null; }
     // Clean up main stream Daily.co call frame (fire-and-forget since showView is sync)
     if (window._callFrame) {
       const _cf = window._callFrame;
@@ -2185,14 +2187,21 @@ async function renderDetailView(ev) {
       <button class="btn btn-sm btn-primary" onclick="joinRoom('${ev.id}')">Join Backstage</button>
     </div>` : "";
 
-  // RSVP button (scheduled only)
+  // RSVP / Join button
+  // Show "Join Live" when live, or "Join Stream" in the 10 min window before start
+  const _minsUntil = ev.scheduled_at
+    ? (new Date(ev.scheduled_at) - Date.now()) / 60000
+    : Infinity;
+  const _earlyJoinOpen = ev.status === "scheduled" && _minsUntil <= 10 && _minsUntil > -5;
   const rsvpBtn = ev.status === "live"
     ? `<button class="btn btn-danger btn-sm" onclick="joinRoom('${ev.id}')">Join Live</button>`
-    : ev.status === "scheduled"
-      ? hasRsvp
-        ? `<button class="btn btn-ghost btn-sm" onclick="removeRsvp('${ev.id}')">✓ Going · Remove</button>`
-        : `<button class="btn btn-primary btn-sm" onclick="addRsvp('${ev.id}')">I'm Going</button>`
-      : "";
+    : _earlyJoinOpen
+      ? `<button class="btn btn-danger btn-sm" onclick="joinStreamEarly('${ev.id}')">Join Stream</button>`
+      : ev.status === "scheduled"
+        ? hasRsvp
+          ? `<button class="btn btn-ghost btn-sm" onclick="removeRsvp('${ev.id}')">✓ Going · Remove</button>`
+          : `<button class="btn btn-primary btn-sm" onclick="addRsvp('${ev.id}')">I'm Going</button>`
+        : "";
 
   // Relative time badge — for ended events use abs diff so early-ended
   // events (scheduled_at still in future) always read "X ago" not "in X"
@@ -3706,6 +3715,68 @@ async function startStream(eventId) {
     btn.textContent = "Go Live"; btn.className = btn.className.replace("btn-primary","btn-danger");
     btn.disabled = false;
   }
+}
+
+// ── Early join — waiting room shown up to 10 min before stream starts ─────────
+// Shows the stream view immediately with a "starting soon" screen.
+// Watches the DB; when status flips to "live" it auto-calls joinStream.
+let _earlyJoinChannel = null;
+let _earlyJoinPoller  = null;
+
+async function joinStreamEarly(eventId) {
+  // Clean up any previous watcher
+  if (_earlyJoinChannel) { db.removeChannel(_earlyJoinChannel); _earlyJoinChannel = null; }
+  if (_earlyJoinPoller)  { clearInterval(_earlyJoinPoller);      _earlyJoinPoller  = null; }
+
+  const { data: ev } = await db.from("live_events").select("*").eq("id", eventId).single();
+  if (!ev) return;
+
+  // Already live — just join directly
+  if (ev.status === "live") { joinStream(eventId); return; }
+
+  currentEvent = ev;
+
+  // Show the stream view with a waiting screen in the video column
+  showView("stream");
+  document.getElementById("stream-event-title").textContent = ev.title || "";
+  if (isAdmin) document.getElementById("stream-admin-bar").classList.add("visible");
+
+  const container = document.getElementById("daily-container");
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                height:100%;gap:16px;color:var(--text-muted);">
+      <div style="width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);
+                  border-radius:50%;animation:spin .8s linear infinite;"></div>
+      <div style="text-align:center;">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Stream starting soon</div>
+        <div style="font-size:.82rem;">You'll be connected automatically when the host goes live.</div>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick="showView('detail')">← Back</button>
+    </div>`;
+
+  setupRealtimeStream(ev);
+
+  async function _checkLive() {
+    const { data } = await db.from("live_events")
+      .select("status, daily_room_name")
+      .eq("id", eventId).single();
+    if (data?.status === "live") {
+      if (_earlyJoinChannel) { db.removeChannel(_earlyJoinChannel); _earlyJoinChannel = null; }
+      if (_earlyJoinPoller)  { clearInterval(_earlyJoinPoller);      _earlyJoinPoller  = null; }
+      joinStream(eventId);
+    }
+  }
+
+  // Realtime watcher — fires the moment the host clicks Go Live
+  _earlyJoinChannel = db.channel(`early-join-${eventId}`)
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "live_events",
+        filter: `id=eq.${eventId}` }, payload => {
+      if (payload.new?.status === "live") _checkLive();
+    })
+    .subscribe();
+
+  // Polling fallback — every 5 s
+  _earlyJoinPoller = setInterval(_checkLive, 5000);
 }
 
 // ── Join stream ───────────────────────────────────────────────────────────────
