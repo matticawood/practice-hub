@@ -1302,6 +1302,7 @@
         <!-- Guests panel -->
         <div id="backstage-panel-guests">
           <div id="backstage-guest-list"></div>
+          <div id="bs-waiting-section" style="display:none;border-top:1px solid var(--border);margin-top:4px;"></div>
           <div id="bs-watching-section" style="display:none;border-top:1px solid var(--border);margin-top:4px;"></div>
           <div class="backstage-invite-row" id="backstage-invite-row" style="display:none;flex-direction:column;gap:6px">
             <!-- Single search input + Invite button. Dropdown spans full row width. -->
@@ -1832,6 +1833,7 @@ let _bsSpotlightId          = null;  // session_id of spotlighted participant, o
 let _bsHiddenIds            = new Set(); // session_ids hidden from the local view
 let _bsJoining              = false; // guard: prevent concurrent joinRoom calls
 let _guestRequestsChannel   = null;  // postgres_changes subscription for pending guest requests
+let _waitingRoomChannel     = null;  // realtime presence channel — who is on the "starting soon" screen
 let _bsChatChannel          = null;  // broadcast channel for backstage chat
 let _bsChatTypingTimer      = null;
 let _bsChatMyName           = "";
@@ -1949,6 +1951,7 @@ function showView(name) {
     if (_guestRequestsChannel)  { db.removeChannel(_guestRequestsChannel);  _guestRequestsChannel  = null; }
     if (_bsChatChannel)         { db.removeChannel(_bsChatChannel);         _bsChatChannel         = null; }
     if (_guestRequestPoller)    { clearInterval(_guestRequestPoller);       _guestRequestPoller    = null; }
+    if (_waitingRoomChannel)    { db.removeChannel(_waitingRoomChannel);    _waitingRoomChannel    = null; }
     if (window._backstageFrame) {
       try { window._backstageFrame.leave(); }   catch(e) {}
       try { window._backstageFrame.destroy(); } catch(e) {}
@@ -3803,6 +3806,17 @@ async function joinStreamEarly(eventId) {
 
   setupRealtimeStream(ev);
 
+  // Announce presence in the waiting room so the host can see who's waiting.
+  // Automatically removed by Supabase when the tab closes or the user navigates away.
+  if (myEmail) {
+    const _wrPresence = db.channel(`event-waiting-${eventId}`);
+    _wrPresence.subscribe(async status => {
+      if (status === "SUBSCRIBED") {
+        await _wrPresence.track({ email: myEmail, name: myName || myEmail.split("@")[0] });
+      }
+    });
+  }
+
   async function _checkLive() {
     const { data } = await db.from("live_events")
       .select("status, daily_room_name")
@@ -5211,6 +5225,21 @@ async function _joinRoomImpl(eventId) {
 
   // 11. Initial grid render
   _renderBsGrid(call);
+
+  // 11b. Pre-load all member avatar URLs into cache (same bulk-fetch community.html uses)
+  //      so the watching list shows real profile photos as soon as viewers appear.
+  db.from("allowed_emails").select("email, avatar_url")
+    .then(({ data }) => {
+      if (!data || !_streamAvatarCache) return;
+      data.forEach(row => {
+        // Only fill in missing entries — don't overwrite values already set at startup
+        if (row.email && !_streamAvatarCache.hasOwnProperty(row.email)) {
+          _streamAvatarCache[row.email] = row.avatar_url || null;
+        }
+      });
+      if (window._backstageCall) _renderBsGrid(window._backstageCall);
+    });
+
   // 12. Device controls
   await _initBsCallControls(call);
 
@@ -5247,6 +5276,51 @@ async function _joinRoomImpl(eventId) {
   if (isAdmin) {
     _subscribeGuestRequests(eventId);
   }
+
+  // Subscribe to waiting-room presence — show members on the "starting soon" screen
+  if (_waitingRoomChannel) { db.removeChannel(_waitingRoomChannel); _waitingRoomChannel = null; }
+  _waitingRoomChannel = db.channel(`event-waiting-${eventId}`);
+  _waitingRoomChannel
+    .on("presence", { event: "sync" }, () => _renderWaitingSection(_waitingRoomChannel.presenceState()))
+    .on("presence", { event: "join" }, () => _renderWaitingSection(_waitingRoomChannel.presenceState()))
+    .on("presence", { event: "leave"}, () => _renderWaitingSection(_waitingRoomChannel.presenceState()))
+    .subscribe();
+}
+
+function _renderWaitingSection(presenceState) {
+  const section = document.getElementById("bs-waiting-section");
+  if (!section) return;
+
+  // presenceState: { [presenceKey]: [{ email, name, phx_ref, ... }] }
+  const waiters = Object.values(presenceState)
+    .flat()
+    .filter(p => p.email && p.email !== myEmail); // exclude host's own entry if they tracked
+
+  if (!waiters.length) {
+    section.style.display = "none";
+    section.innerHTML = "";
+    return;
+  }
+
+  section.style.display = "block";
+  section.innerHTML = `
+    <div style="font-size:.72rem;font-weight:600;color:var(--text-muted);
+                text-transform:uppercase;letter-spacing:.06em;padding:10px 12px 4px;
+                display:flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Waiting (${waiters.length})
+    </div>
+    ${waiters.map(w => {
+      const name  = w.name || w.email?.split("@")[0] || "Member";
+      const email = w.email || "";
+      const cachedUrl = _streamAvatarCache?.[email] || null;
+      return `<div style="display:flex;align-items:center;gap:9px;padding:5px 12px;">
+        ${avatarHtml(name, email, 24, cachedUrl)}
+        <span style="font-size:.83rem;color:var(--text);white-space:nowrap;
+                     overflow:hidden;text-overflow:ellipsis;">${esc(name)}</span>
+        <span style="font-size:.72rem;color:#22c55e;flex-shrink:0;">● Waiting</span>
+      </div>`;
+    }).join("")}`;
 }
 
 // ── Backstage chat ────────────────────────────────────────────────────────────
