@@ -2223,11 +2223,7 @@ async function renderDetailView(ev) {
         <span class="live-dot"></span> Live preview
         <span style="font-size:.75rem;color:var(--text-muted);margin-left:auto">~15s delay · <button class="btn-link" onclick="joinRoom('${ev.id}')">Join for real-time</button></span>
       </div>
-      <div class="mux-player-wrap" id="live-preview-wrap">
-        <div id="live-preview-starting" style="display:none;align-items:center;justify-content:center;gap:12px;padding:40px;background:var(--surface-2);border-radius:var(--radius);">
-          <div style="width:24px;height:24px;border:2.5px solid var(--border);border-top-color:#ff6b6b;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;"></div>
-          <span id="live-preview-starting-msg" style="font-size:.82rem;color:var(--text-muted);">Connecting to stream…</span>
-        </div>
+      <div class="mux-player-wrap" id="live-preview-wrap" style="position:relative;aspect-ratio:16/9;background:var(--surface-2);border-radius:var(--radius);overflow:hidden;">
         <mux-player
           id="live-preview-player"
           playback-id="${ev.mux_live_playback_id}"
@@ -2235,8 +2231,13 @@ async function renderDetailView(ev) {
           muted
           autoplay
           accent-color="#c9a84c"
-          style="width:100%;border-radius:var(--radius);display:block;--media-background-color:transparent;--media-object-fit:contain;">
+          style="position:absolute;inset:0;width:100%;height:100%;display:block;--media-background-color:transparent;--media-object-fit:contain;">
         </mux-player>
+        <!-- Overlay sits on top — shown while connecting or reconnecting, hides Mux error UI -->
+        <div id="live-preview-starting" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:12px;background:var(--surface-2);border-radius:var(--radius);z-index:2;">
+          <div style="width:24px;height:24px;border:2.5px solid var(--border);border-top-color:#ff6b6b;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;"></div>
+          <span id="live-preview-starting-msg" style="font-size:.82rem;color:var(--text-muted);">Connecting to stream…</span>
+        </div>
       </div>
     </div>` : "";
 
@@ -2465,9 +2466,17 @@ async function renderDetailView(ev) {
       attachPlayerListeners(p);
       wrap.appendChild(p);
     }
+    let retryCount = 0;
     function scheduleRetry() {
+      retryCount++;
       clearTimeout(retryTimer);
-      retryTimer = setTimeout(spawnPlayer, 10000);
+      if (retryCount > 12) {
+        // After ~2 min of retrying, give up gracefully
+        const msg = document.getElementById("live-preview-starting-msg");
+        if (msg) msg.textContent = "Preview unavailable — join for real-time instead.";
+        return;
+      }
+      retryTimer = setTimeout(spawnPlayer, 5000);
     }
     let hasPlayed = false;
 
@@ -5269,6 +5278,32 @@ async function _joinRoomImpl(eventId) {
         if (msg.hidden) _bsHiddenIds.add(msg.session_id);
         else            _bsHiddenIds.delete(msg.session_id);
         _renderBsGrid(call);
+      }
+    })
+    // 9a. Live-streaming status events — gives the host real RTMP feedback
+    .on("live-streaming-started", () => {
+      console.log("[Mux] RTMP streaming started ✓");
+      const ind = document.getElementById("backstage-stream-indicator");
+      if (ind) { ind.style.display = "inline-flex"; ind.title = "RTMP streaming to Mux ✓"; }
+    })
+    .on("live-streaming-stopped", () => {
+      console.log("[Mux] RTMP streaming stopped");
+      const ind = document.getElementById("backstage-stream-indicator");
+      if (ind) ind.style.display = "none";
+    })
+    .on("live-streaming-error", e => {
+      console.error("[Mux] RTMP streaming error:", e);
+      const ind = document.getElementById("backstage-stream-indicator");
+      if (ind) {
+        ind.style.background = "rgba(255,80,80,.18)";
+        ind.style.color = "#ff6b6b";
+        ind.style.borderColor = "#ff6b6b";
+        ind.title = "RTMP error — try ending and restarting the stream";
+      }
+      // Surface to host so they know the preview won't work
+      const btn = document.getElementById("backstage-golive-btn");
+      if (btn && btn.textContent !== "End Stream") {
+        alert("⚠️ The RTMP stream to Mux failed to start. Viewers may not see the live preview.\n\nTry clicking End Stream, then Go Live again.");
       }
     })
     // 9. Wire up left-meeting handler
