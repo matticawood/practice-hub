@@ -1306,8 +1306,7 @@
           <div style="display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--border)">
             <input id="backstage-chat-input" placeholder="Message…" type="text"
               style="flex:1;min-width:0"
-              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendBackstageChat()}"
-              oninput="onBackstageChatInput()" />
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendBackstageChat()}" />
             <button class="btn btn-sm btn-primary" onclick="sendBackstageChat()">Send</button>
           </div>
         </div>
@@ -5050,56 +5049,71 @@ async function _joinRoomImpl(eventId) {
 }
 
 // ── Backstage chat ────────────────────────────────────────────────────────────
+// Uses the same event_chat table as the live stream — so the host sees
+// the audience chat in backstage too, and any messages sent from backstage
+// are visible to the audience once the stream starts.
 function _initBsChat(eventId) {
   if (_bsChatChannel) { db.removeChannel(_bsChatChannel); _bsChatChannel = null; }
-  _bsChatMyName = currentUserName || currentUser?.email?.split("@")[0] || "You";
 
-  _bsChatChannel = db.channel(`bs-chat-${eventId}`, { config: { broadcast: { self: true }, presence: { key: "" } } })
-    .on("broadcast", { event: "chat" }, ({ payload }) => {
-      _appendBsChatMsg(payload.name, payload.text, payload.self);
-      const tab = document.getElementById("bs-tab-chat");
-      if (tab && !tab.classList.contains("active")) {
-        const badge = document.getElementById("bs-chat-badge");
-        if (badge) { badge.textContent = "+"; badge.classList.add("visible"); }
-      }
-    })
-    .on("broadcast", { event: "typing" }, ({ payload }) => {
-      if (payload.name === _bsChatMyName) return;
-      const el = document.getElementById("backstage-chat-typing");
-      if (el) el.textContent = `${payload.name} is typing…`;
-      clearTimeout(_bsChatTypingTimer);
-      _bsChatTypingTimer = setTimeout(() => { if (el) el.textContent = ""; }, 2000);
-    })
-    .subscribe();
+  const el = document.getElementById("backstage-chat-messages");
+  if (el) el.innerHTML = "";
+
+  // Load existing messages
+  db.from("event_chat").select("*").eq("event_id", eventId).order("created_at")
+    .then(({ data }) => { if (data) data.forEach(m => _bsAppendChatMsg(m, true)); });
+
+  // Subscribe to new messages
+  _bsChatChannel = db.channel(`bs-event-chat-${eventId}`)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_chat",
+        filter: `event_id=eq.${eventId}` }, p => { _bsAppendChatMsg(p.new); })
+    .subscribe(async status => {
+      if (status !== "SUBSCRIBED") return;
+      // Second pass — catch anything that arrived during the handshake gap
+      const { data } = await db.from("event_chat").select("*").eq("event_id", eventId).order("created_at");
+      if (data) data.forEach(m => _bsAppendChatMsg(m, true));
+    });
 }
 
-function _appendBsChatMsg(name, text, isSelf) {
-  const list = document.getElementById("backstage-chat-messages");
-  if (!list) return;
-  const el = document.createElement("div");
-  el.style.cssText = "display:flex;flex-direction:column;gap:1px";
-  el.innerHTML = `
-    <span style="font-size:.7rem;color:var(--text-muted);font-weight:600">${isSelf ? "You" : name}</span>
-    <span style="font-size:.82rem;color:var(--text);word-break:break-word">${text.replace(/</g,"&lt;")}</span>`;
-  list.appendChild(el);
-  list.scrollTop = list.scrollHeight;
+// Same rendering style as appendChatMsg (avatars, dedup, .chat-msg classes)
+// but targets #backstage-chat-messages instead of #chat-messages.
+function _bsAppendChatMsg(msg, skipBadge = false) {
+  const el = document.getElementById("backstage-chat-messages");
+  if (!el) return;
+  if (el.querySelector(`[data-id="${msg.id}"]`)) return; // dedup
+  const mine = msg.email === myEmail;
+  const av = avatarHtml(msg.name || msg.email?.split("@")[0] || "?", msg.email, 26,
+    _streamAvatarCache?.[msg.email] || null);
+  const div = document.createElement("div");
+  div.className = "chat-msg" + (mine ? " mine" : "");
+  div.dataset.id    = msg.id;
+  div.dataset.email = msg.email;
+  div.innerHTML = `
+    <span class="chat-msg-av">${av}</span>
+    <div class="chat-msg-body">
+      <div class="chat-msg-author">${esc(msg.name || msg.email?.split("@")[0] || "?")}</div>
+      <div class="chat-msg-text">${esc(msg.message)}</div>
+    </div>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  if (!skipBadge) {
+    const tab = document.getElementById("bs-tab-chat");
+    if (tab && !tab.classList.contains("active")) {
+      const badge = document.getElementById("bs-chat-badge");
+      if (badge) { badge.textContent = "+"; badge.classList.add("visible"); }
+    }
+  }
 }
 
 async function sendBackstageChat() {
   const input = document.getElementById("backstage-chat-input");
   if (!input) return;
   const text = input.value.trim();
-  if (!text || !_bsChatChannel) return;
+  if (!text || !currentEvent) return;
   input.value = "";
-  _appendBsChatMsg(_bsChatMyName, text, true);
-  try {
-    await _bsChatChannel.send({ type: "broadcast", event: "chat", payload: { name: _bsChatMyName, text, self: false } });
-  } catch(e) { console.warn("bs chat send:", e); }
-}
-
-function onBackstageChatInput() {
-  if (!_bsChatChannel) return;
-  _bsChatChannel.send({ type: "broadcast", event: "typing", payload: { name: _bsChatMyName } }).catch(() => {});
+  const name = myName || myEmail?.split("@")[0] || "Host";
+  await db.from("event_chat").insert({
+    event_id: currentEvent.id, email: myEmail, name, message: text
+  });
 }
 
 // ── Guest request approval notifications (admin only) ─────────────────────────
@@ -6044,18 +6058,10 @@ async function loadBackstageQA(eventId) {
     return;
   }
 
-  el.innerHTML = questions.map(q => `
-    <div class="qa-item ${q.is_featured ? "featured" : ""}">
-      <div class="qa-item-asker">${esc(q.name || q.email?.split("@")[0] || "Anonymous")}</div>
-      <div class="qa-item-text">${esc(q.question)}</div>
-      ${isAdmin ? `<div class="qa-item-actions">
-        <button class="${q.is_featured ? "featured-btn" : ""}"
-          onclick="featureQA('${q.id}', ${!q.is_featured})">${q.is_featured ? "Unfeature" : "Feature"}</button>
-        <button class="${q.answered ? "featured-btn" : ""}"
-          onclick="markAnswered('${q.id}', ${q.answered})">${q.answered ? "Unmark" : "Answered"}</button>
-      </div>` : ""}
-    </div>
-  `).join("");
+  // Reuse buildQAEl so backstage Q&A is identical to the stream Q&A panel
+  // (Feature / Answered buttons, answered badge, etc.)
+  el.innerHTML = "";
+  questions.forEach(q => el.appendChild(buildQAEl(q)));
 }
 
 // ── Stream layout controls (host only) ───────────────────────────────────────
