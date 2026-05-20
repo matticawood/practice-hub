@@ -4465,15 +4465,24 @@ async function joinStream(eventId, options = {}) {
           );
         }
 
-        // ── Grid template: split container evenly by columns × rows ─────────
-        const n    = visible.length;
-        const cW   = grid.clientWidth  || 1;
-        const cH   = grid.clientHeight || 1;
-        // Portrait / narrow: 1 column (stack); landscape / wide: up to 2 columns
-        const cols = n <= 1 ? 1 : (cW < cH || cW < 500) ? 1 : Math.min(n, 2);
-        const rows = Math.ceil(n / cols);
-        grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-        grid.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
+        // ── Grid template ────────────────────────────────────────────────────
+        // 1 → full  |  2 → side-by-side  |  3 → 2-top + 1 spanning  |  4 → 2×2
+        // Side-by-side always gives more height per tile than stacking in a 16:9 box.
+        const n = visible.length;
+        if (n <= 1) {
+          grid.style.gridTemplateColumns = "1fr";
+          grid.style.gridTemplateRows    = "1fr";
+        } else if (n === 2) {
+          grid.style.gridTemplateColumns = "1fr 1fr";
+          grid.style.gridTemplateRows    = "1fr";
+        } else if (n === 3) {
+          grid.style.gridTemplateColumns = "1fr 1fr";
+          grid.style.gridTemplateRows    = "1fr 1fr";
+        } else {
+          // 4+ : 2 columns, enough rows to fit everyone
+          grid.style.gridTemplateColumns = "1fr 1fr";
+          grid.style.gridTemplateRows    = `repeat(${Math.ceil(n / 2)}, 1fr)`;
+        }
 
         // ── Sync tiles ──────────────────────────────────────────────────────
         // Index existing tiles by session_id
@@ -4535,6 +4544,16 @@ async function joinStream(eventId, options = {}) {
           tile.appendChild(nameEl);
 
           grid.appendChild(tile);
+        });
+
+        // ── Grid placement: odd last tile spans both columns ─────────────────
+        // (3 participants: tile[2] spans full width; 5 participants: tile[4] spans; etc.)
+        const renderedTiles = visible
+          .map(p => grid.querySelector(`[data-sid="${p.session_id}"]`))
+          .filter(Boolean);
+        renderedTiles.forEach((t, i) => {
+          const isLastOdd = n > 1 && n % 2 !== 0 && i === n - 1;
+          t.style.gridColumn = isLastOdd ? "1 / -1" : "";
         });
 
         // Show/hide waiting overlay
