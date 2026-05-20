@@ -1863,8 +1863,13 @@ function showView(name) {
     if (typingChannel)       { db.removeChannel(typingChannel);       typingChannel       = null; }
     if (discussionChannel)   { db.removeChannel(discussionChannel);   discussionChannel   = null; }
     if (streamStatusChannel) { db.removeChannel(streamStatusChannel); streamStatusChannel = null; }
-    // Clean up main stream Daily.co call frame
-    if (window._callFrame) { window._callFrame.destroy(); window._callFrame = null; }
+    // Clean up main stream Daily.co call frame (fire-and-forget since showView is sync)
+    if (window._callFrame) {
+      const _cf = window._callFrame;
+      window._callFrame = null;
+      try { _cf.leave(); }   catch(e) {}
+      try { _cf.destroy(); } catch(e) {}
+    }
   }
   if (name !== "backstage") {
     // Clean up backstage channels and call frame
@@ -1877,9 +1882,10 @@ function showView(name) {
       window._backstageFrame = null;
     }
     if (window._backstageCall) {
-      try { window._backstageCall.leave(); }   catch(e) {}
-      try { window._backstageCall.destroy(); } catch(e) {}
+      const _bsc = window._backstageCall;
       window._backstageCall = null;
+      try { _bsc.leave(); }   catch(e) {}
+      try { _bsc.destroy(); } catch(e) {}
     }
   }
   if (name === "detail" && currentEvent) {
@@ -4846,7 +4852,25 @@ async function joinBackstage(eventId) {
     return;
   }
 
-  // Switch to backstage view
+  // Destroy ANY existing Daily.co instance FIRST (before showView, which also calls destroy
+  // synchronously — we need to await here to avoid "Duplicate DailyIframe" errors)
+  if (window._callFrame) {
+    try { await window._callFrame.leave(); }    catch(e) {}
+    try { await window._callFrame.destroy(); }  catch(e) {}
+    window._callFrame = null;
+  }
+  if (window._backstageFrame) {
+    try { await window._backstageFrame.leave(); }   catch(e) {}
+    try { await window._backstageFrame.destroy(); } catch(e) {}
+    window._backstageFrame = null;
+  }
+  if (window._backstageCall) {
+    try { await window._backstageCall.leave(); }   catch(e) {}
+    try { await window._backstageCall.destroy(); } catch(e) {}
+    window._backstageCall = null;
+  }
+
+  // Switch to backstage view (all Daily instances are now fully destroyed)
   showView("backstage");
   document.getElementById("backstage-event-name").textContent = ev.title || "";
 
@@ -4862,18 +4886,6 @@ async function joinBackstage(eventId) {
   // If stream is live, show the live indicator
   const liveIndicator = document.getElementById("backstage-stream-indicator");
   if (liveIndicator) liveIndicator.style.display = (ev.status === "live") ? "inline-flex" : "none";
-
-  // Leave and destroy any existing backstage call before creating a new one
-  if (window._backstageFrame) {
-    try { await window._backstageFrame.leave(); }   catch(e) {}
-    try { await window._backstageFrame.destroy(); } catch(e) {}
-    window._backstageFrame = null;
-  }
-  if (window._backstageCall) {
-    try { await window._backstageCall.leave(); }   catch(e) {}
-    try { window._backstageCall.destroy(); } catch(e) {}
-    window._backstageCall = null;
-  }
 
   const container = document.getElementById("backstage-container");
   container.innerHTML = "";
@@ -4908,9 +4920,9 @@ async function joinBackstage(eventId) {
     })
     .on("track-started",  _refreshBsGrid)
     .on("track-stopped",  _refreshBsGrid)
-    .on("left-meeting", () => {
+    .on("left-meeting", async () => {
       if (window._backstageCall) {
-        try { window._backstageCall.destroy(); } catch(e) {}
+        try { await window._backstageCall.destroy(); } catch(e) {}
         window._backstageCall = null;
       }
       const c = document.getElementById("backstage-container");
@@ -5125,6 +5137,11 @@ async function goLiveFromBackstage() {
       try { await window._backstageFrame.destroy(); } catch(e) {}
       window._backstageFrame = null;
     }
+    if (window._backstageCall) {
+      try { await window._backstageCall.leave(); } catch(e) {}
+      try { await window._backstageCall.destroy(); } catch(e) {}
+      window._backstageCall = null;
+    }
     if (backstageChannel) { db.removeChannel(backstageChannel); backstageChannel = null; }
 
     const ok = await joinStream(currentEvent.id);
@@ -5145,7 +5162,7 @@ async function leaveBackstage() {
   }
   if (window._backstageCall) {
     try { await window._backstageCall.leave(); } catch(e) {}
-    try { window._backstageCall.destroy(); } catch(e) {}
+    try { await window._backstageCall.destroy(); } catch(e) {}
     window._backstageCall = null;
   }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
@@ -5163,7 +5180,7 @@ async function _joinMainStreamFromBackstage() {
   }
   if (window._backstageCall) {
     try { await window._backstageCall.leave(); } catch(e) {}
-    try { window._backstageCall.destroy(); } catch(e) {}
+    try { await window._backstageCall.destroy(); } catch(e) {}
     window._backstageCall = null;
   }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
