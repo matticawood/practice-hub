@@ -183,6 +183,49 @@
     }
     .ctrl-leave:hover { background: rgba(239,68,68,.28); }
     #guest-name-label { font-size: .8rem; color: var(--text-muted); margin-left: 4px; }
+
+    /* ── Backstage grid (same layout as member guests in events.html) ── */
+    #bs-grid {
+      display: none; position: absolute; inset: 0;
+      background: var(--bg); overflow: hidden;
+    }
+    #bs-guest-grid {
+      position: absolute; inset: 0;
+      display: grid; gap: 4px; padding: 4px; overflow: hidden;
+    }
+    .bs-tile {
+      position: relative; background: #111; border-radius: 6px;
+      overflow: hidden; display: flex; align-items: center;
+      justify-content: center; min-height: 0;
+    }
+    .bs-video-wrap {
+      position: relative; max-width: 100%; max-height: 100%;
+      aspect-ratio: 16/9; flex-shrink: 0;
+    }
+    .bs-video-wrap video { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .bs-tile-name {
+      position: absolute; font-weight: 600; white-space: nowrap;
+      color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.9);
+      pointer-events: none; background: rgba(0,0,0,.45);
+      border-radius: 4px;
+    }
+    .bs-cam-off-overlay {
+      position: absolute; inset: 0; display: none; flex-direction: column;
+      align-items: center; justify-content: center; gap: 6px;
+      color: var(--text-muted); font-size: .75rem;
+    }
+    #bs-hidden-strip {
+      position: absolute; bottom: 52px; left: 6px; right: 6px;
+      display: none; gap: 4px; flex-wrap: wrap; z-index: 10;
+      pointer-events: none;
+    }
+    /* Device selects injected into controls */
+    .dev-select {
+      font-size: .76rem; padding: 5px 6px; background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.15); border-radius: 6px;
+      color: var(--text); max-width: 130px; cursor: pointer;
+    }
+    .dev-sep { width: 1px; height: 18px; background: rgba(255,255,255,.15); flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -236,6 +279,9 @@
       <p>Host went live — moving you to the main stream…</p>
     </div>
 
+    <!-- Backstage grid (shown instead of gallery/main/thumbs when in backstage) -->
+    <div id="bs-grid"></div>
+
     <!-- Controls -->
     <div id="call-controls">
       <button id="btn-mic" class="ctrl-btn" onclick="toggleMic()" title="Toggle microphone">
@@ -266,10 +312,14 @@
     let bcastChannel = null;
     let guestName    = "";
 
-    // Layout state — mirrors what the host is driving
-    let _layout      = { preset: "default", session_id: null };
-    let _micOn       = true;
-    let _camOn       = true;
+    // Layout state — mirrors what the host is driving (stream phase)
+    let _layout        = { preset: "default", session_id: null };
+    let _micOn         = true;
+    let _camOn         = true;
+    // Backstage grid state — synced from host via sendAppMessage
+    let _inBackstage   = false;
+    let _bsSpotlightId = null;
+    let _bsHiddenIds   = new Set();
 
     // ── UI helpers ───────────────────────────────────────────────────────────
     function setStatus(title, sub = "", spinner = true) {
@@ -322,6 +372,11 @@
       setHeader(data.eventTitle, forStream);
       document.getElementById("guest-name-label").textContent = guestName;
 
+      // Set mode before creating call so renderers know which path to use
+      _inBackstage   = !forStream;
+      _bsSpotlightId = null;
+      _bsHiddenIds   = new Set();
+
       // Tear down any existing call
       if (callObject) {
         try { await callObject.destroy(); } catch(e) {}
@@ -331,27 +386,46 @@
       // Create headless call object (we render video ourselves)
       callObject = DailyIframe.createCallObject();
 
-      callObject.on("joined-meeting",    renderLayout);
-      callObject.on("participant-joined",  renderLayout);
-      callObject.on("participant-updated", renderLayout);
-      callObject.on("participant-left",    renderLayout);
-      callObject.on("track-started",     renderLayout);
-      callObject.on("track-stopped",     renderLayout);
+      // Dispatch to the right renderer based on which phase we're in
+      const renderAll = () => { if (_inBackstage) renderBsGrid(); else renderLayout(); };
+
+      callObject.on("joined-meeting",    renderAll);
+      callObject.on("participant-joined",  renderAll);
+      callObject.on("participant-updated", renderAll);
+      callObject.on("participant-left",  e => {
+        if (_bsSpotlightId === e.participant?.session_id) _bsSpotlightId = null;
+        _bsHiddenIds.delete(e.participant?.session_id);
+        renderAll();
+      });
+      callObject.on("track-started",  renderAll);
+      callObject.on("track-stopped",  renderAll);
 
       callObject.on("active-speaker-change", (e) => {
         _activeSpeakerId = e.activeSpeaker?.peerId || null;
-        if (_layout.preset === "spotlight") renderLayout();
+        if (!_inBackstage && _layout.preset === "spotlight") renderLayout();
       });
 
       callObject.on("app-message", (e) => {
         const msg = e.data;
-        if (msg?.type === "layout-change") {
+        if (!msg?.type) return;
+        if (msg.type === "layout-change") {
+          // Main stream layout change (stream phase)
           _layout = { preset: msg.preset || "default", session_id: msg.session_id || null };
-          renderLayout();
-          // Show featured banner if we're the spotlighted one
-          const local = callObject.participants().local;
-          const isFeatured = _layout.preset === "single-participant" && _layout.session_id === local?.session_id;
-          document.getElementById("featured-banner").style.display = isFeatured ? "block" : "none";
+          if (!_inBackstage) {
+            renderLayout();
+            const local = callObject.participants().local;
+            const isFeatured = _layout.preset === "single-participant" && _layout.session_id === local?.session_id;
+            document.getElementById("featured-banner").style.display = isFeatured ? "block" : "none";
+          }
+        } else if (msg.type === "bs-spotlight") {
+          // Host spotlighted someone in backstage
+          _bsSpotlightId = msg.session_id || null;
+          if (_inBackstage) renderBsGrid();
+        } else if (msg.type === "bs-hide") {
+          // Host hid/showed someone in backstage
+          if (msg.hidden) _bsHiddenIds.add(msg.session_id);
+          else            _bsHiddenIds.delete(msg.session_id);
+          if (_inBackstage) renderBsGrid();
         }
       });
 
@@ -367,7 +441,6 @@
 
       try {
         await callObject.join({ url: data.roomUrl, token: data.token });
-        // Mic and cam are on by default (is_owner token); sync button states
         _micOn = true; _camOn = true;
         updateCtrlBtns();
       } catch(e) {
@@ -379,10 +452,214 @@
         document.getElementById("on-deck-banner").style.display = "flex";
       } else {
         subscribeToBackstageBroadcast();
+        // Inject device selectors into the controls bar
+        await injectDeviceSelectors();
       }
     }
 
-    // ── Video rendering ──────────────────────────────────────────────────────
+    // ── Backstage grid renderer (matches member-guest view in events.html) ───
+
+    function renderBsGrid() {
+      if (!callObject || !_inBackstage) return;
+
+      // Switch visible elements
+      document.getElementById("video-gallery").style.display  = "none";
+      document.getElementById("video-main").style.display     = "none";
+      document.getElementById("video-thumbs").innerHTML       = "";
+      document.getElementById("video-waiting").style.display  = "none";
+      const bsRoot = document.getElementById("bs-grid");
+      bsRoot.style.display = "block";
+
+      const allParts     = Object.values(callObject.participants());
+      const visibleParts = allParts.filter(p => !_bsHiddenIds.has(p.session_id));
+      const hiddenParts  = allParts.filter(p =>  _bsHiddenIds.has(p.session_id));
+
+      // Build / reuse CSS grid wrapper
+      let grid = bsRoot.querySelector("#bs-guest-grid");
+      if (!grid) {
+        grid = document.createElement("div");
+        grid.id = "bs-guest-grid";
+        bsRoot.appendChild(grid);
+        if (window.ResizeObserver)
+          new ResizeObserver(() => { if (_inBackstage) renderBsGrid(); }).observe(bsRoot);
+      }
+
+      // Layout: spotlight or equal gallery
+      const spotPart   = _bsSpotlightId ? visibleParts.find(p => p.session_id === _bsSpotlightId) : null;
+      const otherParts = spotPart ? visibleParts.filter(p => p.session_id !== _bsSpotlightId) : visibleParts;
+      const stripH     = Math.max(56, Math.min(140, Math.round(bsRoot.clientHeight * 0.22)));
+
+      if (spotPart) {
+        const cols = Math.max(1, otherParts.length);
+        grid.style.gridTemplateRows    = otherParts.length ? `1fr ${stripH}px` : "1fr";
+        grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      } else {
+        grid.style.gridTemplateRows    = "";
+        grid.style.gridTemplateColumns = `repeat(${visibleParts.length <= 1 ? 1 : 2}, 1fr)`;
+      }
+
+      const rendered = new Set();
+      visibleParts.forEach(p => {
+        rendered.add(p.session_id);
+        const isSpotlit = spotPart?.session_id === p.session_id;
+
+        let tile = document.getElementById(`bsg-tile-${p.session_id}`);
+        if (!tile) {
+          tile = document.createElement("div");
+          tile.id = `bsg-tile-${p.session_id}`;
+          tile.className = "bs-tile";
+
+          const videoWrap = document.createElement("div");
+          videoWrap.className = "bs-video-wrap";
+
+          const video = document.createElement("video");
+          video.autoplay = true; video.playsInline = true; video.muted = !!p.local;
+          const syncWrap = () => {
+            let w = video.videoWidth, h = video.videoHeight;
+            if (!w || !h) {
+              const vt = video.srcObject?.getVideoTracks?.();
+              if (vt?.length) { const s = vt[0].getSettings(); w = s.width; h = s.height; }
+            }
+            if (w && h) videoWrap.style.aspectRatio = `${w} / ${h}`;
+            bsUpdateTileLabel(tile);
+          };
+          video.addEventListener("loadedmetadata", syncWrap);
+          video.addEventListener("resize",         syncWrap);
+          video.addEventListener("playing",        syncWrap);
+          videoWrap.appendChild(video);
+
+          const nameLabel = document.createElement("div");
+          nameLabel.className = "bs-tile-name";
+          nameLabel.style.cssText = "bottom:6px;left:8px;";
+          videoWrap.appendChild(nameLabel);
+
+          tile.appendChild(videoWrap);
+
+          const camOff = document.createElement("div");
+          camOff.className = "bs-cam-off-overlay";
+          camOff.innerHTML =
+            `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">` +
+            `<path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/>` +
+            `<line x1="1" y1="1" x2="23" y2="23"/></svg><span>Camera off</span>`;
+          tile.appendChild(camOff);
+          grid.appendChild(tile);
+        }
+
+        // Spotlight grid position
+        if (isSpotlit) {
+          tile.style.gridRow = "1"; tile.style.gridColumn = "1 / -1";
+        } else if (spotPart) {
+          tile.style.gridRow = "2"; tile.style.gridColumn = "auto";
+        } else {
+          tile.style.gridRow = tile.style.gridColumn = "";
+        }
+
+        // Name
+        const nameLabel = tile.querySelector(".bs-tile-name");
+        if (nameLabel) nameLabel.textContent = p.user_name || (p.local ? "You" : "Guest");
+
+        // Video track
+        const videoWrap = tile.querySelector(".bs-video-wrap");
+        const video     = tile.querySelector("video");
+        const camOff    = tile.querySelector(".bs-cam-off-overlay");
+        const hasVideo  = p.tracks?.video?.state === "playable";
+        if (hasVideo && video) {
+          const track = p.tracks.video.persistentTrack;
+          if (track) {
+            if (!video.srcObject || video.srcObject.getVideoTracks()[0] !== track)
+              video.srcObject = new MediaStream([track]);
+            if (videoWrap) {
+              videoWrap.style.display = "";
+              const s = track.getSettings?.() || {};
+              const w = s.width || video.videoWidth, h = s.height || video.videoHeight;
+              if (w && h) videoWrap.style.aspectRatio = `${w} / ${h}`;
+            }
+          }
+          if (camOff) camOff.style.display = "none";
+        } else {
+          if (videoWrap) videoWrap.style.display = "none";
+          if (video) video.srcObject = null;
+          if (camOff) camOff.style.display = "flex";
+        }
+
+        // Audio (remote only)
+        if (!p.local && p.tracks?.audio?.state === "playable") {
+          let audio = tile.querySelector("audio");
+          if (!audio) { audio = document.createElement("audio"); audio.autoplay = true; tile.appendChild(audio); }
+          const track = p.tracks.audio.persistentTrack;
+          if (track && (!audio.srcObject || audio.srcObject.getAudioTracks()[0] !== track))
+            audio.srcObject = new MediaStream([track]);
+        }
+
+        bsUpdateTileLabel(tile);
+      });
+
+      // Remove departed/hidden tiles
+      grid.querySelectorAll("[id^='bsg-tile-']").forEach(el => {
+        if (!rendered.has(el.id.replace("bsg-tile-", ""))) el.remove();
+      });
+
+      // Hidden participants pill strip
+      let hiddenStrip = bsRoot.querySelector("#bs-hidden-strip");
+      if (!hiddenStrip) {
+        hiddenStrip = document.createElement("div");
+        hiddenStrip.id = "bs-hidden-strip";
+        bsRoot.appendChild(hiddenStrip);
+      }
+      hiddenStrip.style.display = hiddenParts.length ? "flex" : "none";
+      hiddenStrip.innerHTML = hiddenParts.map(p => `
+        <div style="pointer-events:auto;display:inline-flex;align-items:center;gap:5px;
+                    background:rgba(0,0,0,.75);border:1px solid rgba(255,255,255,.2);
+                    border-radius:20px;padding:3px 10px 3px 8px;
+                    font-size:.72rem;color:var(--text-muted);">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>${p.user_name || "Guest"}
+        </div>`).join("");
+    }
+
+    function bsUpdateTileLabel(tile) {
+      const nameLabel = tile.querySelector(".bs-tile-name");
+      if (!nameLabel) return;
+      const h    = tile.clientHeight || 100;
+      const size = Math.max(9, Math.min(15, Math.round(h * 0.055)));
+      nameLabel.style.fontSize = `${size}px`;
+      nameLabel.style.padding  = `${Math.round(size * 0.15)}px ${Math.round(size * 0.4)}px`;
+      nameLabel.style.bottom   = `${Math.round(size * 0.55)}px`;
+      nameLabel.style.left     = `${Math.round(size * 0.7)}px`;
+    }
+
+    async function injectDeviceSelectors() {
+      let devices = [];
+      try { const r = await callObject.enumerateDevices(); devices = r.devices || []; } catch(e) {}
+      const mics = devices.filter(d => d.kind === "audioinput");
+      const cams = devices.filter(d => d.kind === "videoinput");
+      const micOpts = mics.map(m => `<option value="${m.deviceId}">${m.label||"Microphone"}</option>`).join("");
+      const camOpts = cams.map(c => `<option value="${c.deviceId}">${c.label||"Camera"}</option>`).join("");
+      const bar = document.getElementById("call-controls");
+      if (!bar || bar.querySelector(".dev-select")) return; // already injected
+      const micBtn = document.getElementById("btn-mic");
+      if (micBtn && micOpts) {
+        const sel = document.createElement("select");
+        sel.className = "dev-select"; sel.title = "Microphone";
+        sel.innerHTML = micOpts;
+        sel.onchange = async () => { try { await callObject.setInputDevicesAsync({ audioDeviceId: sel.value }); } catch(e) {} };
+        micBtn.insertAdjacentElement("afterend", sel);
+      }
+      const sep = document.createElement("div"); sep.className = "dev-sep";
+      document.getElementById("btn-cam")?.insertAdjacentElement("beforebegin", sep);
+      const camBtn = document.getElementById("btn-cam");
+      if (camBtn && camOpts) {
+        const sel = document.createElement("select");
+        sel.className = "dev-select"; sel.title = "Camera";
+        sel.innerHTML = camOpts;
+        sel.onchange = async () => { try { await callObject.setInputDevicesAsync({ videoDeviceId: sel.value }); } catch(e) {} };
+        camBtn.insertAdjacentElement("afterend", sel);
+      }
+    }
+
+    // ── Stream video rendering (used when forStream = true) ──────────────────
     let _activeSpeakerId = null;
 
     function renderLayout() {
