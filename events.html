@@ -274,6 +274,10 @@
     mux-player::part(poster) img,
     mux-player::part(thumbnail) img,
     media-poster-image img { display: none !important; }
+    /* Suppress Mux's built-in offline/error illustration (laptop + coffee) */
+    #live-preview-player::part(dialog),
+    #live-preview-player::part(error-dialog),
+    #live-preview-player media-error-dialog { display: none !important; }
     /* Shared Mux upload overlay styles (global fixed bar) */
     .mux-upload-overlay-icon { font-size: 1.5rem; flex-shrink: 0; }
     .mux-upload-overlay-body { flex: 1; min-width: 0; }
@@ -2220,8 +2224,9 @@ async function renderDetailView(ev) {
         <span style="font-size:.75rem;color:var(--text-muted);margin-left:auto">~15s delay · <button class="btn-link" onclick="joinRoom('${ev.id}')">Join for real-time</button></span>
       </div>
       <div class="mux-player-wrap" id="live-preview-wrap">
-        <div id="live-preview-starting" style="display:none;align-items:center;justify-content:center;padding:40px;background:var(--surface-2);border-radius:var(--radius);">
-          <div style="width:24px;height:24px;border:2.5px solid var(--border);border-top-color:#ff6b6b;border-radius:50%;animation:spin .8s linear infinite;"></div>
+        <div id="live-preview-starting" style="display:none;align-items:center;justify-content:center;gap:12px;padding:40px;background:var(--surface-2);border-radius:var(--radius);">
+          <div style="width:24px;height:24px;border:2.5px solid var(--border);border-top-color:#ff6b6b;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;"></div>
+          <span id="live-preview-starting-msg" style="font-size:.82rem;color:var(--text-muted);">Connecting to stream…</span>
         </div>
         <mux-player
           id="live-preview-player"
@@ -2466,20 +2471,27 @@ async function renderDetailView(ev) {
     }
     let hasPlayed = false;
 
+    function showReconnecting() {
+      // Always use our own overlay rather than Mux's coffee-and-laptop error UI
+      const msg = document.getElementById("live-preview-starting-msg");
+      if (msg) msg.textContent = hasPlayed ? "Reconnecting…" : "Connecting to stream…";
+      showStarting();
+    }
+
     function attachPlayerListeners(p) {
       p.addEventListener("playing", () => {
         clearTimeout(retryTimer);
         hasPlayed = true;
         showPlayer(p);
       });
-      // Only show "starting" overlay before the stream has ever played.
-      // After that, let mux-player handle errors natively (host pausing/leaving
-      // shouldn't look like the stream hasn't started yet).
+      // Always intercept errors with our own overlay — never show Mux's default
+      // "stream offline" illustration (laptop with coffee).
       p.addEventListener("error", () => {
-        if (!hasPlayed) { showStarting(); scheduleRetry(); }
+        showReconnecting();
+        scheduleRetry();
       });
       const stallTimer = setTimeout(() => {
-        if (!hasPlayed && p.readyState === 0) { showStarting(); scheduleRetry(); }
+        if (!hasPlayed && p.readyState === 0) { showReconnecting(); scheduleRetry(); }
       }, 12000);
       p.addEventListener("canplay", () => clearTimeout(stallTimer));
     }
