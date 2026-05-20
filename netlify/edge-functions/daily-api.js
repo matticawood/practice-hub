@@ -380,7 +380,6 @@ export default async (request) => {
           enable_screenshare:   true,
           enable_recording:     "cloud",
           owner_only_broadcast: true,   // audience can join but not broadcast
-          max_participants:     500,
           exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
         }
       })
