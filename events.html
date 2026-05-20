@@ -1980,6 +1980,7 @@ let _qaTypingUsers      = {};   // email → name (currently typing in Q&A)
 let _qaTypingClearTimers = {};  // email → setTimeout handle (Q&A)
 let currentEvtTab = "upcoming";
 let countdownInterval = null;
+let _timeAgoInterval  = null;
 let isRecording  = false;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -2066,6 +2067,7 @@ function showView(name) {
     if (streamStatusChannel) { db.removeChannel(streamStatusChannel); streamStatusChannel = null; }
     if (_earlyJoinChannel)   { db.removeChannel(_earlyJoinChannel);   _earlyJoinChannel   = null; }
     if (_earlyJoinPoller)    { clearInterval(_earlyJoinPoller);        _earlyJoinPoller    = null; }
+    if (_timeAgoInterval)   { clearInterval(_timeAgoInterval);        _timeAgoInterval    = null; }
     // Clean up main stream Daily.co call frame (fire-and-forget since showView is sync)
     if (window._callFrame) {
       const _cf = window._callFrame;
@@ -2413,7 +2415,7 @@ async function renderDetailView(ev) {
 
       <!-- Top: title, host, RSVP, description -->
       <div class="event-detail-top">
-        <div class="event-time-ago">${
+        <div class="event-time-ago" id="event-time-ago">${
           ev.status === "ended" ? `Ended ${timeAgoStr}` :
           ev.status === "live"  ? "● Happening now" :
           new Date(ev.scheduled_at) <= new Date() ? "Starting soon" :
@@ -2510,6 +2512,7 @@ async function renderDetailView(ev) {
 
   if (ev.status === "scheduled") {
     startCountdown(new Date(ev.scheduled_at));
+    _startTimeAgoTicker(ev.scheduled_at);
   }
 
   // Live preview: detect 412 "stream not active yet" and show a starting indicator
@@ -2691,6 +2694,25 @@ document.addEventListener("visibilitychange", async () => {
     }
   } catch(e) { /* silent — next poll tick will retry */ }
 });
+
+// ── Live "Coming up" ticker ────────────────────────────────────────────────────
+function _startTimeAgoTicker(scheduledAt) {
+  if (_timeAgoInterval) clearInterval(_timeAgoInterval);
+  function tick() {
+    const el = document.getElementById("event-time-ago");
+    if (!el) { clearInterval(_timeAgoInterval); _timeAgoInterval = null; return; }
+    const minsUntil = (new Date(scheduledAt) - Date.now()) / 60000;
+    if (minsUntil <= 0) {
+      el.textContent = "Starting soon";
+      clearInterval(_timeAgoInterval); _timeAgoInterval = null;
+      return;
+    }
+    el.textContent = `Coming up ${timeAgo(scheduledAt)}`;
+  }
+  tick();
+  // Refresh every 30 s — precise enough for minute-level changes
+  _timeAgoInterval = setInterval(tick, 30000);
+}
 
 // ── Countdown ─────────────────────────────────────────────────────────────────
 function startCountdown(targetDate) {
