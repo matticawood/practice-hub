@@ -5250,21 +5250,45 @@ function _renderBsGrid(call) {
         "position:relative;background:#111;border-radius:6px;overflow:hidden;" +
         "display:flex;align-items:center;justify-content:center;min-height:0;";
 
-      // Video
+      // ── .video-wrap: sizes itself to the video's actual AR via CSS aspect-ratio.
+      // The name label lives inside here so it's always anchored to the real
+      // frame edge, not the tile edge — no JS geometry maths needed.
+      const videoWrap = document.createElement("div");
+      videoWrap.className = "video-wrap";
+      videoWrap.style.cssText =
+        "position:relative;max-width:100%;max-height:100%;" +
+        "aspect-ratio:16/9;flex-shrink:0;"; // 16:9 default, updated on loadedmetadata
+
       const video = document.createElement("video");
       video.autoplay = true; video.playsInline = true;
       video.muted = !!p.local;
-      video.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
-      // Reposition label whenever the video dimensions become known or change
-      video.addEventListener("loadedmetadata", () => _updateBsTileLabel(tile));
-      video.addEventListener("resize",         () => _updateBsTileLabel(tile));
-      tile.appendChild(video);
+      video.style.cssText = "display:block;width:100%;height:100%;";
+      // Update wrap AR whenever stream dimensions are known / change
+      const syncWrap = () => {
+        if (video.videoWidth && video.videoHeight)
+          videoWrap.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+        _updateBsTileLabel(tile);
+      };
+      video.addEventListener("loadedmetadata", syncWrap);
+      video.addEventListener("resize",         syncWrap);
+      videoWrap.appendChild(video);
 
-      // Camera-off overlay
+      // Name label inside the wrap — bottom-left of the actual frame
+      const nameLabel = document.createElement("div");
+      nameLabel.className = "bs-tile-name";
+      nameLabel.style.cssText =
+        "position:absolute;bottom:6px;left:8px;font-weight:600;" +
+        "color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none;" +
+        "background:rgba(0,0,0,.45);border-radius:4px;white-space:nowrap;";
+      videoWrap.appendChild(nameLabel);
+
+      tile.appendChild(videoWrap);
+
+      // Camera-off overlay covers the whole tile (outside the wrap)
       const camOff = document.createElement("div");
       camOff.className = "bs-cam-off-overlay";
       camOff.style.cssText =
-        "position:absolute;inset:0;display:flex;flex-direction:column;" +
+        "position:absolute;inset:0;display:none;flex-direction:column;" +
         "align-items:center;justify-content:center;gap:6px;" +
         "color:var(--text-muted);font-size:.75rem;";
       camOff.innerHTML =
@@ -5273,16 +5297,7 @@ function _renderBsGrid(call) {
         `<line x1="1" y1="1" x2="23" y2="23"/></svg><span>Camera off</span>`;
       tile.appendChild(camOff);
 
-      // Name label — bottom/left set dynamically by _updateBsTileLabel
-      const nameLabel = document.createElement("div");
-      nameLabel.className = "bs-tile-name";
-      nameLabel.style.cssText =
-        "position:absolute;bottom:6px;left:8px;font-size:.72rem;font-weight:600;" +
-        "color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none;" +
-        "background:rgba(0,0,0,.45);border-radius:4px;padding:1px 5px;";
-      tile.appendChild(nameLabel);
-
-      // Admin hover-controls overlay
+      // Admin hover-controls overlay (on top of everything)
       if (isAdmin) {
         const actions = document.createElement("div");
         actions.className = "bs-tile-actions";
@@ -5308,27 +5323,29 @@ function _renderBsGrid(call) {
       tile.style.gridRow = tile.style.gridColumn = "";
     }
 
-    // Name label
+    // Name label text
     const nameLabel = tile.querySelector(".bs-tile-name");
     if (nameLabel) nameLabel.textContent = p.user_name || (p.local ? "You" : "Guest");
 
-    // Video track
-    const video    = tile.querySelector("video");
-    const camOff   = tile.querySelector(".bs-cam-off-overlay");
-    const hasVideo = p.tracks?.video?.state === "playable";
+    // Video track — show/hide videoWrap instead of toggling display on video
+    const videoWrap = tile.querySelector(".video-wrap");
+    const video     = tile.querySelector("video");
+    const camOff    = tile.querySelector(".bs-cam-off-overlay");
+    const hasVideo  = p.tracks?.video?.state === "playable";
     if (hasVideo && video) {
       const track = p.tracks.video.persistentTrack;
       if (track) {
         if (!video.srcObject || video.srcObject.getVideoTracks()[0] !== track)
           video.srcObject = new MediaStream([track]);
-        video.style.display = "block";
+        if (videoWrap) videoWrap.style.display = "";
       }
       if (camOff) camOff.style.display = "none";
     } else {
-      if (video) { video.style.display = "none"; video.srcObject = null; }
+      if (videoWrap) videoWrap.style.display = "none";
+      if (video) video.srcObject = null;
       if (camOff) camOff.style.display = "flex";
     }
-    // Reposition name label to corner of actual video frame (not tile edge)
+    // Scale font size to tile height
     _updateBsTileLabel(tile);
 
     // Audio track (remote only)
@@ -5538,41 +5555,21 @@ async function _bsChangeCam(deviceId) {
 }
 
 /**
- * Positions the name label at the bottom-left corner of the *actual* video
- * frame inside a tile, accounting for letterbox/pillarbox bars from object-fit:contain.
- * Falls back to the tile corner when the camera is off or dimensions aren't ready.
+ * Scales the name label font size proportionally to the tile height so it
+ * reads well on both thumbnail strips and full spotlight tiles.
+ * Positioning is handled purely by CSS — the label lives inside .video-wrap
+ * which is sized to the video's actual aspect ratio, so no JS geometry needed.
  */
 function _updateBsTileLabel(tile) {
-  const video     = tile.querySelector("video");
   const nameLabel = tile.querySelector(".bs-tile-name");
   if (!nameLabel) return;
-
-  const camOff = (video?.style.display === "none") || !video?.videoWidth;
-  if (camOff || !video) {
-    // Camera off — anchor to tile corner (no bars to worry about)
-    nameLabel.style.bottom = "6px";
-    nameLabel.style.left   = "8px";
-    return;
-  }
-
-  // Compute how the video frame sits inside the element under object-fit:contain
-  const vAR = video.videoWidth  / video.videoHeight;   // video aspect ratio
-  const eAR = video.clientWidth / video.clientHeight;  // element aspect ratio
-
-  let offsetX = 0, offsetY = 0;
-  if (vAR > eAR) {
-    // Video is wider than element → letterbox bars top & bottom
-    const renderH = video.clientWidth / vAR;
-    offsetY = (video.clientHeight - renderH) / 2;
-  } else {
-    // Video is taller than element → pillarbox bars left & right
-    const renderW = video.clientHeight * vAR;
-    offsetX = (video.clientWidth - renderW) / 2;
-  }
-
-  // Place label just inside the corner of the actual video frame
-  nameLabel.style.bottom = `${Math.round(offsetY) + 6}px`;
-  nameLabel.style.left   = `${Math.round(offsetX) + 8}px`;
+  const h    = tile.clientHeight || 100;
+  // ~5.5% of tile height, clamped: 9px (thumbnail strip) → 15px (spotlight)
+  const size = Math.max(9, Math.min(15, Math.round(h * 0.055)));
+  nameLabel.style.fontSize = `${size}px`;
+  nameLabel.style.padding  = `${Math.round(size * 0.15)}px ${Math.round(size * 0.4)}px`;
+  nameLabel.style.bottom   = `${Math.round(size * 0.55)}px`;
+  nameLabel.style.left     = `${Math.round(size * 0.7)}px`;
 }
 
 /** Toggle spotlight on a participant tile — synced to all backstage participants. */
