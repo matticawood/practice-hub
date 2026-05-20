@@ -5017,10 +5017,23 @@ async function setupVodQaList(ev) {
     return;
   }
 
+  const streamStart = ev.stream_started_at ? new Date(ev.stream_started_at).getTime() : null;
+
+  // Only include feature windows that occurred after the stream went live.
+  // Questions featured in backstage (before stream_started_at) are excluded.
+  const liveWindows = streamStart
+    ? featureWindows.filter(w => new Date(w.featured_at).getTime() >= streamStart)
+    : featureWindows;
+
+  if (!liveWindows.length) {
+    console.log("[VOD list] no featured windows during live stream");
+    return;
+  }
+
   // Deduplicate: one row per question (keyed by qa_id), ordered by first feature time
   const seenQa = new Set();
   const questions = [];
-  for (const w of featureWindows) {
+  for (const w of liveWindows) {
     if (!w.event_qa || seenQa.has(w.qa_id)) continue;
     seenQa.add(w.qa_id);
     questions.push({ ...w.event_qa, _firstFeaturedAt: w.featured_at });
@@ -5028,12 +5041,10 @@ async function setupVodQaList(ev) {
 
   // Build a flat map of all windows for timeline highlighting: qa_id → windows[]
   const windowsByQa = {};
-  (featureWindows).forEach(w => {
+  liveWindows.forEach(w => {
     if (!windowsByQa[w.qa_id]) windowsByQa[w.qa_id] = [];
     windowsByQa[w.qa_id].push(w);
   });
-
-  const streamStart = ev.stream_started_at ? new Date(ev.stream_started_at).getTime() : null;
 
   // Pre-warm avatar cache for all Q&A askers so rows show photos immediately.
   // Re-renders the whole list once all fetches settle (only fires if any were missing).
@@ -5100,9 +5111,9 @@ async function setupVodQaList(ev) {
 
   // Highlight the active question as the video plays.
   // Uses all feature windows so re-featuring a question highlights it each time.
-  if (streamStart && featureWindows?.length) {
+  if (streamStart && liveWindows?.length) {
     const toOffset = ts => (new Date(ts).getTime() - streamStart) / 1000;
-    const allWindows = featureWindows;
+    const allWindows = liveWindows;
     const segments = allWindows
       .map((w, i) => {
         const start       = toOffset(w.featured_at);
