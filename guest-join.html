@@ -84,12 +84,11 @@
       flex-wrap: wrap;
     }
     .thumb-tile {
-      width: 100px; height: 56px; border-radius: 6px;
-      overflow: hidden; background: #1a1a1a;
-      border: 1.5px solid var(--border); flex-shrink: 0;
-      position: relative;
+      height: 72px; width: auto; aspect-ratio: 16/9; /* overridden per-tile by JS */
+      border-radius: 6px; overflow: hidden; background: #1a1a1a;
+      border: 1.5px solid var(--border); flex-shrink: 0; position: relative;
     }
-    .thumb-tile video { width: 100%; height: 100%; object-fit: cover; }
+    .thumb-tile video { width: 100%; height: 100%; object-fit: contain; display: block; }
     .thumb-tile .thumb-name {
       position: absolute; bottom: 0; left: 0; right: 0;
       background: rgba(0,0,0,.6); color: #fff;
@@ -112,7 +111,7 @@
       overflow: hidden; position: relative;
       border: 1.5px solid var(--border);
     }
-    .gallery-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .gallery-tile video { width: 100%; height: 100%; object-fit: contain; display: block; }
     .gallery-tile .tile-name {
       position: absolute; bottom: 0; left: 0; right: 0;
       background: rgba(0,0,0,.55); color: #fff;
@@ -433,17 +432,27 @@
       }
     }
 
+    // Returns the aspect ratio of a participant's video track.
+    // Reads track.getSettings() first (available immediately for remote tracks),
+    // then falls back to video element intrinsics.
+    function getVideoAR(p, videoEl) {
+      const vt = p?.tracks?.video?.persistentTrack;
+      if (vt) {
+        const s = vt.getSettings?.() || {};
+        if (s.width && s.height) return s.width / s.height;
+      }
+      if (videoEl?.videoWidth && videoEl?.videoHeight)
+        return videoEl.videoWidth / videoEl.videoHeight;
+      return 16 / 9; // safe default
+    }
+
     function showGallery(participants) {
       const grid = document.getElementById("video-gallery");
       grid.style.display = "flex";
 
       const count = participants.length;
-      // Tile size: try to fill the space
       const w = Math.min(260, Math.max(120, Math.floor((window.innerWidth - 24) / Math.ceil(Math.sqrt(count))) - 8));
-      const h = Math.round(w * 9 / 16);
 
-      // Re-use or create tiles
-      const existingTiles = [...grid.querySelectorAll(".gallery-tile")];
       while (grid.children.length > count) grid.lastChild.remove();
 
       participants.forEach((p, i) => {
@@ -454,10 +463,12 @@
           tile.innerHTML = `<video autoplay playsinline></video><div class="tile-name"></div>`;
           grid.appendChild(tile);
         }
-        tile.style.width  = w + "px";
-        tile.style.height = h + "px";
         const vid = tile.querySelector("video");
-        attachTrack(vid, p, true);
+        attachTrack(vid, p, true, tile);
+        // Height from actual track AR — recalculated on every renderLayout call
+        const ar = getVideoAR(p, vid);
+        tile.style.width  = w + "px";
+        tile.style.height = Math.round(w / ar) + "px";
         tile.querySelector(".tile-name").textContent = p.user_name || "Guest";
       });
     }
@@ -482,20 +493,38 @@
         tile.appendChild(vid);
         tile.appendChild(nameEl);
         strip.appendChild(tile);
-        attachTrack(vid, p, true);
+        attachTrack(vid, p, true, tile);
       });
     }
 
-    function attachTrack(videoEl, participant, muted) {
+    function attachTrack(videoEl, participant, muted, tileEl) {
       videoEl.muted = muted || participant?.local || false;
       const vt = participant?.tracks?.video?.persistentTrack;
       if (vt && participant?.tracks?.video?.state === "playable") {
         if (!videoEl.srcObject || !videoEl.srcObject.getVideoTracks().includes(vt)) {
           videoEl.srcObject = new MediaStream([vt]);
         }
+        // Sync tile aspect-ratio from track settings immediately
+        if (tileEl) _syncTileAR(videoEl, vt, tileEl);
+        // Re-sync on dimension changes (phone rotation, resolution switch)
+        if (tileEl && !videoEl._arSynced) {
+          const sync = () => _syncTileAR(videoEl, vt, tileEl);
+          videoEl.addEventListener("loadedmetadata", sync);
+          videoEl.addEventListener("resize",         sync);
+          videoEl.addEventListener("playing",        sync);
+          videoEl._arSynced = true;
+        }
       } else {
         videoEl.srcObject = null;
+        if (tileEl) tileEl.style.aspectRatio = "16 / 9";
       }
+    }
+
+    function _syncTileAR(videoEl, track, tileEl) {
+      const s = track?.getSettings?.() || {};
+      const w = s.width  || videoEl.videoWidth;
+      const h = s.height || videoEl.videoHeight;
+      if (w && h) tileEl.style.aspectRatio = `${w} / ${h}`;
     }
 
     function clearMainVideo() {
