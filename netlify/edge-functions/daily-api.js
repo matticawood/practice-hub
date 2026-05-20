@@ -496,6 +496,27 @@ export default async (request) => {
     const ev = evRows?.[0];
     if (!ev?.daily_room_name) return json({ error: "Room not found for event" }, 404);
 
+    // Ensure we have a room URL — fetch from Daily if missing (can happen if the
+    // ensure-room DB PATCH failed silently on a prior join).
+    let roomUrl = ev.daily_room_url;
+    if (!roomUrl) {
+      const dailyRoomRes = await fetch(`https://api.daily.co/v1/rooms/${ev.daily_room_name}`, {
+        headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
+      });
+      if (!dailyRoomRes.ok) return json({ error: "Daily room not found — host must open Backstage first." }, 404);
+      const dailyRoom = await dailyRoomRes.json();
+      roomUrl = dailyRoom.url;
+      // Persist so future approvals don't need to fetch it again
+      if (roomUrl) {
+        await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`, {
+          method: "PATCH",
+          headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+          body: JSON.stringify({ daily_room_url: roomUrl })
+        });
+      }
+    }
+    if (!roomUrl) return json({ error: "Could not resolve room URL" }, 500);
+
     // Generate is_owner:true token for the guest
     const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
       method: "POST",
@@ -517,7 +538,7 @@ export default async (request) => {
     // Also add to event_backstage_guests so they're recognised on future visits
     await fetch(`${SUPABASE_URL}/rest/v1/event_backstage_guests`, {
       method: "POST",
-      headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+      headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal,resolution=ignore-duplicates" },
       body: JSON.stringify({ event_id: eventId, email: `guest-${req.invite_token}@invite.local`, name: req.guest_name })
     });
 
@@ -525,7 +546,7 @@ export default async (request) => {
     await fetch(`${SUPABASE_URL}/rest/v1/event_guest_requests?id=eq.${requestId}`, {
       method: "PATCH",
       headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
-      body: JSON.stringify({ status: "approved", daily_token: tokenData.token, room_url: ev.daily_room_url })
+      body: JSON.stringify({ status: "approved", daily_token: tokenData.token, room_url: roomUrl })
     });
 
     return json({ ok: true });
