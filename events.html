@@ -6737,6 +6737,13 @@ function _bsSetSpotlight(sessionId) {
   _bsSpotlightId = (_bsSpotlightId === sessionId) ? null : sessionId;
   _renderBsGrid(window._backstageCall);
   try { window._backstageCall?.sendAppMessage({ type: "bs-spotlight", session_id: _bsSpotlightId }, "*"); } catch(e) {}
+  // Update RTMP stream layout
+  if (window._backstageCall) {
+    const layout = _bsSpotlightId
+      ? { preset: "single-participant", session_id: _bsSpotlightId }
+      : { preset: "default" };
+    window._backstageCall.updateLiveStreaming({ layout }).catch(e => console.warn("updateLiveStreaming spotlight:", e));
+  }
 }
 
 /** Hide a participant tile — synced to all backstage participants. */
@@ -6745,6 +6752,7 @@ function _bsHideTile(sessionId) {
   _bsHiddenIds.add(sessionId);
   _renderBsGrid(window._backstageCall);
   try { window._backstageCall?.sendAppMessage({ type: "bs-hide", session_id: sessionId, hidden: true }, "*"); } catch(e) {}
+  _bsUpdateStreamLayout();
 }
 
 /** Restore a previously hidden tile — synced to all backstage participants. */
@@ -6752,6 +6760,29 @@ function _bsShowTile(sessionId) {
   _bsHiddenIds.delete(sessionId);
   _renderBsGrid(window._backstageCall);
   try { window._backstageCall?.sendAppMessage({ type: "bs-hide", session_id: sessionId, hidden: false }, "*"); } catch(e) {}
+  _bsUpdateStreamLayout();
+}
+
+/** Push current spotlight/hidden state to the RTMP stream layout. */
+function _bsUpdateStreamLayout() {
+  const call = window._backstageCall;
+  if (!call) return;
+  let layout;
+  if (_bsSpotlightId) {
+    layout = { preset: "single-participant", session_id: _bsSpotlightId };
+  } else if (_bsHiddenIds.size > 0) {
+    // Build list of visible backstage participant session IDs
+    const allParts = Object.values(call.participants() || {});
+    const visibleIds = allParts
+      .filter(p => !_bsHiddenIds.has(p.session_id))
+      .map(p => p.session_id);
+    layout = visibleIds.length === 1
+      ? { preset: "single-participant", session_id: visibleIds[0] }
+      : { preset: "default", session_ids: visibleIds };
+  } else {
+    layout = { preset: "default" };
+  }
+  call.updateLiveStreaming({ layout }).catch(e => console.warn("updateLiveStreaming hide/show:", e));
 }
 
 
@@ -7082,7 +7113,7 @@ async function loadBackstageQA(eventId) {
 // ── Stream layout controls (host only) ───────────────────────────────────────
 
 async function setStreamLayout(preset, sessionId) {
-  if (!window._callFrame) return;
+  if (!window._callFrame && !window._backstageCall) return;
 
   // Update active button state
   document.querySelectorAll(".stream-layout-btn").forEach(b => b.classList.remove("active"));
