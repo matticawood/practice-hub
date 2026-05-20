@@ -294,11 +294,29 @@ export default async (request) => {
   // ── Action: get-token ──────────────────────────────────────────────────────
   // Any authenticated member can get a viewer token.
   // Only admin can get an owner (host) token.
+  // Backstage guests can request a cohost token (isCohost: true + eventId) —
+  // verified against event_backstage_guests; grants is_owner so they can
+  // broadcast in a room that has owner_only_broadcast: true.
   if (action === "get-token") {
-    const { roomName, isOwner } = body;
+    const { roomName, isOwner, isCohost, eventId: tokenEventId } = body;
     if (!roomName) return json({ error: "roomName required" }, 400);
 
-    if (isOwner && !(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const admin = await isAdmin();
+    if (isOwner && !admin) return json({ error: "Forbidden" }, 403);
+
+    // Verify cohost eligibility via backstage guest list
+    let grantedOwner = isOwner || false;
+    if (isCohost && !admin && tokenEventId) {
+      const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+      const guestRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/event_backstage_guests?event_id=eq.${tokenEventId}&email=eq.${encodeURIComponent(userEmail)}&select=id`,
+        { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+      );
+      const guestRows = await guestRes.json();
+      if (Array.isArray(guestRows) && guestRows.length > 0) {
+        grantedOwner = true;  // backstage guests can broadcast in the main room
+      }
+    }
 
     // Get display name from allowed_emails
     const nameRes = await fetch(
@@ -316,13 +334,13 @@ export default async (request) => {
       },
       body: JSON.stringify({
         properties: {
-          room_name:            roomName,
-          user_name:            displayName,
-          is_owner:             isOwner || false,
-          enable_prejoin_ui:    false,               // skip the Daily.co pre-join screen
-          start_video_off:      !isOwner,
-          start_audio_off:      !isOwner,
-          start_cloud_recording: isOwner || false    // auto-start recording when host joins
+          room_name:             roomName,
+          user_name:             displayName,
+          is_owner:              grantedOwner,
+          enable_prejoin_ui:     false,
+          start_video_off:       !grantedOwner,    // cohosts + host start with camera on
+          start_audio_off:       !grantedOwner,
+          start_cloud_recording: admin && isOwner  // only the actual host starts recording
         }
       })
     });

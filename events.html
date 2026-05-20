@@ -807,6 +807,35 @@
     #stream-admin-bar.visible { display: flex; }
     .admin-bar-label { font-size: 0.8rem; color: var(--accent); font-weight: 700; }
 
+    /* Layout controls (inside admin bar) */
+    #stream-layout-controls {
+      display: none; align-items: center; gap: 5px;
+      border-left: 1px solid rgba(255,255,255,.1);
+      padding-left: 10px; margin-left: 2px;
+    }
+    #stream-layout-controls.visible { display: flex; }
+    .stream-layout-btn {
+      background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 6px; color: var(--text-muted); cursor: pointer;
+      width: 30px; height: 28px; display: flex; align-items: center; justify-content: center;
+      transition: all .15s; font-family: inherit; padding: 0; flex-shrink: 0;
+    }
+    .stream-layout-btn:hover { background: rgba(201,168,76,.15); border-color: var(--accent); color: var(--accent); }
+    .stream-layout-btn.active { background: rgba(201,168,76,.2); border-color: var(--accent); color: var(--accent); }
+    #spotlight-menu {
+      position: absolute; bottom: calc(100% + 8px); left: 0;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; min-width: 190px; padding: 6px; z-index: 300;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    }
+    .spotlight-menu-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      background: none; border: none; padding: 7px 10px; border-radius: 7px;
+      cursor: pointer; color: var(--text); font-family: inherit; font-size: .85rem;
+      text-align: left; transition: background .12s;
+    }
+    .spotlight-menu-item:hover { background: rgba(255,255,255,.07); }
+
     /* Tab unread badges */
     .sid-tab-badge {
       background: #ff6b6b; color: #fff;
@@ -1317,6 +1346,31 @@
         End Stream
       </button>
       <button class="btn btn-sm btn-ghost" onclick="showView('detail')">← Back to event page</button>
+      <!-- Layout controls — only shown when stream is live with multiple participants -->
+      <div id="stream-layout-controls">
+        <span style="font-size:.72rem;color:var(--text-muted);white-space:nowrap">Layout:</span>
+        <!-- Gallery -->
+        <button class="stream-layout-btn active" id="layout-btn-gallery" onclick="setStreamLayout('default')" title="Gallery — show everyone">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </button>
+        <!-- Active speaker -->
+        <button class="stream-layout-btn" id="layout-btn-speaker" onclick="setStreamLayout('spotlight')" title="Active speaker">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        </button>
+        <!-- Solo (just me) -->
+        <button class="stream-layout-btn" id="layout-btn-solo" onclick="setStreamLayout('solo')" title="Solo — just you on screen">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        </button>
+        <!-- Spotlight a specific person -->
+        <div style="position:relative">
+          <button class="stream-layout-btn" id="layout-btn-spotlight" onclick="toggleSpotlightMenu()" title="Spotlight a participant">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </button>
+          <div id="spotlight-menu" style="display:none">
+            <div id="spotlight-participants"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -3524,7 +3578,10 @@ async function startStream(eventId) {
 
 // ── Join stream ───────────────────────────────────────────────────────────────
 // Returns true on success, false on any failure (caller should restore UI).
-async function joinStream(eventId) {
+// options.asCohost = true  →  backstage guest joining as a broadcaster
+async function joinStream(eventId, options = {}) {
+  const { asCohost = false } = options;
+
   // Refresh event to get latest room details
   const { data: ev } = await db.from("live_events").select("*").eq("id", eventId).single();
   if (!ev || ev.status !== "live") { alert("Stream is not live."); return false; }
@@ -3544,7 +3601,13 @@ async function joinStream(eventId) {
     tokenRes = await fetch("/api/daily", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
-      body: JSON.stringify({ action: "get-token", roomName: ev.daily_room_name, isOwner: isAdmin })
+      body: JSON.stringify({
+        action:    "get-token",
+        roomName:  ev.daily_room_name,
+        isOwner:   isAdmin,
+        isCohost:  asCohost,
+        eventId:   asCohost ? eventId : undefined
+      })
     });
     if (!tokenRes.ok) {
       alert(`Could not connect to the stream service (HTTP ${tokenRes.status}). The hosting provider may be having a temporary outage — please try again in a moment.`);
@@ -3575,22 +3638,30 @@ async function joinStream(eventId) {
   container.innerHTML = "";
 
   try {
-    if (isAdmin) {
-      // ── HOST: full Daily.co iframe UI with camera/mic controls ──────────────
+    if (isAdmin || asCohost) {
+      // ── HOST / COHOST: full Daily.co iframe with camera + mic ───────────────
       window._callFrame = DailyIframe.createFrame(container, {
-        showLeaveButton: true,
+        showLeaveButton:      true,
         showFullscreenButton: true,
         iframeStyle: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }
       });
 
       // Register listeners BEFORE join() so events aren't missed
       window._callFrame.on("joined-meeting", async () => {
+        // Refresh participant list for layout controls
+        _refreshStreamParticipants();
+
+        // Cohosts never start recording or streaming — only the host does
+        if (asCohost) return;
+
         // On REJOIN (stream_started_at already set) don't restart recording or
         // live streaming — the Mux RTMP stream reconnects automatically within
         // the 5-minute reconnect window and we'd just get duplicate Daily recordings
         // and an overwritten stream_started_at that would break VOD timestamps.
         if (currentEvent.stream_started_at) {
           console.log("[Mux] Rejoining existing stream — skipping startRecording/startLiveStreaming");
+          // Show layout controls (stream already running, may have participants)
+          document.getElementById("stream-layout-controls")?.classList.add("visible");
           return;
         }
 
@@ -3599,19 +3670,22 @@ async function joinStream(eventId) {
         try { await window._callFrame.startRecording(); } catch(e) {
           console.warn("startRecording failed:", e.message);
         }
-        // Start RTMP live streaming to Mux (for the preview on the event page)
+        // Start RTMP live streaming to Mux (gallery layout by default)
         const streamKey = currentEvent._muxStreamKey;
         console.log("[Mux] stream key present:", !!streamKey, "| playback ID:", currentEvent.mux_live_playback_id || "none");
         if (streamKey) {
           try {
             await window._callFrame.startLiveStreaming({
-              rtmpUrl: `rtmps://global-live.mux.com:443/app/${streamKey}`
+              rtmpUrl: `rtmps://global-live.mux.com:443/app/${streamKey}`,
+              layout:  { preset: "default" }
             });
             console.log("[Mux] live streaming started successfully");
             // Record the moment RTMP begins — this is VOD t=0 for Q&A timestamp sync
             const streamStartedAt = new Date().toISOString();
             currentEvent.stream_started_at = streamStartedAt;
             db.from("live_events").update({ stream_started_at: streamStartedAt }).eq("id", currentEvent.id).then();
+            // Show layout controls now that streaming is confirmed active
+            document.getElementById("stream-layout-controls")?.classList.add("visible");
           } catch(e) {
             console.warn("[Mux] startLiveStreaming failed:", e.message);
           }
@@ -3620,8 +3694,14 @@ async function joinStream(eventId) {
         }
       });
 
+      // Refresh participant list whenever someone joins or leaves
+      window._callFrame.on("participant-joined",  _refreshStreamParticipants);
+      window._callFrame.on("participant-updated", _refreshStreamParticipants);
+      window._callFrame.on("participant-left",    _refreshStreamParticipants);
+
       window._callFrame.on("left-meeting", () => {
         if (window._callFrame) { try { window._callFrame.destroy(); } catch(e) {} window._callFrame = null; }
+        document.getElementById("stream-layout-controls")?.classList.remove("visible");
         const c = document.getElementById("daily-container");
         if (c) c.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;"><p style="color:var(--text-muted)">You left the stream.</p><button class="btn btn-primary" onclick="joinStream('${ev.id}')">▶ Rejoin</button></div>`;
       });
@@ -4721,9 +4801,9 @@ async function _joinMainStreamFromBackstage() {
   }
   if (backstageChannel)       { db.removeChannel(backstageChannel);       backstageChannel       = null; }
   if (_backstageBcastChannel) { db.removeChannel(_backstageBcastChannel); _backstageBcastChannel = null; }
-  // Join main stream as a viewer
+  // Join main stream as a cohost (can broadcast camera/mic)
   if (!currentEvent?.id) { showView("detail"); return; }
-  await joinStream(currentEvent.id);
+  await joinStream(currentEvent.id, { asCohost: true });
 }
 
 async function inviteToBackstage() {
@@ -4814,6 +4894,83 @@ async function loadBackstageQA(eventId) {
     </div>
   `).join("");
 }
+
+// ── Stream layout controls (host only) ───────────────────────────────────────
+
+async function setStreamLayout(preset, sessionId) {
+  if (!window._callFrame) return;
+
+  // Update active button state
+  document.querySelectorAll(".stream-layout-btn").forEach(b => b.classList.remove("active"));
+  if (preset === "default")           document.getElementById("layout-btn-gallery")?.classList.add("active");
+  else if (preset === "spotlight")    document.getElementById("layout-btn-speaker")?.classList.add("active");
+  else if (preset === "solo")         document.getElementById("layout-btn-solo")?.classList.add("active");
+  else if (preset === "single-participant") document.getElementById("layout-btn-spotlight")?.classList.add("active");
+
+  let layout;
+  if (preset === "solo") {
+    // Spotlight the host themselves
+    const me = window._callFrame.participants()?.local;
+    layout = { preset: "single-participant", session_id: me?.session_id };
+  } else if (preset === "single-participant" && sessionId) {
+    layout = { preset: "single-participant", session_id: sessionId };
+  } else {
+    layout = { preset };
+  }
+
+  try {
+    await window._callFrame.updateLiveStreaming({ layout });
+  } catch(e) {
+    console.warn("updateLiveStreaming:", e);
+  }
+
+  // Close spotlight menu
+  const menu = document.getElementById("spotlight-menu");
+  if (menu) menu.style.display = "none";
+}
+
+function toggleSpotlightMenu() {
+  const menu = document.getElementById("spotlight-menu");
+  if (!menu) return;
+  const opening = menu.style.display === "none";
+  if (opening) _populateSpotlightMenu();
+  menu.style.display = opening ? "block" : "none";
+}
+
+function _populateSpotlightMenu() {
+  if (!window._callFrame) return;
+  const el = document.getElementById("spotlight-participants");
+  if (!el) return;
+
+  const others = Object.values(window._callFrame.participants()).filter(p => !p.local);
+  if (!others.length) {
+    el.innerHTML = `<p style="font-size:.8rem;color:var(--text-muted);padding:6px 10px">No other participants yet</p>`;
+    return;
+  }
+
+  el.innerHTML = others.map(p => `
+    <button class="spotlight-menu-item" onclick="setStreamLayout('single-participant','${p.session_id}')">
+      ${avatarHtml(p.user_name || "Guest", "", 22, null)}
+      <span>${esc(p.user_name || "Guest")}</span>
+    </button>
+  `).join("");
+}
+
+function _refreshStreamParticipants() {
+  if (!window._callFrame) return;
+  // Repopulate spotlight menu if it's open
+  const menu = document.getElementById("spotlight-menu");
+  if (menu && menu.style.display !== "none") _populateSpotlightMenu();
+}
+
+// Close spotlight menu when clicking outside
+document.addEventListener("click", e => {
+  const wrap = document.getElementById("layout-btn-spotlight")?.closest("div[style*='position:relative']");
+  if (wrap && !wrap.contains(e.target)) {
+    const menu = document.getElementById("spotlight-menu");
+    if (menu) menu.style.display = "none";
+  }
+});
 
 function showBackstageTab(tab, btn) {
   document.querySelectorAll("#backstage-tabs .sid-tab").forEach(t => t.classList.remove("active"));
