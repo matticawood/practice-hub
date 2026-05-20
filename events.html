@@ -5751,7 +5751,8 @@ function _renderBsGrid(call) {
     grid.id = "bs-guest-grid";
     grid.style.cssText =
       "position:absolute;inset:0;display:grid;gap:4px;padding:4px;" +
-      "background:var(--bg);border-radius:inherit;overflow:hidden;";
+      "background:var(--bg);border-radius:inherit;overflow:hidden;" +
+      "transition:grid-template-columns .35s ease,grid-template-rows .35s ease;";
     container.appendChild(grid);
 
     // Re-render on container resize so spotlight proportions stay correct
@@ -5773,6 +5774,18 @@ function _renderBsGrid(call) {
   // Strip height: 22% of the container's current height, clamped to a
   // sensible range so it's proportional on both mobile and desktop.
   const stripH = Math.max(56, Math.min(140, Math.round(container.clientHeight * 0.22)));
+
+  // Detect spotlight layout change → crossfade tiles so the jump feels smooth
+  const prevSpot = grid.dataset.spotId || "";
+  const curSpot  = _bsSpotlightId || "";
+  if (prevSpot !== curSpot) {
+    grid.dataset.spotId = curSpot;
+    // Brief opacity dip on existing (already-visible) tiles only
+    grid.querySelectorAll("[id^='bs-tile-']:not([data-removing])").forEach(el => {
+      el.style.opacity = "0";
+      requestAnimationFrame(() => requestAnimationFrame(() => { el.style.opacity = "1"; }));
+    });
+  }
 
   if (spotPart) {
     // Spotlight: big tile on top, thumbnail strip below
@@ -5799,7 +5812,13 @@ function _renderBsGrid(call) {
       tile.id = `bs-tile-${p.session_id}`;
       tile.style.cssText =
         "position:relative;background:#111;border-radius:6px;overflow:hidden;" +
-        "display:flex;align-items:center;justify-content:center;min-height:0;";
+        "display:flex;align-items:center;justify-content:center;min-height:0;" +
+        "opacity:0;transform:scale(.94);transition:opacity .3s ease,transform .3s ease,grid-column .35s ease,grid-row .35s ease;";
+      // Fade in on next frame so the transition fires
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        tile.style.opacity = "1";
+        tile.style.transform = "";
+      }));
 
       // ── .video-wrap: sizes itself to the video's actual AR via CSS aspect-ratio.
       // The name label lives inside here so it's always anchored to the real
@@ -5958,7 +5977,12 @@ function _renderBsGrid(call) {
   // ── Remove tiles for departed / now-hidden participants ────────────
   grid.querySelectorAll("[id^='bs-tile-']").forEach(el => {
     const sid = el.id.replace("bs-tile-", "");
-    if (!rendered.has(sid)) el.remove();
+    if (!rendered.has(sid) && !el.dataset.removing) {
+      el.dataset.removing = "1";
+      el.style.opacity = "0";
+      el.style.transform = "scale(.94)";
+      setTimeout(() => el.remove(), 320);
+    }
   });
 
   // ── Hidden participants strip (admin only) ─────────────────────────
