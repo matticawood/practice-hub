@@ -139,13 +139,40 @@
     .ctrl-leave:hover { background: rgba(239,68,68,.28); }
     #guest-name-label { font-size: .8rem; color: var(--text-muted); margin-left: 4px; }
 
-    /* Device selects injected into controls */
-    .dev-select {
-      font-size: .76rem; padding: 5px 6px; background: rgba(255,255,255,.08);
-      border: 1px solid rgba(255,255,255,.15); border-radius: 6px;
-      color: var(--text); max-width: 130px; cursor: pointer;
+    /* ── Zoom-style device selector button groups ───────────────────────── */
+    .dev-group {
+      display: inline-flex; align-items: stretch;
+      border: 1px solid rgba(255,255,255,.15); border-radius: 8px;
+      overflow: visible; position: relative;
     }
-    .dev-sep { width: 1px; height: 18px; background: rgba(255,255,255,.15); flex-shrink: 0; }
+    .dev-group > .ctrl-btn { border: none !important; border-radius: 8px 0 0 8px !important; }
+    .dev-group > .ctrl-btn:only-child { border-radius: 8px !important; }
+    .dev-chevron {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; min-width: 22px; padding: 0;
+      background: rgba(255,255,255,.08); border: none;
+      border-left: 1px solid rgba(255,255,255,.12);
+      border-radius: 0 8px 8px 0; cursor: pointer;
+      color: rgba(255,255,255,.45); transition: background .12s, color .12s;
+    }
+    .dev-chevron:hover { background: rgba(255,255,255,.18); color: rgba(255,255,255,.9); }
+    .dev-menu {
+      position: absolute; bottom: calc(100% + 8px); left: 0;
+      min-width: 200px; max-width: 280px;
+      background: #1c1c1c; border: 1px solid rgba(255,255,255,.15); border-radius: 8px;
+      padding: 4px 0; box-shadow: 0 4px 20px rgba(0,0,0,.65); z-index: 9999;
+    }
+    .dev-menu-header {
+      font-size: .65rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: rgba(255,255,255,.35); padding: 6px 14px 3px;
+    }
+    .dev-menu-item {
+      display: block; width: 100%; text-align: left;
+      padding: 7px 14px; font-size: .8rem; color: rgba(255,255,255,.82);
+      background: none; border: none; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .dev-menu-item:hover { background: rgba(255,255,255,.08); }
 
     /* Backstage grid */
     #bs-grid {
@@ -384,14 +411,18 @@
 
       <!-- Controls -->
       <div id="call-controls">
-        <button id="btn-mic" class="ctrl-btn" onclick="toggleMic()" title="Toggle microphone">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-          Mic
-        </button>
-        <button id="btn-cam" class="ctrl-btn" onclick="toggleCam()" title="Toggle camera">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-          Cam
-        </button>
+        <div class="dev-group" id="dev-group-mic">
+          <button id="btn-mic" class="ctrl-btn" onclick="toggleMic()" title="Toggle microphone">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            Mic
+          </button>
+        </div>
+        <div class="dev-group" id="dev-group-cam">
+          <button id="btn-cam" class="ctrl-btn" onclick="toggleCam()" title="Toggle camera">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Cam
+          </button>
+        </div>
         <span id="guest-name-label"></span>
         <button class="ctrl-btn ctrl-leave" onclick="confirmLeave()">Leave</button>
       </div>
@@ -609,6 +640,16 @@
         if (!callObject) return; // intentional cleanup — don't show error
         callObject = null;
         showError("You left the call", "Refresh the page to rejoin.");
+      });
+
+      // Update header badge when streaming starts/stops
+      callObject.on("live-streaming-started", () => {
+        const badge = document.getElementById("header-badge");
+        if (badge) { badge.textContent = "Live"; badge.className = "live-top-badge live"; }
+      });
+      callObject.on("live-streaming-stopped", () => {
+        const badge = document.getElementById("header-badge");
+        if (badge) { badge.textContent = "Backstage"; badge.className = "live-top-badge backstage"; }
       });
 
       // Show call UI
@@ -838,32 +879,77 @@
     }
 
     async function injectDeviceSelectors() {
-      let devices = [];
-      try { const r = await callObject.enumerateDevices(); devices = r.devices || []; } catch(e) {}
-      const mics = devices.filter(d => d.kind === "audioinput");
-      const cams = devices.filter(d => d.kind === "videoinput");
-      const micOpts = mics.map(m => `<option value="${m.deviceId}">${m.label||"Microphone"}</option>`).join("");
-      const camOpts = cams.map(c => `<option value="${c.deviceId}">${c.label||"Camera"}</option>`).join("");
-      const bar = document.getElementById("call-controls");
-      if (!bar || bar.querySelector(".dev-select")) return; // already injected
-      const micBtn = document.getElementById("btn-mic");
-      if (micBtn && micOpts) {
-        const sel = document.createElement("select");
-        sel.className = "dev-select"; sel.title = "Microphone";
-        sel.innerHTML = micOpts;
-        sel.onchange = async () => { try { await callObject.setInputDevicesAsync({ audioDeviceId: sel.value }); } catch(e) {} };
-        micBtn.insertAdjacentElement("afterend", sel);
-      }
-      const sep = document.createElement("div"); sep.className = "dev-sep";
-      document.getElementById("btn-cam")?.insertAdjacentElement("beforebegin", sep);
-      const camBtn = document.getElementById("btn-cam");
-      if (camBtn && camOpts) {
-        const sel = document.createElement("select");
-        sel.className = "dev-select"; sel.title = "Camera";
-        sel.innerHTML = camOpts;
-        sel.onchange = async () => { try { await callObject.setInputDevicesAsync({ videoDeviceId: sel.value }); } catch(e) {} };
-        camBtn.insertAdjacentElement("afterend", sel);
-      }
+      // Add Zoom-style chevron buttons to the mic and cam device groups
+      const chevronSvg = `<svg viewBox="0 0 24 24" width="8" height="8" fill="none" stroke="currentColor"
+        stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`;
+
+      ["mic", "cam"].forEach(type => {
+        const group = document.getElementById("dev-group-" + type);
+        if (!group || group.querySelector(".dev-chevron")) return;
+        const ch = document.createElement("button");
+        ch.className = "dev-chevron";
+        ch.title = type === "mic" ? "Select microphone" : "Select camera";
+        ch.innerHTML = chevronSvg;
+        ch.addEventListener("click", e => { e.stopPropagation(); _gOpenDeviceMenu(type, ch); });
+        group.appendChild(ch);
+      });
+    }
+
+    function _gOpenDeviceMenu(type, chevronEl) {
+      const menuId = "dev-menu-" + type;
+      // Toggle: close if already open
+      const existing = document.getElementById(menuId);
+      if (existing) { existing.remove(); return; }
+      document.querySelectorAll(".dev-menu").forEach(m => m.remove());
+
+      if (!callObject) return;
+
+      callObject.enumerateDevices().then(({ devices }) => {
+        const kind = type === "mic" ? "audioinput" : "videoinput";
+        const list = (devices || []).filter(d => d.kind === kind);
+
+        const menu = document.createElement("div");
+        menu.className = "dev-menu"; menu.id = menuId;
+
+        const header = document.createElement("div");
+        header.className = "dev-menu-header";
+        header.textContent = type === "mic" ? "Microphone" : "Camera";
+        menu.appendChild(header);
+
+        if (!list.length) {
+          const empty = document.createElement("button");
+          empty.className = "dev-menu-item"; empty.disabled = true;
+          empty.style.opacity = ".5"; empty.textContent = "No devices found";
+          menu.appendChild(empty);
+        } else {
+          list.forEach(d => {
+            const btn = document.createElement("button");
+            btn.className = "dev-menu-item";
+            btn.textContent = d.label || (type === "mic" ? "Microphone" : "Camera");
+            btn.onclick = async () => {
+              try {
+                await callObject.setInputDevicesAsync(
+                  type === "mic" ? { audioDeviceId: d.deviceId } : { videoDeviceId: d.deviceId }
+                );
+              } catch(e) { console.warn("Could not switch device:", e); }
+              menu.remove();
+            };
+            menu.appendChild(btn);
+          });
+        }
+
+        chevronEl.closest(".dev-group").appendChild(menu);
+
+        setTimeout(() => {
+          function closeMenu(e) {
+            if (menu.isConnected && !menu.contains(e.target)) {
+              menu.remove();
+              document.removeEventListener("click", closeMenu);
+            }
+          }
+          document.addEventListener("click", closeMenu);
+        }, 0);
+      }).catch(e => console.warn("Could not enumerate devices for menu:", e));
     }
 
     // ── Mic / cam controls ────────────────────────────────────────────────────
