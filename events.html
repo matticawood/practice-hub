@@ -1499,6 +1499,7 @@ let currentEvent = null;
 let editingEventId = null;
 let chatChannel         = null;
 let qaChannel           = null;
+let typingChannel       = null;   // fixed-name broadcast channel for chat + Q&A typing
 let discussionChannel   = null;   // event_comments + poll_votes listener
 let streamStatusChannel = null;   // watches for stream-ended status update
 let _recordingWatcher   = null;
@@ -1565,6 +1566,7 @@ function showView(name) {
     // Clean up realtime channels when leaving stream
     if (chatChannel)         { db.removeChannel(chatChannel);         chatChannel         = null; }
     if (qaChannel)           { db.removeChannel(qaChannel);           qaChannel           = null; }
+    if (typingChannel)       { db.removeChannel(typingChannel);       typingChannel       = null; }
     if (discussionChannel)   { db.removeChannel(discussionChannel);   discussionChannel   = null; }
     if (streamStatusChannel) { db.removeChannel(streamStatusChannel); streamStatusChannel = null; }
     // Clean up Daily.co call frame
@@ -3533,6 +3535,7 @@ function setupRealtimeStream(ev) {
   // ── Clean up ALL existing channels before re-subscribing ──────────────────
   if (chatChannel)         { db.removeChannel(chatChannel);         chatChannel         = null; }
   if (qaChannel)           { db.removeChannel(qaChannel);           qaChannel           = null; }
+  if (typingChannel)       { db.removeChannel(typingChannel);       typingChannel       = null; }
   if (discussionChannel)   { db.removeChannel(discussionChannel);   discussionChannel   = null; }
   if (streamStatusChannel) { db.removeChannel(streamStatusChannel); streamStatusChannel = null; }
 
@@ -3609,15 +3612,52 @@ function setupRealtimeStream(ev) {
       console.log("[Stream] discussionChannel status:", status);
     });
 
-  // Chat messages + typing broadcast
-  chatChannel = db.channel(`event-chat-${ev.id}-${gen}`, {
-    config: { broadcast: { self: false } }
-  })
+  // Chat messages (postgres_changes only — typing moved to typingChannel)
+  chatChannel = db.channel(`event-chat-${ev.id}-${gen}`)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_chat",
       filter: `event_id=eq.${ev.id}` }, p => {
         console.log("[Stream] chat INSERT received:", p.new?.id);
         appendChatMsg(p.new);
       })
+    .subscribe(async (status) => {
+      console.log("[Stream] chatChannel status:", status);
+      if (status !== "SUBSCRIBED") return;
+      // Second pass: catch any messages that arrived during the handshake gap.
+      const { data, error } = await db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at");
+      if (error) { console.error("[Stream] chat second-pass error:", error); return; }
+      if (data) data.forEach(m => appendChatMsg(m, true));
+    });
+
+  // Q&A questions (postgres_changes only — typing moved to typingChannel)
+  qaChannel = db.channel(`event-qa-${ev.id}-${gen}`)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_qa",
+      filter: `event_id=eq.${ev.id}` }, p => {
+        console.log("[Stream] Q&A INSERT received:", p.new?.id);
+        appendQAItem(p.new);
+      })
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "event_qa",
+      filter: `event_id=eq.${ev.id}` }, p => updateQAItem(p.new))
+    .subscribe(async (status) => {
+      console.log("[Stream] qaChannel status:", status);
+      if (status !== "SUBSCRIBED") return;
+      // Second pass: catch any Q&A that arrived during the handshake gap.
+      const { data, error } = await db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at");
+      if (error) { console.error("[Stream] Q&A second-pass error:", error); return; }
+      if (!data) return;
+      data.forEach(q => appendQAItem(q, true));
+      const featured = data.find(q => q.is_featured);
+      if (featured) {
+        document.getElementById("featured-qa-text").textContent = featured.question;
+        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
+        document.getElementById("featured-qa-bar").classList.add("visible");
+      }
+    });
+
+  // Typing broadcasts — fixed channel name (no gen suffix) so host + participants
+  // always share the same channel even after the host rejoins the stream.
+  typingChannel = db.channel(`event-typing-${ev.id}`, {
+    config: { broadcast: { self: false } }
+  })
     .on("broadcast", { event: "typing" }, ({ payload }) => {
       if (!payload?.email || payload.email === myEmail) return;
       if (payload.typing) {
@@ -3635,24 +3675,6 @@ function setupRealtimeStream(ev) {
       }
       updateTypingIndicator();
     })
-    .subscribe(async (status) => {
-      console.log("[Stream] chatChannel status:", status);
-      if (status !== "SUBSCRIBED") return;
-      // Second pass: catch any messages that arrived during the handshake gap.
-      const { data, error } = await db.from("event_chat").select("*").eq("event_id", ev.id).order("created_at");
-      if (error) { console.error("[Stream] chat second-pass error:", error); return; }
-      if (data) data.forEach(m => appendChatMsg(m, true));
-    });
-
-  // Q&A questions
-  qaChannel = db.channel(`event-qa-${ev.id}-${gen}`, { config: { broadcast: { self: false } } })
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_qa",
-      filter: `event_id=eq.${ev.id}` }, p => {
-        console.log("[Stream] Q&A INSERT received:", p.new?.id);
-        appendQAItem(p.new);
-      })
-    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "event_qa",
-      filter: `event_id=eq.${ev.id}` }, p => updateQAItem(p.new))
     .on("broadcast", { event: "qa-typing" }, ({ payload }) => {
       if (!payload?.email || payload.email === myEmail) return;
       if (payload.typing) {
@@ -3670,20 +3692,8 @@ function setupRealtimeStream(ev) {
       }
       updateQATypingIndicator();
     })
-    .subscribe(async (status) => {
-      console.log("[Stream] qaChannel status:", status);
-      if (status !== "SUBSCRIBED") return;
-      // Second pass: catch any Q&A that arrived during the handshake gap.
-      const { data, error } = await db.from("event_qa").select("*").eq("event_id", ev.id).order("created_at");
-      if (error) { console.error("[Stream] Q&A second-pass error:", error); return; }
-      if (!data) return;
-      data.forEach(q => appendQAItem(q, true));
-      const featured = data.find(q => q.is_featured);
-      if (featured) {
-        document.getElementById("featured-qa-text").textContent = featured.question;
-        document.getElementById("featured-qa-asker").textContent = "— " + (featured.name || featured.email.split("@")[0]);
-        document.getElementById("featured-qa-bar").classList.add("visible");
-      }
+    .subscribe((status) => {
+      console.log("[Stream] typingChannel status:", status);
     });
 
   // Watch for stream ending — send everyone back to the event detail page
@@ -3758,11 +3768,11 @@ function appendChatMsg(msg, skipUnread = false) {
 }
 
 function onChatTyping() {
-  if (!chatChannel) return;
+  if (!typingChannel) return;
   // Only broadcast typing:true once when they start — not on every keystroke
   if (!_typingActive) {
     _typingActive = true;
-    chatChannel.send({ type: "broadcast", event: "typing",
+    typingChannel.send({ type: "broadcast", event: "typing",
       payload: { email: myEmail, name: myName || myEmail, typing: true } });
   }
   // Debounce the stop signal — reset on every keystroke
@@ -3773,7 +3783,7 @@ function onChatTyping() {
 function stopTypingBroadcast() {
   if (!_typingActive) return;
   _typingActive = false;
-  if (chatChannel) chatChannel.send({ type: "broadcast", event: "typing",
+  if (typingChannel) typingChannel.send({ type: "broadcast", event: "typing",
     payload: { email: myEmail, name: myName || myEmail, typing: false } });
 }
 
@@ -3787,10 +3797,10 @@ function updateTypingIndicator() {
 }
 
 function onQATyping() {
-  if (!qaChannel) return;
+  if (!typingChannel) return;
   if (!_qaTypingActive) {
     _qaTypingActive = true;
-    qaChannel.send({ type: "broadcast", event: "qa-typing",
+    typingChannel.send({ type: "broadcast", event: "qa-typing",
       payload: { email: myEmail, name: myName || myEmail, typing: true } });
   }
   clearTimeout(_qaTypingTimeout);
@@ -3800,7 +3810,7 @@ function onQATyping() {
 function stopQATypingBroadcast() {
   if (!_qaTypingActive) return;
   _qaTypingActive = false;
-  if (qaChannel) qaChannel.send({ type: "broadcast", event: "qa-typing",
+  if (typingChannel) typingChannel.send({ type: "broadcast", event: "qa-typing",
     payload: { email: myEmail, name: myName || myEmail, typing: false } });
 }
 
@@ -4240,50 +4250,68 @@ async function setupVodQaOverlay(ev) {
   document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 }
 
-// ── VOD answered Q&A list ──────────────────────────────────────────────────────
-// Shows all answered questions below the recording with clickable timestamps
-// that seek the player to the moment they were featured.
+// ── VOD Q&A list ──────────────────────────────────────────────────────────────
+// Shows all questions that were featured during the stream (whether or not they
+// were explicitly marked "answered") with clickable timestamps to seek the player.
 async function setupVodQaList(ev) {
   const wrap = document.getElementById("vod-qa-list-wrap");
   console.log("[VOD list] wrap:", !!wrap, "mux_playback_id:", ev.mux_playback_id, "ev.id:", ev.id);
   if (!wrap || !ev.mux_playback_id) return;
 
-  // Fetch answered questions (no ordering by featured_at — we'll sort below)
-  const { data: questions, error: qErr } = await db
-    .from("event_qa")
-    .select("id, question, name, email, answered")
-    .eq("event_id", ev.id)
-    .eq("answered", true);
-
-  console.log("[VOD list] answered=true query:", questions?.length, "rows, error:", qErr);
-  if (!questions?.length) {
-    db.from("event_qa").select("id, question, answered").eq("event_id", ev.id)
-      .then(({ data: all }) => console.log("[VOD list] all Q&A for event:", all?.map(q => ({ id: q.id.slice(0,8), answered: q.answered }))));
-    return;
-  }
-
-  // Fetch all feature windows ordered by time — one row per feature event
-  const { data: featureWindows } = await db
+  // Primary source: event_qa_features — one row per feature window.
+  // Fetch joined with event_qa so we get question text in one query.
+  let featureWindows = null;
+  let useLegacyFallback = false;
+  const { data: fwData, error: fwErr } = await db
     .from("event_qa_features")
-    .select("id, qa_id, featured_at, unfeatured_at")
+    .select("id, qa_id, featured_at, unfeatured_at, event_qa(id, question, name, email, answered)")
     .eq("event_id", ev.id)
     .order("featured_at", { ascending: true });
 
-  // Build a map: qa_id → sorted array of feature windows
+  if (fwErr) {
+    // Table may not exist yet — fall back to legacy single-column approach
+    console.warn("[VOD list] event_qa_features query failed, using legacy fallback:", fwErr.message);
+    useLegacyFallback = true;
+  } else {
+    featureWindows = fwData || [];
+    console.log("[VOD list] feature windows:", featureWindows.length);
+  }
+
+  // ── Legacy fallback: use featured_at on event_qa directly ─────────────────
+  if (useLegacyFallback) {
+    const { data: legacyQs } = await db
+      .from("event_qa")
+      .select("id, question, name, email, featured_at, unfeatured_at, answered")
+      .eq("event_id", ev.id)
+      .not("featured_at", "is", null)
+      .order("featured_at", { ascending: true });
+    if (!legacyQs?.length) return;
+    featureWindows = legacyQs.map(q => ({
+      id: q.id, qa_id: q.id,
+      featured_at: q.featured_at, unfeatured_at: q.unfeatured_at,
+      event_qa: q
+    }));
+  }
+
+  if (!featureWindows.length) {
+    console.log("[VOD list] no featured windows found");
+    return;
+  }
+
+  // Deduplicate: one row per question (keyed by qa_id), ordered by first feature time
+  const seenQa = new Set();
+  const questions = [];
+  for (const w of featureWindows) {
+    if (!w.event_qa || seenQa.has(w.qa_id)) continue;
+    seenQa.add(w.qa_id);
+    questions.push({ ...w.event_qa, _firstFeaturedAt: w.featured_at });
+  }
+
+  // Build a flat map of all windows for timeline highlighting: qa_id → windows[]
   const windowsByQa = {};
-  (featureWindows || []).forEach(w => {
+  (featureWindows).forEach(w => {
     if (!windowsByQa[w.qa_id]) windowsByQa[w.qa_id] = [];
     windowsByQa[w.qa_id].push(w);
-  });
-
-  // Sort questions by their first feature window time
-  questions.sort((a, b) => {
-    const aTs = windowsByQa[a.id]?.[0]?.featured_at || null;
-    const bTs = windowsByQa[b.id]?.[0]?.featured_at || null;
-    if (!aTs && !bTs) return 0;
-    if (!aTs) return 1;
-    if (!bTs) return -1;
-    return new Date(aTs) - new Date(bTs);
   });
 
   const streamStart = ev.stream_started_at ? new Date(ev.stream_started_at).getTime() : null;
@@ -4303,10 +4331,10 @@ async function setupVodQaList(ev) {
 
   wrap.innerHTML = `
     <div class="vod-qa-list">
-      <div class="vod-qa-list-title">${svgQ} Questions answered in this session</div>
+      <div class="vod-qa-list-title">${svgQ} Questions featured in this session</div>
       ${questions.map(q => {
-        // Use the first feature window's timestamp for the "jump to" button
-        const firstFeaturedAt = windowsByQa[q.id]?.[0]?.featured_at || null;
+        // _firstFeaturedAt was set when we deduplicated above
+        const firstFeaturedAt = q._firstFeaturedAt || null;
         const offset = fmtOffset(firstFeaturedAt);
         const secs   = streamStart && firstFeaturedAt
           ? Math.max(0, Math.round((new Date(firstFeaturedAt).getTime() - streamStart) / 1000))
