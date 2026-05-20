@@ -173,7 +173,9 @@ export default async (request) => {
     const RESEND_FROM    = Netlify.env.get("RESEND_FROM_EMAIL");
     const escHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const origin  = new URL(request.url).origin;
-    const eventUrl = `${origin}/events.html`;
+    // Direct backstage link: events.html stores ?backstage=ID in sessionStorage
+    // and auto-joins once the user is authenticated.
+    const backstageUrl = `${origin}/events.html?backstage=${eventId}`;
 
     if (!RESEND_API_KEY) return json({ emailSent: false, emailError: "RESEND_API_KEY not set" });
     if (!RESEND_FROM)    return json({ emailSent: false, emailError: "RESEND_FROM_EMAIL not set" });
@@ -190,8 +192,11 @@ export default async (request) => {
             <h2 style="margin:0 0 8px;font-size:1.3rem;color:#f5c518">You're invited backstage</h2>
             <p style="color:#aaa;margin:0 0 8px">Hi ${escHtml(name || email.split("@")[0])},</p>
             <p style="color:#aaa;margin:0 0 24px">You've been invited to join <strong style="color:#e8e8e8">${escHtml(eventTitle)}</strong> as a guest speaker.</p>
-            <a href="${eventUrl}" style="display:inline-block;background:#f5c518;color:#000;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:1rem">Go to Events →</a>
-            <p style="color:#666;font-size:.8rem;margin:28px 0 0">Log in and look for the <strong style="color:#aaa">Join Backstage</strong> button on the event.</p>
+            <a href="${backstageUrl}" style="display:inline-block;background:#f5c518;color:#000;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:1rem">Join Backstage →</a>
+            <p style="color:#666;font-size:.8rem;margin:28px 0 0">Or copy this link:<br>
+              <a href="${backstageUrl}" style="color:#f5c518;word-break:break-all">${backstageUrl}</a>
+            </p>
+            <p style="color:#555;font-size:.75rem;margin:16px 0 0">You'll be asked to log in if you aren't already — the link will take you straight to the backstage room.</p>
           </div>
         `
       })
