@@ -983,59 +983,64 @@
       if (_typingCh) { db.removeChannel(_typingCh); _typingCh = null; }
       _typingCh = db.channel(`event-typing-${evId}`, { config: { broadcast: { self: false } } })
         .on("broadcast", { event: "typing" }, ({ payload }) => {
-          if (!payload?.name) return;
+          const _tKey = payload?.email || (payload?.name ? "guest:" + payload.name : null);
+          if (!_tKey || payload?.name === guestName) return;
           if (payload.typing) {
-            _gTypingUsers[payload.name] = payload.name;
-            clearTimeout(_gTypingClearTimers[payload.name]);
-            _gTypingClearTimers[payload.name] = setTimeout(() => {
-              delete _gTypingUsers[payload.name];
-              _updateGuestTyping();
+            _gTypingUsers[_tKey] = payload.name || "Someone";
+            clearTimeout(_gTypingClearTimers[_tKey]);
+            _gTypingClearTimers[_tKey] = setTimeout(() => {
+              delete _gTypingUsers[_tKey];
+              delete _gTypingClearTimers[_tKey];
+              _updateGuestTypingMerged();
             }, 4000);
           } else {
-            clearTimeout(_gTypingClearTimers[payload.name]);
-            delete _gTypingUsers[payload.name];
+            clearTimeout(_gTypingClearTimers[_tKey]);
+            delete _gTypingUsers[_tKey];
+            delete _gTypingClearTimers[_tKey];
           }
-          _updateGuestTyping();
+          _updateGuestTypingMerged();
         })
         .on("broadcast", { event: "qa-typing" }, ({ payload }) => {
-          if (!payload?.name) return;
+          const _tKey = payload?.email || (payload?.name ? "guest:" + payload.name : null);
+          if (!_tKey || payload?.name === guestName) return;
           if (payload.typing) {
-            _gQATypingUsers[payload.name] = payload.name;
-            clearTimeout(_gQATypingClearTimers[payload.name]);
-            _gQATypingClearTimers[payload.name] = setTimeout(() => {
-              delete _gQATypingUsers[payload.name];
-              _updateGuestQATyping();
+            _gQATypingUsers[_tKey] = payload.name || "Someone";
+            clearTimeout(_gQATypingClearTimers[_tKey]);
+            _gQATypingClearTimers[_tKey] = setTimeout(() => {
+              delete _gQATypingUsers[_tKey];
+              delete _gQATypingClearTimers[_tKey];
+              _updateGuestTypingMerged();
             }, 4000);
           } else {
-            clearTimeout(_gQATypingClearTimers[payload.name]);
-            delete _gQATypingUsers[payload.name];
+            clearTimeout(_gQATypingClearTimers[_tKey]);
+            delete _gQATypingUsers[_tKey];
+            delete _gQATypingClearTimers[_tKey];
           }
-          _updateGuestQATyping();
+          _updateGuestTypingMerged();
         })
         .subscribe();
     }
 
-    function _updateGuestTyping() {
-      const el = document.getElementById("chat-typing");
-      if (!el) return;
-      const names = Object.keys(_gTypingUsers).map(n => n.split(" ")[0]).slice(0, 2);
-      const text  = names.length === 0 ? ""
+    function _updateGuestTypingMerged() {
+      // Merge chat + Q&A typers so indicator shows regardless of active tab
+      const all = {};
+      Object.values(_gTypingUsers).forEach(n => { all[n] = n; });
+      Object.values(_gQATypingUsers).forEach(n => { all[n] = n; });
+      const names = Object.values(all).map(n => n.split(" ")[0]).slice(0, 2);
+      const text = names.length === 0 ? ""
         : names.length === 1 ? `${names[0]} is typing…`
         : `${names.join(" & ")} are typing…`;
-      el.textContent = text;
-      el.style.display = text ? "block" : "none";
+      ["chat-typing", "qa-typing"].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.style.display = text ? "block" : "none";
+      });
     }
 
-    function _updateGuestQATyping() {
-      const el = document.getElementById("qa-typing");
-      if (!el) return;
-      const names = Object.keys(_gQATypingUsers).map(n => n.split(" ")[0]).slice(0, 2);
-      const text  = names.length === 0 ? ""
-        : names.length === 1 ? `${names[0]} is typing…`
-        : `${names.join(" & ")} are typing…`;
-      el.textContent = text;
-      el.style.display = text ? "block" : "none";
-    }
+    // Keep legacy aliases in case called elsewhere
+    function _updateGuestTyping()   { _updateGuestTypingMerged(); }
+    function _updateGuestQATyping() { _updateGuestTypingMerged(); }
 
     function _appendGuestChat(msg, skipBadge = false) {
       const el = document.getElementById("chat-messages");
