@@ -1846,9 +1846,11 @@ let _recordingPoller    = null;
 let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
 let _wmBgCache          = null; // cached watermark background CSS (built once)
 
-// Returns the background CSS value for the diagonal "The Practice Room" watermark.
-// Measures text via a real SVG element so metrics exactly match the data-URI render.
-function _getWatermarkBg() {
+// Builds and caches the diagonal "The Practice Room" watermark.
+// _wmBgCache.bg  = background shorthand value (url + repeat + base colour)
+// _wmBgCache.sz  = background-size value ("Wpx H2px")
+// Use _applyWatermark(el) to set both properties on a DOM element.
+function _buildWatermark() {
   if (_wmBgCache) return _wmBgCache;
   const _unit = "The Practice Room  •  ";
   const _ms   = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1861,7 +1863,7 @@ function _getWatermarkBg() {
   _mt.textContent = _unit;
   _ms.appendChild(_mt);
   document.body.appendChild(_ms);
-  const _U = Math.ceil(_mt.getComputedTextLength());
+  const _U = Math.ceil(_mt.getComputedTextLength()) || 200; // fallback if measurement fails
   document.body.removeChild(_ms);
   const _W    = Math.round(_U * Math.cos(22 * Math.PI / 180));
   const _H    = Math.round(_U * Math.sin(22 * Math.PI / 180));
@@ -1874,8 +1876,22 @@ function _getWatermarkBg() {
     `<text x='${-_U}' y='${_H * 2}' transform='rotate(-22 0 ${_H * 2})' ${_attr}>${_line}</text>` +
     `</svg>`;
   const _url  = `url("data:image/svg+xml,${encodeURIComponent(_svg)}")`;
-  _wmBgCache  = `#0f0e0c ${_url} repeat`;
-  return _wmBgCache + `;background-size:${_W}px ${_H * 2}px`;
+  _wmBgCache  = { bg: `#0f0e0c ${_url} repeat`, sz: `${_W}px ${_H * 2}px` };
+  return _wmBgCache;
+}
+
+// Apply the watermark to any element. Sets both background + background-size correctly.
+function _applyWatermark(el) {
+  if (!el) return;
+  const wm = _buildWatermark();
+  el.style.background     = wm.bg;
+  el.style.backgroundSize = wm.sz;
+}
+
+// For cssText contexts (backstage grid): returns a two-property fragment.
+function _getWatermarkBg() {
+  const wm = _buildWatermark();
+  return `${wm.bg};background-size:${wm.sz}`;
 }
 let _chatUnread         = 0;
 let _qaUnread           = 0;
@@ -2002,9 +2018,8 @@ function showView(name) {
     renderDetailView(currentEvent);
   }
   if (name === "stream") {
-    // Apply the same watermark background to the viewer video column
-    const _svc = document.getElementById("stream-video-col");
-    if (_svc) { _svc.style.background = _getWatermarkBg(); }
+    // Apply the watermark background to the viewer video column
+    _applyWatermark(document.getElementById("stream-video-col"));
   }
   window.scrollTo(0, 0);
 }
