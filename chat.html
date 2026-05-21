@@ -749,6 +749,29 @@
     .chat-send-btn:hover { opacity: .85; }
     .chat-send-btn:disabled { opacity: .4; cursor: default; }
     .chat-send-btn svg { width: 16px; height: 16px; }
+    /* ── @mention autocomplete dropdown ── */
+    .chat-mention-dropdown {
+      position: absolute; bottom: calc(100% + 4px); left: 0; right: 0;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; box-shadow: 0 -4px 20px rgba(0,0,0,.18);
+      max-height: 220px; overflow-y: auto; z-index: 200;
+    }
+    .chat-mention-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 8px 12px; cursor: pointer; font-size: .875rem; color: var(--text);
+    }
+    .chat-mention-item:hover, .chat-mention-item.cm-active { background: var(--surface-2); }
+    .chat-mention-item .cm-av {
+      width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+      background: var(--accent); color: #1a1410; font-size: .7rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    /* ── @mention chip in messages ── */
+    .chat-mention {
+      color: var(--accent); font-weight: 600;
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      border-radius: 4px; padding: 0 3px;
+    }
 
     /* ── Image loading shimmer ── */
     .chat-img-wrap {
@@ -993,11 +1016,12 @@
             </span>
             <button onclick="_chatCancelReply()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;padding:2px 4px" title="Cancel reply">×</button>
           </div>
-          <div class="chat-input-row">
+          <div class="chat-input-row" style="position:relative">
+            <div id="chat-mention-dropdown" class="chat-mention-dropdown" style="display:none"></div>
             <textarea class="chat-textarea" id="chat-input" rows="1"
               placeholder="Message…"
-              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,140)+'px';_broadcastTyping()"
-              onkeydown="if(event.key==='Enter'&&event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,140)+'px';_broadcastTyping();_onMentionInput(this)"
+              onkeydown="_onChatKeydown(event)"></textarea>
             <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" title="Send (Shift+Enter)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
@@ -3395,7 +3419,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     : "";
 
   const mediaHtml = _renderCommentMedia({ media: nonReplyMedia });
-  const contentHtml = msg.content ? `<div>${escHtml(msg.content).replace(/\n/g, "<br>")}</div>` : "";
+  const contentHtml = msg.content ? `<div>${_renderMentions(escHtml(msg.content)).replace(/\n/g, "<br>")}</div>` : "";
   const bubbleContent = replyQuoteHtml + contentHtml + (mediaHtml ? `<div class="chat-media">${mediaHtml}</div>` : "");
 
   const pollHtml = pollItem ? (() => {
@@ -3481,6 +3505,103 @@ function _scrollChatToBottom(instant) {
   if (!el) return;
   el.scrollTo({ top: el.scrollHeight, behavior: instant ? "auto" : "smooth" });
 }
+
+// ── @mention rendering ──────────────────────────────────────────────────────
+function _renderMentions(escapedHtml) {
+  const members = (_allMembers || []);
+  if (!members.length) return escapedHtml;
+  // Sort longest name first so "David A Bryson" matches before "David"
+  const names = members.map(m => m.name).filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  let html = escapedHtml;
+  for (const name of names) {
+    const en = escHtml(name);
+    const pattern = new RegExp('@' + en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    html = html.replace(pattern, `<span class="chat-mention">@${en}</span>`);
+  }
+  return html;
+}
+
+// ── @mention autocomplete ────────────────────────────────────────────────────
+let _mentionQuery = null;   // current @word being typed, or null
+let _mentionActive = -1;    // highlighted index in dropdown
+
+function _onChatKeydown(e) {
+  const drop = document.getElementById("chat-mention-dropdown");
+  if (drop && drop.style.display !== "none") {
+    const items = drop.querySelectorAll(".chat-mention-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      _mentionActive = Math.min(_mentionActive + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle("cm-active", i === _mentionActive));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      _mentionActive = Math.max(_mentionActive - 1, 0);
+      items.forEach((el, i) => el.classList.toggle("cm-active", i === _mentionActive));
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      const active = drop.querySelector(".cm-active") || items[0];
+      if (active) { e.preventDefault(); active.click(); return; }
+    }
+    if (e.key === "Escape") { _closeMentionDrop(); return; }
+  }
+  if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+}
+
+function _onMentionInput(ta) {
+  const pos = ta.selectionStart;
+  const before = ta.value.slice(0, pos);
+  // Find the @word immediately before cursor
+  const m = before.match(/@([\w\sÀ-ÿ\-\.']{0,30})$/);
+  if (!m) { _closeMentionDrop(); return; }
+  const query = m[1].toLowerCase();
+  _mentionQuery = m[0]; // full "@word" fragment
+  const members = (_allMembers || []).filter(mem =>
+    mem.name && mem.name.toLowerCase().includes(query)
+  ).slice(0, 8);
+  if (!members.length) { _closeMentionDrop(); return; }
+  _mentionActive = -1;
+  const drop = document.getElementById("chat-mention-dropdown");
+  drop.innerHTML = members.map(mem => {
+    const ini = (mem.name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+    const av = mem.avatar_url
+      ? `<img class="cm-av" src="${escHtml(mem.avatar_url)}" alt="">`
+      : `<div class="cm-av">${ini}</div>`;
+    return `<div class="chat-mention-item" onclick="_pickMention('${escHtml(mem.name)}')">${av}${escHtml(mem.name)}</div>`;
+  }).join("");
+  drop.style.display = "block";
+}
+
+function _pickMention(name) {
+  const ta = document.getElementById("chat-input");
+  const pos = ta.selectionStart;
+  const before = ta.value.slice(0, pos);
+  const after  = ta.value.slice(pos);
+  // Replace the @fragment with the full @Name + space
+  const replaced = before.replace(/@([\w\sÀ-ÿ\-\.']{0,30})$/, `@${name} `);
+  ta.value = replaced + after;
+  const newPos = replaced.length;
+  ta.setSelectionRange(newPos, newPos);
+  ta.focus();
+  _closeMentionDrop();
+}
+
+function _closeMentionDrop() {
+  const drop = document.getElementById("chat-mention-dropdown");
+  if (drop) drop.style.display = "none";
+  _mentionQuery = null;
+  _mentionActive = -1;
+}
+
+// Close dropdown when clicking outside
+document.addEventListener("click", e => {
+  if (!e.target.closest("#chat-mention-dropdown") && !e.target.closest("#chat-input")) {
+    _closeMentionDrop();
+  }
+});
 
 // Send a message
 async function sendChatMessage() {
