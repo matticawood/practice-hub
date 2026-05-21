@@ -495,21 +495,29 @@
       flex-wrap: wrap;
     }
     .cf-meta-counts { font-size: 0.8rem; color: var(--text-muted); }
-    .cf-cmt-toggle {
-      background: none;
-      border: 1.5px solid var(--border);
-      border-radius: 6px;
-      padding: 5px 14px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-family: inherit;
-      margin-left: auto;
-      transition: border-color .15s, color .15s;
+    .cf-footer-btn {
+      background: none; border: none; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 0.82rem; color: var(--text-muted);
+      font-family: inherit; padding: 4px 6px; border-radius: 6px;
+      transition: color .15s, background .15s;
     }
-    .cf-cmt-toggle:hover,
-    .cf-cmt-toggle.open { border-color: var(--accent); color: var(--accent); }
+    .cf-footer-btn:hover { color: var(--text); background: rgba(0,0,0,.05); }
+
+    /* Detail view */
+    #cf-detail { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
+    .cf-detail-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: 1.5px solid var(--border); border-radius: 8px;
+      padding: 6px 14px; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; font-family: inherit; color: var(--text-muted);
+      margin-bottom: 20px; transition: border-color .15s, color .15s;
+    }
+    .cf-detail-back:hover { border-color: var(--text-muted); color: var(--text); }
+    .cf-detail-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .cf-detail-card.type-youtube { border-left: 3.5px solid var(--yt-clr); }
+    .cf-detail-card.type-blog    { border-left: 3.5px solid var(--blog-clr); }
+    .cf-detail-card.type-post    { border-left: 3.5px solid var(--post-clr); }
 
     /* Shared reaction button style */
     .focus-footer-btn, .tc-react-btn {
@@ -685,6 +693,16 @@
       </div>
 
     </div>
+
+    <!-- ── Post detail view ─────────────────────────────────────────────────── -->
+    <div id="cf-detail" style="display:none">
+      <button class="cf-detail-back" onclick="closeCfDetail()">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <div id="cf-detail-card"></div>
+    </div>
+
   </main>
 
 <script>
@@ -887,7 +905,7 @@ function cfCardHTML(p) {
   const cmtBtnTxt = cmtOpen ? "Hide comments ↑" : `${SVG_CMT}Comments${p.commentCount ? ` (${p.commentCount})` : ""}`;
 
   return `
-    <div class="cf-card type-${_esc(p.type)}" id="cf-${p.id}">
+    <div class="cf-card type-${_esc(p.type)}" id="cf-${p.id}" onclick="showCfDetail('${p.id}')" style="cursor:pointer">
       <div class="cf-card-hdr type-${_esc(p.type)}">
         <span class="cf-type-badge">${_typeBadge(p.type)}</span>
         <span class="cf-card-date">${dateStr}</span>
@@ -897,17 +915,10 @@ function cfCardHTML(p) {
       <div class="cf-card-footer" onclick="event.stopPropagation()">
         ${reactBtn}
         ${likeAvatars}
-        <span class="cf-meta-counts cf-meta-${p.id}">${metaTxt}</span>
-        <button class="cf-cmt-toggle${cmtOpen ? " open" : ""}" id="cf-cmt-btn-${p.id}"
-                onclick="toggleComments('${p.id}')">${cmtBtnTxt}</button>
-      </div>
-      <div id="cf-cmt-wrap-${p.id}" style="${cmtOpen ? "" : "display:none"}">
-        <div class="cf-cmt-wrap">
-          <div class="tc-comments-section">
-            <div id="tc-comments-list-${p.id}"></div>
-            ${Comments.formHtml(p.id)}
-          </div>
-        </div>
+        <button class="cf-footer-btn" onclick="showCfDetail('${p.id}')">
+          ${SVG_CMT}${p.commentCount ? ` ${p.commentCount}` : ""}
+        </button>
+        <span class="cf-meta-counts cf-meta-${p.id}" style="margin-left:auto">${metaTxt}</span>
       </div>
     </div>`;
 }
@@ -965,6 +976,54 @@ function _typeBadge(type) {
 }
 
 /* ── Embed YouTube inline ────────────────────────────────────────────────── */
+/* ── Post detail view ────────────────────────────────────────────────────── */
+function showCfDetail(postId) {
+  const p = _posts.find(x => x.id === postId);
+  if (!p) return;
+
+  document.getElementById("cf-main").style.display = "none";
+  document.getElementById("cf-detail").style.display = "";
+  window.scrollTo(0, 0);
+
+  const rxData = Comments.getReactionState(p.id);
+  let totalRx = 0;
+  for (const d of Object.values(rxData)) totalRx += d.count;
+  const safeKey  = `cf_det_${p.id.replace(/-/g,'_')}`;
+  const reactBtn = Comments.reactBtnHtml(p.id, safeKey);
+
+  const d = new Date(p.published_at || p.created_at);
+  const day = d.getDate();
+  const suffix = day===1||day===21||day===31?"st":day===2||day===22?"nd":day===3||day===23?"rd":"th";
+  const dateStr = `${day}${suffix} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]} ${d.getFullYear()}`;
+
+  document.getElementById("cf-detail-card").innerHTML = `
+    <div class="cf-detail-card type-${_esc(p.type)}">
+      <div class="cf-card-hdr type-${_esc(p.type)}">
+        <span class="cf-type-badge">${_typeBadge(p.type)}</span>
+        <span class="cf-card-date">${dateStr}</span>
+      </div>
+      <div class="cf-card-body">${_cardBody(p)}</div>
+      <div class="cf-card-footer" onclick="event.stopPropagation()">
+        ${reactBtn}
+        <span class="cf-meta-counts cf-meta-${p.id}" style="margin-left:auto">${totalRx ? `${totalRx} reaction${totalRx!==1?"s":""}` : ""}</span>
+      </div>
+      <div class="cf-cmt-wrap">
+        <div class="tc-comments-section">
+          <div id="tc-comments-list-${p.id}"></div>
+          ${Comments.formHtml(p.id)}
+        </div>
+      </div>
+    </div>`;
+
+  Comments.load(p.id);
+}
+
+function closeCfDetail() {
+  document.getElementById("cf-detail").style.display = "none";
+  document.getElementById("cf-main").style.display = "";
+  window.scrollTo(0, 0);
+}
+
 function embedYt(postId) {
   _embeddedYt.add(postId);
   const p    = _posts.find(x => x.id === postId);
