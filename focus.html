@@ -264,16 +264,6 @@
     }
     .focus-footer-btn:hover, .tc-react-btn:hover { color: var(--text); background: rgba(0,0,0,.05); }
     .focus-footer-btn.liked, .tc-react-btn.liked { color: #e879a0; }
-    .focus-expand-btn {
-      margin-left: auto;
-      background: none; border: 1.5px solid var(--border);
-      border-radius: 6px; padding: 5px 14px;
-      font-size: 0.8rem; font-weight: 600;
-      color: var(--text-muted); cursor: pointer;
-      font-family: inherit;
-      transition: border-color .15s, color .15s;
-    }
-    .focus-expand-btn:hover { border-color: var(--accent); color: var(--accent); }
     .focus-meta-counts { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
 
     /* ── Expanded content ────────────────────────────────────────────────────── */
@@ -352,17 +342,6 @@
     }
     .focus-edit-btn:hover { background: rgba(245,197,24,.15); border-color: var(--accent); }
 
-    /* ── Comments wrap ───────────────────────────────────────────────────────── */
-    .focus-comments-wrap {
-      padding: 0 22px 22px;
-    }
-    .focus-comments-wrap .tc-comments-section {
-      background: var(--surface);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      margin-top: 0;
-    }
     .comments-hdr {
       padding: 12px 18px;
       border-bottom: 1px solid var(--border);
@@ -414,6 +393,26 @@
       border-bottom: 1.5px solid var(--border);
     }
 
+    /* ── Detail view ─────────────────────────────────────────────────────────── */
+    #focus-detail { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
+    .focus-detail-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: 1.5px solid var(--border); border-radius: 8px;
+      padding: 6px 14px; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; font-family: inherit; color: var(--text-muted);
+      margin-bottom: 20px; transition: border-color .15s, color .15s;
+    }
+    .focus-detail-back:hover { border-color: var(--text-muted); color: var(--text); }
+    .focus-detail-cmt-wrap {
+      margin-top: 12px;
+    }
+    .focus-detail-cmt-wrap .tc-comments-section {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
     @media (max-width: 600px) {
       main { padding: 0; }
       #focus-main { padding: 16px 0 80px; }
@@ -422,9 +421,13 @@
       .focus-card-header { border-left: none; }
       .focus-card-body { padding: 14px 16px 10px; }
       .focus-card-footer { padding: 8px 0 12px; margin: 0 16px; }
-      .focus-expanded { padding: 16px; }
-      .focus-comments-wrap { padding: 0 0 14px; }
       .tc-comments-section { border-radius: 0; border-left: none; border-right: none; }
+      /* Detail view — full width on mobile */
+      #focus-detail { padding: 0 0 60px; }
+      .focus-detail-back { margin: 16px 16px 14px; }
+      .focus-card { cursor: pointer; }
+      .focus-expanded { padding: 20px 16px; }
+      .focus-detail-cmt-wrap { margin-top: 8px; }
     }
 
     /* rich composer + lightbox CSS lives in shared-comments.js */
@@ -864,6 +867,14 @@
     </div>
   </div>
 </div>
+
+    <div id="focus-detail" style="display:none">
+      <button class="focus-detail-back" onclick="closeFocusDetail()">
+        ← Back
+      </button>
+      <div id="focus-detail-card"></div>
+      <div id="focus-detail-comments"></div>
+    </div>
   </main>
 
 <script>
@@ -877,7 +888,7 @@ let myName     = null;
 let myAvatarUrl = null;
 let isAdmin    = false;
 let _focuses   = [];      // loaded focus rows + metadata
-let _expanded  = new Set(); // focus IDs currently expanded
+let _currentDetailId = null;
 let _stepCount = 0;         // for unique step IDs in form
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -899,7 +910,7 @@ let _stepCount = 0;         // for unique step IDs in form
     auth: { email: myEmail, name: myName, avatarUrl: myAvatarUrl, isAdmin },
     comments:  { table: 'weekly_focus_comments',  parentField: 'focus_id' },
     reactions: { table: 'weekly_focus_likes',      parentField: 'focus_id' },
-    replyNotificationLinkFn: (parentId) => `/focus.html?focus=${parentId}`,
+    replyNotificationLinkFn: (parentId) => `/focus.html?post=${parentId}`,
     onReactionChange: (parentId) => {
       const rxData = Comments.getReactionState(parentId);
       let total = 0;
@@ -936,14 +947,15 @@ let _stepCount = 0;         // for unique step IDs in form
 
   document.getElementById("focus-main").style.display = "";
 
-  // Deep-link: ?focus=<id>
-  const deepId = new URLSearchParams(window.location.search).get("focus");
+  await loadFocuses();
 
-  await loadFocuses(deepId);
+  // Deep-link: ?post=<id>
+  const deepId = new URLSearchParams(window.location.search).get("post");
+  if (deepId) showFocusDetail(deepId);
 })();
 
 // ── Load focuses ──────────────────────────────────────────────────────────────
-async function loadFocuses(autoExpandId = null) {
+async function loadFocuses() {
   const list = document.getElementById("focus-list");
   list.innerHTML = '<div class="focus-empty"><div class="loading-spinner" style="margin:0 auto 12px"></div>Loading…</div>';
 
@@ -1003,17 +1015,7 @@ async function loadFocuses(autoExpandId = null) {
   });
   window._likerAvatarMap = likerAvatarMap;
 
-  // Auto-expand: current week + deep-link target
-  _expanded.clear();
-  if (_focuses.length) _expanded.add(_focuses[0].id); // always expand latest
-  if (autoExpandId)    _expanded.add(autoExpandId);
-
   renderFocusList();
-
-  if (autoExpandId) {
-    const el = document.getElementById(`focus-${autoExpandId}`);
-    if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -1029,17 +1031,11 @@ function renderFocusList() {
     archive.forEach(f => { html += focusCardHTML(f); });
   }
   list.innerHTML = html;
-
-  // Load comments for expanded focuses
-  _focuses.forEach(f => {
-    if (_expanded.has(f.id)) Comments.load(f.id);
-  });
 }
 
 function focusCardHTML(f) {
-  const dateStr    = formatFocusDate(f.published_at);
-  const isExpanded = _expanded.has(f.id);
-  const introText  = (f.intro || "").split("\n")[0];
+  const dateStr   = formatFocusDate(f.published_at);
+  const introText = (f.intro || "").split("\n")[0];
 
   const headerBadge = f.isCurrentWeek
     ? `<span class="focus-this-week-badge">This Week</span>`
@@ -1049,13 +1045,11 @@ function focusCardHTML(f) {
     : "";
 
   const rxData = Comments.getReactionState(f.id);
-  let totalRx = 0, myEmoji = null;
-  for (const [e, d] of Object.entries(rxData)) { totalRx += d.count; if (d.mine) myEmoji = e; }
-
-  const safeKey = `focus_${f.id.replace(/-/g,'_')}`;
+  let totalRx = 0;
+  for (const d of Object.values(rxData)) totalRx += d.count;
+  const safeKey  = `focus_${f.id.replace(/-/g,'_')}`;
   const reactBtn = Comments.reactBtnHtml(f.id, safeKey);
 
-  // Stacked liker avatars (up to 3)
   const likerAvatarMap = window._likerAvatarMap || {};
   const likerChips = (f.likers || []).map(email => {
     const info = likerAvatarMap[email];
@@ -1071,56 +1065,86 @@ function focusCardHTML(f) {
     : "";
 
   const metaCounts = [
-    totalRx       ? `${totalRx} reaction${totalRx !== 1 ? "s" : ""}` : "",
-    f.commentCount? `${f.commentCount} comment${f.commentCount !== 1 ? "s" : ""}` : "",
+    totalRx        ? `${totalRx} reaction${totalRx !== 1 ? "s" : ""}` : "",
+    f.commentCount ? `${f.commentCount} comment${f.commentCount !== 1 ? "s" : ""}` : "",
   ].filter(Boolean).join(" · ");
 
-  const collapsedBody = !isExpanded ? `
-    <div class="focus-card-body">
-      <div class="focus-headline">${escHtml(f.headline)}</div>
-      <div class="focus-intro-preview">${escHtml(introText)}</div>
-    </div>
-    <div class="focus-card-footer" onclick="event.stopPropagation()">
-      ${reactBtn}
-      ${likeAvatars}
-      <span class="focus-meta-counts like-count-${f.id}">${metaCounts}</span>
-      <button class="focus-expand-btn" style="margin-left:auto" onclick="toggleExpand('${f.id}')">Read focus ↓</button>
-    </div>` : "";
-
-  const expandedBody = isExpanded ? `
-    <div class="focus-expanded">
-      <div class="focus-expanded-headline">
-        <em>This week:</em> ${escHtml(f.headline)}
-      </div>
-      ${f.intro ? `<div class="focus-body-text">${escHtml(f.intro)}</div>` : ""}
-      ${renderSteps(f.steps)}
-      ${f.closing ? `<div class="focus-body-text">${escHtml(f.closing)}</div>` : ""}
-      <div class="focus-divider"></div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap" onclick="event.stopPropagation()">
-        ${reactBtn}
-        ${likeAvatars}
-        <span class="focus-meta-counts like-count-${f.id}">${metaCounts}</span>
-        <button class="focus-expand-btn" style="margin-left:auto" onclick="toggleExpand('${f.id}')">Close ↑</button>
-      </div>
-    </div>
-    <div class="focus-comments-wrap" id="comments-section-${f.id}">
-      <div class="tc-comments-section">
-        <div class="tc-comments-hdr" id="tc-comments-hdr-${f.id}">Comments</div>
-        <div id="tc-comments-list-${f.id}"></div>
-        ${Comments.formHtml(f.id)}
-      </div>
-    </div>` : "";
-
   return `
-    <div class="focus-card" id="focus-${f.id}">
+    <div class="focus-card" onclick="showFocusDetail('${f.id}')" style="cursor:pointer">
       <div class="focus-card-header">
         <span class="focus-card-label">🎯 Weekly Practice Focus</span>
         ${headerBadge}
         <span class="focus-card-date">${dateStr}</span>
         ${editBtn}
       </div>
-      ${collapsedBody}
-      ${expandedBody}
+      <div class="focus-card-body">
+        <div class="focus-headline">${escHtml(f.headline)}</div>
+        <div class="focus-intro-preview">${escHtml(introText)}</div>
+      </div>
+      <div class="focus-card-footer" onclick="event.stopPropagation()">
+        ${reactBtn}
+        ${likeAvatars}
+        <span class="focus-meta-counts like-count-${f.id}">${metaCounts}</span>
+      </div>
+    </div>`;
+}
+
+function focusDetailCardHTML(f) {
+  const dateStr = formatFocusDate(f.published_at);
+  const headerBadge = f.isCurrentWeek
+    ? `<span class="focus-this-week-badge">This Week</span>`
+    : "";
+  const editBtn = isAdmin
+    ? `<button class="focus-edit-btn" onclick="openEditForm('${f.id}')"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-1px;margin-right:3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>Edit</button>`
+    : "";
+
+  const rxData = Comments.getReactionState(f.id);
+  let totalRx = 0;
+  for (const d of Object.values(rxData)) totalRx += d.count;
+  const safeKey  = `focus_det_${f.id.replace(/-/g,'_')}`;
+  const reactBtn = Comments.reactBtnHtml(f.id, safeKey);
+
+  const likerAvatarMap = window._likerAvatarMap || {};
+  const likerChips = (f.likers || []).map(email => {
+    const info = likerAvatarMap[email];
+    const name = info?.name || email.split("@")[0];
+    const col  = avatarColour(email);
+    const inner = info?.url
+      ? `<img src="${escHtml(info.url)}" alt="${escHtml(name)}">`
+      : `<span style="background:${col.bg};color:${col.fg};width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</span>`;
+    return `<div class="tc-like-chip">${inner}</div>`;
+  }).join("");
+  const likeAvatars = totalRx > 0
+    ? `<span class="tc-like-avatars" onclick="Comments.showLikers('${f.id}',event)" style="cursor:pointer;margin-left:4px" title="See who reacted">${likerChips}${totalRx > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:6px">+${totalRx - 3}</span>` : ""}</span>`
+    : "";
+
+  const metaCounts = [
+    totalRx        ? `${totalRx} reaction${totalRx !== 1 ? "s" : ""}` : "",
+    f.commentCount ? `${f.commentCount} comment${f.commentCount !== 1 ? "s" : ""}` : "",
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <div class="focus-card">
+      <div class="focus-card-header">
+        <span class="focus-card-label">🎯 Weekly Practice Focus</span>
+        ${headerBadge}
+        <span class="focus-card-date">${dateStr}</span>
+        ${editBtn}
+      </div>
+      <div class="focus-expanded">
+        <div class="focus-expanded-headline">
+          <em>This week:</em> ${escHtml(f.headline)}
+        </div>
+        ${f.intro ? `<div class="focus-body-text">${escHtml(f.intro)}</div>` : ""}
+        ${renderSteps(f.steps)}
+        ${f.closing ? `<div class="focus-body-text">${escHtml(f.closing)}</div>` : ""}
+        <div class="focus-divider"></div>
+        <div class="focus-card-footer">
+          ${reactBtn}
+          ${likeAvatars}
+          <span class="focus-meta-counts like-count-${f.id} focus-det-meta-${f.id}">${metaCounts}</span>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1144,20 +1168,44 @@ function renderSteps(steps) {
     <ul class="focus-steps">${items}</ul>`;
 }
 
-function toggleExpand(focusId) {
-  if (_expanded.has(focusId)) {
-    _expanded.delete(focusId);
-  } else {
-    _expanded.add(focusId);
-  }
-  renderFocusList();
-  if (_expanded.has(focusId)) {
-    Comments.load(focusId);
-    setTimeout(() => {
-      document.getElementById(`focus-${focusId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
-  }
+function showFocusDetail(focusId) {
+  const f = _focuses.find(x => x.id === focusId);
+  if (!f) return;
+  _currentDetailId = focusId;
+  history.pushState({ post: focusId }, "", "?post=" + focusId);
+  document.getElementById("focus-main").style.display = "none";
+  document.getElementById("focus-detail").style.display = "";
+  document.getElementById("focus-detail-card").innerHTML = focusDetailCardHTML(f);
+  document.getElementById("focus-detail-comments").innerHTML = `
+    <div class="focus-detail-cmt-wrap">
+      <div class="tc-comments-section">
+        <div class="tc-comments-hdr" id="tc-comments-hdr-${focusId}">Comments</div>
+        <div id="tc-comments-list-${focusId}"></div>
+        ${Comments.formHtml(focusId)}
+      </div>
+    </div>`;
+  Comments.load(focusId);
+  window.scrollTo({ top: 0, behavior: "instant" });
 }
+
+function closeFocusDetail() {
+  _currentDetailId = null;
+  history.pushState({}, "", "/focus.html");
+  document.getElementById("focus-detail").style.display = "none";
+  document.getElementById("focus-main").style.display = "";
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+window.addEventListener("popstate", (e) => {
+  const postId = e.state?.post || new URLSearchParams(window.location.search).get("post");
+  if (postId) {
+    showFocusDetail(postId);
+  } else {
+    document.getElementById("focus-detail").style.display = "none";
+    document.getElementById("focus-main").style.display = "";
+    _currentDetailId = null;
+  }
+});
 
 // ── Admin form ────────────────────────────────────────────────────────────────
 let _editFocusId = null; // null = new post, uuid = editing existing
@@ -1313,7 +1361,7 @@ async function publishFocus() {
     }
     closeFocusForm();
     btn.disabled = false; btn.textContent = "Save Changes";
-    await loadFocuses(_editFocusId);
+    await loadFocuses();
 
   } else {
     // ── Create new ────────────────────────────────────────────────────────────
@@ -1339,7 +1387,7 @@ async function publishFocus() {
           type:     "weekly_focus",
           title:    "New Weekly Practice Focus",
           body:     headline.slice(0, 120),
-          link_url: `/focus.html?focus=${focus.id}`,
+          link_url: `/focus.html?post=${focus.id}`,
           metadata: {},
         }));
       if (notifications.length) await db.from("notifications").insert(notifications);
@@ -1347,7 +1395,7 @@ async function publishFocus() {
 
     closeFocusForm();
     btn.disabled = false; btn.textContent = "Publish & Notify Members";
-    await loadFocuses(focus.id);
+    await loadFocuses();
   }
 }
 
