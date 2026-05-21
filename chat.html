@@ -565,7 +565,7 @@
       gap: 2px;
       background: var(--bg);
       overscroll-behavior: none; /* no rubber-band on iOS */
-      contain: layout; /* reflows inside can't affect outside the scroll container */
+      overflow-anchor: none; /* prevent browser fighting scroll position on textarea resize */
     }
     .chat-msg-group {
       display: flex;
@@ -1020,7 +1020,7 @@
             <div id="chat-mention-dropdown" class="chat-mention-dropdown" style="display:none"></div>
             <textarea class="chat-textarea" id="chat-input" rows="1"
               placeholder="Message…"
-              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,140)+'px';_broadcastTyping();_onMentionInput(this)"
+              oninput="_onChatInput(this)"
               onkeydown="_onChatKeydown(event)"></textarea>
             <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" title="Send (Shift+Enter)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -2936,7 +2936,8 @@ async function _openConversation(chatIdOrEmail, otherName) {
   _updateChatHeaderBadge();
 
   _renderChatMessages();
-  _scrollChatToBottom(true);
+  // Double rAF: first frame commits layout, second frame has final scrollHeight
+  requestAnimationFrame(() => requestAnimationFrame(() => _scrollChatToBottom(true)));
 }
 
 // Fetch poll votes + reactions for a set of message IDs and merge into global maps.
@@ -3504,6 +3505,17 @@ function _scrollChatToBottom(instant) {
   const el = document.getElementById("chat-messages");
   if (!el) return;
   el.scrollTo({ top: el.scrollHeight, behavior: instant ? "auto" : "smooth" });
+}
+
+function _onChatInput(ta) {
+  // Preserve bottom-pinned scroll when textarea grows/shrinks
+  const msgs = document.getElementById("chat-messages");
+  const atBottom = msgs ? (msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 60) : false;
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
+  if (atBottom && msgs) msgs.scrollTop = msgs.scrollHeight;
+  _broadcastTyping();
+  _onMentionInput(ta);
 }
 
 // ── @mention rendering ──────────────────────────────────────────────────────
