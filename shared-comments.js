@@ -139,7 +139,7 @@
     s.textContent = `
 /* ── Comments ─────────────────────────────────────────────────────────────── */
 .tc-comments-section { background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius,10px); overflow:hidden; }
-.tc-comments-hdr { padding:12px 18px; border-bottom:1px solid var(--border); font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); }
+.tc-comments-hdr { padding:14px 20px; border-bottom:1px solid var(--border); font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); }
 .tc-comment-item { display:flex; gap:10px; padding:13px 20px; border-bottom:1px solid rgba(0,0,0,.04); }
 .tc-comment-item:last-of-type { border-bottom:none; }
 .tc-comment-body { flex:1; min-width:0; }
@@ -148,10 +148,10 @@
 .tc-comment-time { font-size:.7rem; color:var(--text-muted); }
 .tc-comment-text { font-size:.87rem; color:var(--text-muted); line-height:1.5; white-space:pre-wrap; word-break:break-word; }
 .tc-reply-to-name { color:var(--accent); font-weight:600; margin-right:4px; }
-.tc-comments-empty { padding:22px 18px; text-align:center; color:var(--text-muted); font-size:.82rem; }
+.tc-comments-empty { padding:24px 20px; text-align:center; color:var(--text-muted); font-size:.82rem; }
 .tc-comment-reply-btn { background:none; border:none; cursor:pointer; font-family:inherit; font-size:.72rem; font-weight:600; color:var(--text-muted); padding:3px 0; transition:color .15s; display:inline-block; margin-top:3px; }
 .tc-comment-reply-btn:hover { color:var(--accent); }
-.tc-comment-replies { margin-left:36px; margin-top:8px; display:flex; flex-direction:column; gap:2px; }
+.tc-comment-replies { margin-left:36px; margin-top:8px; display:flex; flex-direction:column; gap:4px; }
 /* Reply composer — uses same .tc-comment-item.is-reply structure as community.html */
 .tc-reply-composer { padding:10px 20px; border-top:1px solid var(--border); }
 .tc-reply-composer-inner { display:flex; gap:10px; align-items:flex-start; }
@@ -162,7 +162,7 @@
 .tc-irc-cancel { background:none; border:none; font-family:inherit; font-size:.8rem; cursor:pointer; color:var(--text-muted); padding:0; }
 .tc-irc-cancel:hover { color:var(--text); }
 /* Main comment form */
-.tc-comment-form { display:flex; gap:10px; align-items:flex-start; padding:12px 18px; border-top:1px solid var(--border); }
+.tc-comment-form { display:flex; gap:10px; align-items:flex-start; padding:14px 20px; border-top:1px solid var(--border); }
 .tc-comment-form-body { flex:1; min-width:0; }
 .tc-comment-form-top { display:flex; gap:8px; align-items:flex-end; }
 .tc-comment-form-top textarea { flex:1; background:transparent; border:1.5px solid var(--border); border-radius:20px; color:var(--text); font-size:.87rem; font-family:inherit; padding:9px 14px; resize:none; min-height:38px; max-height:120px; transition:border-color .15s; box-sizing:border-box; }
@@ -176,13 +176,13 @@
 .tc-comment-media video { max-width:100%; max-height:240px; border-radius:8px; margin-top:7px; }
 .tc-comment-media audio { width:100%; margin-top:7px; }
 /* Reaction picker */
-.tc-react-picker { position:absolute; bottom:calc(100% + 8px); left:0; background:var(--surface-2); border:1.5px solid var(--border); border-radius:32px; padding:6px 8px; display:flex; align-items:center; gap:2px; box-shadow:0 8px 24px rgba(0,0,0,.18); z-index:200; white-space:nowrap; }
+.tc-react-picker { position:absolute; bottom:calc(100% + 8px); left:0; background:var(--surface-2); border:1.5px solid var(--border); border-radius:32px; padding:6px 8px; display:flex; align-items:center; gap:2px; box-shadow:0 8px 24px rgba(0,0,0,.5); z-index:200; white-space:nowrap; }
 .tc-react-picker button { display:inline-flex; flex-direction:column; align-items:center; gap:1px; background:none; border:none; border-radius:10px; padding:5px 7px; cursor:pointer; font-size:1.3rem; line-height:1; transition:transform .12s, background .12s; }
 .tc-react-picker button:hover { transform:scale(1.35); background:rgba(0,0,0,.06); }
 .tc-react-picker button.picked { background:rgba(0,0,0,.07); }
 .tc-react-picker button .picker-count { font-size:.62rem; color:var(--text-muted); font-family:inherit; line-height:1; }
 /* Likers popover */
-.tc-likers-popover { position:fixed; z-index:9999; background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:10px 14px; box-shadow:0 8px 24px rgba(0,0,0,.18); min-width:140px; max-width:220px; }
+.tc-likers-popover { position:fixed; z-index:9999; background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:10px 14px; box-shadow:0 8px 24px rgba(0,0,0,.45); min-width:140px; max-width:220px; }
 .tc-likers-popover-title { font-size:.72rem; color:var(--text-muted); margin-bottom:8px; font-weight:600; letter-spacing:.03em; text-transform:uppercase; }
 .tc-likers-popover-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .tc-likers-popover-row:last-child { margin-bottom:0; }
@@ -190,7 +190,7 @@
 .tc-likers-popover-name { font-size:.82rem; color:var(--text); }
 /* Stacked liker avatar chips */
 .tc-like-avatars { display:inline-flex; align-items:center; }
-.tc-like-chip { width:20px; height:20px; border-radius:50%; border:1.5px solid var(--surface); margin-left:-6px; flex-shrink:0; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:.52rem; font-weight:800; }
+.tc-like-chip { width:22px; height:22px; border-radius:50%; border:2px solid var(--surface); margin-left:-6px; flex-shrink:0; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:.52rem; font-weight:800; }
 .tc-like-chip:first-child { margin-left:0; }
 .tc-like-chip img { width:100%; height:100%; object-fit:cover; border-radius:50%; display:block; }
 /* ── Inline composer toolbar ──────────────────────────────────────────────── */
