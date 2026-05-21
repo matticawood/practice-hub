@@ -653,6 +653,7 @@
         const d=_rxState[parentId][emoji];
         if(d){d.mine=false;d.count=Math.max(0,d.count-1);}
         _refreshReactBtn(parentId,safeKey);
+        _cfg?.onReactionChange?.(parentId);
         await _db().from(_rTable()).delete().eq(_rParent(),parentId).eq("email",auth.email);
         return;
       }
@@ -665,6 +666,7 @@
       _rxState[parentId][emoji].mine=true;
       _rxState[parentId][emoji].count++;
       _refreshReactBtn(parentId,safeKey);
+      _cfg?.onReactionChange?.(parentId);
       await _db().from(_rTable()).upsert({[_rParent()]:parentId,email:auth.email,emoji},{onConflict:`${_rParent()},email`});
     },
 
@@ -778,6 +780,7 @@
       if(ta){ta.value="";ta.style.height="";}
       _clearState(key);
       await Comments.load(parentId);
+      _cfg?.onCommentChange?.(parentId);
     },
 
     // Submit a reply
@@ -801,6 +804,7 @@
       }
       Comments.cancelReply(commentId);
       await Comments.load(parentId);
+      _cfg?.onCommentChange?.(parentId);
     },
 
     // Delete a comment
@@ -808,6 +812,7 @@
       if(!confirm("Delete this comment?"))return;
       await _db().from(_cTable()).delete().eq("id",commentId);
       await Comments.load(parentId);
+      _cfg?.onCommentChange?.(parentId);
     },
 
     // Show reply composer for a comment
