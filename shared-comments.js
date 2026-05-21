@@ -226,7 +226,7 @@
 @keyframes tc-stripe { 0%{background-position:0 0} 100%{background-position:40px 0} }
 @keyframes tc-mux-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 /* Poll display (comment media) — mirrors community.html exactly */
-.poll-card { background:transparent; border:none; border-radius:10px; padding:0; margin-top:10px; margin-bottom:8px; max-width:340px; }
+.poll-card { background:transparent; border:none; border-radius:10px; padding:0; margin-top:10px; margin-bottom:8px; }
 .poll-card-question { font-size:0.97rem; font-weight:700; color:var(--text,#1a1410); margin-bottom:12px; }
 .poll-option-vote-btn { width:100%; text-align:left; background:rgba(0,0,0,.04); border:1.5px solid var(--border,#e0d5c8); border-radius:8px; padding:9px 14px; font-size:0.87rem; color:var(--text,#1a1410); font-family:inherit; cursor:pointer; margin-bottom:8px; transition:border-color .15s, background .15s; display:block; box-sizing:border-box; }
 .poll-option-vote-btn:hover { border-color:var(--accent,#f5c518); background:rgba(245,197,24,.07); }
