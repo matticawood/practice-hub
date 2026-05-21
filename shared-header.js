@@ -391,7 +391,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <div class="sh-tab-wrap">
       <a class="sh-tab" data-page="studio" href="/events.html">Matt's Studio</a>
       <div class="sh-tab-drop">
-        <a href="#">Weekly Practice Focus</a>
+        <a href="/focus.html">Weekly Practice Focus</a>
         <a href="#">Content Feed</a>
         <a href="/events.html">Live Practice Clinics</a>
         <a href="/clinic-booking.html">One-to-One Clinics</a>
@@ -475,7 +475,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sh-group-items">
-        <a class="sh-item" data-page="studio" href="#">Weekly Practice Focus</a>
+        <a class="sh-item" data-page="studio" href="/focus.html">Weekly Practice Focus</a>
         <a class="sh-item" data-page="studio" href="#">Content Feed</a>
         <a class="sh-item" data-page="studio" href="/events.html">Live Practice Clinics</a>
         <a class="sh-item" data-page="studio" href="/clinic-booking.html">One-to-One Clinics</a>

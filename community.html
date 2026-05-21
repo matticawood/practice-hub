@@ -794,6 +794,73 @@
     }
     .post-card:hover { border-color: rgba(245,197,24,.35); }
 
+    /* ── Weekly Practice Focus feed card ────────────────────────────────────── */
+    .focus-feed-card {
+      padding: 0;
+      border-left: 3.5px solid var(--accent);
+      overflow: hidden;
+    }
+    .focus-feed-card:hover { border-color: var(--accent); }
+    .focus-feed-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      background: linear-gradient(90deg, rgba(245,197,24,.12) 0%, rgba(245,197,24,.03) 100%);
+      border-bottom: 1px solid rgba(245,197,24,.2);
+      flex-wrap: wrap;
+    }
+    .focus-feed-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      color: #b8900a;
+    }
+    .focus-feed-this-week {
+      font-size: 0.67rem;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      background: var(--accent);
+      color: #1a1410;
+      padding: 1px 7px;
+      border-radius: 999px;
+    }
+    .focus-feed-date {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+    .focus-feed-headline {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.4;
+      padding: 14px 18px 6px;
+    }
+    .focus-feed-teaser {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.55;
+      padding: 0 18px 12px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .focus-feed-footer {
+      padding: 8px 18px 14px;
+    }
+    .focus-feed-cta {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #b8900a;
+    }
+
     .post-type-badge {
       display: inline-block;
       font-size: 0.65rem; font-weight: 700;
@@ -2966,14 +3033,26 @@ function _updateSpaceBadges() {
 function _renderFilteredPosts() {
   const list = document.getElementById("posts-list");
   const filtered = _postFilter ? _posts.filter(p => p.type === _postFilter) : _posts;
-  if (!filtered.length) {
+
+  // When showing the unfiltered feed, weave focus cards into the post stream
+  // by date so they appear naturally where they belong chronologically.
+  let items = []; // { html, ts }
+  if (!_postFilter) {
+    filtered.forEach(p => items.push({ html: postCardHTML(p), ts: new Date(p.created_at).getTime() }));
+    _focusFeedItems.forEach(f => items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
+    items.sort((a, b) => b.ts - a.ts);
+  } else {
+    items = filtered.map(p => ({ html: postCardHTML(p), ts: 0 }));
+  }
+
+  if (!items.length) {
     const label = _postFilter ? `No ${_postFilter} posts yet.` : "No posts yet — be the first to share something! 👆";
     list.innerHTML = `<div class="posts-empty">${label}</div>`;
   } else {
-    const visible = filtered.slice(0, _postsPage * POSTS_PER_PAGE);
-    const hasMore = visible.length < filtered.length;
-    list.innerHTML = visible.map(p => postCardHTML(p)).join("") +
-      (hasMore ? `<button class="see-more-btn" style="margin-top:4px" onclick="loadMorePosts()">Load more <span style="opacity:.6">(${filtered.length - visible.length} remaining)</span></button>` : "");
+    const visible = items.slice(0, _postsPage * POSTS_PER_PAGE);
+    const hasMore = visible.length < items.length;
+    list.innerHTML = visible.map(i => i.html).join("") +
+      (hasMore ? `<button class="see-more-btn" style="margin-top:4px" onclick="loadMorePosts()">Load more <span style="opacity:.6">(${items.length - visible.length} remaining)</span></button>` : "");
     fixMuxAspectRatios();
   }
   _updateSpaceBadges();
@@ -4384,37 +4463,78 @@ async function submitPost() {
   await loadPosts();
 }
 
+// ── Weekly focus cards in the community feed ──────────────────────────────────
+let _focusFeedItems = []; // recent weekly_focus rows for the feed
+
+async function _loadFocusFeedItems() {
+  const { data } = await db.from("weekly_focus")
+    .select("id,headline,intro,published_at")
+    .order("published_at", { ascending: false })
+    .limit(4); // only show last 4 in feed to avoid clutter
+  _focusFeedItems = data || [];
+}
+
+function focusFeedCardHTML(f) {
+  const dateStr = (() => {
+    const d = new Date(f.published_at);
+    const day = d.getDate();
+    const suffix = day===1||day===21||day===31?"st":day===2||day===22?"nd":day===3||day===23?"rd":"th";
+    const month = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+    return `${day}${suffix} ${month} ${d.getFullYear()}`;
+  })();
+  const teaser = escHtml((f.intro || "").split("\n")[0].slice(0, 160));
+  const isLatest = f === _focusFeedItems[0];
+  return `
+    <div class="post-card focus-feed-card" onclick="window.location.href='/focus.html?focus=${f.id}'">
+      <div class="focus-feed-header">
+        <span class="focus-feed-label">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          Weekly Practice Focus
+        </span>
+        ${isLatest ? `<span class="focus-feed-this-week">This Week</span>` : ""}
+        <span class="focus-feed-date">${dateStr}</span>
+      </div>
+      <div class="focus-feed-headline">${escHtml(f.headline)}</div>
+      ${teaser ? `<div class="focus-feed-teaser">${teaser}</div>` : ""}
+      <div class="focus-feed-footer">
+        <span class="focus-feed-cta">Read this week's focus →</span>
+      </div>
+    </div>`;
+}
+
 // ── Posts ─────────────────────────────────────────────────────────────────────
 async function loadPosts() {
   _postsPage = 1; // reset pagination on fresh load
   const list = document.getElementById("posts-list");
   list.innerHTML = '<div class="posts-empty"><div class="loading-spinner" style="margin:0 auto 12px"></div>Loading posts…</div>';
 
-  const { data: posts, error } = await db
-    .from("community_posts")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(100);
+  const [postsResult] = await Promise.all([
+    db.from("community_posts").select("*").order("created_at", { ascending: false }).limit(100),
+    _loadFocusFeedItems(),
+  ]);
+  const { data: posts, error } = postsResult;
 
   if (error || !posts) {
     list.innerHTML = '<div class="posts-empty">Could not load posts.</div>';
     return;
   }
 
-  if (!posts.length) {
+  if (!posts.length && !_focusFeedItems.length) {
     list.innerHTML = `<div class="posts-empty">No posts yet — be the first to share something! 👆</div>`;
     return;
   }
 
   // Fetch like counts, comment counts, poll info, and post reactions in parallel
-  const ids = posts.map(p => p.id);
-  const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }, { data: postReactions }] = await Promise.all([
-    db.from("community_post_likes").select("post_id,email").in("post_id", ids),
-    db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", ids),
-    db.from("community_post_comments").select("post_id").in("post_id", ids),
-    db.from("community_post_polls").select("post_id,question,id").in("post_id", ids),
-    db.from("activity_reactions").select("item_id,email,emoji").eq("event_type","post").in("item_id", ids)
-  ]);
+  const ids = (posts || []).map(p => p.id);
+  const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }, { data: postReactions }] = ids.length
+    ? await Promise.all([
+        db.from("community_post_likes").select("post_id,email").in("post_id", ids),
+        db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", ids),
+        db.from("community_post_comments").select("post_id").in("post_id", ids),
+        db.from("community_post_polls").select("post_id,question,id").in("post_id", ids),
+        db.from("activity_reactions").select("item_id,email,emoji").eq("event_type","post").in("item_id", ids)
+      ])
+    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   // Build _postRxMap[postId][emoji] = { count, mine }
   _postRxMap = {};

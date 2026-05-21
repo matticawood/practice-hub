@@ -5633,7 +5633,7 @@ async function _joinRoomImpl(eventId) {
     // 9a. Live-streaming status events — gives the host real RTMP feedback
     .on("live-streaming-started", () => {
       clearTimeout(window._rtmpWatchdog);
-      console.log("[Mux] RTMP streaming started ✓");
+      console.log("[Mux] RTMP streaming started ✓ — Mux is now recording");
       const ind = document.getElementById("backstage-stream-indicator");
       if (ind) {
         ind.style.display      = "inline-flex";
@@ -5654,6 +5654,22 @@ async function _joinRoomImpl(eventId) {
         adminLabel.classList.add("live");
       }
       if (leaveBtn) leaveBtn.textContent = "Leave Backstage";
+
+      // Mark event live in DB now that RTMP is actually flowing to Mux.
+      // Doing this here (not in goLiveFromBackstage) means viewers only discover
+      // the stream is live after Mux has started recording — no missing first 20 s.
+      if (currentEvent && currentEvent.status !== "live") {
+        currentEvent = { ...currentEvent, status: "live" };
+        db.from("live_events").update({ status: "live" }).eq("id", currentEvent.id)
+          .then(({ error }) => { if (error) console.error("[Mux] Failed to set status=live:", error); });
+        _updateBackstageGoLiveBtn();
+      }
+
+      // Re-apply the current spotlight/hidden layout in case the host changed it
+      // while the RTMP connection was still establishing (updateLiveStreaming would
+      // have failed silently during that window).
+      _bsUpdateStreamLayout();
+
       // Record t=0 for VOD Q&A timestamp sync — only on the first start,
       // not on rejoins where stream_started_at is already set.
       if (currentEvent && !currentEvent.stream_started_at) {
@@ -6147,8 +6163,11 @@ async function goLiveFromBackstage() {
     // 2. Start RTMP live streaming from within the Daily room
     if (!window._backstageCall) throw new Error("Not in a Daily room — rejoin first.");
     const rtmpUrl = `rtmps://global-live.mux.com:443/app/${streamKey}`;
+    // Use the current spotlight/hidden state for the initial stream layout.
+    // _bsRtmpLayout() mirrors _bsUpdateStreamLayout's logic so the recording
+    // starts with the correct compositor view.
     console.log("[Mux] Calling startLiveStreaming… key length:", streamKey.length, "| playback:", currentEvent.mux_live_playback_id || "none");
-    await window._backstageCall.startLiveStreaming({ rtmpUrl, layout: { preset: "default" } });
+    await window._backstageCall.startLiveStreaming({ rtmpUrl, layout: _bsRtmpLayout() });
     console.log("[Mux] startLiveStreaming() accepted by Daily — waiting for live-streaming-started event…");
 
     // Watchdog: if live-streaming-started doesn't fire within 20s, RTMP likely isn't flowing
@@ -6164,14 +6183,12 @@ async function goLiveFromBackstage() {
       }
     }, 20000);
 
-    // 3. Update DB status to live
-    await db.from("live_events").update({ status: "live" }).eq("id", currentEvent.id);
-    currentEvent = { ...currentEvent, status: "live" };
+    // 3. DB + button update intentionally deferred to the live-streaming-started event:
+    //    RTMP takes ~15-20 s to reach Mux. Marking the event live only after the stream
+    //    is confirmed flowing means viewers join after Mux has started recording —
+    //    so no content is missing from the start of the VOD.
 
-    // 4. Update button UI
-    _updateBackstageGoLiveBtn();
-
-    // Show live indicator (will be styled green once live-streaming-started fires)
+    // Show connecting indicator (turns green in live-streaming-started)
     const liveIndicator = document.getElementById("backstage-stream-indicator");
     if (liveIndicator) {
       liveIndicator.style.display = "inline-flex";
@@ -6850,15 +6867,9 @@ function _bsSetSpotlight(sessionId) {
   _renderBsGrid(window._backstageCall);
   // Backstage guests: bs-spotlight keeps their grid in sync
   try { window._backstageCall?.sendAppMessage({ type: "bs-spotlight", session_id: _bsSpotlightId }, "*"); } catch(e) {}
-  // Viewers: layout-change triggers syncGrid with hidden_ids
-  _bsBroadcastLayout();
-  // RTMP stream
-  if (window._backstageCall) {
-    const layout = _bsSpotlightId
-      ? { preset: "single-participant", session_id: _bsSpotlightId }
-      : { preset: "default" };
-    window._backstageCall.updateLiveStreaming({ layout }).catch(e => console.warn("updateLiveStreaming spotlight:", e));
-  }
+  // RTMP stream — uses the same path as hide/show so spotlight is treated
+  // as "everyone else is hidden" in the compositor (see _bsRtmpLayout)
+  _bsUpdateStreamLayout();
 }
 
 /** Hide a participant tile — synced to all backstage participants. */
@@ -6890,29 +6901,51 @@ function _bsBroadcastLayout() {
   } catch(e) { console.warn("sendAppMessage layout-change:", e); }
 }
 
+/**
+ * Compute the correct Daily RTMP compositor layout given the current
+ * spotlight + hidden state.  background_color sets the gap/fill colour.
+ *
+ * Key insight: Daily's RTMP compositor does NOT support pinning a specific
+ * participant via session_id in single-participant mode — it always shows the
+ * active speaker.  To spotlight someone reliably we treat all non-spotlighted
+ * participants as "hidden" from the compositor, leaving only 1 visible so
+ * Daily naturally shows them full-screen.
+ */
+function _bsRtmpLayout() {
+  const call = window._backstageCall;
+  const BG   = "#0f0e0c";
+  if (!call) return { preset: "default", background_color: BG };
+
+  const allParts = Object.values(call.participants() || {});
+
+  if (_bsSpotlightId) {
+    // Spotlight: show ONLY the spotlighted participant — hide everyone else
+    // from the compositor so Daily's active-speaker logic picks them by default.
+    const spotPart = allParts.find(p => p.session_id === _bsSpotlightId);
+    if (spotPart) {
+      return { preset: "single-participant", session_id: _bsSpotlightId, background_color: BG };
+    }
+  }
+
+  if (_bsHiddenIds.size > 0) {
+    const visibleIds = allParts
+      .filter(p => !_bsHiddenIds.has(p.session_id))
+      .map(p => p.session_id);
+    if (visibleIds.length === 1) {
+      return { preset: "single-participant", session_id: visibleIds[0], background_color: BG };
+    }
+  }
+
+  return { preset: "default", background_color: BG };
+}
+
 /** Push current spotlight/hidden state to the RTMP stream layout. */
 function _bsUpdateStreamLayout() {
   const call = window._backstageCall;
   if (!call) return;
-  // Also tell viewers which participants are hidden
   _bsBroadcastLayout();
-  let layout;
-  if (_bsSpotlightId) {
-    layout = { preset: "single-participant", session_id: _bsSpotlightId };
-  } else if (_bsHiddenIds.size > 0) {
-    // Daily layout API doesn't support arbitrary participant filtering;
-    // fall back to single-participant if only 1 visible, otherwise default
-    const allParts   = Object.values(call.participants() || {});
-    const visibleIds = allParts
-      .filter(p => !_bsHiddenIds.has(p.session_id))
-      .map(p => p.session_id);
-    layout = visibleIds.length === 1
-      ? { preset: "single-participant", session_id: visibleIds[0] }
-      : { preset: "default" };
-  } else {
-    layout = { preset: "default" };
-  }
-  call.updateLiveStreaming({ layout }).catch(e => console.warn("updateLiveStreaming hide/show:", e));
+  const layout = _bsRtmpLayout();
+  call.updateLiveStreaming({ layout }).then(() => console.log("[Mux] Stream layout updated:", JSON.stringify(layout))).catch(e => console.error("[Mux] updateLiveStreaming FAILED:", e?.message || e));
 }
 
 
