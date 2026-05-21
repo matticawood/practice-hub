@@ -205,6 +205,28 @@
     .like-avatar-chip:first-child { margin-left: 0; }
     .like-avatar-chip img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
 
+    /* ── Emoji reaction picker ──────────────────────────────────────────────── */
+    .focus-react-picker {
+      position: absolute; bottom: calc(100% + 8px); left: 0;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 32px; padding: 6px 8px;
+      display: flex; align-items: center; gap: 2px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      z-index: 200; white-space: nowrap;
+    }
+    .focus-react-picker button {
+      display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
+      background: none; border: none; border-radius: 10px;
+      padding: 5px 7px; cursor: pointer; font-size: 1.3rem; line-height: 1;
+      transition: transform .12s, background .12s;
+      position: relative;
+    }
+    .focus-react-picker button:hover { transform: scale(1.35); background: rgba(0,0,0,.06); }
+    .focus-react-picker button.picked { background: rgba(0,0,0,.07); }
+    .focus-react-picker button .picker-count {
+      font-size: 0.62rem; color: var(--text-muted); font-family: inherit; line-height: 1;
+    }
+
     /* ── Focus card ─────────────────────────────────────────────────────────── */
     .focus-card {
       background: var(--surface);
@@ -433,7 +455,7 @@
       padding: 10px 18px; border-top: 1px solid var(--border);
     }
     .inline-reply-composer textarea {
-      flex: 1; min-width: 0;
+      width: 100%; box-sizing: border-box;
       background: transparent; border: 1.5px solid var(--accent);
       border-radius: 16px; color: var(--text); font-size: 0.85rem;
       font-family: inherit; padding: 7px 12px; resize: none;
@@ -995,6 +1017,11 @@ let _focuses   = [];      // loaded focus rows + metadata
 let _expanded  = new Set(); // focus IDs currently expanded
 let _stepCount = 0;         // for unique step IDs in form
 
+const FOCUS_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
+// _focusRxMap[focusId][emoji] = { count, mine }
+let _focusRxMap = {};
+let _openFocusPicker = null;
+
 // ── Inline composer state ─────────────────────────────────────────────────────
 const _inlineMedia       = {};
 const _inlinePollOpen    = {};
@@ -1033,6 +1060,15 @@ let _commImgCurrentIdx   = 0;
 
   document.getElementById("focus-main").style.display = "";
 
+  // Close reaction picker when clicking outside
+  document.addEventListener("click", () => {
+    if (_openFocusPicker) {
+      const prev = document.getElementById(`picker-${_openFocusPicker}`);
+      if (prev) prev.style.display = "none";
+      _openFocusPicker = null;
+    }
+  });
+
   // Deep-link: ?focus=<id>
   const deepId = new URLSearchParams(window.location.search).get("focus");
 
@@ -1059,19 +1095,24 @@ async function loadFocuses(autoExpandId = null) {
   }
 
   const ids = rows.map(r => r.id);
-  const [{ data: allLikes }, { data: myLikes }, { data: cmtCounts }] = await Promise.all([
-    db.from("weekly_focus_likes").select("focus_id,email").in("focus_id", ids),
-    db.from("weekly_focus_likes").select("focus_id").eq("email", myEmail).in("focus_id", ids),
+  const [{ data: allLikes }, { data: cmtCounts }] = await Promise.all([
+    db.from("weekly_focus_likes").select("focus_id,email,emoji").in("focus_id", ids),
     db.from("weekly_focus_comments").select("focus_id").in("focus_id", ids),
   ]);
 
-  const likeCountMap = {}, myLikeSet = new Set(), cmtCountMap = {}, likersMap = {};
+  // Build _focusRxMap[focusId][emoji] = { count, mine }
+  _focusRxMap = {};
+  const cmtCountMap = {}, likersMap = {};
   (allLikes || []).forEach(l => {
-    likeCountMap[l.focus_id] = (likeCountMap[l.focus_id] || 0) + 1;
+    if (!_focusRxMap[l.focus_id]) _focusRxMap[l.focus_id] = {};
+    const em = l.emoji || "❤️";
+    if (!_focusRxMap[l.focus_id][em]) _focusRxMap[l.focus_id][em] = { count: 0, mine: false };
+    _focusRxMap[l.focus_id][em].count++;
+    if (l.email === myEmail) _focusRxMap[l.focus_id][em].mine = true;
+
     if (!likersMap[l.focus_id]) likersMap[l.focus_id] = [];
     if (likersMap[l.focus_id].length < 3) likersMap[l.focus_id].push(l.email);
   });
-  (myLikes  || []).forEach(l => myLikeSet.add(l.focus_id));
   (cmtCounts|| []).forEach(c => cmtCountMap[c.focus_id] = (cmtCountMap[c.focus_id] || 0) + 1);
 
   // Fetch avatar URLs for likers (up to 3 per focus)
@@ -1083,14 +1124,20 @@ async function loadFocuses(autoExpandId = null) {
     (likerRows || []).forEach(r => { likerAvatarMap[r.email] = { url: r.avatar_url, name: r.name }; });
   }
 
-  _focuses = rows.map((r, i) => ({
-    ...r,
-    likeCount:    likeCountMap[r.id] || 0,
-    commentCount: cmtCountMap[r.id]  || 0,
-    iLiked:       myLikeSet.has(r.id),
-    likers:       likersMap[r.id]    || [],
-    isCurrentWeek: i === 0,
-  }));
+  _focuses = rows.map((r, i) => {
+    const rxData = _focusRxMap[r.id] || {};
+    let totalRx = 0, myEmoji = null;
+    for (const [e, d] of Object.entries(rxData)) { totalRx += d.count; if (d.mine) myEmoji = e; }
+    return {
+      ...r,
+      likeCount:    totalRx,
+      commentCount: cmtCountMap[r.id]  || 0,
+      iLiked:       !!myEmoji,
+      myEmoji,
+      likers:       likersMap[r.id]    || [],
+      isCurrentWeek: i === 0,
+    };
+  });
   window._likerAvatarMap = likerAvatarMap;
 
   // Auto-expand: current week + deep-link target
@@ -1138,10 +1185,25 @@ function focusCardHTML(f) {
     ? `<button class="focus-edit-btn" onclick="event.stopPropagation();openEditForm('${f.id}')">✏️ Edit</button>`
     : "";
 
-  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15"
-    ${f.iLiked ? 'fill="currentColor" stroke="currentColor" stroke-width="1.5"' : 'fill="none" stroke="currentColor" stroke-width="2"'}
-    stroke-linecap="round" stroke-linejoin="round">
-    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const rxData  = _focusRxMap[f.id] || {};
+  let totalRx = 0, myEmoji = null;
+  for (const [e, d] of Object.entries(rxData)) { totalRx += d.count; if (d.mine) myEmoji = e; }
+  const heartFill = myEmoji ? 'fill="currentColor" stroke="currentColor" stroke-width="1.5"' : 'fill="none" stroke="currentColor" stroke-width="2"';
+  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+  const countLabel  = totalRx > 0 ? ` ${totalRx}` : "";
+
+  const safeKey = `focus_${f.id.replace(/-/g,'_')}`;
+  const pickerBtns = FOCUS_EMOJIS.map(e => {
+    const d = rxData[e] || { count: 0, mine: false };
+    return `<button class="${d.mine ? "picked" : ""}" onclick="pickFocusReaction(event,'${safeKey}','${f.id}','${e}')">${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+  }).join("");
+
+  const reactBtn = `
+    <div style="position:relative;display:inline-flex">
+      <button class="focus-footer-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}" onclick="toggleFocusReactPicker('${safeKey}',event)">${heartSvg}${emojiLabel}${countLabel}</button>
+      <div class="focus-react-picker" id="picker-${safeKey}" style="display:none">${pickerBtns}</div>
+    </div>`;
 
   // Stacked liker avatars (up to 3)
   const likerAvatarMap = window._likerAvatarMap || {};
@@ -1154,24 +1216,24 @@ function focusCardHTML(f) {
       : `<span style="background:${col.bg};color:${col.fg};width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</span>`;
     return `<div class="like-avatar-chip">${inner}</div>`;
   }).join("");
-  const likeAvatars = f.likeCount > 0
-    ? `<span class="like-avatars" onclick="event.stopPropagation();showFocusLikers('${f.id}',event)" style="cursor:pointer;margin-left:4px" title="See who liked">${likerChips}${f.likeCount > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:6px">+${f.likeCount - 3}</span>` : ""}</span>`
+  const likeAvatars = totalRx > 0
+    ? `<span class="like-avatars" onclick="event.stopPropagation();showFocusLikers('${f.id}',event)" style="cursor:pointer;margin-left:4px" title="See who reacted">${likerChips}${totalRx > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:6px">+${totalRx - 3}</span>` : ""}</span>`
     : "";
-  const likeLabel = f.iLiked ? "Liked" : "Like";
+
+  const metaCounts = [
+    totalRx       ? `${totalRx} reaction${totalRx !== 1 ? "s" : ""}` : "",
+    f.commentCount? `${f.commentCount} comment${f.commentCount !== 1 ? "s" : ""}` : "",
+  ].filter(Boolean).join(" · ");
 
   const collapsedBody = !isExpanded ? `
     <div class="focus-card-body">
       <div class="focus-headline">${escHtml(f.headline)}</div>
       <div class="focus-intro-preview">${escHtml(introText)}</div>
     </div>
-    <div class="focus-card-footer">
-      <button class="focus-footer-btn${f.iLiked ? " liked" : ""}" onclick="toggleLike('${f.id}')">
-        ${heartSvg} ${likeLabel}
-      </button>
+    <div class="focus-card-footer" onclick="event.stopPropagation()">
+      ${reactBtn}
       ${likeAvatars}
-      <span class="focus-meta-counts">
-        ${[f.commentCount ? `${f.commentCount} comment${f.commentCount!==1?"s":""}` : ""].filter(Boolean).join(" · ")}
-      </span>
+      <span class="focus-meta-counts like-count-${f.id}">${metaCounts}</span>
       <button class="focus-expand-btn" onclick="toggleExpand('${f.id}')">Read focus ↓</button>
     </div>` : "";
 
@@ -1184,12 +1246,11 @@ function focusCardHTML(f) {
       ${renderSteps(f.steps)}
       ${f.closing ? `<div class="focus-body-text">${escHtml(f.closing)}</div>` : ""}
       <div class="focus-divider"></div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <button class="focus-footer-btn${f.iLiked ? " liked" : ""}" onclick="toggleLike('${f.id}')">
-          ${heartSvg} ${likeLabel}
-        </button>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap" onclick="event.stopPropagation()">
+        ${reactBtn}
         ${likeAvatars}
-        <button class="focus-expand-btn" style="margin-left:auto" onclick="toggleExpand('${f.id}')">Close ↑</button>
+        <span class="focus-meta-counts like-count-${f.id}" style="margin-left:auto">${metaCounts}</span>
+        <button class="focus-expand-btn" onclick="toggleExpand('${f.id}')">Close ↑</button>
       </div>
     </div>
     <div class="focus-comments-wrap" id="comments-section-${f.id}">
@@ -1260,27 +1321,112 @@ function toggleExpand(focusId) {
   }
 }
 
-// ── Likes ─────────────────────────────────────────────────────────────────────
-async function toggleLike(focusId) {
-  const f = _focuses.find(x => x.id === focusId);
-  if (!f) return;
-  if (f.iLiked) {
-    await db.from("weekly_focus_likes").delete().eq("focus_id", focusId).eq("email", myEmail);
-    f.likeCount = Math.max(0, f.likeCount - 1);
-    f.iLiked = false;
-    f.likers = (f.likers || []).filter(e => e !== myEmail);
-  } else {
-    await db.from("weekly_focus_likes").insert({ focus_id: focusId, email: myEmail });
-    f.likeCount++;
-    f.iLiked = true;
-    if (!f.likers) f.likers = [];
-    if (f.likers.length < 3) f.likers.unshift(myEmail);
-    // Add current user to avatar map
-    const map = window._likerAvatarMap || {};
-    if (!map[myEmail]) map[myEmail] = { url: myAvatarUrl, name: myName };
-    window._likerAvatarMap = map;
+// ── Emoji Reactions ───────────────────────────────────────────────────────────
+function toggleFocusReactPicker(safeKey, event) {
+  if (event) event.stopPropagation();
+  const picker = document.getElementById(`picker-${safeKey}`);
+  if (!picker) return;
+  if (_openFocusPicker && _openFocusPicker !== safeKey) {
+    const prev = document.getElementById(`picker-${_openFocusPicker}`);
+    if (prev) prev.style.display = "none";
   }
-  renderFocusList();
+  const isOpen = picker.style.display !== "none";
+  picker.style.display = isOpen ? "none" : "";
+  _openFocusPicker = isOpen ? null : safeKey;
+}
+
+async function pickFocusReaction(event, safeKey, focusId, emoji) {
+  event.stopPropagation();
+  const picker = document.getElementById(`picker-${safeKey}`);
+  if (!_focusRxMap[focusId]) _focusRxMap[focusId] = {};
+
+  const wasPicked = event.currentTarget.classList.contains("picked");
+  const existingEmoji = Object.keys(_focusRxMap[focusId]).find(e => _focusRxMap[focusId][e]?.mine);
+
+  if (picker) picker.style.display = "none";
+  _openFocusPicker = null;
+
+  if (wasPicked) {
+    // un-react
+    const d = _focusRxMap[focusId][emoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    _refreshFocusLikeBtn(focusId);
+    await db.from("weekly_focus_likes").delete()
+      .eq("focus_id", focusId).eq("email", myEmail);
+    return;
+  }
+
+  // Remove old reaction if switching emojis
+  if (existingEmoji) {
+    const d = _focusRxMap[focusId][existingEmoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    await db.from("weekly_focus_likes").delete()
+      .eq("focus_id", focusId).eq("email", myEmail);
+  }
+
+  // Add new reaction
+  if (!_focusRxMap[focusId][emoji]) _focusRxMap[focusId][emoji] = { count: 0, mine: false };
+  _focusRxMap[focusId][emoji].mine = true;
+  _focusRxMap[focusId][emoji].count++;
+
+  // Update likers map
+  const map = window._likerAvatarMap || {};
+  if (!map[myEmail]) map[myEmail] = { url: myAvatarUrl, name: myName };
+  window._likerAvatarMap = map;
+
+  // Update focus likers list
+  const f = _focuses.find(x => x.id === focusId);
+  if (f) {
+    if (!f.likers) f.likers = [];
+    if (!f.likers.includes(myEmail) && f.likers.length < 3) f.likers.unshift(myEmail);
+  }
+
+  _refreshFocusLikeBtn(focusId);
+
+  await db.from("weekly_focus_likes")
+    .upsert({ focus_id: focusId, email: myEmail, emoji }, { onConflict: "focus_id,email" });
+}
+
+function _refreshFocusLikeBtn(focusId) {
+  const rxData = _focusRxMap[focusId] || {};
+  let totalRx = 0, myEmoji = null;
+  for (const [e, d] of Object.entries(rxData)) { totalRx += d.count; if (d.mine) myEmoji = e; }
+
+  const heartFill = myEmoji ? 'fill="currentColor" stroke="currentColor" stroke-width="1.5"' : 'fill="none" stroke="currentColor" stroke-width="2"';
+  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+  const countLabel  = totalRx > 0 ? ` ${totalRx}` : "";
+
+  const safeKey = `focus_${focusId.replace(/-/g,'_')}`;
+  const btn = document.getElementById(`like-btn-${safeKey}`);
+  if (btn) {
+    btn.classList.toggle("liked", !!myEmoji);
+    btn.innerHTML = heartSvg + emojiLabel + countLabel;
+  }
+
+  // Refresh picker counts
+  const pickerEl = document.getElementById(`picker-${safeKey}`);
+  if (pickerEl) {
+    const btns = pickerEl.querySelectorAll("button");
+    FOCUS_EMOJIS.forEach((e, i) => {
+      const d = rxData[e] || { count: 0, mine: false };
+      if (btns[i]) {
+        btns[i].className = d.mine ? "picked" : "";
+        btns[i].innerHTML = `${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}`;
+      }
+    });
+  }
+
+  // Update meta counts
+  const f = _focuses.find(x => x.id === focusId);
+  const commentCount = f?.commentCount || 0;
+  const metaCounts = [
+    totalRx       ? `${totalRx} reaction${totalRx !== 1 ? "s" : ""}` : "",
+    commentCount  ? `${commentCount} comment${commentCount !== 1 ? "s" : ""}` : "",
+  ].filter(Boolean).join(" · ");
+  document.querySelectorAll(`.like-count-${focusId}`).forEach(el => {
+    el.textContent = metaCounts;
+  });
 }
 
 let _focusLikersPopover = null;
