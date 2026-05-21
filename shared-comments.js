@@ -843,6 +843,9 @@
     // Clear inline state (for custom submit handlers)
     clearState: (key) => _clearState(key),
 
+    // Read raw inline media array (for custom submit handlers — e.g. content-feed.html Post form)
+    readMedia: (key) => (_inlineMedia[key] || []).slice(),
+
     // Expose reaction state for external reads (e.g. to build avatars / counts)
     getReactionState: (parentId) => ({..._reactState(parentId)}),
     setReactionState: (parentId, data) => { _rxState[parentId]=data; },
@@ -1118,5 +1121,7 @@
   window._commImgModalClose = window._tcImgClose;
   window._commImgModalNav   = window._tcImgNav;
   window._commImgGroupStore = _imgGroupStore;
+  // Media renderer — used by content-feed.html to render post-card media
+  window._tcRenderMedia = _renderCommentMedia;
 
 })();

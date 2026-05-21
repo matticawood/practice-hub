@@ -392,7 +392,7 @@ document.addEventListener("DOMContentLoaded", function() {
       <a class="sh-tab" data-page="studio" href="/events.html">Matt's Studio</a>
       <div class="sh-tab-drop">
         <a href="/focus.html">Weekly Practice Focus</a>
-        <a href="#">Content Feed</a>
+        <a href="/content-feed.html">Content Feed</a>
         <a href="/events.html">Live Practice Clinics</a>
         <a href="/clinic-booking.html">One-to-One Clinics</a>
         <a href="#">Practice Room Updates</a>
@@ -476,7 +476,7 @@ document.addEventListener("DOMContentLoaded", function() {
       </button>
       <div class="sh-group-items">
         <a class="sh-item" data-page="studio" href="/focus.html">Weekly Practice Focus</a>
-        <a class="sh-item" data-page="studio" href="#">Content Feed</a>
+        <a class="sh-item" data-page="studio" href="/content-feed.html">Content Feed</a>
         <a class="sh-item" data-page="studio" href="/events.html">Live Practice Clinics</a>
         <a class="sh-item" data-page="studio" href="/clinic-booking.html">One-to-One Clinics</a>
         <a class="sh-item" data-page="studio" href="#">Practice Room Updates</a>
