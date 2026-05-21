@@ -493,7 +493,7 @@
   // ── Render comment media (displayed in comment list) ─────────────────────────
   function _renderCommentMedia(c) {
     const media=Array.isArray(c.media)?c.media:[];
-    if(!media.length)return"";
+    if(!media.length&&!c.poll)return"";
     let html="";
     const images=media.filter(m=>m.type==="image");
     const others=media.filter(m=>m.type!=="image");
@@ -512,6 +512,7 @@
       else if(m.type==="file")    html+=`<div style="margin-top:6px"><a href="${_escHtml(m.url)}" target="_blank" download="${_escHtml(m.name)}" style="display:inline-flex;align-items:center;gap:5px;font-size:.82rem;color:var(--text-muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${_escHtml(m.name)}</a></div>`;
       else if(m.type==="poll"){const opts=Array.isArray(m.options)?m.options:[];html+=`<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:340px"><div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${_escHtml(m.question||"Poll")}</div>${opts.map(o=>`<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${_escHtml(o)}</div>`).join("")}</div>`;}
     });
+    if(c.poll){const opts=Array.isArray(c.poll.options)?c.poll.options:[];html+=`<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:340px"><div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${_escHtml(c.poll.question||"Poll")}</div>${opts.map(o=>`<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${_escHtml(o)}</div>`).join("")}</div>`;}
     return html;
   }
 
