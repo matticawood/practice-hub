@@ -729,7 +729,8 @@ let _activeFilter  = "all";
 let _cfTab         = "youtube";
 let _editPostId    = null;
 let _ytTimer       = null;
-let _likerAvatarMap= {};
+let _likerAvatarMap = {};
+let _cfLikersMap   = {}; // postId → [email, ...] kept in sync on react/unreact
 let _postImages    = [];          // { file, objectUrl } for Post tab image upload
 let _toolbarInjected = false;
 
@@ -755,11 +756,20 @@ let _toolbarInjected = false;
     replyNotificationLinkFn: (parentId) => `/content-feed.html?post=${parentId}`,
     onReactionChange: (parentId) => {
       const rxData = Comments.getReactionState(parentId);
-      let total = 0;
-      for (const d of Object.values(rxData)) total += d.count;
+      let total = 0, iMine = false;
+      for (const d of Object.values(rxData)) { total += d.count; if (d.mine) iMine = true; }
       const p = _posts.find(x => x.id === parentId);
       const cc = p?.commentCount || 0;
       _setMeta(parentId, total, cc);
+      // Sync _cfLikersMap and re-render chips
+      if (!_cfLikersMap[parentId]) _cfLikersMap[parentId] = [];
+      if (iMine && !_cfLikersMap[parentId].includes(myEmail)) {
+        if (!_likerAvatarMap[myEmail]) _likerAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
+        _cfLikersMap[parentId].unshift(myEmail);
+      } else if (!iMine) {
+        _cfLikersMap[parentId] = _cfLikersMap[parentId].filter(e => e !== myEmail);
+      }
+      _updateLikerChips(parentId);
     },
     onCommentChange: (parentId) => {
       const listEl = document.getElementById(`tc-comments-list-${parentId}`);
@@ -783,6 +793,30 @@ let _toolbarInjected = false;
   const deepId = new URLSearchParams(window.location.search).get("post");
   await loadFeed(deepId);
 })();
+
+function _likerChipsInner(postId) {
+  const likers = (_cfLikersMap[postId] || []).slice(0, 3);
+  const total  = (_cfLikersMap[postId] || []).length;
+  if (!total) return "";
+  const chips = likers.map(email => {
+    const info  = _likerAvatarMap[email];
+    const name  = info?.name || email.split("@")[0];
+    const col   = _avatarColour(email);
+    const inner = info?.url
+      ? `<img src="${_esc(info.url)}" alt="${_esc(name)}">`
+      : `<span style="background:${col.bg};color:${col.fg};width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</span>`;
+    return `<div class="tc-like-chip">${inner}</div>`;
+  }).join("");
+  return chips + (total > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:6px">+${total - 3}</span>` : "");
+}
+
+function _updateLikerChips(postId) {
+  document.querySelectorAll(`.cf-likers-${postId}`).forEach(el => {
+    const inner = _likerChipsInner(postId);
+    el.innerHTML = inner;
+    el.style.display = inner ? "" : "none";
+  });
+}
 
 function _setMeta(parentId, totalRx, cc) {
   const txt = [
@@ -821,9 +855,12 @@ async function loadFeed(deepId = null) {
 
   // Build maps
   const cmtCountMap = {}, likersMap = {};
+  _cfLikersMap = {};
   (allLikes || []).forEach(l => {
     if (!likersMap[l.post_id]) likersMap[l.post_id] = [];
     if (likersMap[l.post_id].length < 3) likersMap[l.post_id].push(l.email);
+    if (!_cfLikersMap[l.post_id]) _cfLikersMap[l.post_id] = [];
+    if (!_cfLikersMap[l.post_id].includes(l.email)) _cfLikersMap[l.post_id].push(l.email);
   });
   (cmtRows || []).forEach(c => cmtCountMap[c.post_id] = (cmtCountMap[c.post_id] || 0) + 1);
 
@@ -914,6 +951,8 @@ function cfCardHTML(p) {
       <div class="cf-card-body" id="cf-body-${p.id}">${_cardBody(p)}</div>
       <div class="cf-card-footer" onclick="event.stopPropagation()">
         ${reactBtn}
+        <span class="tc-like-avatars cf-likers-${p.id}" onclick="event.stopPropagation();Comments.showLikers('${p.id}',event)"
+          style="cursor:pointer;margin-left:4px;${totalRx===0?"display:none":""}" title="See who reacted">${_likerChipsInner(p.id)}</span>
         <button class="cf-footer-btn" onclick="showCfDetail('${p.id}')">
           ${SVG_CMT}${p.commentCount ? ` ${p.commentCount}` : ""}
         </button>
