@@ -149,9 +149,9 @@
       border: 1.5px solid var(--border);
       border-radius: 10px;
       overflow: hidden;
-      background: var(--surface);
+      background: var(--bg);
     }
-    .cf-composer-body { padding: 14px 16px; }
+    .cf-composer-body { padding: 14px 16px; background: var(--bg); }
     .cf-composer-title {
       width: 100%;
       box-sizing: border-box;
@@ -188,7 +188,66 @@
       gap: 6px;
       padding: 10px 14px;
       border-top: 1.5px solid var(--border);
-      background: var(--surface-2);
+      background: var(--border);
+    }
+
+    /* ── Blog bullet builder (admin form) ───────────────────────────────────── */
+    .cf-bullets-builder { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .cf-bullet-row { display: flex; gap: 8px; align-items: center; }
+    .cf-bullet-num {
+      font-size: 0.78rem; font-weight: 800;
+      color: var(--blog-clr);
+      width: 20px; flex-shrink: 0; text-align: right;
+    }
+    .cf-bullet-input {
+      flex: 1;
+      padding: 8px 10px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 0.88rem;
+      color: var(--text);
+      transition: border-color .15s;
+    }
+    .cf-bullet-input:focus { outline: none; border-color: var(--blog-clr); }
+    .cf-bullet-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 1.1rem; padding: 2px 4px;
+    }
+    .cf-bullet-remove:hover { color: #ef4444; }
+    .add-blog-bullet-btn {
+      background: none;
+      border: 1.5px dashed var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.84rem;
+      color: var(--text-muted);
+      width: 100%;
+      transition: border-color .15s, color .15s;
+    }
+    .add-blog-bullet-btn:hover { border-color: var(--blog-clr); color: var(--blog-clr); }
+
+    /* ── Blog card bullet points (rendered in feed) ─────────────────────────── */
+    .cf-blog-bullets {
+      list-style: none; padding: 0;
+      margin: 10px 0 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .cf-blog-bullet { display: flex; gap: 10px; align-items: flex-start; }
+    .cf-blog-bullet-num {
+      min-width: 22px; height: 22px;
+      background: var(--blog-clr);
+      color: #fff;
+      font-size: 0.68rem; font-weight: 800;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .cf-blog-bullet-text {
+      flex: 1; font-size: 0.88rem; color: var(--text); line-height: 1.5;
     }
     /* Post image previews */
     .cf-img-preview-grid {
@@ -547,8 +606,13 @@
             </div>
             <div class="cf-form-field">
               <label class="cf-form-label">Short description / excerpt</label>
-              <textarea id="cfblog-excerpt" class="cf-form-textarea" rows="3"
+              <textarea id="cfblog-excerpt" class="cf-form-textarea" rows="2"
                         placeholder="One or two sentences summarising what the post covers…"></textarea>
+            </div>
+            <div class="cf-form-field">
+              <label class="cf-form-label">What's covered (bullet points)</label>
+              <div id="cfblog-bullets" class="cf-bullets-builder"></div>
+              <button type="button" class="add-blog-bullet-btn" onclick="addBlogBullet()">+ Add bullet</button>
             </div>
             <div class="cf-form-field">
               <label class="cf-form-label">Published date</label>
@@ -571,7 +635,7 @@
                   <div class="cf-img-preview-grid" id="cfpost-img-grid"></div>
                 </div>
                 <!-- Shared-comments.js inline toolbar injected here -->
-                <div id="cfpost-toolbar-area" style="border-top:1.5px solid var(--border);padding:8px 14px;background:var(--surface-2)"></div>
+                <div id="cfpost-toolbar-area" style="border-top:1.5px solid var(--border);padding:8px 14px;background:var(--border)"></div>
                 <div class="cf-composer-footer">
                   <div style="flex:1"></div>
                   <button class="btn btn-ghost btn-sm" onclick="closeCfForm()">Cancel</button>
@@ -634,6 +698,7 @@ const SVG_CMT  = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" st
 const SVG_EDIT = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-1px;margin-right:3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>`;
 
 let myEmail = null, myName = null, myAvatarUrl = null, isAdmin = false;
+let _blogBulletCount = 0;
 let _posts         = [];
 let _commentsOpen  = new Set();   // post IDs with visible comments
 let _commentsLoaded= new Set();   // post IDs where Comments.load() has been called
@@ -867,9 +932,18 @@ function _blogBody(p) {
   const url     = _esc(p.url || "#");
   const title   = _esc(p.title || "");
   const excerpt = _esc(p.body || "");
+  const bulletData = (Array.isArray(p.media) ? p.media : []).find(m => m.type === "bullets");
+  const bulletsHtml = bulletData?.items?.length
+    ? `<ul class="cf-blog-bullets">${bulletData.items.map((item, i) =>
+        `<li class="cf-blog-bullet">
+          <span class="cf-blog-bullet-num">${i + 1}</span>
+          <span class="cf-blog-bullet-text">${_esc(item)}</span>
+        </li>`).join("")}</ul>`
+    : "";
   return `
     <div class="cf-card-title">${title}</div>
     ${excerpt ? `<div class="cf-blog-excerpt">${excerpt}</div>` : ""}
+    ${bulletsHtml}
     <a href="${url}" target="_blank" rel="noopener" class="cf-blog-link">Read post ↗</a>`;
 }
 
@@ -944,6 +1018,8 @@ function openCfForm() {
   document.getElementById("cfblog-title").value  = "";
   document.getElementById("cfblog-url").value    = "";
   document.getElementById("cfblog-excerpt").value= "";
+  _resetBlogBullets();
+  addBlogBullet();
   document.getElementById("cfpost-title").value  = "";
   document.getElementById("cfpost-body").value   = "";
   document.getElementById("cfpost-body").style.height = "";
@@ -976,6 +1052,10 @@ function openEditCfForm(postId) {
     document.getElementById("cfblog-url").value     = p.url   || "";
     document.getElementById("cfblog-excerpt").value = p.body  || "";
     _setDateFromTs("cfblog-date", p.published_at);
+    _resetBlogBullets();
+    const bulletData = (Array.isArray(p.media) ? p.media : []).find(m => m.type === "bullets");
+    (bulletData?.items || []).forEach(item => addBlogBullet(item));
+    if (!bulletData?.items?.length) addBlogBullet();
   } else {
     document.getElementById("cfpost-title").value = p.title || "";
     document.getElementById("cfpost-body").value  = p.body  || "";
@@ -1029,6 +1109,42 @@ function switchCfTab(tab) {
 // On submit we read them out via Comments.readMedia?.('cfp') if available,
 // falling back to just the text content.
 
+/* ── Blog bullet builder ─────────────────────────────────────────────────── */
+function _resetBlogBullets() {
+  document.getElementById("cfblog-bullets").innerHTML = "";
+  _blogBulletCount = 0;
+}
+
+function addBlogBullet(val = "") {
+  _blogBulletCount++;
+  const wrap = document.getElementById("cfblog-bullets");
+  if (!wrap) return;
+  const id  = `bb-${_blogBulletCount}`;
+  const num = wrap.querySelectorAll(".cf-bullet-row").length + 1;
+  const row = document.createElement("div");
+  row.id = id;
+  row.className = "cf-bullet-row";
+  row.innerHTML = `
+    <span class="cf-bullet-num">${num}.</span>
+    <input class="cf-bullet-input" type="text" placeholder="Bullet point…" value="${_esc(val)}"
+           oninput="" />
+    <button class="cf-bullet-remove" onclick="removeBlogBullet('${id}')" title="Remove">×</button>`;
+  wrap.appendChild(row);
+}
+
+function removeBlogBullet(id) {
+  document.getElementById(id)?.remove();
+  // Renumber
+  document.querySelectorAll("#cfblog-bullets .cf-bullet-num").forEach((el, i) => {
+    el.textContent = `${i + 1}.`;
+  });
+}
+
+function readBlogBullets() {
+  return [...document.querySelectorAll("#cfblog-bullets .cf-bullet-input")]
+    .map(inp => inp.value.trim()).filter(Boolean);
+}
+
 /* ── Publish / save ──────────────────────────────────────────────────────── */
 async function publishCfPost() {
   const isPost = _cfTab === "post";
@@ -1052,7 +1168,9 @@ async function publishCfPost() {
     const excerpt = document.getElementById("cfblog-excerpt").value.trim();
     const dateV   = document.getElementById("cfblog-date").value;
     if (!title || !url) { alert("Please add a title and URL."); return; }
-    payload = { type:"blog", title, url, body:excerpt, media:[], published_at: _toIso(dateV) };
+    const bullets = readBlogBullets();
+    const media   = bullets.length ? [{ type: "bullets", items: bullets }] : [];
+    payload = { type:"blog", title, url, body:excerpt, media, published_at: _toIso(dateV) };
 
   } else {
     // Post type — read text + any media from shared-comments toolbar
