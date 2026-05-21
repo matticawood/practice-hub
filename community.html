@@ -4513,6 +4513,7 @@ async function submitPost() {
 // ── Weekly focus cards in the community feed ──────────────────────────────────
 let _focusFeedItems = []; // recent weekly_focus rows for the feed
 let _contentFeedItems = []; // content_feed_posts rows for the feed
+const _cfEmbeddedYt = new Set(); // content feed YT post IDs with embed active
 
 async function _loadFocusFeedItems() {
   const { data } = await db.from("weekly_focus")
@@ -4550,6 +4551,12 @@ function focusFeedCardHTML(f) {
     </div>`;
 }
 
+function cfEmbedYt(postId, ytId) {
+  _cfEmbeddedYt.add(postId);
+  const el = document.getElementById(`cf-yt-media-${postId}`);
+  if (el) el.innerHTML = `<div style="aspect-ratio:16/9;background:#000"><iframe src="https://www.youtube.com/embed/${ytId}?autoplay=1" style="width:100%;height:100%;border:none;display:block" allowfullscreen></iframe></div>`;
+}
+
 function contentFeedCardHTML(p) {
   const timeAgo      = relativeTime(p.published_at || p.created_at);
   const likeCount    = p.likeCount    || 0;
@@ -4568,18 +4575,31 @@ function contentFeedCardHTML(p) {
   if (p.type === "youtube") {
     const ytId = escHtml(p.youtube_id || "");
     const url  = ytId ? `https://www.youtube.com/watch?v=${ytId}` : "/content-feed.html";
+    const mediaEl = ytId
+      ? (_cfEmbeddedYt.has(p.id)
+          ? `<div id="cf-yt-media-${escHtml(p.id)}" style="aspect-ratio:16/9;background:#000"><iframe src="https://www.youtube.com/embed/${ytId}?autoplay=1" style="width:100%;height:100%;border:none;display:block" allowfullscreen></iframe></div>`
+          : `<div id="cf-yt-media-${escHtml(p.id)}" style="position:relative;aspect-ratio:16/9;background:#000;cursor:pointer" onclick="cfEmbedYt('${escHtml(p.id)}','${ytId}')">
+              <img src="https://img.youtube.com/vi/${ytId}/hqdefault.jpg" style="width:100%;height:100%;object-fit:cover;display:block;transition:opacity .2s" loading="lazy"
+                onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">
+              <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+                <div style="width:58px;height:58px;background:rgba(220,38,38,.92);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 18px rgba(0,0,0,.4)">
+                  <div style="width:0;height:0;border-style:solid;border-width:10px 0 10px 20px;border-color:transparent transparent transparent #fff;margin-left:4px"></div>
+                </div>
+              </div>
+            </div>`)
+      : "";
     return `
       <div class="post-card cf-comm-card cf-comm-yt">
         <div class="cf-comm-header">
           <span class="cf-comm-label">${SVG_YT} New Video</span>
           <span class="cf-comm-date">${timeAgo}</span>
         </div>
-        ${ytId ? `<div style="width:100%;aspect-ratio:16/9;background:#000"><iframe src="https://www.youtube.com/embed/${ytId}" style="width:100%;height:100%;border:none;display:block" allowfullscreen loading="lazy"></iframe></div>` : ""}
+        ${mediaEl}
         <div class="cf-comm-body">
           <div class="cf-comm-title">${escHtml(p.title || "")}</div>
         </div>
         <div class="cf-comm-footer">
-          <a href="${url}" target="_blank" rel="noopener" class="cf-comm-cta" style="text-decoration:none" onclick="event.stopPropagation()">Watch on YouTube →</a>
+          <a href="${url}" target="_blank" rel="noopener" class="cf-comm-cta" style="text-decoration:none">Watch on YouTube →</a>
           ${metaEl}
         </div>
       </div>`;
