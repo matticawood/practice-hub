@@ -1022,6 +1022,9 @@
         <div class="chat-messages" id="chat-messages">
           <div class="chat-empty" id="chat-empty">No messages yet — say hello!</div>
         </div>
+        <!-- Single shared emoji picker portal — lives outside .chat-messages so it isn't
+             clipped by overflow:hidden/.chat-msg-body or overflow-y:auto/.chat-messages -->
+        <div id="chat-react-portal" class="chat-react-picker" style="display:none;position:absolute;z-index:300"></div>
         <div class="chat-composer">
           <div class="chat-typing" id="chat-typing" style="display:none;padding:0 0 4px">
             <div class="typing-dots"><span></span><span></span><span></span></div>
@@ -3130,22 +3133,55 @@ function _scrollToMsg(msgId) {
   el.classList.add("flash");
 }
 
+let _pickerMsgId = null; // message ID the portal is currently showing
+
 function toggleChatReactPicker(msgId, ev) {
   ev.stopPropagation();
-  // Close any other open picker
-  document.querySelectorAll(".chat-react-picker").forEach(p => {
-    if (p.id !== `chat-picker-${msgId}`) p.style.display = "none";
-  });
-  const picker = document.getElementById(`chat-picker-${msgId}`);
-  if (!picker) return;
-  const isOpen = picker.style.display === "flex";
-  picker.style.display = isOpen ? "none" : "flex";
+  const portal = document.getElementById("chat-react-portal");
+  if (!portal) return;
+
+  // Toggle closed if same message
+  if (_pickerMsgId === msgId && portal.style.display !== "none") {
+    portal.style.display = "none";
+    _pickerMsgId = null;
+    return;
+  }
+
+  // Build emoji buttons for this message
+  const rx = _chatRxMap[msgId] || {};
+  portal.innerHTML = CHAT_EMOJIS.map(e => {
+    const mine = rx[e]?.mine;
+    return `<button class="${mine ? "picked" : ""}" data-emoji="${e}" onclick="pickChatReaction('${escHtml(msgId)}','${e}')">${e}</button>`;
+  }).join("");
+  _pickerMsgId = msgId;
+
+  // Position portal above the trigger button, inside #chat-panel-conversation
+  const btn    = ev.currentTarget;
+  const panel  = document.getElementById("chat-panel-conversation");
+  const bRect  = btn.getBoundingClientRect();
+  const pRect  = panel.getBoundingClientRect();
+
+  // Vertical: portal bottom sits 6px above top of trigger button
+  portal.style.bottom = (pRect.bottom - bRect.top + 6) + "px";
+  portal.style.top    = "auto";
+
+  // Horizontal: align to left or right depending on which side of the panel the button is on
+  const isMine = !!btn.closest(".chat-msg-group.mine");
+  if (isMine) {
+    portal.style.right = Math.max(0, pRect.right - bRect.right) + "px";
+    portal.style.left  = "auto";
+  } else {
+    portal.style.left  = Math.max(0, bRect.left - pRect.left) + "px";
+    portal.style.right = "auto";
+  }
+
+  portal.style.display = "flex";
 }
 
 async function pickChatReaction(msgId, emoji) {
-  // Close picker
-  const picker = document.getElementById(`chat-picker-${msgId}`);
-  if (picker) picker.style.display = "none";
+  // Close portal
+  const portal = document.getElementById("chat-react-portal");
+  if (portal) { portal.style.display = "none"; _pickerMsgId = null; }
 
   if (!_chatRxMap[msgId]) _chatRxMap[msgId] = {};
   const existingEmoji = Object.entries(_chatRxMap[msgId]).find(([, d]) => d.mine)?.[0];
@@ -3182,11 +3218,11 @@ function _refreshChatRx(msgId) {
   // Update pills row
   const rxRow = document.getElementById(`chat-rx-${msgId}`);
   if (rxRow) rxRow.innerHTML = _chatRxHtml(msgId);
-  // Update picker button states
-  const picker = document.getElementById(`chat-picker-${msgId}`);
-  if (picker) {
+  // Update portal button states if it's showing this message
+  if (_pickerMsgId === msgId) {
+    const portal = document.getElementById("chat-react-portal");
     const rx = _chatRxMap[msgId] || {};
-    picker.querySelectorAll("button[data-emoji]").forEach(btn => {
+    if (portal) portal.querySelectorAll("button[data-emoji]").forEach(btn => {
       btn.classList.toggle("picked", !!(rx[btn.dataset.emoji]?.mine));
     });
   }
@@ -3491,7 +3527,6 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     : "";
 
   const rxHtml = `<div class="chat-rx-row" id="chat-rx-${escHtml(msg.id)}">${_chatRxHtml(msg.id)}</div>`;
-  const pickerHtml = _chatPickerHtml(msg.id, isMine);
   const triggerBtn = `<button class="chat-react-trigger" onclick="toggleChatReactPicker('${escHtml(msg.id)}',event)" title="React">😊</button>`;
   const _rp = msg.content || "";
   const replyPreview = escHtml(_rp.length > 80 ? _rp.slice(0, 80) + "…" : _rp);
@@ -3500,9 +3535,9 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     ? `<button class="chat-react-trigger chat-delete-trigger" onclick="_deleteChatMessage('${escHtml(msg.id)}')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`
     : "";
 
-  // chat-bubble-inner is position:relative so picker + trigger are anchored to the bubble
+  // chat-bubble-inner is position:relative so trigger buttons are anchored to the bubble
   const innerWrap = (bubbleHtml || pollHtml)
-    ? `<div class="chat-bubble-inner">${pickerHtml}${bubbleHtml}${pollHtml}${replyBtn}${triggerBtn}${deleteBtn}</div>`
+    ? `<div class="chat-bubble-inner">${bubbleHtml}${pollHtml}${replyBtn}${triggerBtn}${deleteBtn}</div>`
     : "";
   const bubbleWrap = innerWrap
     ? `<div class="chat-bubble-wrap">${innerWrap}${rxHtml}</div>`
@@ -3661,6 +3696,11 @@ function _closeMentionDrop() {
 document.addEventListener("click", e => {
   if (!e.target.closest("#chat-mention-dropdown") && !e.target.closest("#chat-input")) {
     _closeMentionDrop();
+  }
+  // Close emoji portal when clicking outside it
+  if (!e.target.closest("#chat-react-portal") && !e.target.closest(".chat-react-trigger")) {
+    const portal = document.getElementById("chat-react-portal");
+    if (portal) { portal.style.display = "none"; _pickerMsgId = null; }
   }
 });
 
