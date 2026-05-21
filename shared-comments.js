@@ -531,20 +531,21 @@
   }
 
   // Render a poll in a comment — mirrors community.html _commentPollHtml exactly
-  function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail) {
+  function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail, parentId) {
     const auth=_auth();
     const hasVoted=!!myOptId||(!!authorEmail&&authorEmail===auth.email);
+    const pid=_escHtml(parentId||"");
     let html=`<div class="poll-card"><div class="poll-card-question">${_escHtml(question)}</div>`;
     if(!hasVoted){
       html+=opts.map(o=>
-        `<button class="poll-option-vote-btn" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}')">${_escHtml(o.label)}</button>`
+        `<button class="poll-option-vote-btn" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}','${pid}')">${_escHtml(o.label)}</button>`
       ).join("");
     } else {
       html+=opts.map(o=>{
         const count=voteCountMap[o.id]||0;
         const pct=totalVotes>0?Math.round(count/totalVotes*100):0;
         const isMine=o.id===myOptId;
-        return`<div class="poll-bar-row" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}')">
+        return`<div class="poll-bar-row" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}','${pid}')">
           <div class="poll-bar-label">
             <span>${_escHtml(o.label)}${isMine?` <span style="color:#10b981;font-size:.7em">●</span>`:""}</span>
             <span>${pct}%</span>
@@ -628,7 +629,7 @@
     const replyPrefix=(isReply&&c.reply_to_name)?`<span class="tc-reply-to-name">@${_escHtml(c.reply_to_name)}</span> `:"";
     const media=_renderCommentMedia(c);
     const p=_pollByComment[c.id];
-    const pollHtml=p?_commentPollHtml(p.pollId,p.question,p.opts,p.voteCountMap,p.myOptId,p.totalVotes,c.email):"";
+    const pollHtml=p?_commentPollHtml(p.pollId,p.question,p.opts,p.voteCountMap,p.myOptId,p.totalVotes,c.email,parentId):"";
     const profileLink=`/profile.html?u=${encodeURIComponent(c.email)}`;
     return `
       <div class="tc-comment-item${isReply?" is-reply":""}" id="tc-cmt-${c.id}">
@@ -1199,20 +1200,14 @@
   };
 
   // ── Poll voting — mirrors community.html castCommentVote() exactly ───────────
-  window.tcCastCommentPollVote = async function(pollId, optionId) {
+  window.tcCastCommentPollVote = async function(pollId, optionId, parentId) {
     const auth=_auth();
     const {error}=await _db().from("tc_comment_poll_votes").upsert(
       {poll_id:pollId, option_id:optionId, email:auth.email},
       {onConflict:"poll_id,email"}
     );
     if(error){alert("Couldn't cast vote: "+error.message);return;}
-    // Reload comments for the current visible parent
-    // Walk up the DOM from the poll element to find the parent ID
-    // (We re-render all comment sections that are currently loaded)
-    document.querySelectorAll("[id^='tc-comments-list-']").forEach(el=>{
-      const pid=el.id.replace("tc-comments-list-","");
-      if(pid)Comments.load(pid);
-    });
+    if(parentId) await Comments.load(parentId);
   };
 
   // ── Backward-compat aliases (for existing pages like focus.html) ─────────────
