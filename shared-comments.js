@@ -140,23 +140,24 @@
 /* ── Comments ─────────────────────────────────────────────────────────────── */
 .tc-comments-section { background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius,10px); overflow:hidden; }
 .tc-comments-hdr { padding:12px 18px; border-bottom:1px solid var(--border); font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); }
-.tc-comment-item { display:flex; gap:10px; padding:12px 18px; border-bottom:1px solid rgba(0,0,0,.04); }
+.tc-comment-item { display:flex; gap:10px; padding:13px 20px; border-bottom:1px solid rgba(0,0,0,.04); }
 .tc-comment-item:last-of-type { border-bottom:none; }
 .tc-comment-body { flex:1; min-width:0; }
 .tc-comment-meta { display:flex; align-items:baseline; gap:8px; margin-bottom:3px; }
 .tc-comment-name { font-size:.82rem; font-weight:700; color:var(--text); }
 .tc-comment-time { font-size:.7rem; color:var(--text-muted); }
 .tc-comment-text { font-size:.87rem; color:var(--text-muted); line-height:1.5; white-space:pre-wrap; word-break:break-word; }
-.tc-reply-to-name { color:var(--accent); font-weight:600; margin-right:3px; }
+.tc-reply-to-name { color:var(--accent); font-weight:600; margin-right:4px; }
 .tc-comments-empty { padding:22px 18px; text-align:center; color:var(--text-muted); font-size:.82rem; }
 .tc-comment-reply-btn { background:none; border:none; cursor:pointer; font-family:inherit; font-size:.72rem; font-weight:600; color:var(--text-muted); padding:3px 0; transition:color .15s; display:inline-block; margin-top:3px; }
 .tc-comment-reply-btn:hover { color:var(--accent); }
-.tc-comment-replies { margin-left:36px; margin-top:4px; display:flex; flex-direction:column; gap:2px; }
-/* Reply composer */
-.tc-reply-composer { display:flex; gap:10px; align-items:flex-start; padding:10px 18px; border-top:1px solid var(--border); }
+.tc-comment-replies { margin-left:36px; margin-top:8px; display:flex; flex-direction:column; gap:2px; }
+/* Reply composer — uses same .tc-comment-item.is-reply structure as community.html */
+.tc-reply-composer { padding:10px 20px; border-top:1px solid var(--border); }
+.tc-reply-composer-inner { display:flex; gap:10px; align-items:flex-start; }
 .tc-reply-composer textarea { width:100%; box-sizing:border-box; background:transparent; border:1.5px solid var(--accent); border-radius:16px; color:var(--text); font-size:.85rem; font-family:inherit; padding:7px 12px; resize:none; min-height:34px; max-height:100px; }
 .tc-reply-composer textarea:focus { outline:none; }
-.tc-irc-actions { display:flex; justify-content:flex-end; gap:14px; margin-top:5px; padding-left:38px; }
+.tc-irc-actions { display:flex; justify-content:flex-end; gap:14px; margin-top:5px; }
 .tc-irc-send { background:none; border:none; font-family:inherit; font-size:.8rem; font-weight:700; cursor:pointer; color:var(--accent); padding:0; }
 .tc-irc-cancel { background:none; border:none; font-family:inherit; font-size:.8rem; cursor:pointer; color:var(--text-muted); padding:0; }
 .tc-irc-cancel:hover { color:var(--text); }
@@ -620,25 +621,27 @@
   }
 
   // ── Comment HTML ─────────────────────────────────────────────────────────────
-  function _commentHtml(c, isReply, avatarMap, badgeMap, parentId) {
+  function _commentHtml(c, isReply, avatarMap, parentId) {
     const auth=_auth();
     const dispName=_escHtml(c.name||c.email.split("@")[0]);
-    const badge=badgeMap[c.email]?`<span class="author-badge">${_escHtml(badgeMap[c.email])}</span>`:"";
     const canDel=auth.isAdmin||c.email===auth.email;
     const replyPrefix=(isReply&&c.reply_to_name)?`<span class="tc-reply-to-name">@${_escHtml(c.reply_to_name)}</span> `:"";
     const media=_renderCommentMedia(c);
     const p=_pollByComment[c.id];
     const pollHtml=p?_commentPollHtml(p.pollId,p.question,p.opts,p.voteCountMap,p.myOptId,p.totalVotes,c.email):"";
+    const profileLink=`/profile.html?u=${encodeURIComponent(c.email)}`;
     return `
       <div class="tc-comment-item${isReply?" is-reply":""}" id="tc-cmt-${c.id}">
-        ${_avatarHtml(c.email,c.name,28,avatarMap[c.email])}
+        <a href="${profileLink}" style="display:contents;text-decoration:none">
+          ${_avatarHtml(c.email,c.name,28,avatarMap[c.email])}
+        </a>
         <div class="tc-comment-body">
           <div class="tc-comment-meta">
-            <span class="tc-comment-name">${dispName}</span>${badge}
+            <a href="${profileLink}" style="text-decoration:none"><span class="tc-comment-name" style="cursor:pointer">${dispName}</span></a>
             <span class="tc-comment-time">${_relativeTime(c.created_at)}</span>
             ${canDel?`<button onclick="Comments.deleteComment('${c.id}','${parentId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
           </div>
-          ${c.content?`<div class="tc-comment-text">${replyPrefix}${_escHtml(c.content)}</div>`:""}
+          ${c.content?`<div class="tc-comment-text">${replyPrefix}${_escHtml(c.content)}</div>`:(replyPrefix?`<div class="tc-comment-text">${replyPrefix}</div>`:"")}
           ${media?`<div class="tc-comment-media">${media}</div>`:""}
           ${pollHtml}
           ${!isReply?`<button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>`:""}
@@ -798,18 +801,19 @@
       if(hdrEl)hdrEl.textContent=count===0?"Comments":`${count} Comment${count!==1?"s":""}`;
       if(!count){listEl.innerHTML=`<div class="tc-comments-empty">No comments yet — be the first!</div>`;return;}
       const emails=[...new Set(comments.map(c=>c.email))];
-      const {data:avRows}=await _db().from("allowed_emails").select("email,avatar_url,badge").in("email",emails);
-      const avatarMap={},badgeMap={};
-      (avRows||[]).forEach(r=>{if(r.avatar_url)avatarMap[r.email]=r.avatar_url;if(r.badge)badgeMap[r.email]=r.badge;});
+      const {data:avRows}=await _db().from("allowed_emails").select("email,avatar_url").in("email",emails);
+      const avatarMap={};
+      (avRows||[]).forEach(r=>{if(r.avatar_url)avatarMap[r.email]=r.avatar_url;});
       const topLevel=comments.filter(c=>!c.parent_comment_id);
       const replyMap={};
       comments.filter(c=>c.parent_comment_id).forEach(c=>{(replyMap[c.parent_comment_id]=replyMap[c.parent_comment_id]||[]).push(c);});
       const auth=_auth();
       listEl.innerHTML=topLevel.map(c=>{
-        const replies=(replyMap[c.id]||[]).map(r=>_commentHtml(r,true,avatarMap,badgeMap,parentId)).join("");
+        const replies=(replyMap[c.id]||[]).map(r=>_commentHtml(r,true,avatarMap,parentId)).join("");
         const key=c.id;
         const replyComposer=`
           <div id="tc-reply-composer-${c.id}" class="tc-reply-composer" style="display:none">
+            <div class="tc-reply-composer-inner">
             ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl)}
             <div style="flex:1;min-width:0">
               <textarea placeholder="Write a reply…" rows="1"
@@ -821,8 +825,9 @@
                 <button class="tc-irc-send" id="send-btn-${key}" onclick="Comments.submitReply('${parentId}','${c.id}',this.closest('.tc-reply-composer'))">Send</button>
               </div>
             </div>
+            </div>
           </div>`;
-        return _commentHtml(c,false,avatarMap,badgeMap,parentId)+`<div class="tc-comment-replies">${replies}${replyComposer}</div>`;
+        return _commentHtml(c,false,avatarMap,parentId)+`<div class="tc-comment-replies">${replies}${replyComposer}</div>`;
       }).join("");
     },
 
