@@ -2652,8 +2652,10 @@ const ACTIVITY_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
 let _rxMap = {};
 // _postRxMap[postId][emoji] = { count, mine }
 let _postRxMap = {};
-let _commRxLikersMap    = {}; // postId → [email, ...] from activity_reactions
+let _commRxLikersMap    = {}; // postId → [{email, emoji}, ...] from activity_reactions
 let _commLikerAvatarMap = {}; // email → { url, name }
+let _activityRxPersonMap = {}; // key → [{email,emoji}]
+let _activityAvatarMap   = {}; // email → {url,name}
 // _cmtMap[`${event_type}:${item_id}`] = count
 let _cmtMap = {};
 // Activity detail view state
@@ -4922,7 +4924,8 @@ async function loadPosts() {
   _commRxLikersMap = {};
   (postReactions || []).forEach(rx => {
     if (!_commRxLikersMap[rx.item_id]) _commRxLikersMap[rx.item_id] = [];
-    if (!_commRxLikersMap[rx.item_id].includes(rx.email)) _commRxLikersMap[rx.item_id].push(rx.email);
+    if (!_commRxLikersMap[rx.item_id].find(x => x.email === rx.email))
+      _commRxLikersMap[rx.item_id].push({ email: rx.email, emoji: rx.emoji || "❤️" });
   });
 
   _posts = posts.map(p => {
@@ -4990,10 +4993,10 @@ function _commLikerChipsInner(postId) {
   const likers = (_commRxLikersMap[postId] || []).slice(0, 3);
   const total  = (_commRxLikersMap[postId] || []).length;
   if (!total) return "";
-  const chips = likers.map(email => {
-    const info  = _commLikerAvatarMap[email];
-    const name  = info?.name || email.split("@")[0];
-    const col   = avatarColour(email);
+  const chips = likers.map(item => {
+    const info  = _commLikerAvatarMap[item.email];
+    const name  = info?.name || item.email.split("@")[0];
+    const col   = avatarColour(item.email);
     const inner = info?.url
       ? `<img src="${escHtml(info.url)}" alt="${escHtml(name)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`
       : `<div style="width:100%;height:100%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</div>`;
@@ -5021,14 +5024,14 @@ function showReactorsPopover(postId, event) {
   _dismissReactorsPopover();
   const likers = _commRxLikersMap[postId] || [];
   if (!likers.length) return;
-  const rows = likers.map(email => {
+  const rows = likers.map(({email, emoji}) => {
     const info = _commLikerAvatarMap[email];
     const name = info?.name || email.split("@")[0];
     const col  = avatarColour(email);
     const av   = info?.url
       ? `<div class="likers-popover-avatar"><img src="${escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
       : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
-    return `<div class="likers-popover-row">${av}<span class="likers-popover-name">${escHtml(name)}</span></div>`;
+    return `<div class="likers-popover-row">${av}<span class="likers-popover-name">${escHtml(name)}</span><span style="margin-left:auto;font-size:1rem">${emoji}</span></div>`;
   }).join("");
   const pop = document.createElement("div");
   pop.className = "likers-popover";
@@ -5933,6 +5936,22 @@ async function loadActivity() {
       _rxMap[key][rx.emoji].count++;
       if (rx.email === myEmail) _rxMap[key][rx.emoji].mine = true;
     }
+    // Build _activityRxPersonMap for avatar chips
+    _activityRxPersonMap = {};
+    _activityAvatarMap   = {};
+    for (const rx of (rxRes.data || [])) {
+      const key = `${rx.event_type}:${rx.item_id}`;
+      if (!_activityRxPersonMap[key]) _activityRxPersonMap[key] = [];
+      if (!_activityRxPersonMap[key].find(x => x.email === rx.email))
+        _activityRxPersonMap[key].push({ email: rx.email, emoji: rx.emoji || "❤️" });
+    }
+    const rxEmails = [...new Set((rxRes.data || []).map(r => r.email))];
+    if (rxEmails.length) {
+      const { data: rxAvatarRows } = await db.from("allowed_emails").select("email,avatar_url,name").in("email", rxEmails);
+      (rxAvatarRows || []).forEach(r => {
+        _activityAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] };
+      });
+    }
     for (const c of (cmtRes.data || [])) {
       const key = `${c.event_type}:${c.item_id}`;
       _cmtMap[key] = (_cmtMap[key] || 0) + 1;
@@ -5957,6 +5976,49 @@ function renderFeedPage(list, champHTML = "") {
 function loadMoreFeed() {
   _feedPage++;
   renderFeedPage(document.getElementById("community-feed-list"));
+}
+
+function _activityLikerChipsInner(key) {
+  const people = (_activityRxPersonMap[key] || []).slice(0, 3);
+  const total  = (_activityRxPersonMap[key] || []).length;
+  if (!total) return "";
+  const chips = people.map(({email}) => {
+    const info  = _activityAvatarMap[email];
+    const name  = info?.name || email.split("@")[0];
+    const col   = avatarColour(email);
+    const inner = info?.url
+      ? `<img src="${escHtml(info.url)}" alt="${escHtml(name)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`
+      : `<div style="width:100%;height:100%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</div>`;
+    return `<div class="post-footer-avatar">${inner}</div>`;
+  }).join("");
+  return chips + (total > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:4px">+${total - 3}</span>` : "");
+}
+
+let _activityReactorsPopover = null;
+function showActivityReactorsPopover(key, event) {
+  event.stopPropagation();
+  if (_activityReactorsPopover) { _activityReactorsPopover.remove(); _activityReactorsPopover = null; }
+  const people = _activityRxPersonMap[key] || [];
+  if (!people.length) return;
+  const rows = people.map(({email, emoji}) => {
+    const info = _activityAvatarMap[email];
+    const name = info?.name || email.split("@")[0];
+    const col  = avatarColour(email);
+    const av   = info?.url
+      ? `<div class="likers-popover-avatar"><img src="${escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
+      : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
+    return `<div class="likers-popover-row">${av}<span class="likers-popover-name">${escHtml(name)}</span><span style="margin-left:auto;font-size:1rem">${emoji}</span></div>`;
+  }).join("");
+  const pop = document.createElement("div");
+  pop.className = "likers-popover";
+  pop.innerHTML = `<div class="likers-popover-title">Reacted</div>${rows}`;
+  document.body.appendChild(pop);
+  _activityReactorsPopover = pop;
+  const { clientX: x, clientY: y } = event;
+  const pw = 240, ph = 48 + people.length * 38;
+  pop.style.left = Math.min(x, window.innerWidth  - pw - 12) + "px";
+  pop.style.top  = Math.min(y + 8, window.innerHeight - ph - 12) + "px";
+  setTimeout(() => document.addEventListener("click", () => { if (_activityReactorsPopover) { _activityReactorsPopover.remove(); _activityReactorsPopover = null; } }, { once: true }), 0);
 }
 
 function feedItemHTML(row) {
@@ -5984,6 +6046,7 @@ function feedItemHTML(row) {
     ? (totalRx > 0 ? `${myEmoji} ${totalRx}` : myEmoji)
     : (totalRx > 0 ? String(totalRx) : "Like");
 
+  const actChips = itemKey ? _activityLikerChipsInner(itemKey) : "";
   const footer = itemKey ? `
     <div class="activity-footer post-footer" style="margin-top:8px" onclick="event.stopPropagation()">
       <div style="position:relative;display:inline-flex">
@@ -5999,6 +6062,7 @@ function feedItemHTML(row) {
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       </button>
       <div class="post-footer-right">
+        ${actChips ? `<div class="post-footer-avatars" onclick="event.stopPropagation();showActivityReactorsPopover('${itemKey}',event)" style="cursor:pointer" title="See who reacted">${actChips}</div>` : ""}
         <span class="post-footer-meta" id="acmeta-${safeKey}">
           ${totalRx > 0 ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : ""}${totalRx > 0 && cmtCount > 0 ? " · " : ""}${cmtCount > 0 ? `<span>${cmtCount} comment${cmtCount!==1?"s":""}</span>` : ""}
         </span>
@@ -6092,6 +6156,14 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
     _refreshLikeBtn(safeKey, key);
     _refreshPickerCounts(safeKey, key);
+    // Sync _activityRxPersonMap
+    if (_activityRxPersonMap[key]) _activityRxPersonMap[key] = _activityRxPersonMap[key].filter(x => x.email !== myEmail);
+    const safeK2 = key.replace(/[^a-z0-9]/gi, "_");
+    document.querySelectorAll(`.act-likers-${safeK2}`).forEach(el => {
+      const inner = _activityLikerChipsInner(key);
+      el.innerHTML = inner;
+      el.style.display = inner ? "" : "none";
+    });
     await db.from("activity_reactions").delete()
       .eq("email", myEmail).eq("event_type", eventType)
       .eq("item_id", String(itemId)).eq("emoji", emoji);
@@ -6116,6 +6188,18 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
   _rxMap[key][emoji].count++;
   _refreshLikeBtn(safeKey, key);
   _refreshPickerCounts(safeKey, key);
+  // Sync _activityRxPersonMap
+  if (!_activityRxPersonMap[key]) _activityRxPersonMap[key] = [];
+  if (!_activityAvatarMap[myEmail]) _activityAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
+  if (!_activityRxPersonMap[key].find(x => x.email === myEmail))
+    _activityRxPersonMap[key].unshift({ email: myEmail, emoji });
+  // Update chips
+  const safeK2 = key.replace(/[^a-z0-9]/gi, "_");
+  document.querySelectorAll(`.act-likers-${safeK2}`).forEach(el => {
+    const inner = _activityLikerChipsInner(key);
+    el.innerHTML = inner;
+    el.style.display = inner ? "" : "none";
+  });
 
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: eventType, item_id: String(itemId), emoji });
@@ -6207,7 +6291,7 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
     _refreshPickerCounts(_detailSK, `post:${postId}`);
     // Remove from likers only if no remaining reaction
     if (!Object.values(_postRxMap[postId] || {}).some(d => d.mine)) {
-      if (_commRxLikersMap[postId]) _commRxLikersMap[postId] = _commRxLikersMap[postId].filter(e => e !== myEmail);
+      if (_commRxLikersMap[postId]) _commRxLikersMap[postId] = _commRxLikersMap[postId].filter(x => x.email !== myEmail);
     }
     _updateCommLikerChips(postId);
     await db.from("activity_reactions").delete()
@@ -6228,7 +6312,7 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
   _rxMap[`post:${postId}`] = _postRxMap[postId];
   if (!_commRxLikersMap[postId]) _commRxLikersMap[postId] = [];
   if (!_commLikerAvatarMap[myEmail]) _commLikerAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
-  if (!_commRxLikersMap[postId].includes(myEmail)) _commRxLikersMap[postId].unshift(myEmail);
+  if (!_commRxLikersMap[postId].find(x => x.email === myEmail)) _commRxLikersMap[postId].unshift({ email: myEmail, emoji });
   _refreshPostLikeBtn(safeKey, postId);
   _refreshPickerCounts(_feedSK,   `post:${postId}`);
   _refreshPickerCounts(_detailSK, `post:${postId}`);

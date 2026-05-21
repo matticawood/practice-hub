@@ -674,17 +674,18 @@
     async showLikers(parentId, event) {
       event.stopPropagation();
       if(_likersPopover){_likersPopover.remove();_likersPopover=null;}
-      const {data:likes}=await _db().from(_rTable()).select("email").eq(_rParent(),parentId);
+      const {data:likes}=await _db().from(_rTable()).select("email,emoji").eq(_rParent(),parentId);
       if(!likes?.length)return;
       const emails=likes.map(l=>l.email);
       const {data:nameRows}=await _db().from("allowed_emails").select("email,name,avatar_url").in("email",emails);
       const infoMap={};(nameRows||[]).forEach(r=>{infoMap[r.email]=r;});
+      const emojiMap={};(likes||[]).forEach(l=>{emojiMap[l.email]=l.emoji||"❤️";});
       const rows=emails.map(e=>{
         const info=infoMap[e]||{};
         const name=info.name||e.split("@")[0];
         const col=_avatarColour(e);
         const av=info.avatar_url?`<div class="tc-likers-popover-avatar"><img src="${_escHtml(info.avatar_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`:`<div class="tc-likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${_initials(name)}</div>`;
-        return`<div class="tc-likers-popover-row">${av}<span class="tc-likers-popover-name">${_escHtml(name)}</span></div>`;
+        return`<div class="tc-likers-popover-row">${av}<span class="tc-likers-popover-name">${_escHtml(name)}</span><span style="margin-left:auto;font-size:1rem">${emojiMap[e]||"❤️"}</span></div>`;
       }).join("");
       const pop=document.createElement("div");
       pop.className="tc-likers-popover";
