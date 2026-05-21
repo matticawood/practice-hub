@@ -451,6 +451,8 @@
     #chat-panel-conversation, #chat-panel-new {
       display: flex; flex-direction: column; flex: 1; min-height: 0;
     }
+    /* Conversation panel: position:relative so composer can be absolute */
+    #chat-panel-conversation { position: relative; }
 
     /* ── Conversations list panel ────────────────────────────────────────────── */
     .chat-list-hdr {
@@ -559,13 +561,16 @@
     .chat-messages {
       flex: 1;
       overflow-y: auto;
-      padding: 16px 24px 8px;
+      /* top padding fixed; bottom padding set by JS via --composer-h so composer never overlaps content */
+      padding: 16px 24px 0;
+      padding-bottom: var(--composer-h, 80px);
       display: flex;
       flex-direction: column;
       gap: 2px;
       background: var(--bg);
-      overscroll-behavior: none; /* no rubber-band on iOS */
-      overflow-anchor: none; /* prevent browser fighting scroll position on textarea resize */
+      overscroll-behavior: none;
+      /* No scroll-anchor interference — we manage position manually */
+      overflow-anchor: none;
     }
     .chat-msg-group {
       display: flex;
@@ -703,13 +708,15 @@
 
     /* Composer */
     .chat-composer {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
       border-top: 1px solid var(--border);
       background: var(--surface);
       padding: 10px 14px 12px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      flex-shrink: 0;
+      z-index: 10;
     }
     /* Input row always visible */
     .chat-input-row { background: var(--surface); padding-top: 6px; }
@@ -1006,11 +1013,11 @@
         <div class="chat-messages" id="chat-messages">
           <div class="chat-empty" id="chat-empty">No messages yet — say hello!</div>
         </div>
-        <div class="chat-typing" id="chat-typing" style="display:none">
-          <div class="typing-dots"><span></span><span></span><span></span></div>
-          <span class="typing-label" id="chat-typing-label"></span>
-        </div>
         <div class="chat-composer">
+          <div class="chat-typing" id="chat-typing" style="display:none;padding:0 0 4px">
+            <div class="typing-dots"><span></span><span></span><span></span></div>
+            <span class="typing-label" id="chat-typing-label"></span>
+          </div>
           <div class="chat-toolbar-wrap" id="chat-toolbar-container"></div>
           <div id="chat-reply-bar" style="display:none;align-items:center;gap:8px;padding:6px 12px 4px;border-top:1px solid var(--border);font-size:.82rem;color:var(--text-muted)">
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
@@ -2640,6 +2647,7 @@ function _detachChatViewportListener() {
 // Called from the nav "Chat" button — open group chat with sidebar visible
 async function showChat(chatIdOrEmail, otherName) {
   _showChatView();
+  _initComposerResizeObserver();
   _loadConversationsList();
 
   // Ensure member list is loaded so avatars + proper names show in chat
@@ -3510,21 +3518,28 @@ function _scrollChatToBottom(instant) {
   el.scrollTo({ top: el.scrollHeight, behavior: instant ? "auto" : "smooth" });
 }
 
+// Keep messages padding-bottom === composer height so composer never overlaps content
+// and the messages container itself never resizes (no scroll jitter).
+function _initComposerResizeObserver() {
+  const composer = document.querySelector(".chat-composer");
+  const msgs     = document.getElementById("chat-messages");
+  if (!composer || !msgs) return;
+
+  const sync = () => {
+    const h = composer.offsetHeight;
+    const atBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 10;
+    msgs.style.setProperty("--composer-h", h + "px");
+    // If pinned to bottom, stay there after padding change
+    if (atBottom) msgs.scrollTop = msgs.scrollHeight;
+  };
+
+  new ResizeObserver(sync).observe(composer);
+  sync(); // run once immediately
+}
+
 function _onChatInput(ta) {
-  const msgs = document.getElementById("chat-messages");
-  const atBottom = msgs && (msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 60);
-
-  // JS resize only needed as fallback for browsers without field-sizing:content
-  if (!CSS.supports("field-sizing", "content")) {
-    ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
-  }
-
-  // Re-pin to bottom after layout settles (rAF = after reflow is committed)
-  if (atBottom && msgs) {
-    requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
-  }
-
+  // Textarea resizes via CSS field-sizing:content (absolute composer never
+  // changes messages container height — no scroll jitter possible)
   _broadcastTyping();
   _onMentionInput(ta);
 }
