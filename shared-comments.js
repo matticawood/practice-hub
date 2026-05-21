@@ -757,7 +757,7 @@
           <div class="tc-comment-form-body">
             <div class="tc-comment-form-top">
               <textarea id="tc-cmt-input-${parentId}" rows="1"
-                placeholder="Share your experience or ask a question…"
+                placeholder="Write a comment…"
                 oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();Comments.submitComment('${parentId}')}"></textarea>
               <button class="tc-send-btn" id="send-btn-${key}" onclick="Comments.submitComment('${parentId}')">Send</button>
