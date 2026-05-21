@@ -4514,6 +4514,9 @@ async function submitPost() {
 let _focusFeedItems = []; // recent weekly_focus rows for the feed
 let _contentFeedItems = []; // content_feed_posts rows for the feed
 const _cfEmbeddedYt = new Set(); // content feed YT post IDs with embed active
+let _cfRxMap = {}; // content_feed_likes: [postId][emoji] = { count, mine }
+const _cfCommentsLoaded = new Set();
+const _cfCommentsOpen   = new Set();
 
 async function _loadFocusFeedItems() {
   const { data } = await db.from("weekly_focus")
@@ -4551,6 +4554,129 @@ function focusFeedCardHTML(f) {
     </div>`;
 }
 
+/* ── Content feed reactions ───────────────────────────────────────────────── */
+function toggleCfReactPicker(safeKey) {
+  const picker = document.getElementById(`cf-picker-${safeKey}`);
+  if (!picker) return;
+  if (_openPicker && _openPicker !== `cf-${safeKey}`) {
+    const prev = document.getElementById(`picker-${_openPicker}`) || document.getElementById(`cf-picker-${_openPicker.replace(/^cf-/,"")}`);
+    if (prev) prev.style.display = "none";
+  }
+  const isOpen = picker.style.display !== "none";
+  picker.style.display = isOpen ? "none" : "";
+  _openPicker = isOpen ? null : `cf-${safeKey}`;
+}
+
+async function pickCfReaction(event, safeKey, postId, emoji) {
+  event.stopPropagation();
+  const picker = document.getElementById(`cf-picker-${safeKey}`);
+  if (!_cfRxMap[postId]) _cfRxMap[postId] = {};
+  const wasPicked = event.currentTarget.classList.contains("picked");
+  const existingEmoji = Object.keys(_cfRxMap[postId]).find(e => _cfRxMap[postId][e]?.mine);
+  if (picker) picker.style.display = "none";
+  _openPicker = null;
+
+  if (wasPicked) {
+    const d = _cfRxMap[postId][emoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    _refreshCfLikeBtn(safeKey, postId);
+    await db.from("content_feed_likes").delete().eq("email", myEmail).eq("post_id", postId);
+    return;
+  }
+  if (existingEmoji) {
+    const d = _cfRxMap[postId][existingEmoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    await db.from("content_feed_likes").delete().eq("email", myEmail).eq("post_id", postId);
+  }
+  if (!_cfRxMap[postId][emoji]) _cfRxMap[postId][emoji] = { count: 0, mine: false };
+  _cfRxMap[postId][emoji].mine  = true;
+  _cfRxMap[postId][emoji].count++;
+  _refreshCfLikeBtn(safeKey, postId);
+  await db.from("content_feed_likes").upsert({ post_id: postId, email: myEmail, emoji }, { onConflict: "post_id,email" });
+}
+
+function _refreshCfLikeBtn(safeKey, postId) {
+  const rxData = _cfRxMap[postId] || {};
+  let myEmoji = null, total = 0;
+  for (const [e, d] of Object.entries(rxData)) { total += d.count; if (d.mine) myEmoji = e; }
+  const hf  = myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const svg = `<svg viewBox="0 0 24 24" width="15" height="15" ${hf} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const btn = document.getElementById(`cf-like-btn-${safeKey}`);
+  if (btn) { btn.classList.toggle("liked", !!myEmoji); btn.innerHTML = svg + (myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "") + (total > 0 ? ` ${total}` : ""); }
+  const picker = document.getElementById(`cf-picker-${safeKey}`);
+  if (picker) {
+    ACTIVITY_EMOJIS.forEach((e, i) => {
+      const b = picker.children[i]; if (!b) return;
+      const d = rxData[e] || { count: 0, mine: false };
+      b.className = d.mine ? "picked" : "";
+      b.innerHTML = e + (d.count > 0 ? `<span class="picker-count">${d.count}</span>` : "");
+    });
+  }
+}
+
+/* ── Content feed comments ────────────────────────────────────────────────── */
+async function toggleCfComments(postId) {
+  const el = document.getElementById(`cf-comments-${postId}`);
+  if (!el) return;
+  if (_cfCommentsOpen.has(postId)) {
+    _cfCommentsOpen.delete(postId); el.style.display = "none";
+  } else {
+    _cfCommentsOpen.add(postId); el.style.display = "";
+    if (!_cfCommentsLoaded.has(postId)) await _renderCfComments(postId);
+  }
+}
+
+async function _renderCfComments(postId) {
+  const el = document.getElementById(`cf-comments-${postId}`);
+  if (!el) return;
+  _cfCommentsLoaded.add(postId);
+  el.innerHTML = `<div style="padding:0 20px;color:var(--text-muted);font-size:.85rem">Loading…</div>`;
+  const { data: comments } = await db.from("content_feed_comments")
+    .select("*").eq("post_id", postId).is("parent_comment_id", null)
+    .order("created_at", { ascending: true });
+  const list = (comments || []).map(c => {
+    const col = avatarColour(c.email);
+    const av  = `<div style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${escHtml((c.name||c.email).slice(0,1).toUpperCase())}</div>`;
+    return `<div style="display:flex;gap:10px;margin-bottom:14px">${av}<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.84rem;color:var(--text)">${escHtml(c.name||c.email.split("@")[0])}</div><div style="font-size:.88rem;color:var(--text);margin-top:2px;line-height:1.5;white-space:pre-wrap">${escHtml(c.content)}</div><div style="font-size:.72rem;color:var(--text-muted);margin-top:4px">${relativeTime(c.created_at)}</div></div></div>`;
+  }).join("") || `<div style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">No comments yet — be the first!</div>`;
+  const tid = `cf-ci-${postId.replace(/-/g,"_")}`;
+  el.innerHTML = `<div style="padding:0 20px 10px">${list}</div>
+    <div style="padding:0 20px 16px;display:flex;gap:8px;align-items:flex-start">
+      ${avatarHtml(myEmail, myName, 28, myAvatarUrl)}
+      <div style="flex:1">
+        <textarea id="${tid}" placeholder="Add a comment…" rows="2"
+          style="width:100%;box-sizing:border-box;resize:none;border:1.5px solid var(--border);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:.88rem;background:var(--surface);color:var(--text);outline:none;transition:border-color .15s"
+          onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+        <button onclick="postCfComment('${postId}','${tid}')"
+          style="margin-top:6px;background:var(--accent);color:#1a1410;border:none;border-radius:7px;padding:6px 14px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit">Comment</button>
+      </div>
+    </div>`;
+}
+
+async function postCfComment(postId, inputId) {
+  const ta = document.getElementById(inputId);
+  if (!ta) return;
+  const content = ta.value.trim();
+  if (!content) return;
+  ta.disabled = true;
+  const { error } = await db.from("content_feed_comments").insert({
+    post_id: postId, email: myEmail,
+    name: myName || myEmail.split("@")[0], content,
+  });
+  ta.disabled = false;
+  if (error) { alert("Could not post comment. Please try again."); return; }
+  ta.value = "";
+  _cfCommentsLoaded.delete(postId);
+  await _renderCfComments(postId);
+  const item = _contentFeedItems.find(x => x.id === postId);
+  if (item) {
+    item.commentCount = (item.commentCount || 0) + 1;
+    const sk  = postId.replace(/-/g,"_");
+    const btn = document.getElementById(`cf-cmt-btn-${sk}`);
+    if (btn) btn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> ${item.commentCount}`;
+  }
+}
+
 function cfEmbedYt(postId, ytId) {
   _cfEmbeddedYt.add(postId);
   const el = document.getElementById(`cf-yt-media-${postId}`);
@@ -4559,17 +4685,42 @@ function cfEmbedYt(postId, ytId) {
 
 function contentFeedCardHTML(p) {
   const timeAgo      = relativeTime(p.published_at || p.created_at);
-  const likeCount    = p.likeCount    || 0;
-  const commentCount = p.commentCount || 0;
-  const metaParts    = [
-    likeCount    ? `${likeCount} reaction${likeCount !== 1 ? "s" : ""}`   : "",
-    commentCount ? `${commentCount} comment${commentCount !== 1 ? "s" : ""}` : "",
-  ].filter(Boolean);
-  const metaEl = metaParts.length ? `<span class="cf-comm-meta">${metaParts.join(" · ")}</span>` : "";
+  const safeKey      = p.id.replace(/-/g, "_");
+  const rxData       = _cfRxMap[p.id] || {};
+  let liveMyEmoji = null, liveTotal = 0;
+  for (const [e, d] of Object.entries(rxData)) { liveTotal += d.count; if (d.mine) liveMyEmoji = e; }
 
+  const hf      = liveMyEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15" ${hf} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const cmtSvg   = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
   const SVG_YT   = `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" style="flex-shrink:0"><polygon points="4,2 14,8 4,14"/></svg>`;
   const SVG_BLOG = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
   const SVG_POST = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>`;
+
+  const commentCount = p.commentCount || 0;
+
+  // Shared footer: reaction picker + comment button + CTA on right
+  function footer(ctaHtml) {
+    return `
+      <div class="post-footer" onclick="event.stopPropagation()">
+        <div style="position:relative;display:inline-flex">
+          <button class="post-footer-btn${liveMyEmoji ? " liked" : ""}" id="cf-like-btn-${safeKey}" onclick="toggleCfReactPicker('${safeKey}')">
+            ${heartSvg}${liveMyEmoji && liveMyEmoji !== "❤️" ? ` ${liveMyEmoji}` : ""}${liveTotal > 0 ? ` ${liveTotal}` : ""}
+          </button>
+          <div class="activity-react-picker" id="cf-picker-${safeKey}" style="display:none">
+            ${ACTIVITY_EMOJIS.map(e => {
+              const d = rxData[e] || { count: 0, mine: false };
+              return `<button class="${d.mine ? "picked" : ""}" onclick="pickCfReaction(event,'${safeKey}','${p.id}','${e}')">${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+            }).join("")}
+          </div>
+        </div>
+        <button class="post-footer-btn" id="cf-cmt-btn-${safeKey}" onclick="toggleCfComments('${p.id}')">
+          ${cmtSvg}${commentCount > 0 ? ` ${commentCount}` : ""}
+        </button>
+        <div class="post-footer-right">${ctaHtml}</div>
+      </div>
+      <div id="cf-comments-${p.id}" style="display:none;border-top:1px solid var(--border)"></div>`;
+  }
 
   /* ── YouTube ── */
   if (p.type === "youtube") {
@@ -4598,10 +4749,7 @@ function contentFeedCardHTML(p) {
         <div class="cf-comm-body">
           <div class="cf-comm-title">${escHtml(p.title || "")}</div>
         </div>
-        <div class="cf-comm-footer">
-          <a href="${url}" target="_blank" rel="noopener" class="cf-comm-cta" style="text-decoration:none">Watch on YouTube →</a>
-          ${metaEl}
-        </div>
+        ${footer(`<a href="${url}" target="_blank" rel="noopener" class="cf-comm-cta" style="text-decoration:none">Watch on YouTube →</a>`)}
       </div>`;
   }
 
@@ -4617,9 +4765,11 @@ function contentFeedCardHTML(p) {
             <span style="font-size:.88rem;color:var(--text);line-height:1.5">${escHtml(item)}</span>
           </div>`).join("") + `</div>`
       : "";
-    const dest = p.url ? `window.open('${escHtml(p.url)}','_blank')` : `window.location.href='/content-feed.html'`;
+    const ctaHtml = p.url
+      ? `<a href="${escHtml(p.url)}" target="_blank" rel="noopener" class="cf-comm-cta" style="text-decoration:none">Read post →</a>`
+      : `<a href="/content-feed.html" class="cf-comm-cta" style="text-decoration:none">View in Content Feed →</a>`;
     return `
-      <div class="post-card cf-comm-card cf-comm-blog" onclick="${dest}">
+      <div class="post-card cf-comm-card cf-comm-blog">
         <div class="cf-comm-header">
           <span class="cf-comm-label">${SVG_BLOG} This Week's Article</span>
           <span class="cf-comm-date">${timeAgo}</span>
@@ -4628,10 +4778,7 @@ function contentFeedCardHTML(p) {
           <div class="cf-comm-title">${escHtml(p.title || "")}</div>
           ${bulletsHtml}
         </div>
-        <div class="cf-comm-footer">
-          <span class="cf-comm-cta">Read post →</span>
-          ${metaEl}
-        </div>
+        ${footer(ctaHtml)}
       </div>`;
   }
 
@@ -4652,20 +4799,17 @@ function contentFeedCardHTML(p) {
     }
   });
   return `
-    <div class="post-card cf-comm-card cf-comm-post" onclick="window.location.href='/content-feed.html'">
+    <div class="post-card cf-comm-card cf-comm-post">
       <div class="cf-comm-header">
         <span class="cf-comm-label">${SVG_POST} Practice Room Post</span>
         <span class="cf-comm-date">${timeAgo}</span>
       </div>
       <div class="cf-comm-body">
-        ${p.title ? `<div class="cf-comm-title">${escHtml(p.title)}</div>` : ""}
+        ${p.title  ? `<div class="cf-comm-title">${escHtml(p.title)}</div>` : ""}
         ${content  ? `<div class="cf-comm-preview">${preview}</div>` : ""}
         ${mediaHtml}
       </div>
-      <div class="cf-comm-footer">
-        <span class="cf-comm-cta">View in Content Feed →</span>
-        ${metaEl}
-      </div>
+      ${footer(`<a href="/content-feed.html" class="cf-comm-cta" style="text-decoration:none">View in Content Feed →</a>`)}
     </div>`;
 }
 
@@ -4791,24 +4935,38 @@ async function loadPosts() {
   const cfIds = cfPosts.map(p => p.id);
   const [{ data: cfLikes }, { data: cfComments }] = cfIds.length
     ? await Promise.all([
-        db.from("content_feed_likes").select("post_id").in("post_id", cfIds),
+        db.from("content_feed_likes").select("post_id,email,emoji").in("post_id", cfIds),
         db.from("content_feed_comments").select("post_id").in("post_id", cfIds),
       ])
     : [{ data: [] }, { data: [] }];
+  _cfRxMap = {};
   const cfLikeCountMap    = {};
   const cfCommentCountMap = {};
-  (cfLikes    || []).forEach(l => { cfLikeCountMap[l.post_id]    = (cfLikeCountMap[l.post_id]    || 0) + 1; });
+  (cfLikes || []).forEach(l => {
+    cfLikeCountMap[l.post_id] = (cfLikeCountMap[l.post_id] || 0) + 1;
+    if (!_cfRxMap[l.post_id]) _cfRxMap[l.post_id] = {};
+    if (!_cfRxMap[l.post_id][l.emoji]) _cfRxMap[l.post_id][l.emoji] = { count: 0, mine: false };
+    _cfRxMap[l.post_id][l.emoji].count++;
+    if (l.email === myEmail) _cfRxMap[l.post_id][l.emoji].mine = true;
+  });
   (cfComments || []).forEach(c => { cfCommentCountMap[c.post_id] = (cfCommentCountMap[c.post_id] || 0) + 1; });
 
   const _matthewAvatar = avatarUrlMap['matthew@matthewcawood.com'] || null;
   const _matthewName   = nameFromDbMap['matthew@matthewcawood.com'] || 'Matthew Cawood';
-  _contentFeedItems = cfPosts.map(p => ({
-    ...p,
-    likeCount:    cfLikeCountMap[p.id]    || 0,
-    commentCount: cfCommentCountMap[p.id] || 0,
-    matthewAvatar: _matthewAvatar,
-    matthewName:   _matthewName,
-  }));
+  _contentFeedItems = cfPosts.map(p => {
+    const rxData = _cfRxMap[p.id] || {};
+    let myEmoji = null, totalReactions = 0;
+    for (const [e, d] of Object.entries(rxData)) { totalReactions += d.count; if (d.mine) myEmoji = e; }
+    return {
+      ...p,
+      likeCount:      cfLikeCountMap[p.id]    || 0,
+      commentCount:   cfCommentCountMap[p.id] || 0,
+      matthewAvatar:  _matthewAvatar,
+      matthewName:    _matthewName,
+      myEmoji,
+      totalReactions,
+    };
+  });
 
   _renderFilteredPosts();
 }
