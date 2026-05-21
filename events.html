@@ -5488,12 +5488,21 @@ async function _joinRoomImpl(eventId) {
 
   // 2. If admin: call ensure-room to create/get the single Daily room
   if (isAdmin) {
-    try {
-      const ensureRes = await fetch("/api/daily", {
+    const _ensureRoom = async () => {
+      const res = await fetch("/api/daily", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
         body: JSON.stringify({ action: "ensure-room", eventId })
       });
+      return res;
+    };
+    try {
+      let ensureRes = await _ensureRoom();
+      // Auto-retry once on 502/503 (edge function cold start)
+      if ((ensureRes.status === 502 || ensureRes.status === 503)) {
+        await new Promise(r => setTimeout(r, 700));
+        ensureRes = await _ensureRoom();
+      }
       if (!ensureRes.ok) {
         const text = await ensureRes.text();
         alert(`Server error (${ensureRes.status}) setting up room — please try again.\n\n${text.slice(0, 200)}`);
