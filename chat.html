@@ -3379,6 +3379,12 @@ function _subscribeGlobalRealtime() {
       if (!payload || payload.chat_id !== _currentChatId) return;
       _showTyping(payload.email, payload.name);
     })
+    .on("broadcast", { event: "delete_message" }, ({ payload }) => {
+      if (!payload?.id) return;
+      _chatMessages = _chatMessages.filter(m => m.id !== payload.id);
+      const el = document.querySelector(`.chat-msg-group[data-msg-id="${payload.id}"]`);
+      if (el) el.remove();
+    })
     .subscribe();
 }
 
@@ -3663,10 +3669,12 @@ async function _deleteChatMessage(msgId) {
   if (!confirm("Delete this message?")) return;
   const { error } = await db.from("community_messages").delete().eq("id", msgId).eq("email", myEmail);
   if (error) { console.error("Delete failed:", error); return; }
-  // Remove from local state and DOM
+  // Remove locally
   _chatMessages = _chatMessages.filter(m => m.id !== msgId);
   const el = document.querySelector(`.chat-msg-group[data-msg-id="${msgId}"]`);
   if (el) el.remove();
+  // Broadcast so every connected client removes it live
+  _chatRealtimeSub?.send({ type: "broadcast", event: "delete_message", payload: { id: msgId, chat_id: _currentChatId } });
 }
 
 async function sendChatMessage() {
