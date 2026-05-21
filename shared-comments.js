@@ -224,6 +224,10 @@
 .mux-upload-overlay-status.processing { animation:tc-mux-pulse 1.4s ease-in-out infinite; color:var(--accent); }
 @keyframes tc-stripe { 0%{background-position:0 0} 100%{background-position:40px 0} }
 @keyframes tc-mux-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+/* Poll display (comment media) */
+.tc-poll-card { margin-top:10px; max-width:340px; }
+.tc-poll-question { font-size:0.92rem; font-weight:700; color:var(--text, #1a1410); margin-bottom:10px; }
+.tc-poll-option { width:100%; text-align:left; background:rgba(0,0,0,.04); border:1.5px solid var(--border, #e0d5c8); border-radius:8px; padding:9px 14px; font-size:0.85rem; color:var(--text, #1a1410); font-family:inherit; cursor:default; margin-bottom:7px; display:block; box-sizing:border-box; }
 /* Poll builder */
 .poll-builder { background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:14px; margin-top:10px; }
 .poll-builder-title { font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); margin-bottom:10px; }
@@ -510,9 +514,12 @@
       else if(m.type==="youtube") html+=`<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${_escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
       else if(m.type==="vimeo")   html+=`<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://player.vimeo.com/video/${_escHtml(m.vimeoId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
       else if(m.type==="file")    html+=`<div style="margin-top:6px"><a href="${_escHtml(m.url)}" target="_blank" download="${_escHtml(m.name)}" style="display:inline-flex;align-items:center;gap:5px;font-size:.82rem;color:var(--text-muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${_escHtml(m.name)}</a></div>`;
-      else if(m.type==="poll"){const opts=Array.isArray(m.options)?m.options:[];html+=`<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:340px"><div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${_escHtml(m.question||"Poll")}</div>${opts.map(o=>`<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${_escHtml(o)}</div>`).join("")}</div>`;}
+      else if(m.type==="poll"){const opts=Array.isArray(m.options)?m.options:[];html+=`<div class="tc-poll-card"><div class="tc-poll-question">${_escHtml(m.question||"Poll")}</div>${opts.map(o=>`<div class="tc-poll-option">${_escHtml(o)}</div>`).join("")}</div>`;}
     });
-    if(c.poll){const opts=Array.isArray(c.poll.options)?c.poll.options:[];html+=`<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:340px"><div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${_escHtml(c.poll.question||"Poll")}</div>${opts.map(o=>`<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${_escHtml(o)}</div>`).join("")}</div>`;}
+    // NOTE: if poll is undefined after a fresh column migration, run in Supabase SQL editor:
+    //   NOTIFY pgrst, 'reload schema';
+    // This forces PostgREST to refresh its schema cache so select("*") returns the poll column.
+    if(c.poll){const opts=Array.isArray(c.poll.options)?c.poll.options:[];html+=`<div class="tc-poll-card"><div class="tc-poll-question">${_escHtml(c.poll.question||"Poll")}</div>${opts.map(o=>`<div class="tc-poll-option">${_escHtml(o)}</div>`).join("")}</div>`;}
     return html;
   }
 
