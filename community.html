@@ -2652,6 +2652,8 @@ const ACTIVITY_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
 let _rxMap = {};
 // _postRxMap[postId][emoji] = { count, mine }
 let _postRxMap = {};
+let _commRxLikersMap    = {}; // postId → [email, ...] from activity_reactions
+let _commLikerAvatarMap = {}; // email → { url, name }
 // _cmtMap[`${event_type}:${item_id}`] = count
 let _cmtMap = {};
 // Activity detail view state
@@ -4901,16 +4903,26 @@ async function loadPosts() {
   }
 
   // Fetch avatar URLs + badges for all post authors
-  const allEmails = [...new Set([...posts.map(p => p.email), 'matthew@matthewcawood.com'])];
+  const rxEmails  = (postReactions || []).map(r => r.email);
+  const allEmails = [...new Set([...posts.map(p => p.email), 'matthew@matthewcawood.com', ...rxEmails])];
   const { data: avatarRows } = await db.from("allowed_emails")
     .select("email,avatar_url,badge,name").in("email", allEmails);
   const avatarUrlMap = {};
   const badgeMap     = {};
   const nameFromDbMap = {};
+  _commLikerAvatarMap = {};
   (avatarRows || []).forEach(r => {
     if (r.avatar_url) avatarUrlMap[r.email] = r.avatar_url;
     if (r.badge)      badgeMap[r.email]     = r.badge;
     if (r.name)       nameFromDbMap[r.email] = r.name;
+    _commLikerAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] };
+  });
+
+  // Build _commRxLikersMap from activity_reactions (emoji picker source of truth)
+  _commRxLikersMap = {};
+  (postReactions || []).forEach(rx => {
+    if (!_commRxLikersMap[rx.item_id]) _commRxLikersMap[rx.item_id] = [];
+    if (!_commRxLikersMap[rx.item_id].includes(rx.email)) _commRxLikersMap[rx.item_id].push(rx.email);
   });
 
   _posts = posts.map(p => {
@@ -4972,6 +4984,61 @@ async function loadPosts() {
   });
 
   _renderFilteredPosts();
+}
+
+function _commLikerChipsInner(postId) {
+  const likers = (_commRxLikersMap[postId] || []).slice(0, 3);
+  const total  = (_commRxLikersMap[postId] || []).length;
+  if (!total) return "";
+  const chips = likers.map(email => {
+    const info  = _commLikerAvatarMap[email];
+    const name  = info?.name || email.split("@")[0];
+    const col   = avatarColour(email);
+    const inner = info?.url
+      ? `<img src="${escHtml(info.url)}" alt="${escHtml(name)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`
+      : `<div style="width:100%;height:100%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</div>`;
+    return `<div class="post-footer-avatar">${inner}</div>`;
+  }).join("");
+  return chips + (total > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:4px">+${total - 3}</span>` : "");
+}
+
+function _updateCommLikerChips(postId) {
+  document.querySelectorAll(`.comm-likers-${postId}`).forEach(el => {
+    const inner = _commLikerChipsInner(postId);
+    el.innerHTML = inner;
+    el.style.display = inner ? "" : "none";
+  });
+}
+
+let _reactorsPopover = null;
+function _dismissReactorsPopover() {
+  if (_reactorsPopover) { _reactorsPopover.remove(); _reactorsPopover = null; }
+}
+document.addEventListener("click", _dismissReactorsPopover);
+
+function showReactorsPopover(postId, event) {
+  event.stopPropagation();
+  _dismissReactorsPopover();
+  const likers = _commRxLikersMap[postId] || [];
+  if (!likers.length) return;
+  const rows = likers.map(email => {
+    const info = _commLikerAvatarMap[email];
+    const name = info?.name || email.split("@")[0];
+    const col  = avatarColour(email);
+    const av   = info?.url
+      ? `<div class="likers-popover-avatar"><img src="${escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
+      : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
+    return `<div class="likers-popover-row">${av}<span class="likers-popover-name">${escHtml(name)}</span></div>`;
+  }).join("");
+  const pop = document.createElement("div");
+  pop.className = "likers-popover";
+  pop.innerHTML = `<div class="likers-popover-title">Reacted</div>${rows}`;
+  document.body.appendChild(pop);
+  _reactorsPopover = pop;
+  const { clientX: x, clientY: y } = event;
+  const pw = 220, ph = 48 + likers.length * 38;
+  pop.style.left = Math.min(x, window.innerWidth  - pw - 12) + "px";
+  pop.style.top  = Math.min(y + 8, window.innerHeight - ph - 12) + "px";
 }
 
 function postCardHTML(p) {
@@ -5127,6 +5194,10 @@ function postCardHTML(p) {
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         </button>
         <div class="post-footer-right">
+          <div class="post-footer-avatars comm-likers-${p.id}" onclick="event.stopPropagation();showReactorsPopover('${p.id}',event)"
+            style="cursor:pointer;${_liveTotal === 0 ? "display:none" : ""}" title="See who reacted">
+            ${_commLikerChipsInner(p.id)}
+          </div>
           <span class="post-footer-meta like-count-${p.id}">
             ${[
               _liveTotal      ? `<span>${_liveTotal} reaction${_liveTotal !== 1 ? "s" : ""}</span>` : "",
@@ -6134,6 +6205,11 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
     _refreshPostLikeBtn(safeKey, postId);
     _refreshPickerCounts(_feedSK,   `post:${postId}`);
     _refreshPickerCounts(_detailSK, `post:${postId}`);
+    // Remove from likers only if no remaining reaction
+    if (!Object.values(_postRxMap[postId] || {}).some(d => d.mine)) {
+      if (_commRxLikersMap[postId]) _commRxLikersMap[postId] = _commRxLikersMap[postId].filter(e => e !== myEmail);
+    }
+    _updateCommLikerChips(postId);
     await db.from("activity_reactions").delete()
       .eq("email", myEmail).eq("event_type", "post").eq("item_id", postId).eq("emoji", emoji);
     return;
@@ -6150,9 +6226,13 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
   _postRxMap[postId][emoji].mine = true;
   _postRxMap[postId][emoji].count++;
   _rxMap[`post:${postId}`] = _postRxMap[postId];
+  if (!_commRxLikersMap[postId]) _commRxLikersMap[postId] = [];
+  if (!_commLikerAvatarMap[myEmail]) _commLikerAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
+  if (!_commRxLikersMap[postId].includes(myEmail)) _commRxLikersMap[postId].unshift(myEmail);
   _refreshPostLikeBtn(safeKey, postId);
   _refreshPickerCounts(_feedSK,   `post:${postId}`);
   _refreshPickerCounts(_detailSK, `post:${postId}`);
+  _updateCommLikerChips(postId);
 
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: "post", item_id: postId, emoji });
