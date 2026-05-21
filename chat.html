@@ -451,8 +451,15 @@
     #chat-panel-conversation, #chat-panel-new {
       display: flex; flex-direction: column; flex: 1; min-height: 0;
     }
-    /* Conversation panel: position:relative so composer can be absolute */
-    #chat-panel-conversation { position: relative; }
+    /* Conversation panel: position:relative so composer can be absolute.
+       padding-bottom reserves space for the composer so the .chat-messages
+       scrollbar track ends above the composer, not behind it.
+       env(safe-area-inset-bottom) adds space for the iPhone home indicator. */
+    #chat-panel-conversation {
+      position: relative;
+      padding-bottom: 70px;
+      padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    }
 
     /* ── Conversations list panel ────────────────────────────────────────────── */
     .chat-list-hdr {
@@ -561,7 +568,7 @@
     .chat-messages {
       flex: 1;
       overflow-y: auto;
-      padding: 16px 24px 120px; /* bottom pad covers absolute composer (fixed, never changes = no scrollbar jitter) */
+      padding: 16px 24px 160px; /* generous bottom pad so last message stays above the composer */
       display: flex;
       flex-direction: column;
       gap: 2px;
@@ -659,19 +666,25 @@
       z-index: 5; box-shadow: 0 1px 4px rgba(0,0,0,.14);
     }
     .chat-react-trigger { right: 8px; }
-    .chat-reply-trigger { right: 36px; font-size: .85rem; }
+    .chat-reply-trigger { right: 36px; }
+    .chat-reply-trigger svg { display: block; color: var(--text-muted); }
+    .chat-delete-trigger { right: 64px; font-size: .72rem; color: var(--text-muted); }
+    .chat-delete-trigger:hover { color: #ef4444; border-color: #ef4444; }
     .chat-msg-group:hover .chat-react-trigger,
-    .chat-msg-group:hover .chat-reply-trigger { opacity: 1; }
+    .chat-msg-group:hover .chat-reply-trigger,
+    .chat-msg-group:hover .chat-delete-trigger { opacity: 1; }
     .chat-react-picker {
       display: none; gap: 2px; flex-wrap: nowrap;
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 20px; padding: 5px 8px;
       box-shadow: 0 2px 12px rgba(0,0,0,.18);
-      position: absolute; bottom: calc(100% + 6px); z-index: 200;
+      position: absolute; z-index: 200;
       white-space: nowrap;
+      /* Sit just above the trigger button:
+         trigger is bottom:-12px, height:24px → top at bottom:12px
+         + 6px gap = bottom:18px. Aligned right with the trigger (right:8px). */
+      bottom: 18px; right: 8px;
     }
-    .chat-react-picker.mine { right: 0; }
-    .chat-react-picker:not(.mine) { left: 0; }
     .chat-react-picker button {
       background: none; border: none; cursor: pointer;
       font-size: 1.15rem; padding: 2px 4px; border-radius: 8px;
@@ -1025,7 +1038,7 @@
               placeholder="Message…"
               oninput="_onChatInput(this)"
               onkeydown="_onChatKeydown(event)"></textarea>
-            <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" title="Send (Shift+Enter)">
+            <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" title="Send (Enter)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
           </div>
@@ -1718,7 +1731,7 @@ function _renderInlineMediaPreview(key) {
     const sendBtn = document.getElementById(sendBtnId);
     if (sendBtn) {
       sendBtn.disabled = isUploading;
-      sendBtn.title = isUploading ? "Please wait — video is processing…" : (key === "chat_main" ? "Send (Shift+Enter)" : "");
+      sendBtn.title = isUploading ? "Please wait — video is processing…" : (key === "chat_main" ? "Send (Enter)" : "");
     }
     // Also try activity reply btn (activity replies share UUID keys with post replies)
     const actReplySendBtn = document.getElementById(`activity-reply-send-btn-${key}`);
@@ -2938,6 +2951,7 @@ async function _openConversation(chatIdOrEmail, otherName) {
   _updateConvRowBadge(chatId);
   _updateChatHeaderBadge();
 
+  _syncComposerPad();
   _renderChatMessages();
   // rAF lets the browser commit the new DOM before we read scrollHeight
   requestAnimationFrame(() => _scrollChatToBottom(true));
@@ -3419,7 +3433,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const replyItem    = nonPollMedia.find(m => m.type === "reply");
   const nonReplyMedia = nonPollMedia.filter(m => m.type !== "reply");
   const replyQuoteHtml = replyItem
-    ? `<div class="chat-reply-quote" onclick="_scrollToMsg('${escHtml(replyItem.toId)}')"><strong>↩ ${escHtml(replyItem.toName)}</strong>${replyItem.toPreview ? escHtml(replyItem.toPreview) : ""}</div>`
+    ? `<div class="chat-reply-quote" onclick="_scrollToMsg('${escHtml(replyItem.toId)}')"><strong><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>${escHtml(replyItem.toName)}</strong>${replyItem.toPreview ? escHtml(replyItem.toPreview) : ""}</div>`
     : "";
 
   const mediaHtml = _renderCommentMedia({ media: nonReplyMedia });
@@ -3472,11 +3486,14 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const triggerBtn = `<button class="chat-react-trigger" onclick="toggleChatReactPicker('${escHtml(msg.id)}',event)" title="React">😊</button>`;
   const _rp = msg.content || "";
   const replyPreview = escHtml(_rp.length > 80 ? _rp.slice(0, 80) + "…" : _rp);
-  const replyBtn   = `<button class="chat-reply-trigger" data-name="${escHtml(dispName)}" data-id="${escHtml(msg.id)}" data-preview="${replyPreview}" onclick="_chatReply(this.dataset.name,this.dataset.id,this.dataset.preview)" title="Reply">↩</button>`;
+  const replyBtn   = `<button class="chat-reply-trigger" data-name="${escHtml(dispName)}" data-id="${escHtml(msg.id)}" data-preview="${replyPreview}" onclick="_chatReply(this.dataset.name,this.dataset.id,this.dataset.preview)" title="Reply"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg></button>`;
+  const deleteBtn  = isMine
+    ? `<button class="chat-react-trigger chat-delete-trigger" onclick="_deleteChatMessage('${escHtml(msg.id)}')" title="Delete">🗑</button>`
+    : "";
 
   // chat-bubble-inner is position:relative so picker + trigger are anchored to the bubble
   const innerWrap = (bubbleHtml || pollHtml)
-    ? `<div class="chat-bubble-inner">${pickerHtml}${bubbleHtml}${pollHtml}${replyBtn}${triggerBtn}</div>`
+    ? `<div class="chat-bubble-inner">${pickerHtml}${bubbleHtml}${pollHtml}${replyBtn}${triggerBtn}${deleteBtn}</div>`
     : "";
   const bubbleWrap = innerWrap
     ? `<div class="chat-bubble-wrap">${innerWrap}${rxHtml}</div>`
@@ -3510,10 +3527,28 @@ function _scrollChatToBottom(instant) {
   el.scrollTo({ top: el.scrollHeight, behavior: instant ? "auto" : "smooth" });
 }
 
+// Keep #chat-panel-conversation padding-bottom in sync with the actual composer height
+// so the scrollbar track never overlaps the composer — called on load and resize,
+// NOT on every keystroke (that would cause scroll jitter).
+function _syncComposerPad() {
+  const composer = document.querySelector(".chat-composer");
+  const panel    = document.getElementById("chat-panel-conversation");
+  if (!composer || !panel) return;
+  const h = composer.offsetHeight;
+  panel.style.paddingBottom = h + "px";
+}
+window.addEventListener("resize", _syncComposerPad);
+
 
 function _onChatInput(ta) {
-  // Textarea resizes via CSS field-sizing:content (absolute composer never
-  // changes messages container height — no scroll jitter possible)
+  // Native auto-resize via CSS field-sizing:content.
+  // JS fallback for browsers that don't support it (Chrome<123, Firefox<128, Safari<17.4).
+  // Safe to do here: composer is position:absolute so height changes don't
+  // affect messages container scrollHeight — no scroll jitter.
+  if (!CSS.supports("field-sizing", "content")) {
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
+  }
   _broadcastTyping();
   _onMentionInput(ta);
 }
@@ -3560,7 +3595,10 @@ function _onChatKeydown(e) {
     }
     if (e.key === "Escape") { _closeMentionDrop(); return; }
   }
-  if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+  // Desktop: Enter sends, Shift+Enter newlines.
+  // Touch/mobile: Enter always newlines — use the send button instead.
+  const touchDevice = window.matchMedia("(pointer: coarse)").matches;
+  if (e.key === "Enter" && !e.shiftKey && !touchDevice) { e.preventDefault(); sendChatMessage(); }
 }
 
 function _onMentionInput(ta) {
@@ -3616,6 +3654,16 @@ document.addEventListener("click", e => {
 });
 
 // Send a message
+async function _deleteChatMessage(msgId) {
+  if (!confirm("Delete this message?")) return;
+  const { error } = await _sb.from("community_messages").delete().eq("id", msgId).eq("email", myEmail);
+  if (error) { console.error("Delete failed:", error); return; }
+  // Remove from local state and DOM
+  _chatMessages = _chatMessages.filter(m => m.id !== msgId);
+  const el = document.querySelector(`.chat-msg-group[data-msg-id="${msgId}"]`);
+  if (el) el.remove();
+}
+
 async function sendChatMessage() {
   if (!myEmail) return;
   const sendBtn = document.getElementById("chat-send-btn");
@@ -3662,6 +3710,7 @@ async function sendChatMessage() {
   input.value = ""; input.style.height = "";
   _clearInlineState("chat_main");
   document.getElementById("chat-toolbar-container").innerHTML = _inlineToolbarHtml("chat_main");
+  requestAnimationFrame(_syncComposerPad); // textarea shrinks back — re-sync padding
 
   const { data: inserted, error } = await db.from("community_messages").insert({
     chat_id: _currentChatId,
