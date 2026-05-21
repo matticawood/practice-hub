@@ -179,6 +179,32 @@
     .add-step-btn:hover { border-color: var(--accent); color: var(--accent); }
     .form-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
 
+    /* ── Likers popover ─────────────────────────────────────────────────────── */
+    .likers-popover {
+      position: fixed; z-index: 9999;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      min-width: 140px; max-width: 220px;
+    }
+    .likers-popover-title { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+    .likers-popover-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .likers-popover-row:last-child { margin-bottom: 0; }
+    .likers-popover-avatar { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; font-weight: 800; flex-shrink: 0; overflow: hidden; }
+    .likers-popover-name { font-size: 0.82rem; color: var(--text); }
+    /* Stacked liker avatars next to like button */
+    .like-avatars {
+      display: inline-flex; align-items: center;
+    }
+    .like-avatar-chip {
+      width: 20px; height: 20px; border-radius: 50%;
+      border: 1.5px solid var(--surface);
+      margin-left: -6px; flex-shrink: 0; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.52rem; font-weight: 800;
+    }
+    .like-avatar-chip:first-child { margin-left: 0; }
+    .like-avatar-chip img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+
     /* ── Focus card ─────────────────────────────────────────────────────────── */
     .focus-card {
       background: var(--surface);
@@ -429,12 +455,15 @@
     .irc-cancel:hover { color: var(--text); }
     /* Comment input form at bottom */
     .comment-form {
-      display: flex; gap: 10px; align-items: flex-end;
+      display: flex; gap: 10px; align-items: flex-start;
       padding: 12px 18px;
       border-top: 1px solid var(--border);
-      flex-direction: column;
     }
-    .comment-form-row { display: flex; gap: 10px; align-items: flex-end; width: 100%; }
+    .comment-form-body { flex: 1; min-width: 0; }
+    .comment-form-top { display: flex; gap: 8px; align-items: flex-end; }
+    .comment-form-top .comment-input { flex: 1; }
+    /* composer-toolbar inside the form body sits below the textarea */
+    .comment-form-body .composer-toolbar { margin-top: 6px; }
     .comment-input {
       flex: 1; background: transparent;
       border: 1.5px solid var(--border);
@@ -1036,18 +1065,33 @@ async function loadFocuses(autoExpandId = null) {
     db.from("weekly_focus_comments").select("focus_id").in("focus_id", ids),
   ]);
 
-  const likeCountMap = {}, myLikeSet = new Set(), cmtCountMap = {};
-  (allLikes || []).forEach(l => likeCountMap[l.focus_id] = (likeCountMap[l.focus_id] || 0) + 1);
+  const likeCountMap = {}, myLikeSet = new Set(), cmtCountMap = {}, likersMap = {};
+  (allLikes || []).forEach(l => {
+    likeCountMap[l.focus_id] = (likeCountMap[l.focus_id] || 0) + 1;
+    if (!likersMap[l.focus_id]) likersMap[l.focus_id] = [];
+    if (likersMap[l.focus_id].length < 3) likersMap[l.focus_id].push(l.email);
+  });
   (myLikes  || []).forEach(l => myLikeSet.add(l.focus_id));
   (cmtCounts|| []).forEach(c => cmtCountMap[c.focus_id] = (cmtCountMap[c.focus_id] || 0) + 1);
 
+  // Fetch avatar URLs for likers (up to 3 per focus)
+  const likerEmails = [...new Set((allLikes || []).map(l => l.email))];
+  const likerAvatarMap = {};
+  if (likerEmails.length) {
+    const { data: likerRows } = await db.from("allowed_emails")
+      .select("email,avatar_url,name").in("email", likerEmails);
+    (likerRows || []).forEach(r => { likerAvatarMap[r.email] = { url: r.avatar_url, name: r.name }; });
+  }
+
   _focuses = rows.map((r, i) => ({
     ...r,
-    likeCount:   likeCountMap[r.id] || 0,
-    commentCount:cmtCountMap[r.id]  || 0,
-    iLiked:      myLikeSet.has(r.id),
+    likeCount:    likeCountMap[r.id] || 0,
+    commentCount: cmtCountMap[r.id]  || 0,
+    iLiked:       myLikeSet.has(r.id),
+    likers:       likersMap[r.id]    || [],
     isCurrentWeek: i === 0,
   }));
+  window._likerAvatarMap = likerAvatarMap;
 
   // Auto-expand: current week + deep-link target
   _expanded.clear();
@@ -1094,10 +1138,26 @@ function focusCardHTML(f) {
     ? `<button class="focus-edit-btn" onclick="event.stopPropagation();openEditForm('${f.id}')">✏️ Edit</button>`
     : "";
 
-  const likeIcon = `<svg viewBox="0 0 24 24" width="14" height="14"
+  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15"
     ${f.iLiked ? 'fill="currentColor" stroke="currentColor" stroke-width="1.5"' : 'fill="none" stroke="currentColor" stroke-width="2"'}
     stroke-linecap="round" stroke-linejoin="round">
     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+
+  // Stacked liker avatars (up to 3)
+  const likerAvatarMap = window._likerAvatarMap || {};
+  const likerChips = (f.likers || []).map(email => {
+    const info = likerAvatarMap[email];
+    const name = info?.name || email.split("@")[0];
+    const col  = avatarColour(email);
+    const inner = info?.url
+      ? `<img src="${escHtml(info.url)}" alt="${escHtml(name)}">`
+      : `<span style="background:${col.bg};color:${col.fg};width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</span>`;
+    return `<div class="like-avatar-chip">${inner}</div>`;
+  }).join("");
+  const likeAvatars = f.likeCount > 0
+    ? `<span class="like-avatars" onclick="event.stopPropagation();showFocusLikers('${f.id}',event)" style="cursor:pointer;margin-left:4px" title="See who liked">${likerChips}${f.likeCount > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:6px">+${f.likeCount - 3}</span>` : ""}</span>`
+    : "";
+  const likeLabel = f.iLiked ? "Liked" : "Like";
 
   const collapsedBody = !isExpanded ? `
     <div class="focus-card-body">
@@ -1106,11 +1166,11 @@ function focusCardHTML(f) {
     </div>
     <div class="focus-card-footer">
       <button class="focus-footer-btn${f.iLiked ? " liked" : ""}" onclick="toggleLike('${f.id}')">
-        ${likeIcon}${f.likeCount > 0 ? ` ${f.likeCount}` : ""}
+        ${heartSvg} ${likeLabel}
       </button>
+      ${likeAvatars}
       <span class="focus-meta-counts">
-        ${[f.likeCount ? `${f.likeCount} like${f.likeCount!==1?"s":""}` : "",
-           f.commentCount ? `${f.commentCount} comment${f.commentCount!==1?"s":""}` : ""].filter(Boolean).join(" · ")}
+        ${[f.commentCount ? `${f.commentCount} comment${f.commentCount!==1?"s":""}` : ""].filter(Boolean).join(" · ")}
       </span>
       <button class="focus-expand-btn" onclick="toggleExpand('${f.id}')">Read focus ↓</button>
     </div>` : "";
@@ -1124,11 +1184,12 @@ function focusCardHTML(f) {
       ${renderSteps(f.steps)}
       ${f.closing ? `<div class="focus-body-text">${escHtml(f.closing)}</div>` : ""}
       <div class="focus-divider"></div>
-      <div style="display:flex;align-items:center;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="focus-footer-btn${f.iLiked ? " liked" : ""}" onclick="toggleLike('${f.id}')">
-          ${likeIcon} ${f.iLiked ? "Liked" : "Like"}${f.likeCount > 0 ? ` · ${f.likeCount}` : ""}
+          ${heartSvg} ${likeLabel}
         </button>
-        <button class="focus-expand-btn" onclick="toggleExpand('${f.id}')">Close ↑</button>
+        ${likeAvatars}
+        <button class="focus-expand-btn" style="margin-left:auto" onclick="toggleExpand('${f.id}')">Close ↑</button>
       </div>
     </div>
     <div class="focus-comments-wrap" id="comments-section-${f.id}">
@@ -1136,15 +1197,17 @@ function focusCardHTML(f) {
         <div class="comments-hdr" id="comments-hdr-${f.id}">Comments</div>
         <div id="comments-list-${f.id}"></div>
         <div class="comment-form">
-          <div class="comment-form-row">
-            ${avatarHtml(myEmail, myName, 28, myAvatarUrl)}
-            <textarea class="comment-input" id="cmt-input-${f.id}" rows="1"
-              placeholder="Share your experience or ask a question…"
-              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
-              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment('${f.id}')}"></textarea>
-            <button class="comment-send-btn" id="focus-send-btn-${f.id}" onclick="submitComment('${f.id}')">Send</button>
+          ${avatarHtml(myEmail, myName, 28, myAvatarUrl)}
+          <div class="comment-form-body">
+            <div class="comment-form-top">
+              <textarea class="comment-input" id="cmt-input-${f.id}" rows="1"
+                placeholder="Share your experience or ask a question…"
+                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
+                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment('${f.id}')}"></textarea>
+              <button class="comment-send-btn" id="focus-send-btn-${f.id}" onclick="submitComment('${f.id}')">Send</button>
+            </div>
+            ${_inlineToolbarHtml(f.id + '_main')}
           </div>
-          ${_inlineToolbarHtml(f.id + '_main')}
         </div>
       </div>
     </div>` : "";
@@ -1205,13 +1268,60 @@ async function toggleLike(focusId) {
     await db.from("weekly_focus_likes").delete().eq("focus_id", focusId).eq("email", myEmail);
     f.likeCount = Math.max(0, f.likeCount - 1);
     f.iLiked = false;
+    f.likers = (f.likers || []).filter(e => e !== myEmail);
   } else {
     await db.from("weekly_focus_likes").insert({ focus_id: focusId, email: myEmail });
     f.likeCount++;
     f.iLiked = true;
+    if (!f.likers) f.likers = [];
+    if (f.likers.length < 3) f.likers.unshift(myEmail);
+    // Add current user to avatar map
+    const map = window._likerAvatarMap || {};
+    if (!map[myEmail]) map[myEmail] = { url: myAvatarUrl, name: myName };
+    window._likerAvatarMap = map;
   }
   renderFocusList();
-  if (_expanded.has(focusId)) loadComments(focusId);
+}
+
+let _focusLikersPopover = null;
+function _dismissFocusLikersPopover() {
+  if (_focusLikersPopover) { _focusLikersPopover.remove(); _focusLikersPopover = null; }
+}
+
+async function showFocusLikers(focusId, event) {
+  event.stopPropagation();
+  _dismissFocusLikersPopover();
+
+  const { data: likes } = await db.from("weekly_focus_likes").select("email").eq("focus_id", focusId);
+  if (!likes?.length) return;
+
+  const emails = likes.map(l => l.email);
+  const { data: nameRows } = await db.from("allowed_emails").select("email,name,avatar_url").in("email", emails);
+  const infoMap = {};
+  (nameRows || []).forEach(r => { infoMap[r.email] = r; });
+
+  const rows = emails.map(e => {
+    const info = infoMap[e] || {};
+    const name = info.name || e.split("@")[0];
+    const col  = avatarColour(e);
+    const avatar = info.avatar_url
+      ? `<div class="likers-popover-avatar"><img src="${escHtml(info.avatar_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
+      : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
+    return `<div class="likers-popover-row">${avatar}<span class="likers-popover-name">${escHtml(name)}</span></div>`;
+  }).join("");
+
+  const pop = document.createElement("div");
+  pop.className = "likers-popover";
+  pop.innerHTML = `<div class="likers-popover-title">Liked by</div>${rows}`;
+  document.body.appendChild(pop);
+  _focusLikersPopover = pop;
+
+  const { clientX: x, clientY: y } = event;
+  const pw = 220, ph = 48 + emails.length * 38;
+  pop.style.left = Math.min(x, window.innerWidth  - pw - 12) + "px";
+  pop.style.top  = Math.min(y + 8, window.innerHeight - ph - 12) + "px";
+
+  setTimeout(() => document.addEventListener("click", _dismissFocusLikersPopover, { once: true }), 0);
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────────
@@ -1350,7 +1460,7 @@ async function submitComment(focusId) {
 
   const { error } = await db.from("weekly_focus_comments").insert({
     focus_id: focusId, email: myEmail, name: myName,
-    content, media: uploaded.length ? uploaded : null,
+    content, media: uploaded.length ? uploaded : [],
   });
 
   if (sendBtn) sendBtn.disabled = false;
@@ -1387,7 +1497,7 @@ async function submitReply(focusId, parentId, composerEl) {
   const { error } = await db.from("weekly_focus_comments").insert({
     focus_id: focusId, email: myEmail, name: myName,
     content, parent_comment_id: parentId, reply_to_name: replyToName,
-    media: uploaded.length ? uploaded : null,
+    media: uploaded.length ? uploaded : [],
   });
   if (ta) ta.disabled = false;
   if (error) { alert("Couldn't post reply: " + error.message); return; }
