@@ -906,6 +906,14 @@
     .cf-comm-blog .cf-comm-cta { color: #3730a3; }
     .cf-comm-post .cf-comm-cta { color: #92400e; }
     .cf-comm-meta { font-size: 0.75rem; color: var(--text-muted); }
+
+    /* ── Practice Room Update cards in community feed ───────────────────────── */
+    .cf-comm-update { border-left: 3.5px solid #0f766e; }
+    .cf-comm-update:hover, .cf-comm-update:focus { border-color: #0f766e; }
+    .cf-comm-update .cf-comm-header { background: linear-gradient(90deg,rgba(15,118,110,.1) 0%,rgba(15,118,110,.02) 100%); border-bottom-color: rgba(15,118,110,.18); }
+    .cf-comm-update .cf-comm-label { color: #0d6461; }
+    .cf-comm-update .cf-comm-cta   { color: #0d6461; }
+
     /* post-footer and inline-media sit inside zero-padded cf-comm-card, so add side margin/padding */
     .cf-comm-card .post-footer { margin-left: 18px; margin-right: 18px; padding-bottom: 10px; margin-top: 0; }
     .cf-comm-card .post-card-inline-media { margin-left: -18px; margin-right: -18px; }
@@ -3094,6 +3102,7 @@ function _renderFilteredPosts() {
     filtered.forEach(p => items.push({ html: postCardHTML(p), ts: new Date(p.created_at).getTime() }));
     _focusFeedItems.forEach(f => items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
     _contentFeedItems.forEach(f => items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
+    _updateItems.forEach(f => items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
     items.sort((a, b) => b.ts - a.ts);
   } else {
     items = filtered.map(p => ({ html: postCardHTML(p), ts: 0 }));
@@ -4520,8 +4529,10 @@ async function submitPost() {
 // ── Weekly focus cards in the community feed ──────────────────────────────────
 let _focusFeedItems = []; // recent weekly_focus rows for the feed
 let _contentFeedItems = []; // content_feed_posts rows for the feed
+let _updateItems = []; // practice_room_updates rows for the feed
 const _cfEmbeddedYt = new Set(); // content feed YT post IDs with embed active
 let _cfRxMap = {}; // content_feed_likes: [postId][emoji] = { count, mine }
+let _urxMap  = {}; // practice_room_update_likes: [updateId][emoji] = { count, mine }
 const _cfCommentsLoaded = new Set();
 const _cfCommentsOpen   = new Set();
 
@@ -4819,19 +4830,142 @@ function contentFeedCardHTML(p) {
     </div>`;
 }
 
+function updateFeedCardHTML(p) {
+  const timeAgo      = relativeTime(p.published_at || p.created_at);
+  const safeKey      = "up_" + p.id.replace(/-/g, "_");
+  const rxData       = _urxMap[p.id] || {};
+  let liveMyEmoji = null, liveTotal = 0;
+  for (const [e, d] of Object.entries(rxData)) { liveTotal += d.count; if (d.mine) liveMyEmoji = e; }
+
+  const hf       = liveMyEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const heartSvg = `<svg viewBox="0 0 24 24" width="15" height="15" ${hf} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const cmtSvg   = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+  const SVG_UPD  = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>`;
+
+  const commentCount = p.commentCount || 0;
+  const content      = p.body || "";
+  const PREVIEW      = 180;
+  const preview      = content.length > PREVIEW ? escHtml(content.slice(0, PREVIEW)) + "…" : escHtml(content);
+
+  let mediaHtml = "";
+  (Array.isArray(p.media) ? p.media : []).forEach(m => {
+    if (m.type === "mux") {
+      mediaHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()"><div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div></div>`;
+    } else if (m.type === "youtube") {
+      mediaHtml += `<div class="post-card-inline-media post-card-embed" onclick="event.stopPropagation()"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "image") {
+      mediaHtml += `<div class="comm-img-wrap" style="margin-top:8px" onclick="event.stopPropagation()"><img src="${escHtml(m.url)}" style="width:100%;border-radius:8px" loading="lazy" onload="this.parentElement.classList.add('loaded')"></div>`;
+    }
+  });
+
+  const footerHtml = `
+    <div class="post-footer" onclick="event.stopPropagation()">
+      <div style="position:relative;display:inline-flex">
+        <button class="post-footer-btn${liveMyEmoji ? " liked" : ""}" id="up-like-btn-${safeKey}" onclick="toggleUpReactPicker('${safeKey}')">
+          ${heartSvg}${liveMyEmoji && liveMyEmoji !== "❤️" ? ` ${liveMyEmoji}` : ""}${liveTotal > 0 ? ` ${liveTotal}` : ""}
+        </button>
+        <div class="activity-react-picker" id="up-picker-${safeKey}" style="display:none">
+          ${ACTIVITY_EMOJIS.map(e => {
+            const d = rxData[e] || { count: 0, mine: false };
+            return `<button class="${d.mine ? "picked" : ""}" onclick="pickUpReaction(event,'${safeKey}','${p.id}','${e}')">${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+          }).join("")}
+        </div>
+      </div>
+      <button class="post-footer-btn" onclick="location.href='/updates.html?post=${p.id}'">
+        ${cmtSvg}${commentCount > 0 ? ` ${commentCount}` : ""}
+      </button>
+      <div class="post-footer-right"><a href="/updates.html?post=${p.id}" class="cf-comm-cta" style="text-decoration:none;color:#0d6461" onclick="event.stopPropagation()">View update →</a></div>
+    </div>`;
+
+  return `
+    <div class="post-card cf-comm-card cf-comm-update" style="cursor:pointer" onclick="location.href='/updates.html?post=${p.id}'">
+      <div class="cf-comm-header">
+        <span class="cf-comm-label">${SVG_UPD} Practice Room Update</span>
+        <span class="cf-comm-date">${timeAgo}</span>
+      </div>
+      <div class="cf-comm-body">
+        ${p.title  ? `<div class="cf-comm-title">${escHtml(p.title)}</div>` : ""}
+        ${content  ? `<div class="cf-comm-preview">${preview}</div>` : ""}
+        ${mediaHtml}
+      </div>
+      ${footerHtml}
+    </div>`;
+}
+
+function toggleUpReactPicker(safeKey) {
+  const picker = document.getElementById(`up-picker-${safeKey}`);
+  if (!picker) return;
+  if (_openPicker && _openPicker !== `up-${safeKey}`) {
+    const prev = document.getElementById(`picker-${_openPicker}`) || document.getElementById(`up-picker-${_openPicker.replace(/^up-/,"")}`);
+    if (prev) prev.style.display = "none";
+  }
+  const isOpen = picker.style.display !== "none";
+  picker.style.display = isOpen ? "none" : "";
+  _openPicker = isOpen ? null : `up-${safeKey}`;
+}
+
+async function pickUpReaction(event, safeKey, updateId, emoji) {
+  event.stopPropagation();
+  const picker = document.getElementById(`up-picker-${safeKey}`);
+  if (!_urxMap[updateId]) _urxMap[updateId] = {};
+  const wasPicked = event.currentTarget.classList.contains("picked");
+  const existingEmoji = Object.keys(_urxMap[updateId]).find(e => _urxMap[updateId][e]?.mine);
+  if (picker) picker.style.display = "none";
+  _openPicker = null;
+
+  if (wasPicked) {
+    const d = _urxMap[updateId][emoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    _refreshUpLikeBtn(safeKey, updateId);
+    await db.from("practice_room_update_likes").delete().eq("email", myEmail).eq("update_id", updateId);
+    return;
+  }
+  if (existingEmoji) {
+    const d = _urxMap[updateId][existingEmoji];
+    if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
+    await db.from("practice_room_update_likes").delete().eq("email", myEmail).eq("update_id", updateId);
+  }
+  if (!_urxMap[updateId][emoji]) _urxMap[updateId][emoji] = { count: 0, mine: false };
+  _urxMap[updateId][emoji].mine  = true;
+  _urxMap[updateId][emoji].count++;
+  _refreshUpLikeBtn(safeKey, updateId);
+  await db.from("practice_room_update_likes").upsert({ update_id: updateId, email: myEmail, emoji }, { onConflict: "update_id,email" });
+}
+
+function _refreshUpLikeBtn(safeKey, updateId) {
+  const rxData = _urxMap[updateId] || {};
+  let myEmoji = null, total = 0;
+  for (const [e, d] of Object.entries(rxData)) { total += d.count; if (d.mine) myEmoji = e; }
+  const hf  = myEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const svg = `<svg viewBox="0 0 24 24" width="15" height="15" ${hf} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const btn = document.getElementById(`up-like-btn-${safeKey}`);
+  if (btn) { btn.classList.toggle("liked", !!myEmoji); btn.innerHTML = svg + (myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "") + (total > 0 ? ` ${total}` : ""); }
+  const picker = document.getElementById(`up-picker-${safeKey}`);
+  if (picker) {
+    ACTIVITY_EMOJIS.forEach((e, i) => {
+      const b = picker.children[i]; if (!b) return;
+      const d = rxData[e] || { count: 0, mine: false };
+      b.className = d.mine ? "picked" : "";
+      b.innerHTML = e + (d.count > 0 ? `<span class="picker-count">${d.count}</span>` : "");
+    });
+  }
+}
+
 // ── Posts ─────────────────────────────────────────────────────────────────────
 async function loadPosts() {
   _postsPage = 1; // reset pagination on fresh load
   const list = document.getElementById("posts-list");
   list.innerHTML = '<div class="posts-empty"><div class="loading-spinner" style="margin:0 auto 12px"></div>Loading posts…</div>';
 
-  const [postsResult, cfResult] = await Promise.all([
+  const [postsResult, cfResult, updatesResult] = await Promise.all([
     db.from("community_posts").select("*").order("created_at", { ascending: false }).limit(100),
     db.from("content_feed_posts").select("*").order("published_at", { ascending: false }).limit(50),
+    db.from("practice_room_updates").select("*").order("published_at", { ascending: false }).limit(50),
     _loadFocusFeedItems(),
   ]);
   const { data: posts, error } = postsResult;
-  const cfPosts = cfResult?.data || [];
+  const cfPosts      = cfResult?.data      || [];
+  const updatePosts  = updatesResult?.data || [];
 
   if (error || !posts) {
     list.innerHTML = '<div class="posts-empty">Could not load posts.</div>';
@@ -4984,6 +5118,32 @@ async function loadPosts() {
       totalReactions,
     };
   });
+
+  // Fetch like/comment counts for practice_room_updates posts
+  const upIds = updatePosts.map(p => p.id);
+  const [{ data: upLikes }, { data: upComments }] = upIds.length
+    ? await Promise.all([
+        db.from("practice_room_update_likes").select("update_id,email,emoji").in("update_id", upIds),
+        db.from("practice_room_update_comments").select("update_id").in("update_id", upIds),
+      ])
+    : [{ data: [] }, { data: [] }];
+  _urxMap = {};
+  const upLikeCountMap    = {};
+  const upCommentCountMap = {};
+  (upLikes || []).forEach(l => {
+    upLikeCountMap[l.update_id] = (upLikeCountMap[l.update_id] || 0) + 1;
+    if (!_urxMap[l.update_id]) _urxMap[l.update_id] = {};
+    if (!_urxMap[l.update_id][l.emoji]) _urxMap[l.update_id][l.emoji] = { count: 0, mine: false };
+    _urxMap[l.update_id][l.emoji].count++;
+    if (l.email === myEmail) _urxMap[l.update_id][l.emoji].mine = true;
+  });
+  (upComments || []).forEach(c => { upCommentCountMap[c.update_id] = (upCommentCountMap[c.update_id] || 0) + 1; });
+
+  _updateItems = updatePosts.map(p => ({
+    ...p,
+    likeCount:    upLikeCountMap[p.id]    || 0,
+    commentCount: upCommentCountMap[p.id] || 0,
+  }));
 
   _renderFilteredPosts();
 }

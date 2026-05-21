@@ -395,7 +395,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <a href="/content-feed.html">Content Feed</a>
         <a href="/events.html">Live Practice Clinics</a>
         <a href="/clinic-booking.html">One-to-One Clinics</a>
-        <a href="#">Practice Room Updates</a>
+        <a href="/updates.html">Practice Room Updates</a>
       </div>
     </div>
   `;
@@ -479,7 +479,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <a class="sh-item" data-page="studio" href="/content-feed.html">Content Feed</a>
         <a class="sh-item" data-page="studio" href="/events.html">Live Practice Clinics</a>
         <a class="sh-item" data-page="studio" href="/clinic-booking.html">One-to-One Clinics</a>
-        <a class="sh-item" data-page="studio" href="#">Practice Room Updates</a>
+        <a class="sh-item" data-page="studio" href="/updates.html">Practice Room Updates</a>
       </div>
     </div>
 
