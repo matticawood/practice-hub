@@ -153,11 +153,11 @@
 .tc-comment-reply-btn:hover { color:var(--accent); }
 .tc-comment-replies { margin-left:36px; margin-top:8px; display:flex; flex-direction:column; gap:4px; }
 /* Reply composer — uses same .tc-comment-item.is-reply structure as community.html */
-.tc-reply-composer { padding:10px 20px; border-top:1px solid var(--border); }
+.tc-reply-composer { padding:13px 20px; }
 .tc-reply-composer-inner { display:flex; gap:10px; align-items:flex-start; }
 .tc-reply-composer textarea { width:100%; box-sizing:border-box; background:transparent; border:1.5px solid var(--accent); border-radius:16px; color:var(--text); font-size:.85rem; font-family:inherit; padding:7px 12px; resize:none; min-height:34px; max-height:100px; }
 .tc-reply-composer textarea:focus { outline:none; }
-.tc-irc-actions { display:flex; justify-content:flex-end; gap:14px; margin-top:5px; }
+.tc-irc-actions { display:flex; justify-content:flex-end; gap:14px; margin-top:8px; margin-bottom:6px; }
 .tc-irc-send { background:none; border:none; font-family:inherit; font-size:.8rem; font-weight:700; cursor:pointer; color:var(--accent); padding:0; }
 .tc-irc-cancel { background:none; border:none; font-family:inherit; font-size:.8rem; cursor:pointer; color:var(--text-muted); padding:0; }
 .tc-irc-cancel:hover { color:var(--text); }
