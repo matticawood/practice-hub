@@ -16,6 +16,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mux/mux-player"></script>
   <script src="/shared-header.js"></script>
   <style>
     /* ── Light theme (matches community.html) ───────────────────────────────── */
@@ -507,6 +508,382 @@
       .focus-expanded { padding: 16px; }
       .focus-comments-wrap { padding: 0 14px 14px; }
     }
+
+    /* ── Rich inline composer CSS (from community.html lines 218–573) ─────────── */
+    .composer-toolbar {
+      display: flex; align-items: center; gap: 4px;
+      flex: 1; flex-wrap: wrap;
+    }
+    .toolbar-btn {
+      width: 32px; height: 32px;
+      background: none; border: 1.5px solid transparent;
+      border-radius: 8px; cursor: pointer; font-size: 1.05rem;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); transition: background .15s, border-color .15s, color .15s;
+      position: relative;
+      font-family: inherit;
+    }
+    .toolbar-btn:hover { background: rgba(0,0,0,.05); color: var(--text); border-color: var(--border); }
+    .toolbar-btn.recording {
+      color: #ef4444; border-color: #ef4444;
+      animation: pulse-red 1s ease-in-out infinite;
+    }
+    .toolbar-btn[title]:hover::after {
+      content: attr(title);
+      position: absolute; bottom: calc(100% + 6px); left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); font-size: 0.72rem; white-space: nowrap;
+      padding: 3px 8px; border-radius: 5px; pointer-events: none;
+      z-index: 1000;
+    }
+    @keyframes pulse-red {
+      0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+      50%      { box-shadow: 0 0 0 5px rgba(239,68,68,.25); }
+    }
+
+    .composer-cancel {
+      background: none; border: none; font-size: 0.85rem;
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+      padding: 6px 10px; border-radius: 6px;
+      transition: color .15s;
+    }
+    .composer-cancel:hover { color: var(--text); }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── Recording indicator ─────────────────────────────────────────────────── */
+    .recording-indicator {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.8rem; color: #ef4444; font-weight: 600;
+      background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
+      border-radius: 20px; padding: 4px 12px; margin-top: 8px;
+    }
+    .recording-stop-btn {
+      background: rgba(239,68,68,.2); border: 1px solid rgba(239,68,68,.4);
+      border-radius: 12px; color: #ef4444; cursor: pointer;
+      font-size: 0.75rem; font-weight: 700; padding: 2px 10px; margin-left: 4px;
+    }
+    .recording-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ef4444;
+      animation: pulse-red 1s ease-in-out infinite;
+    }
+    /* ── Video recording preview panel ──────────────────────────────────────── */
+    .video-rec-panel {
+      background: #0d0d0d; border: 1.5px solid var(--border);
+      border-radius: 12px; overflow: hidden; margin-top: 10px;
+    }
+    .video-rec-preview {
+      display: block; width: 100%; height: auto;
+      background: #000;
+    }
+    .video-rec-devices {
+      display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px 0;
+      background: var(--surface);
+    }
+    .video-rec-select {
+      flex: 1; min-width: 0;
+      background: var(--bg);
+      border: 1.5px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 0.78rem; padding: 6px 8px;
+      font-family: inherit; outline: none;
+    }
+    .video-rec-actions {
+      display: flex; gap: 8px; padding: 10px 12px 12px;
+      background: var(--surface);
+    }
+    .video-rec-start-btn {
+      flex: 1; background: #ef4444; color: #fff; border: none;
+      border-radius: 8px; font-weight: 700; font-size: 0.87rem;
+      padding: 10px; cursor: pointer; transition: opacity .15s;
+    }
+    .video-rec-start-btn:hover { opacity: .85; }
+    .video-rec-cancel-btn {
+      background: var(--bg); border: 1.5px solid var(--border);
+      border-radius: 8px; color: var(--text-muted); cursor: pointer;
+      font-size: 0.85rem; padding: 10px 16px;
+    }
+    .video-rec-recording-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px 12px; background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    .video-rec-recording-bar .recording-dot {
+      width: 9px; height: 9px; border-radius: 50%; background: #ef4444;
+      animation: blink 1s ease-in-out infinite; flex-shrink: 0;
+    }
+    #video-rec-timer { font-size: 0.88rem; font-weight: 600; color: var(--text); flex: 1; }
+    .video-rec-stop-btn {
+      background: #ef4444; color: #fff; border: none; border-radius: 8px;
+      font-weight: 700; font-size: 0.82rem; padding: 8px 14px; cursor: pointer;
+    }
+
+    /* ── Video attach panel ───────────────────────────────────────────────────── */
+    .video-attach-panel {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 12px; margin-top: 10px; overflow: hidden;
+    }
+    .video-attach-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px 0;
+      font-size: 1rem; font-weight: 700; color: var(--text);
+    }
+    .video-attach-close {
+      background: rgba(0,0,0,.06); border: none; border-radius: 6px;
+      color: var(--text-muted); cursor: pointer;
+      font-size: 0.85rem; width: 26px; height: 26px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .video-attach-tabs {
+      display: flex; gap: 0; padding: 10px 16px 0;
+      border-bottom: 1.5px solid var(--border);
+    }
+    .video-tab {
+      background: none; border: none; border-bottom: 2.5px solid transparent;
+      color: var(--text-muted); cursor: pointer; font-size: 0.88rem;
+      font-weight: 600; padding: 6px 12px 10px; margin-bottom: -1.5px;
+      transition: color .15s, border-color .15s;
+    }
+    .video-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+    .video-dropzone {
+      margin: 16px; border: 1.5px dashed rgba(0,0,0,.12);
+      border-radius: 10px; padding: 32px 20px;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      transition: background .15s, border-color .15s;
+    }
+    .video-dropzone.drag-over { background: rgba(0,0,0,.05); border-color: rgba(0,0,0,.25); }
+    .video-dropzone-icon { font-size: 2rem; opacity: .4; }
+    .video-dropzone-text { color: var(--text-muted); font-size: 0.85rem; margin: 0; text-align: center; }
+    .video-choose-btn {
+      background: #fff; color: #000; border: none; border-radius: 20px;
+      font-size: 0.85rem; font-weight: 700; cursor: pointer;
+      padding: 8px 20px; margin-top: 4px;
+      transition: opacity .15s;
+    }
+    .video-choose-btn:hover { opacity: .85; }
+    .mux-upload-progress {
+      width: 80%; height: 4px;
+      background: rgba(0,0,0,.08); border-radius: 4px; overflow: hidden;
+    }
+    .mux-upload-bar {
+      height: 100%; background: var(--accent);
+      border-radius: 4px; transition: width .3s;
+      width: 0%;
+    }
+    mux-player {
+      display: block; border-radius: 8px;
+      background: var(--surface);
+      --media-background-color: var(--surface);
+      --media-object-fit: contain;
+    }
+    .mux-wrap {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .mux-wrap mux-player {
+      width: 100%; height: 100%;
+      display: block;
+    }
+
+    /* ── Composer upload progress overlay ────────────────────────────────────── */
+    .mux-upload-overlay {
+      display: flex; align-items: center; gap: 14px;
+      background: rgba(245,197,24,.07);
+      border: 1.5px solid rgba(245,197,24,.25);
+      border-radius: 10px; padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .mux-upload-overlay-icon { font-size: 1.5rem; flex-shrink: 0; }
+    .mux-upload-overlay-body { flex: 1; min-width: 0; }
+    .mux-upload-overlay-filename {
+      font-size: 0.85rem; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 8px;
+    }
+    .mux-upload-overlay-track {
+      width: 100%; height: 5px;
+      background: rgba(0,0,0,.08); border-radius: 4px; overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .mux-upload-overlay-bar {
+      height: 100%; background: var(--accent);
+      border-radius: 4px; transition: width .25s ease;
+      width: 0%;
+    }
+    @keyframes mux-stripe {
+      0%   { background-position: 0 0; }
+      100% { background-position: 40px 0; }
+    }
+    .mux-upload-overlay-bar.processing {
+      background-color: var(--accent);
+      background-image: repeating-linear-gradient(
+        45deg,
+        rgba(0,0,0,.12) 0px, rgba(0,0,0,.12) 10px,
+        transparent 10px, transparent 20px
+      );
+      background-size: 40px 100%;
+      animation: mux-stripe 0.8s linear infinite;
+    }
+    .mux-upload-overlay-status {
+      font-size: 0.75rem; color: var(--text-muted);
+    }
+    @keyframes mux-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .mux-upload-overlay-status.processing {
+      animation: mux-pulse 1.4s ease-in-out infinite;
+      color: var(--accent);
+    }
+    /* Comments: mux-wrap aspect-ratio as posts */
+    .comment-mux-wrap {
+      position: relative; width: 100%; padding-top: 56.25%;
+      background: transparent; overflow: hidden; border-radius: 8px;
+      margin-top: 8px;
+    }
+    .comment-mux-wrap mux-player {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block;
+    }
+    .video-embed-tab {
+      display: flex; gap: 8px; align-items: center; padding: 14px 16px;
+    }
+    .video-url-input {
+      flex: 1; background: rgba(0,0,0,.05); border: 1.5px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: inherit;
+      font-size: 0.87rem; outline: none; padding: 8px 12px;
+    }
+    .video-url-input::placeholder { color: #555; }
+    .video-url-input:focus { border-color: rgba(0,0,0,.2); }
+    .video-add-btn {
+      background: var(--accent); color: #000; border: none; border-radius: 8px;
+      font-size: 0.85rem; font-weight: 700; cursor: pointer; padding: 8px 16px;
+      flex-shrink: 0;
+    }
+
+    /* ── Poll builder ─────────────────────────────────────────────────────────── */
+    .poll-builder {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; padding: 14px; margin-top: 10px;
+    }
+    .poll-builder-title {
+      font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .poll-question-input, .poll-option-input {
+      width: 100%; box-sizing: border-box;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 7px; color: var(--text);
+      font-size: 0.87rem; font-family: inherit;
+      padding: 8px 12px; margin-bottom: 8px;
+      transition: border-color .15s;
+    }
+    .poll-question-input:focus, .poll-option-input:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .poll-question-input::placeholder, .poll-option-input::placeholder { color: #444; }
+    .poll-options-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+    .poll-option-row { display: flex; align-items: center; gap: 6px; }
+    .poll-option-row input { flex: 1; margin-bottom: 0; }
+    .poll-option-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 1.1rem; line-height: 1;
+      padding: 2px 4px; transition: color .15s;
+    }
+    .poll-option-remove:hover { color: #ef4444; }
+    .poll-add-option {
+      background: none; border: 1.5px dashed var(--border);
+      border-radius: 7px; color: var(--text-muted);
+      font-size: 0.82rem; font-family: inherit;
+      padding: 6px 12px; cursor: pointer; width: 100%;
+      transition: border-color .15s, color .15s;
+    }
+    .poll-add-option:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Media preview area ───────────────────────────────────────────────────── */
+    .media-preview-area {
+      margin-top: 10px;
+    }
+    .media-preview-images {
+      display: grid; gap: 6px; margin-bottom: 6px;
+    }
+    .media-thumb-wrap {
+      position: relative; display: block;
+    }
+    .media-thumb-wrap img {
+      width: 100%; height: auto; max-height: 420px;
+      object-fit: contain; border-radius: 8px;
+      border: 1.5px solid var(--border); display: block;
+    }
+    .media-thumb-remove {
+      position: absolute; top: 6px; right: 6px;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: rgba(0,0,0,.55); border: none;
+      color: #fff; font-size: 0.8rem; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: background .15s;
+    }
+    .media-thumb-remove:hover { background: #ef4444; }
+    .media-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 20px; padding: 5px 10px 5px 8px;
+      font-size: 0.8rem; color: var(--text-muted); margin: 4px 4px 4px 0;
+    }
+    .media-chip-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 1rem; line-height: 1;
+      padding: 0 2px; transition: color .15s;
+    }
+    .media-chip-remove:hover { color: #ef4444; }
+    .media-preview-video-wrap {
+      position: relative; margin-bottom: 8px;
+    }
+    .media-video-remove {
+      display: block; width: 100%; margin-top: 6px;
+      background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3);
+      border-radius: 6px; color: #ef4444; cursor: pointer;
+      font-size: 0.78rem; padding: 4px 0;
+    }
+    .media-video-remove:hover { background: rgba(239,68,68,.22); }
+
+    /* ── Image lightbox modal ─────────────────────────────────────────────────── */
+    #comm-img-modal {
+      position: fixed; inset: 0; z-index: 9000;
+      background: rgba(0,0,0,.88);
+      display: none; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .18s ease;
+    }
+    #comm-img-modal.open { display: flex; opacity: 1; }
+    #comm-img-modal img {
+      max-width: min(84vw, 1200px); max-height: 88vh;
+      border-radius: 10px; object-fit: contain;
+      box-shadow: 0 8px 48px rgba(0,0,0,.7); transition: opacity .12s ease;
+    }
+    #comm-img-modal-close {
+      position: absolute; top: 16px; right: 18px;
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 38px; height: 38px; cursor: pointer; color: #fff;
+      font-size: 1.3rem; display: flex; align-items: center; justify-content: center;
+      transition: background .15s;
+    }
+    #comm-img-modal-close:hover { background: rgba(255,255,255,.22); }
+    .comm-img-modal-nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,.12); border: none; border-radius: 50%;
+      width: 44px; height: 44px; cursor: pointer; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s; flex-shrink: 0;
+    }
+    .comm-img-modal-nav:hover { background: rgba(255,255,255,.26); }
+    .comm-img-modal-nav:disabled { opacity: 0; pointer-events: none; }
+    #comm-img-modal-prev { left: 14px; }
+    #comm-img-modal-next { right: 14px; }
+    #comm-img-modal-counter {
+      position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,.6); font-size: .82rem; font-weight: 600;
+      background: rgba(0,0,0,.4); padding: 3px 10px; border-radius: 20px;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -588,6 +965,24 @@ let isAdmin    = false;
 let _focuses   = [];      // loaded focus rows + metadata
 let _expanded  = new Set(); // focus IDs currently expanded
 let _stepCount = 0;         // for unique step IDs in form
+
+// ── Inline composer state ─────────────────────────────────────────────────────
+const _inlineMedia       = {};
+const _inlinePollOpen    = {};
+const _inlineVoiceRec    = {};
+const _inlineRecTimer    = {};
+const _inlineRecStart    = {};
+let   _inlineCamRec           = null;
+let   _inlineCamKey           = null;
+let   _inlineCamStream        = null;
+let   _inlineCamPreviewStream = null;
+let   _inlineCamPreviewKey    = null;
+let   _muxUploading           = false;
+
+// ── Image modal state ─────────────────────────────────────────────────────────
+const _commImgGroups = {};
+let _commImgCurrentGroup = null;
+let _commImgCurrentIdx   = 0;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 (async () => {
@@ -745,18 +1140,11 @@ function focusCardHTML(f) {
             ${avatarHtml(myEmail, myName, 28, myAvatarUrl)}
             <textarea class="comment-input" id="cmt-input-${f.id}" rows="1"
               placeholder="Share your experience or ask a question…"
-              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
-            <button class="comment-send-btn" onclick="submitComment('${f.id}')">Send</button>
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment('${f.id}')}"></textarea>
+            <button class="comment-send-btn" id="focus-send-btn-${f.id}" onclick="submitComment('${f.id}')">Send</button>
           </div>
-          <div id="cmt-media-${f.id}" class="cmt-media-preview"></div>
-          <div class="cmt-media-toolbar">
-            <button class="cmt-media-btn" onclick="pickCmtImage('${f.id}')">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Photo
-            </button>
-            <button class="cmt-media-btn" onclick="pickCmtVideo('${f.id}')">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg> Video
-            </button>
-          </div>
+          ${_inlineToolbarHtml(f.id + '_main')}
         </div>
       </div>
     </div>` : "";
@@ -827,7 +1215,6 @@ async function toggleLike(focusId) {
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────────
-let _cmtMedia = {}; // focusId → [{ type, url, name, blob }]
 
 async function loadComments(focusId) {
   const listEl = document.getElementById(`comments-list-${focusId}`);
@@ -875,12 +1262,7 @@ async function loadComments(focusId) {
     const replyPrefix = (isReply && c.reply_to_name)
       ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
 
-    let mediaHtml = "";
-    (c.media || []).forEach(m => {
-      if      (m.type === "image") mediaHtml += `<div class="comment-media"><img src="${escHtml(m.url)}" loading="lazy" onclick="_focusImgModal('${escHtml(m.url)}')" /></div>`;
-      else if (m.type === "video") mediaHtml += `<div class="comment-media"><video controls src="${escHtml(m.url)}" preload="metadata"></video></div>`;
-      else if (m.type === "audio") mediaHtml += `<div class="comment-media"><audio controls preload="metadata"><source src="${escHtml(m.url)}"></audio></div>`;
-    });
+    const mediaHtml = _renderCommentMedia(c);
 
     return `
       <div class="comment-item${isReply ? " is-reply" : ""}" id="cmt-${c.id}">
@@ -906,10 +1288,12 @@ async function loadComments(focusId) {
         <div style="flex:1;min-width:0">
           <textarea placeholder="Write a reply…" rows="1"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReply('${focusId}','${c.id}',this.closest('.inline-reply-composer'))}"
           ></textarea>
-          <div class="irc-actions">
+          ${_inlineToolbarHtml(c.id)}
+          <div class="irc-actions" style="margin-top:6px">
             <button class="irc-cancel" onclick="cancelFocusReply('${c.id}')">Cancel</button>
-            <button class="irc-send" onclick="submitReply('${focusId}','${c.id}',this.closest('.inline-reply-composer'))">Send</button>
+            <button class="irc-send" id="reply-send-btn-${c.id}" onclick="submitReply('${focusId}','${c.id}',this.closest('.inline-reply-composer'))">Send</button>
           </div>
         </div>
       </div>`;
@@ -934,33 +1318,47 @@ function startFocusReply(focusId, parentId, authorName, authorEmail) {
 
 function cancelFocusReply(parentId) {
   const composer = document.getElementById(`reply-composer-${parentId}`);
-  if (composer) { composer.style.display = "none"; const ta = composer.querySelector("textarea"); if (ta) ta.value = ""; }
+  if (composer) {
+    composer.style.display = "none";
+    const ta = composer.querySelector("textarea");
+    if (ta) ta.value = "";
+  }
+  _clearInlineState(parentId);
 }
 
 async function submitComment(focusId) {
+  const mainKey = focusId + '_main';
   const ta      = document.getElementById(`cmt-input-${focusId}`);
   const content = ta?.value.trim() || "";
-  const media   = _cmtMedia[focusId] || [];
-  if (!content && !media.length) return;
+  const media   = _inlineMedia[mainKey] || [];
+  const poll    = _inlinePollOpen[mainKey] ? _readInlinePoll(mainKey) : null;
+  if (!content && !media.length && !poll) return;
 
-  ta.disabled = true;
+  const sendBtn = document.getElementById(`focus-send-btn-${focusId}`);
+  if (sendBtn) sendBtn.disabled = true;
+  if (ta) ta.disabled = true;
 
-  const uploaded = await uploadCmtMedia(focusId);
+  let uploaded = [];
+  try {
+    uploaded = await _uploadInlineMedia(mainKey);
+  } catch (e) {
+    alert("Failed to upload media: " + e.message);
+    if (sendBtn) sendBtn.disabled = false;
+    if (ta) ta.disabled = false;
+    return;
+  }
+
   const { error } = await db.from("weekly_focus_comments").insert({
     focus_id: focusId, email: myEmail, name: myName,
     content, media: uploaded.length ? uploaded : null,
   });
 
-  ta.disabled = false;
+  if (sendBtn) sendBtn.disabled = false;
+  if (ta) ta.disabled = false;
   if (error) { alert("Couldn't post: " + error.message); return; }
 
-  ta.value = ""; ta.style.height = "";
-  _cmtMedia[focusId] = [];
-  renderMediaPreview(focusId);
-
-  // Update comment count
-  const f = _focuses.find(x => x.id === focusId);
-  if (f) f.commentCount++;
+  if (ta) { ta.value = ""; ta.style.height = ""; }
+  _clearInlineState(mainKey);
 
   await loadComments(focusId);
 }
@@ -968,25 +1366,37 @@ async function submitComment(focusId) {
 async function submitReply(focusId, parentId, composerEl) {
   const ta      = composerEl?.querySelector("textarea");
   const content = ta?.value.trim() || "";
-  if (!content) return;
+  const media   = _inlineMedia[parentId] || [];
+  const poll    = _inlinePollOpen[parentId] ? _readInlinePoll(parentId) : null;
+  if (!content && !media.length && !poll) return;
 
   const replyToName  = composerEl?.dataset.replyToName  || null;
   const replyToEmail = composerEl?.dataset.replyToEmail || null;
 
   if (ta) ta.disabled = true;
+
+  let uploaded = [];
+  try {
+    uploaded = await _uploadInlineMedia(parentId);
+  } catch (e) {
+    alert("Failed to upload media: " + e.message);
+    if (ta) ta.disabled = false;
+    return;
+  }
+
   const { error } = await db.from("weekly_focus_comments").insert({
     focus_id: focusId, email: myEmail, name: myName,
     content, parent_comment_id: parentId, reply_to_name: replyToName,
+    media: uploaded.length ? uploaded : null,
   });
   if (ta) ta.disabled = false;
   if (error) { alert("Couldn't post reply: " + error.message); return; }
 
-  // Notify the person being replied to
   if (replyToEmail && replyToEmail !== myEmail) {
     await db.from("notifications").insert({
       email: replyToEmail, type: "comment_reply",
       title: `${myName || "Someone"} replied to your comment`,
-      body: content.slice(0, 120),
+      body: (content || "Sent an attachment").slice(0, 120),
       link_url: `/focus.html?focus=${focusId}`,
       metadata: {},
     });
@@ -1004,67 +1414,876 @@ async function deleteComment(commentId, focusId) {
   await loadComments(focusId);
 }
 
-// ── Comment media ─────────────────────────────────────────────────────────────
-function pickCmtImage(focusId) {
-  const inp = document.createElement("input");
-  inp.type = "file"; inp.accept = "image/*"; inp.multiple = true;
-  inp.onchange = async () => {
-    for (const file of inp.files) {
-      const url = await uploadToStorage(file, "image");
-      (_cmtMedia[focusId] = _cmtMedia[focusId] || []).push({ type: "image", url, name: file.name });
+// ── Helper functions (from community.html) ────────────────────────────────────
+function _audioMimeType(m) {
+  if (m.mimeType) return m.mimeType;
+  const ext = (m.name || "").split(".").pop().toLowerCase();
+  return { m4a: "audio/mp4", mp4: "audio/mp4", ogg: "audio/ogg", webm: "audio/webm" }[ext] || "";
+}
+
+function parseYouTubeId(url) {
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([^&\s]+)/);
+  return m ? m[1] : null;
+}
+function parseVimeoId(url) {
+  const m = url.match(/vimeo\.com\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+async function compressImage(file, { maxPx = 1920, quality = 0.82 } = {}) {
+  if (file.type === "image/gif") return file;
+  return new Promise(resolve => {
+    const img = new Image();
+    const rawUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(rawUrl);
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > maxPx || h > maxPx) {
+        const r = Math.min(maxPx / w, maxPx / h);
+        w = Math.round(w * r); h = Math.round(h * r);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        if (!blob || blob.size >= file.size) { resolve(file); return; }
+        const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        resolve(new File([blob], name, { type: "image/jpeg" }));
+      }, "image/jpeg", quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(rawUrl); resolve(file); };
+    img.src = rawUrl;
+  });
+}
+
+async function uploadToStorage(blob, filename) {
+  const MAX_MB = 500;
+  if (blob.size > MAX_MB * 1024 * 1024) {
+    const sizeMB = (blob.size / 1024 / 1024).toFixed(0);
+    throw new Error(`"${filename}" is ${sizeMB} MB — files must be under ${MAX_MB} MB.`);
+  }
+  const safe = `${myEmail}/${Date.now()}-${filename.replace(/[^a-z0-9._-]/gi, "_")}`;
+  const { data, error } = await db.storage.from("community-uploads").upload(safe, blob);
+  if (error) {
+    if (error.message?.toLowerCase().includes("size") || error.statusCode === 413) {
+      throw new Error(`"${filename}" is too large for storage. Try a smaller file or use a video embed link instead.`);
     }
-    renderMediaPreview(focusId);
-  };
-  inp.click();
-}
-
-function pickCmtVideo(focusId) {
-  const inp = document.createElement("input");
-  inp.type = "file"; inp.accept = "video/*";
-  inp.onchange = async () => {
-    const file = inp.files[0]; if (!file) return;
-    const url = await uploadToStorage(file, "video");
-    (_cmtMedia[focusId] = _cmtMedia[focusId] || []).push({ type: "video", url, name: file.name });
-    renderMediaPreview(focusId);
-  };
-  inp.click();
-}
-
-async function uploadToStorage(file, type) {
-  const ext  = file.name.split(".").pop() || (type === "image" ? "jpg" : "mp4");
-  const path = `focus-comments/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-  const { data, error } = await db.storage.from("community-uploads").upload(path, file);
-  if (error) throw error;
+    throw error;
+  }
   return db.storage.from("community-uploads").getPublicUrl(data.path).data.publicUrl;
 }
 
-async function uploadCmtMedia(focusId) {
-  // Media is pre-uploaded when selected, just return the array
-  return (_cmtMedia[focusId] || []).map(m => ({ type: m.type, url: m.url, name: m.name }));
+// ── Mux overlay stubs (focus.html has no main-composer Mux overlay) ───────────
+function _setMuxOverlay(o) {}
+function _setGlobalMuxOverlay(o) {
+  const iBar = document.getElementById("inline-mux-upload-bar");
+  const iSt  = document.getElementById("inline-mux-upload-status");
+  if (iBar && o.pct !== undefined) iBar.style.width = o.pct + "%";
+  if (iBar && o.processing !== undefined) iBar.className = "mux-upload-overlay-bar" + (o.processing ? " processing" : "");
+  if (iSt  && o.status !== undefined) iSt.textContent = o.status;
 }
 
-function renderMediaPreview(focusId) {
-  const wrap = document.getElementById(`cmt-media-${focusId}`);
-  if (!wrap) return;
-  const items = _cmtMedia[focusId] || [];
-  wrap.innerHTML = items.map((m, i) => `
-    <div class="cmt-media-chip">
-      ${m.type === "image" ? "🖼" : "🎬"} ${escHtml(m.name || m.type)}
-      <button onclick="removeCmtMedia('${focusId}',${i})">×</button>
-    </div>`).join("");
+// ── Mux video upload ──────────────────────────────────────────────────────────
+async function _deleteMuxAsset(assetId) {
+  if (!assetId) return;
+  try {
+    const token = (await db.auth.getSession()).data.session?.access_token;
+    await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "delete-mux-asset", assetId })
+    });
+  } catch (e) { console.warn("Mux asset delete failed:", e); }
 }
 
-function removeCmtMedia(focusId, idx) {
-  if (_cmtMedia[focusId]) _cmtMedia[focusId].splice(idx, 1);
-  renderMediaPreview(focusId);
+async function _uploadVideoToMux(file, onDone = null) {
+  if (!file || !file.type.startsWith("video/")) { alert("Please select a video file."); return; }
+  if (_muxUploading) { alert("A video upload is already in progress."); return; }
+
+  const _setOverlay = onDone ? _setGlobalMuxOverlay : _setMuxOverlay;
+
+  _setOverlay({ show: true, filename: file.name, pct: 0, status: "Getting upload URL…" });
+
+  _muxUploading = true;
+  try {
+    const token = (await db.auth.getSession()).data.session?.access_token;
+    if (!token) throw new Error("You appear to be signed out. Please refresh the page and sign in again.");
+    const createRes = await fetch("/api/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "create-mux-upload" })
+    });
+    const createText = await createRes.text();
+    let createData;
+    try { createData = JSON.parse(createText); } catch { throw new Error("Bad response from server: " + createText); }
+    if (createData.error) throw new Error(JSON.stringify(createData.error));
+    const { uploadId, uploadUrl } = createData;
+    if (!uploadUrl) throw new Error("No upload URL returned from server");
+
+    _setOverlay({ pct: 0, status: "Uploading… 0%" });
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          _setOverlay({ pct, status: `Uploading… ${pct}%` });
+        }
+      };
+      xhr.onload = () => { xhr.status < 300 ? resolve() : reject(new Error("Upload failed (" + xhr.status + ")")); };
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.send(file);
+    });
+
+    const barId  = onDone ? "mux-global-bar" : "mux-overlay-bar";
+    const barEl  = document.getElementById(barId);
+    if (barEl) barEl.classList.add("processing");
+    _setOverlay({ pct: 100, status: "Queuing for processing…" });
+
+    const processingMessages = [
+      { after: 0,   msg: "Queuing for processing…" },
+      { after: 10,  msg: "Encoding video…" },
+      { after: 30,  msg: "Still encoding — larger videos take a minute or two…" },
+      { after: 60,  msg: "Almost there, finishing up…" },
+      { after: 120, msg: "This is taking longer than usual, but it's still going…" },
+    ];
+
+    let playbackId = null, muxAssetId = null;
+    const pollStart = Date.now();
+    for (let i = 0; i < 72; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const elapsed = Math.round((Date.now() - pollStart) / 1000);
+      const msg = processingMessages.filter(m => elapsed >= m.after).pop()?.msg;
+      if (msg) _setOverlay({ status: msg });
+
+      const statusRes = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "get-mux-upload-status", uploadId })
+      });
+      const s = await statusRes.json();
+      if (s.playbackId && s.assetStatus === "ready") { playbackId = s.playbackId; muxAssetId = s.assetId; break; }
+      if (s.status === "errored" || s.assetStatus === "errored") throw new Error("Mux reported an error processing the video");
+    }
+    if (!playbackId) throw new Error("Video processing timed out after 6 minutes — try again");
+
+    if (barEl) { barEl.classList.remove("processing"); barEl.style.background = "#10b981"; }
+    _setOverlay({ pct: 100, status: "✓ Video ready!", filename: file.name });
+    await new Promise(r => setTimeout(r, 1500));
+    _setOverlay({ show: false });
+    const muxItem = { type: "mux", playbackId, assetId: muxAssetId, name: file.name };
+    if (onDone) { onDone(muxItem); }
+
+  } catch (e) {
+    console.error("[Mux] Upload error:", e);
+    _setOverlay({ show: true, filename: "❌ Upload failed", status: e.message, processing: false });
+    const barEl = document.getElementById(onDone ? "mux-global-bar" : "mux-overlay-bar");
+    if (barEl) barEl.style.background = "#ef4444";
+    const statusElId = onDone ? "mux-global-status" : "mux-overlay-status";
+    const statusEl = document.getElementById(statusElId);
+    const dismissFn = onDone ? "_setGlobalMuxOverlay({show:false})" : "_setMuxOverlay({show:false});_muxUploading=false;";
+    if (statusEl) statusEl.innerHTML =
+      escHtml(e.message) +
+      `<br><button onclick="${dismissFn}"
+        style="margin-top:8px;background:rgba(0,0,0,.07);border:1px solid rgba(0,0,0,.12);
+        border-radius:6px;color:#fff;cursor:pointer;font-size:.75rem;padding:4px 10px">Dismiss</button>`;
+    if (!onDone) return;
+  } finally {
+    _muxUploading = false;
+  }
 }
 
-function _focusImgModal(url) {
-  const overlay = document.createElement("div");
-  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;";
-  overlay.innerHTML = `<img src="${escHtml(url)}" style="max-width:92vw;max-height:92vh;border-radius:8px;object-fit:contain">`;
-  overlay.onclick = () => overlay.remove();
-  document.body.appendChild(overlay);
+// ── Inline toolbar (comment + reply composers) ────────────────────────────────
+
+function _inlineKey(key) {
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  return key;
+}
+
+function _renderInlineMediaPreview(key) {
+  const area = document.getElementById(`inline-media-preview-${key}`);
+  if (!area) return;
+  const media = _inlineMedia[key] || [];
+  if (!media.length) { area.innerHTML = ""; return; }
+  const images = media.filter(m => m.type === "image");
+  const others = media.filter(m => m.type !== "image");
+  let html = "";
+  if (images.length) {
+    const cols = Math.min(images.length, 2);
+    html += `<div class="media-preview-images" style="grid-template-columns:repeat(${cols},1fr)">` +
+      images.map((m, i) => {
+        const idx = media.indexOf(m);
+        return `<div class="media-thumb-wrap">
+          <img src="${m.url}" alt="${escHtml(m.name)}" style="${cols > 1 ? "height:180px;object-fit:cover" : ""}" />
+          <button class="media-thumb-remove" onclick="removeInlineMedia('${key}',${idx})" title="Remove">×</button>
+        </div>`;
+      }).join("") + `</div>`;
+  }
+  const rmBtn = (fn) => `<button onclick="${fn}" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:.8rem;display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;transition:background .15s" onmouseover="this.style.background='#ef4444'" onmouseout="this.style.background='rgba(0,0,0,.55)'">×</button>`;
+  others.forEach(m => {
+    const idx = media.indexOf(m);
+    const rm  = `removeInlineMedia('${key}',${idx})`;
+    if (m.type === "mux") {
+      if (m._uploading) {
+        html += `<div style="position:relative;margin-top:6px">
+          <div class="mux-upload-overlay" style="margin-bottom:0">
+            <div class="mux-upload-overlay-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+            <div class="mux-upload-overlay-body">
+              <div class="mux-upload-overlay-filename">${escHtml(m.name)}</div>
+              <div class="mux-upload-overlay-track"><div class="mux-upload-overlay-bar processing" id="inline-mux-upload-bar"></div></div>
+              <div class="mux-upload-overlay-status processing" id="inline-mux-upload-status">Uploading…</div>
+            </div>
+          </div>
+          ${rmBtn(rm)}
+        </div>`;
+      } else {
+        html += `<div style="position:relative;margin-top:6px">
+          <div style="position:relative;width:100%;height:min(180px,24vh);overflow:hidden;border-radius:8px;background:var(--surface)">
+            <mux-player playback-id="${escHtml(m.playbackId)}" controls style="position:absolute;top:0;left:0;width:100%;height:100%"></mux-player>
+          </div>
+          ${rmBtn(rm)}
+        </div>`;
+      }
+    } else if (m.type === "youtube") {
+      html += `<div style="position:relative;margin-top:6px;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden">
+        <iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe>
+        ${rmBtn(rm)}
+      </div>`;
+    } else if (m.type === "vimeo") {
+      html += `<div style="position:relative;margin-top:6px;padding-bottom:56.25%;height:0;border-radius:8px;overflow:hidden">
+        <iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="position:absolute;top:0;left:0;width:100%;height:100%" frameborder="0" allowfullscreen loading="lazy"></iframe>
+        ${rmBtn(rm)}
+      </div>`;
+    } else if (m.type === "audio") {
+      const dur = m.duration ? ` · ${m.duration}s` : "";
+      html += `<div style="margin-top:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:.78rem;color:var(--text-muted)">🎙️ Voice message${escHtml(dur)}</span>
+          <button onclick="${rm}" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:.85rem;padding:0 2px" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">×</button>
+        </div>
+        <audio controls preload="metadata" style="width:100%;display:block;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio>
+      </div>`;
+    } else {
+      html += `<span class="media-chip" style="margin-top:6px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:middle"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> ${escHtml(m.name)}<button class="media-chip-remove" onclick="${rm}" title="Remove">×</button></span>`;
+    }
+  });
+  area.innerHTML = html;
+
+  // Disable the relevant send button while a Mux video is still uploading/processing
+  {
+    const isUploading = (media || []).some(m => m._uploading);
+    let sendBtnId;
+    if (key.endsWith("_main")) sendBtnId = `focus-send-btn-${key.replace(/_main$/, "")}`;
+    else sendBtnId = `reply-send-btn-${key}`;
+    const sendBtn = document.getElementById(sendBtnId);
+    if (sendBtn) {
+      sendBtn.disabled = isUploading;
+      sendBtn.title = isUploading ? "Please wait — video is processing…" : "";
+    }
+  }
+}
+
+function removeInlineMedia(key, idx) {
+  if (_inlineMedia[key]) {
+    const m = _inlineMedia[key][idx];
+    if (m?.type === "mux" && m.assetId) _deleteMuxAsset(m.assetId);
+    _inlineMedia[key].splice(idx, 1);
+  }
+  _renderInlineMediaPreview(key);
+}
+
+async function inlineHandleImage(input, key) {
+  _inlineKey(key);
+  const files = Array.from(input.files || []);
+  input.value = "";
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) {
+      alert(`"${file.name}" is not an image. Use the file attachment button to send other file types.`);
+      continue;
+    }
+    const compressed = await compressImage(file);
+    const url = URL.createObjectURL(compressed);
+    _inlineMedia[key].push({ type: "image", url, name: compressed.name, blob: compressed });
+    _renderInlineMediaPreview(key);
+  }
+}
+
+function inlineHandleFile(input, key) {
+  _inlineKey(key);
+  const file = input.files[0];
+  if (!file) return;
+  _inlineMedia[key].push({ type: "file", name: file.name, blob: file });
+  input.value = "";
+  _renderInlineMediaPreview(key);
+}
+
+function _closeInlineExcept(key, except) {
+  if (except !== "video") {
+    const vp = document.getElementById(`inline-vid-panel-${key}`);
+    if (vp && vp.style.display !== "none") {
+      vp.style.display = "none";
+      document.getElementById(`inline-vid-btn-${key}`)?.classList.remove("recording");
+    }
+  }
+  if (except !== "poll") {
+    const pp = document.getElementById(`inline-poll-${key}`);
+    if (pp && pp.style.display !== "none") {
+      pp.style.display = "none";
+      _inlinePollOpen[key] = false;
+      (document.getElementById(`inline-${key === "main" ? "main" : key}-poll-btn`) ||
+       document.getElementById(`inline-poll-btn-${key}`))?.classList.remove("recording");
+    }
+  }
+  if (except !== "cam") {
+    if (_inlineCamPreviewKey === key) inlineCancelCamPreview(key);
+    if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") _inlineCamRec.stop();
+  }
+  if (except !== "voice") {
+    if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") _inlineVoiceRec[key].stop();
+  }
+}
+
+async function toggleInlineVoice(key) {
+  if (_inlineVoiceRec[key]) {
+    if (_inlineVoiceRec[key].state !== "inactive") _inlineVoiceRec[key].stop();
+    return;
+  }
+  _closeInlineExcept(key, "voice");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = [];
+    const mr = new MediaRecorder(stream);
+    _inlineVoiceRec[key] = mr;
+    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(_inlineRecTimer[key]);
+      _inlineRecTimer[key] = null;
+      _inlineVoiceRec[key] = null;
+      const recInd = document.getElementById(`inline-recording-${key}`);
+      if (recInd) recInd.style.display = "none";
+      const btn = document.getElementById(`inline-${key === "main" ? "main" : key}-voice-btn`) ||
+                  document.getElementById(`inline-voice-btn-${key}`);
+      if (btn) btn.classList.remove("recording");
+      const mime = mr.mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: mime });
+      const duration = _inlineRecStart[key] ? Math.round((Date.now() - _inlineRecStart[key]) / 1000) : 0;
+      const ext = mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac") ? "m4a"
+        : mime.includes("ogg") ? "ogg"
+        : "webm";
+      const name = `voice-${Date.now()}.${ext}`;
+      _inlineKey(key);
+      _inlineMedia[key].push({ type: "audio", url: URL.createObjectURL(blob), name, blob, duration, mimeType: mime });
+      _renderInlineMediaPreview(key);
+    };
+    mr.start();
+    _inlineRecStart[key] = Date.now();
+    const voiceBtn = document.getElementById(`inline-${key === "main" ? "main" : key}-voice-btn`) ||
+                     document.getElementById(`inline-voice-btn-${key}`);
+    if (voiceBtn) voiceBtn.classList.add("recording");
+    const recInd = document.getElementById(`inline-recording-${key}`);
+    const timeEl = document.getElementById(`inline-rec-time-${key}`);
+    if (recInd) recInd.style.display = "";
+    _inlineRecTimer[key] = setInterval(() => {
+      const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      if (timeEl) timeEl.textContent = `${m}:${String(s).padStart(2, "0")}`;
+    }, 1000);
+  } catch (e) {
+    alert("Microphone access denied: " + e.message);
+  }
+}
+
+function stopInlineVoice(key) {
+  if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") {
+    _inlineVoiceRec[key].stop();
+  }
+}
+
+function inlineToggleVideoPanel(key) {
+  const panel  = document.getElementById(`inline-vid-panel-${key}`);
+  const btn    = document.getElementById(`inline-vid-btn-${key}`);
+  if (!panel) return;
+  const open = panel.style.display === "none";
+  if (open) _closeInlineExcept(key, "video");
+  panel.style.display = open ? "" : "none";
+  btn?.classList.toggle("recording", open);
+  if (open) inlineSwitchVideoTab("upload", key);
+}
+
+function inlineSwitchVideoTab(tab, key) {
+  const upPanel = document.getElementById(`inline-vt-up-${key}`);
+  const emPanel = document.getElementById(`inline-vt-em-${key}`);
+  const upBtn   = document.getElementById(`inline-vt-up-btn-${key}`);
+  const emBtn   = document.getElementById(`inline-vt-em-btn-${key}`);
+  const tabActive = "background:rgba(0,0,0,.07);border-radius:4px;font-weight:600";
+  if (upPanel) upPanel.style.display = tab === "upload" ? "" : "none";
+  if (emPanel) emPanel.style.display = tab === "embed"  ? "" : "none";
+  if (upBtn) upBtn.style.cssText = upBtn.style.cssText.replace(/font-weight:\s*600/g, "") + (tab === "upload" ? tabActive : "");
+  if (emBtn) emBtn.style.cssText = emBtn.style.cssText.replace(/font-weight:\s*600/g, "") + (tab === "embed"  ? tabActive : "");
+}
+
+function inlineHandleVideo(input, key) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  inlineToggleVideoPanel(key);
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  const pendingIdx = _inlineMedia[key].length;
+  _inlineMedia[key].push({ type: "mux", name: file.name, _uploading: true, _localUrl: URL.createObjectURL(file) });
+  _renderInlineMediaPreview(key);
+  _uploadVideoToMux(file, item => {
+    _inlineMedia[key][pendingIdx] = item;
+    _renderInlineMediaPreview(key);
+  });
+}
+
+function inlineAddVideoUrl(key) {
+  const input = document.getElementById(`inline-vurl-${key}`);
+  const val   = input?.value.trim();
+  if (!val) return;
+  if (!_inlineMedia[key]) _inlineMedia[key] = [];
+  const ytId = parseYouTubeId(val);
+  const viId = parseVimeoId(val);
+  if (ytId)      _inlineMedia[key].push({ type: "youtube",   ytId,     url: val, name: "YouTube video" });
+  else if (viId) _inlineMedia[key].push({ type: "vimeo",     vimeoId: viId, url: val, name: "Vimeo video" });
+  else           _inlineMedia[key].push({ type: "video-url", url: val, name: "Video" });
+  if (input) input.value = "";
+  inlineToggleVideoPanel(key);
+  _renderInlineMediaPreview(key);
+}
+
+async function inlineToggleCamRec(key) {
+  if (_inlineCamPreviewKey === key) { inlineCancelCamPreview(key); return; }
+  if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") {
+    inlineStopCamRecording(key); return;
+  }
+  if (_inlineCamRec && _inlineCamRec.state !== "inactive") {
+    alert("Stop the current camera recording first."); return;
+  }
+  if (_inlineCamPreviewStream) { inlineCancelCamPreview(_inlineCamPreviewKey); }
+  _closeInlineExcept(key, "cam");
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { aspectRatio: 16/9 } });
+    _inlineCamPreviewStream = stream;
+    _inlineCamPreviewKey    = key;
+
+    const preview = document.getElementById(`inline-cam-preview-${key}`);
+    const panel   = document.getElementById(`inline-cam-panel-${key}`);
+    const btn     = document.getElementById(`inline-camrec-btn-${key}`);
+    if (preview) preview.srcObject = stream;
+    if (panel)   panel.style.display = "";
+    if (btn)     btn.classList.add("recording");
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+    const mics    = devices.filter(d => d.kind === "audioinput");
+    const activeVideoLabel = stream.getVideoTracks()[0]?.label || "";
+    const activeAudioLabel = stream.getAudioTracks()[0]?.label || "";
+
+    const camSel = document.getElementById(`inline-cam-sel-${key}`);
+    const micSel = document.getElementById(`inline-mic-sel-${key}`);
+    if (camSel) camSel.innerHTML = cameras.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeVideoLabel ? "selected" : ""}>${d.label || "Camera " + (cameras.indexOf(d)+1)}</option>`
+    ).join("");
+    if (micSel) micSel.innerHTML = mics.map(d =>
+      `<option value="${d.deviceId}" ${d.label === activeAudioLabel ? "selected" : ""}>${d.label || "Mic " + (mics.indexOf(d)+1)}</option>`
+    ).join("");
+  } catch (e) {
+    alert("Could not access camera/mic: " + e.message);
+  }
+}
+
+async function inlineSwitchCamDevice(key) {
+  if (!_inlineCamPreviewStream || _inlineCamPreviewKey !== key) return;
+  const camSel = document.getElementById(`inline-cam-sel-${key}`);
+  const micSel = document.getElementById(`inline-mic-sel-${key}`);
+  _inlineCamPreviewStream.getTracks().forEach(t => t.stop());
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: camSel?.value ? { deviceId: { exact: camSel.value } } : true,
+      audio: micSel?.value ? { deviceId: { exact: micSel.value } } : true,
+    });
+    _inlineCamPreviewStream = stream;
+    const preview = document.getElementById(`inline-cam-preview-${key}`);
+    if (preview) preview.srcObject = stream;
+  } catch (e) { alert("Could not switch device: " + e.message); }
+}
+
+function inlineStartCamRecording(key) {
+  if (!_inlineCamPreviewStream) return;
+  const devs    = document.getElementById(`inline-cam-devices-${key}`);
+  const actions = document.getElementById(`inline-cam-actions-${key}`);
+  const recBar  = document.getElementById(`inline-cam-recbar-${key}`);
+  if (devs)    devs.style.display    = "none";
+  if (actions) actions.style.display = "none";
+  if (recBar)  recBar.style.display  = "";
+
+  const stream = _inlineCamPreviewStream;
+  _inlineCamPreviewStream = null;
+  _inlineCamStream = stream;
+  _inlineCamKey    = key;
+
+  const chunks = [];
+  const mr     = new MediaRecorder(stream);
+  _inlineCamRec = mr;
+  mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mr.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    const mime = mr.mimeType || "video/webm";
+    const blob = new Blob(chunks, { type: mime });
+    const name = `video-${Date.now()}.webm`;
+    const file = new File([blob], name, { type: mime });
+    const ck   = _inlineCamKey;
+    const panel   = document.getElementById(`inline-cam-panel-${ck}`);
+    const preview = document.getElementById(`inline-cam-preview-${ck}`);
+    const devEl   = document.getElementById(`inline-cam-devices-${ck}`);
+    const actEl   = document.getElementById(`inline-cam-actions-${ck}`);
+    const barEl   = document.getElementById(`inline-cam-recbar-${ck}`);
+    const btnEl   = document.getElementById(`inline-camrec-btn-${ck}`);
+    if (preview) preview.srcObject = null;
+    if (panel)   panel.style.display   = "none";
+    if (devEl)   devEl.style.display   = "";
+    if (actEl)   actEl.style.display   = "";
+    if (barEl)   barEl.style.display   = "none";
+    if (btnEl)   btnEl.classList.remove("recording");
+    clearInterval(_inlineRecTimer[ck]);
+    _inlineCamRec = null; _inlineCamStream = null; _inlineCamKey = null; _inlineCamPreviewKey = null;
+    if (!_inlineMedia[ck]) _inlineMedia[ck] = [];
+    const pendingIdx = _inlineMedia[ck].length;
+    _inlineMedia[ck].push({ type: "mux", name, _uploading: true, _localUrl: URL.createObjectURL(blob) });
+    _renderInlineMediaPreview(ck);
+    _uploadVideoToMux(file, item => {
+      _inlineMedia[ck][pendingIdx] = item;
+      _renderInlineMediaPreview(ck);
+    });
+  };
+  mr.start();
+
+  _inlineRecStart[key] = Date.now();
+  _inlineRecTimer[key] = setInterval(() => {
+    const secs = Math.round((Date.now() - _inlineRecStart[key]) / 1000);
+    const m = Math.floor(secs / 60), s = secs % 60;
+    const el = document.getElementById(`inline-cam-timer-${key}`);
+    if (el) el.textContent = `${m}:${String(s).padStart(2,"0")}`;
+  }, 1000);
+}
+
+function inlineStopCamRecording(key) {
+  if (_inlineCamRec && _inlineCamKey === key && _inlineCamRec.state !== "inactive") {
+    _inlineCamRec.stop();
+  }
+}
+
+function inlineCancelCamPreview(key) {
+  if (_inlineCamPreviewStream) {
+    _inlineCamPreviewStream.getTracks().forEach(t => t.stop());
+    _inlineCamPreviewStream = null;
+  }
+  _inlineCamPreviewKey = null;
+  const preview = document.getElementById(`inline-cam-preview-${key}`);
+  const panel   = document.getElementById(`inline-cam-panel-${key}`);
+  const btn     = document.getElementById(`inline-camrec-btn-${key}`);
+  if (preview) preview.srcObject = null;
+  if (panel)   panel.style.display = "none";
+  if (btn)     btn.classList.remove("recording");
+}
+
+function toggleInlinePoll(key) {
+  const panel = document.getElementById(`inline-poll-${key}`);
+  if (!panel) return;
+  const open = panel.style.display === "none";
+  if (open) _closeInlineExcept(key, "poll");
+  panel.style.display = open ? "" : "none";
+  _inlinePollOpen[key] = open;
+  const btn = document.getElementById(`inline-${key === "main" ? "main" : key}-poll-btn`) ||
+              document.getElementById(`inline-poll-btn-${key}`);
+  if (btn) btn.classList.toggle("recording", open);
+  if (open) document.getElementById(`inline-poll-q-${key}`)?.focus();
+}
+
+function addInlinePollOption(key) {
+  const list = document.getElementById(`inline-poll-opts-${key}`);
+  if (!list) return;
+  const count = list.querySelectorAll(".poll-option-input").length + 1;
+  const row = document.createElement("div");
+  row.className = "poll-option-row";
+  row.innerHTML = `<input class="poll-option-input" placeholder="Option ${count}" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button>`;
+  list.appendChild(row);
+}
+
+function removeInlinePollOption(btn) {
+  const list = btn.closest(".poll-options-list") || btn.closest("[id^='inline-poll-opts-']");
+  if (!list) return;
+  if (list.querySelectorAll(".poll-option-row").length <= 2) return;
+  btn.closest(".poll-option-row").remove();
+  list.querySelectorAll(".poll-option-input").forEach((input, i) => {
+    if (!input.value) input.placeholder = `Option ${i + 1}`;
+  });
+}
+
+function _readInlinePoll(key) {
+  const q = document.getElementById(`inline-poll-q-${key}`)?.value.trim();
+  const opts = Array.from(document.querySelectorAll(`#inline-poll-opts-${key} .poll-option-input`))
+    .map(i => i.value.trim()).filter(Boolean);
+  if (!q || opts.length < 2) return null;
+  return { question: q, options: opts };
+}
+
+function _clearInlineState(key) {
+  _inlineMedia[key] = [];
+  _inlinePollOpen[key] = false;
+  if (_inlineVoiceRec[key] && _inlineVoiceRec[key].state !== "inactive") {
+    _inlineVoiceRec[key].stop();
+  }
+  _inlineVoiceRec[key] = null;
+  if (_inlineCamKey === key && _inlineCamRec && _inlineCamRec.state !== "inactive") {
+    _inlineCamRec.stop();
+  }
+  if (_inlineCamKey === key) { _inlineCamRec = null; _inlineCamKey = null; }
+  clearInterval(_inlineRecTimer[key]);
+  _inlineRecTimer[key] = null;
+  _inlineRecStart[key] = null;
+  _renderInlineMediaPreview(key);
+  const recInd = document.getElementById(`inline-recording-${key}`);
+  if (recInd) recInd.style.display = "none";
+  document.getElementById(`inline-poll-${key}`)?.style.setProperty("display", "none");
+  document.getElementById(`inline-vid-panel-${key}`)?.style.setProperty("display", "none");
+  document.getElementById(`inline-cam-panel-${key}`)?.style.setProperty("display", "none");
+  document.getElementById(`inline-poll-btn-${key}`)?.classList.remove("recording");
+  document.getElementById(`inline-vid-btn-${key}`)?.classList.remove("recording");
+  document.getElementById(`inline-voice-btn-${key}`)?.classList.remove("recording");
+  document.getElementById(`inline-camrec-btn-${key}`)?.classList.remove("recording");
+  if (_inlineCamPreviewKey === key) inlineCancelCamPreview(key);
+  const pollPanel = document.getElementById(`inline-poll-${key}`);
+  if (pollPanel) pollPanel.style.display = "none";
+  const pollQ = document.getElementById(`inline-poll-q-${key}`);
+  if (pollQ) pollQ.value = "";
+  const pollOpts = document.getElementById(`inline-poll-opts-${key}`);
+  if (pollOpts) {
+    pollOpts.innerHTML = `
+      <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+      <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+    `;
+  }
+}
+
+function _inlineToolbarHtml(key) {
+  const tabActive = "background:rgba(0,0,0,.07);border-radius:4px;font-weight:600";
+  const tabBase   = "background:none;border:none;font-family:inherit;font-size:.78rem;cursor:pointer;padding:4px 8px;border-radius:4px;color:var(--text-muted)";
+  return `
+    <div class="composer-toolbar" id="inline-main-toolbar-${key}" style="flex-wrap:wrap;margin-top:4px">
+      <button class="toolbar-btn" title="Image" onclick="document.getElementById('inline-fi-img-${key}').click()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </button>
+      <button class="toolbar-btn" title="File" onclick="document.getElementById('inline-fi-file-${key}').click()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Video / embed" id="inline-vid-btn-${key}" onclick="inlineToggleVideoPanel('${key}')">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="4"/><polygon points="10 8 18 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Record video" id="inline-camrec-btn-${key}" onclick="inlineToggleCamRec('${key}')">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Voice recording" id="inline-voice-btn-${key}" onclick="toggleInlineVoice('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <button class="toolbar-btn" title="Poll" id="inline-poll-btn-${key}" onclick="toggleInlinePoll('${key}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      </button>
+      <input type="file" id="inline-fi-img-${key}" accept="image/*" multiple style="display:none" onchange="inlineHandleImage(this,'${key}')">
+      <input type="file" id="inline-fi-file-${key}" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.mp3,.wav,.aiff,.aif,.flac,.m4a,.ogg,.opus,.wma,.mid,.midi" style="display:none" onchange="inlineHandleFile(this,'${key}')">
+      <input type="file" id="inline-fi-vid-${key}" accept="video/*" style="display:none" onchange="inlineHandleVideo(this,'${key}')">
+    </div>
+    <div id="inline-recording-${key}" style="display:none" class="recording-indicator">
+      <span class="recording-dot"></span>
+      <span id="inline-rec-label-${key}">Recording…</span>
+      <span id="inline-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
+      <button class="recording-stop-btn" id="inline-rec-stop-${key}" onclick="stopInlineVoice('${key}')">■ Stop</button>
+    </div>
+    <div id="inline-cam-panel-${key}" style="display:none" class="video-rec-panel">
+      <video id="inline-cam-preview-${key}" autoplay muted playsinline class="video-rec-preview"></video>
+      <div class="video-rec-devices" id="inline-cam-devices-${key}">
+        <select id="inline-cam-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')">
+          <option>Loading cameras…</option>
+        </select>
+        <select id="inline-mic-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')">
+          <option>Loading mics…</option>
+        </select>
+      </div>
+      <div class="video-rec-actions" id="inline-cam-actions-${key}">
+        <button class="video-rec-start-btn" onclick="inlineStartCamRecording('${key}')">⏺ Start Recording</button>
+        <button class="video-rec-cancel-btn" onclick="inlineCancelCamPreview('${key}')">Cancel</button>
+      </div>
+      <div class="video-rec-recording-bar" id="inline-cam-recbar-${key}" style="display:none">
+        <span class="recording-dot"></span>
+        <span id="inline-cam-timer-${key}" style="font-size:.88rem;font-weight:600;color:var(--text);flex:1">0:00</span>
+        <button class="video-rec-stop-btn" onclick="inlineStopCamRecording('${key}')">■ Stop & Upload</button>
+      </div>
+    </div>
+    <div id="inline-vid-panel-${key}" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-bottom:8px">
+        <button id="inline-vt-up-btn-${key}" style="${tabBase};${tabActive}" onclick="inlineSwitchVideoTab('upload','${key}')">Upload</button>
+        <button id="inline-vt-em-btn-${key}" style="${tabBase}" onclick="inlineSwitchVideoTab('embed','${key}')">Embed URL</button>
+      </div>
+      <div id="inline-vt-up-${key}">
+        <div onclick="document.getElementById('inline-fi-vid-${key}').click()" style="border:2px dashed var(--border);border-radius:6px;padding:14px;text-align:center;cursor:pointer;font-size:.84rem;color:var(--text-muted)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block;margin:0 auto 6px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          Choose video file (uploaded to storage)
+        </div>
+        <div id="inline-vid-progress-${key}" style="display:none;margin-top:8px;font-size:.82rem;color:var(--text-muted)"></div>
+      </div>
+      <div id="inline-vt-em-${key}" style="display:none">
+        <input type="text" id="inline-vurl-${key}" placeholder="YouTube or Vimeo URL…"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:.88rem;font-family:inherit;margin-bottom:6px">
+        <button onclick="inlineAddVideoUrl('${key}')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:.84rem;font-weight:600;cursor:pointer;font-family:inherit">Add</button>
+      </div>
+    </div>
+    <div id="inline-poll-${key}" style="display:none" class="poll-builder">
+      <div class="poll-builder-title">Poll</div>
+      <input class="poll-question-input" id="inline-poll-q-${key}" placeholder="Ask a question…" />
+      <div class="poll-options-list" id="inline-poll-opts-${key}">
+        <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+        <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+      </div>
+      <button class="poll-add-option" onclick="addInlinePollOption('${key}')">+ Add option</button>
+    </div>
+    <div class="media-preview-area" id="inline-media-preview-${key}"></div>
+  `;
+}
+
+// Render media attached to a comment row
+function _renderCommentMedia(c) {
+  const media = Array.isArray(c.media) ? c.media : [];
+  if (!media.length) return "";
+  let html = "";
+  const images = media.filter(m => m.type === "image");
+  const others = media.filter(m => m.type !== "image");
+  if (images.length) {
+    const cols = Math.min(images.length, 2);
+    const multi = cols > 1;
+    const gk = _commImgGroupStore(images.map(m => m.url));
+    html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:6px">` +
+      images.map((m, i) =>
+        `<div class="comm-img-wrap${multi ? " multi" : ""}" style="border-radius:8px;cursor:pointer" onclick="_commImgModalOpen('${gk}',${i})">` +
+          `<img src="${escHtml(m.url)}" alt="${escHtml(m.name)}" decoding="async" ` +
+            `style="width:100%;${multi ? "" : "max-height:420px;object-fit:contain;"}" ` +
+            `loading="lazy" onload="this.parentElement.classList.add('loaded')">` +
+          `</div>`
+      ).join("") +
+      `</div>`;
+  }
+  others.forEach(m => {
+    if (m.type === "mux") {
+      html += `<div style="margin-top:8px;width:min(480px,70vw);aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:var(--surface)"><mux-player playback-id="${escHtml(m.playbackId)}" controls style="width:100%;height:100%;display:block"></mux-player></div>`;
+    } else if (m.type === "audio") {
+      html += `<div style="margin-top:6px;min-width:240px"><audio controls preload="metadata" style="width:100%;min-width:240px;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
+    } else if (m.type === "youtube") {
+      html += `<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "vimeo") {
+      html += `<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "file") {
+      html += `<div style="margin-top:6px"><a href="${escHtml(m.url)}" target="_blank" download="${escHtml(m.name)}" style="display:inline-flex;align-items:center;gap:5px;font-size:.82rem;color:var(--text-muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${escHtml(m.name)}</a></div>`;
+    } else if (m.type === "poll") {
+      const opts = Array.isArray(m.options) ? m.options : [];
+      html += `<div style="margin-top:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;min-width:240px;max-width:340px">
+        <div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${escHtml(m.question || "Poll")}</div>
+        ${opts.map(o => `<div style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.85rem;color:var(--text);margin-bottom:6px;background:var(--surface)">${escHtml(o)}</div>`).join("")}
+      </div>`;
+    }
+  });
+  return html;
+}
+
+// Upload inline media blobs to storage and return JSON-serialisable array
+async function _uploadInlineMedia(key) {
+  const media = _inlineMedia[key] || [];
+  if (media.some(m => m._uploading)) {
+    throw new Error("A video is still uploading — please wait for it to finish.");
+  }
+  const result = [];
+  for (const m of media) {
+    if (m.type === "mux") {
+      result.push({ type: "mux", playbackId: m.playbackId, assetId: m.assetId, name: m.name });
+    } else if (m.type === "youtube") {
+      result.push({ type: "youtube", ytId: m.ytId, url: m.url, name: m.name });
+    } else if (m.type === "vimeo") {
+      result.push({ type: "vimeo", vimeoId: m.vimeoId, url: m.url, name: m.name });
+    } else if (m.blob) {
+      const publicUrl = await uploadToStorage(m.blob, m.name);
+      const entry = { type: m.type, url: publicUrl, name: m.name };
+      if (m.duration) entry.duration = m.duration;
+      if (m.mimeType) entry.mimeType = m.mimeType;
+      result.push(entry);
+    } else {
+      result.push({ type: m.type, url: m.url, name: m.name });
+    }
+  }
+  return result;
+}
+
+// ── Image lightbox (from community.html) ──────────────────────────────────────
+function _commImgGroupStore(urls) {
+  const key = "cg" + Date.now() + Math.random().toString(36).slice(2, 6);
+  _commImgGroups[key] = urls;
+  return key;
+}
+
+function _commImgModalOpen(groupKey, index) {
+  index = index || 0;
+  const urls = _commImgGroups[groupKey];
+  if (!urls) return;
+  _commImgCurrentGroup = groupKey;
+  _commImgCurrentIdx   = index;
+  const modal = document.getElementById("comm-img-modal");
+  if (modal) { modal.style.display = "flex"; requestAnimationFrame(() => modal.classList.add("open")); }
+  _commImgModalShow();
+  document.addEventListener("keydown", _commImgModalKeyHandler);
+}
+
+function _commImgModalShow() {
+  const urls    = _commImgGroups[_commImgCurrentGroup] || [];
+  const idx     = _commImgCurrentIdx;
+  const modal   = document.getElementById("comm-img-modal");
+  if (modal && modal.style.display === "none") { modal.style.display = "flex"; requestAnimationFrame(() => modal.classList.add("open")); }
+  const img     = document.getElementById("comm-img-modal-img");
+  const prev    = document.getElementById("comm-img-modal-prev");
+  const next    = document.getElementById("comm-img-modal-next");
+  const counter = document.getElementById("comm-img-modal-counter");
+  if (!modal || !img) return;
+  img.src = urls[idx] || "";
+  modal.classList.add("open");
+  const multi = urls.length > 1;
+  if (prev)    prev.disabled    = !multi || idx === 0;
+  if (next)    next.disabled    = !multi || idx === urls.length - 1;
+  if (counter) { counter.style.display = multi ? "" : "none"; counter.textContent = `${idx + 1} / ${urls.length}`; }
+}
+
+function _commImgModalNav(dir) {
+  const urls = _commImgGroups[_commImgCurrentGroup] || [];
+  const next = _commImgCurrentIdx + dir;
+  if (next < 0 || next >= urls.length) return;
+  _commImgCurrentIdx = next;
+  _commImgModalShow();
+}
+
+function _commImgModalClose() {
+  const modal = document.getElementById("comm-img-modal");
+  if (modal) modal.classList.remove("open");
+  document.removeEventListener("keydown", _commImgModalKeyHandler);
+  setTimeout(() => {
+    const img = document.getElementById("comm-img-modal-img");
+    if (img) img.src = "";
+    if (modal) modal.style.display = "none";
+  }, 200);
+  _commImgCurrentGroup = null;
+}
+
+function _commImgModalKeyHandler(e) {
+  if (e.key === "Escape")     _commImgModalClose();
+  if (e.key === "ArrowRight") _commImgModalNav(1);
+  if (e.key === "ArrowLeft")  _commImgModalNav(-1);
 }
 
 // ── Admin form ────────────────────────────────────────────────────────────────
@@ -1311,5 +2530,18 @@ function relativeTime(ts) {
   return `${d}d ago`;
 }
 </script>
+
+<!-- Image lightbox modal -->
+<div id="comm-img-modal" onclick="_commImgModalClose()">
+  <button id="comm-img-modal-close" onclick="_commImgModalClose()" aria-label="Close">✕</button>
+  <button id="comm-img-modal-prev" class="comm-img-modal-nav" onclick="event.stopPropagation();_commImgModalNav(-1)" aria-label="Previous">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <img id="comm-img-modal-img" src="" alt="" onclick="event.stopPropagation()">
+  <button id="comm-img-modal-next" class="comm-img-modal-nav" onclick="event.stopPropagation();_commImgModalNav(1)" aria-label="Next">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <div id="comm-img-modal-counter" style="display:none"></div>
+</div>
 </body>
 </html>
