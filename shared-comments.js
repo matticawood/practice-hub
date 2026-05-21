@@ -49,7 +49,7 @@
 
   // ── Module config & state ────────────────────────────────────────────────────
   let _cfg = null;
-  let _pollVoteMap = {}; // commentId → { myVote: int|null, counts: {optIdx: count} }
+  let _pollByComment = {}; // commentId → { pollId, question, opts, voteCountMap, myOptId, totalVotes }
 
   // Inline media composer state (keyed by toolbar key)
   const _inlineMedia    = {};
@@ -225,20 +225,20 @@
 .mux-upload-overlay-status.processing { animation:tc-mux-pulse 1.4s ease-in-out infinite; color:var(--accent); }
 @keyframes tc-stripe { 0%{background-position:0 0} 100%{background-position:40px 0} }
 @keyframes tc-mux-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-/* Poll display (comment media) */
-.tc-poll-card { margin-top:10px; max-width:340px; }
-.tc-poll-question { font-size:0.92rem; font-weight:700; color:var(--text, #1a1410); margin-bottom:10px; }
-.tc-poll-option { width:100%; text-align:left; background:rgba(0,0,0,.04); border:1.5px solid var(--border, #e0d5c8); border-radius:8px; padding:9px 14px; font-size:0.85rem; color:var(--text, #1a1410); font-family:inherit; cursor:default; margin-bottom:7px; display:block; box-sizing:border-box; }
-.tc-poll-option { cursor: pointer; transition: border-color .15s, background .15s; }
-.tc-poll-option:hover { border-color: var(--accent,#f5c518); background: rgba(245,197,24,.07); }
-.tc-poll-bar-row { margin-bottom: 8px; border-radius: 6px; padding: 2px 4px; }
-.tc-poll-bar-label { display:flex; justify-content:space-between; align-items:center; font-size:.85rem; color:var(--text,#1a1410); margin-bottom:4px; }
-.tc-poll-bar-label span:last-child { color:var(--text-muted,#8a7868); font-size:.78rem; }
-.tc-poll-bar-track { background:rgba(0,0,0,.06); border-radius:4px; height:6px; }
-.tc-poll-bar-fill { height:100%; border-radius:4px; background:var(--accent,#f5c518); transition:width .4s ease; }
-.tc-poll-bar-fill.mine { background:#10b981; }
-.tc-poll-footer { display:flex; align-items:center; margin-top:10px; }
-.tc-poll-total { font-size:.75rem; color:var(--text-muted,#8a7868); }
+/* Poll display (comment media) — mirrors community.html exactly */
+.poll-card { background:transparent; border:none; border-radius:10px; padding:0; margin-top:10px; margin-bottom:8px; max-width:340px; }
+.poll-card-question { font-size:0.97rem; font-weight:700; color:var(--text,#1a1410); margin-bottom:12px; }
+.poll-option-vote-btn { width:100%; text-align:left; background:rgba(0,0,0,.04); border:1.5px solid var(--border,#e0d5c8); border-radius:8px; padding:9px 14px; font-size:0.87rem; color:var(--text,#1a1410); font-family:inherit; cursor:pointer; margin-bottom:8px; transition:border-color .15s, background .15s; display:block; box-sizing:border-box; }
+.poll-option-vote-btn:hover { border-color:var(--accent,#f5c518); background:rgba(245,197,24,.07); }
+.poll-bar-row { margin-bottom:8px; cursor:pointer; border-radius:6px; padding:2px 4px; }
+.poll-bar-row:hover .poll-bar-fill { filter:brightness(1.15); }
+.poll-bar-label { display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; color:var(--text,#1a1410); margin-bottom:4px; }
+.poll-bar-label span:last-child { color:var(--text-muted,#8a7868); font-size:0.78rem; }
+.poll-bar-track { background:rgba(0,0,0,.06); border-radius:4px; height:6px; }
+.poll-bar-fill { height:100%; border-radius:4px; background:var(--accent,#f5c518); transition:width .4s ease; }
+.poll-bar-fill.mine { background:#10b981; }
+.poll-footer { display:flex; align-items:center; margin-top:10px; }
+.poll-total { font-size:0.75rem; color:var(--text-muted,#8a7868); }
 /* Poll builder */
 .poll-builder { background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:14px; margin-top:10px; }
 .poll-builder-title { font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); margin-bottom:10px; }
@@ -506,9 +506,9 @@
   }
 
   // ── Render comment media (displayed in comment list) ─────────────────────────
-  function _renderCommentMedia(c, pollVoteData) {
+  function _renderCommentMedia(c) {
     const media=Array.isArray(c.media)?c.media:[];
-    if(!media.length&&!c.poll)return"";
+    if(!media.length)return"";
     let html="";
     const images=media.filter(m=>m.type==="image");
     const others=media.filter(m=>m.type!=="image");
@@ -525,25 +525,35 @@
       else if(m.type==="youtube") html+=`<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${_escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
       else if(m.type==="vimeo")   html+=`<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://player.vimeo.com/video/${_escHtml(m.vimeoId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
       else if(m.type==="file")    html+=`<div style="margin-top:6px"><a href="${_escHtml(m.url)}" target="_blank" download="${_escHtml(m.name)}" style="display:inline-flex;align-items:center;gap:5px;font-size:.82rem;color:var(--text-muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${_escHtml(m.name)}</a></div>`;
-      else if(m.type==="poll"){const opts=Array.isArray(m.options)?m.options:[];html+=`<div class="tc-poll-card"><div class="tc-poll-question">${_escHtml(m.question||"Poll")}</div>${opts.map(o=>`<div class="tc-poll-option">${_escHtml(o)}</div>`).join("")}</div>`;}
     });
-    // NOTE: if poll is undefined after a fresh column migration, run in Supabase SQL editor:
-    //   NOTIFY pgrst, 'reload schema';
-    // This forces PostgREST to refresh its schema cache so select("*") returns the poll column.
-    if(c.poll){
-      const opts=Array.isArray(c.poll.options)?c.poll.options:[];
-      const vd=pollVoteData||{};
-      const hasVoted=vd.myVote!==null&&vd.myVote!==undefined;
-      const totalVotes=Object.values(vd.counts||{}).reduce((a,b)=>a+b,0);
-      const cid=_escHtml(c.id);
-      const pid=_escHtml(c._parentId||"");
-      if(!hasVoted){
-        html+=`<div class="tc-poll-card"><div class="tc-poll-question">${_escHtml(c.poll.question||"Poll")}</div>${opts.map((o,i)=>`<button class="tc-poll-option" onclick="tcCastPollVote('${cid}',${i},'${pid}')">${_escHtml(o)}</button>`).join("")}</div>`;
-      } else {
-        html+=`<div class="tc-poll-card"><div class="tc-poll-question">${_escHtml(c.poll.question||"Poll")}</div>${opts.map((o,i)=>{const count=(vd.counts||{})[i]||0;const pct=totalVotes>0?Math.round(count/totalVotes*100):0;const isMine=vd.myVote===i;return`<div class="tc-poll-bar-row"><div class="tc-poll-bar-label"><span>${_escHtml(o)}${isMine?` <span style="color:#10b981;font-size:.7em">●</span>`:""}</span><span>${pct}%</span></div><div class="tc-poll-bar-track"><div class="tc-poll-bar-fill${isMine?" mine":""}" style="width:${pct}%"></div></div></div>`;}).join("")}<div class="tc-poll-footer"><span class="tc-poll-total">${totalVotes} vote${totalVotes!==1?"s":""}</span></div></div>`;
-      }
-    }
     return html;
+  }
+
+  // Render a poll in a comment — mirrors community.html _commentPollHtml exactly
+  function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail) {
+    const auth=_auth();
+    const hasVoted=!!myOptId||(!!authorEmail&&authorEmail===auth.email);
+    let html=`<div class="poll-card"><div class="poll-card-question">${_escHtml(question)}</div>`;
+    if(!hasVoted){
+      html+=opts.map(o=>
+        `<button class="poll-option-vote-btn" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}')">${_escHtml(o.label)}</button>`
+      ).join("");
+    } else {
+      html+=opts.map(o=>{
+        const count=voteCountMap[o.id]||0;
+        const pct=totalVotes>0?Math.round(count/totalVotes*100):0;
+        const isMine=o.id===myOptId;
+        return`<div class="poll-bar-row" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}')">
+          <div class="poll-bar-label">
+            <span>${_escHtml(o.label)}${isMine?` <span style="color:#10b981;font-size:.7em">●</span>`:""}</span>
+            <span>${pct}%</span>
+          </div>
+          <div class="poll-bar-track"><div class="poll-bar-fill${isMine?" mine":""}" style="width:${pct}%"></div></div>
+        </div>`;
+      }).join("");
+      html+=`<div class="poll-footer"><span class="poll-total">${totalVotes} vote${totalVotes!==1?"s":""}</span></div>`;
+    }
+    return html+`</div>`;
   }
 
   // ── Image lightbox ───────────────────────────────────────────────────────────
@@ -616,8 +626,9 @@
     const badge=badgeMap[c.email]?`<span class="author-badge">${_escHtml(badgeMap[c.email])}</span>`:"";
     const canDel=auth.isAdmin||c.email===auth.email;
     const replyPrefix=(isReply&&c.reply_to_name)?`<span class="tc-reply-to-name">@${_escHtml(c.reply_to_name)}</span> `:"";
-    c._parentId=parentId;
-    const media=_renderCommentMedia(c, _pollVoteMap[c.id]);
+    const media=_renderCommentMedia(c);
+    const p=_pollByComment[c.id];
+    const pollHtml=p?_commentPollHtml(p.pollId,p.question,p.opts,p.voteCountMap,p.myOptId,p.totalVotes,c.email):"";
     return `
       <div class="tc-comment-item${isReply?" is-reply":""}" id="tc-cmt-${c.id}">
         ${_avatarHtml(c.email,c.name,28,avatarMap[c.email])}
@@ -629,6 +640,7 @@
           </div>
           ${c.content?`<div class="tc-comment-text">${replyPrefix}${_escHtml(c.content)}</div>`:""}
           ${media?`<div class="tc-comment-media">${media}</div>`:""}
+          ${pollHtml}
           ${!isReply?`<button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>`:""}
         </div>
       </div>`;
@@ -757,18 +769,31 @@
       const hdrEl =document.getElementById(`tc-comments-hdr-${parentId}`);
       if(!listEl)return;
       const {data:comments}=await _db().from(_cTable()).select("*").eq(_cParent(),parentId).order("created_at",{ascending:true});
-      // Fetch poll votes for comments that have polls
-      const pollCmtIds=(comments||[]).filter(c=>c.poll).map(c=>c.id);
-      if(pollCmtIds.length){
+
+      // Fetch polls attached to comments — mirrors community.html loadComments() pattern
+      _pollByComment={};
+      const commentIds=(comments||[]).map(c=>c.id);
+      if(commentIds.length){
         const auth=_auth();
-        const {data:pvotes}=await _db().from("comment_poll_votes").select("comment_id,email,option_index").in("comment_id",pollCmtIds);
-        pollCmtIds.forEach(id=>{_pollVoteMap[id]={myVote:null,counts:{}};});
-        (pvotes||[]).forEach(v=>{
-          if(!_pollVoteMap[v.comment_id])_pollVoteMap[v.comment_id]={myVote:null,counts:{}};
-          _pollVoteMap[v.comment_id].counts[v.option_index]=(_pollVoteMap[v.comment_id].counts[v.option_index]||0)+1;
-          if(v.email===auth.email)_pollVoteMap[v.comment_id].myVote=v.option_index;
-        });
+        const {data:cPollRows}=await _db().from("tc_comment_polls").select("id,question,comment_id").in("comment_id",commentIds);
+        if(cPollRows&&cPollRows.length){
+          const pollIds=cPollRows.map(p=>p.id);
+          const [{data:cOpts},{data:cAllVotes},{data:cMyVotes}]=await Promise.all([
+            _db().from("tc_comment_poll_options").select("id,poll_id,label,position").in("poll_id",pollIds).order("position"),
+            _db().from("tc_comment_poll_votes").select("poll_id,option_id").in("poll_id",pollIds),
+            _db().from("tc_comment_poll_votes").select("poll_id,option_id").eq("email",auth.email).in("poll_id",pollIds),
+          ]);
+          cPollRows.forEach(p=>{
+            const opts=(cOpts||[]).filter(o=>o.poll_id===p.id);
+            const allV=(cAllVotes||[]).filter(v=>v.poll_id===p.id);
+            const myV=(cMyVotes||[]).find(v=>v.poll_id===p.id);
+            const voteCountMap={};
+            allV.forEach(v=>{voteCountMap[v.option_id]=(voteCountMap[v.option_id]||0)+1;});
+            _pollByComment[p.comment_id]={pollId:p.id,question:p.question,opts,voteCountMap,myOptId:myV?.option_id||null,totalVotes:allV.length};
+          });
+        }
       }
+
       const count=comments?.length||0;
       if(hdrEl)hdrEl.textContent=count===0?"Comments":`${count} Comment${count!==1?"s":""}`;
       if(!count){listEl.innerHTML=`<div class="tc-comments-empty">No comments yet — be the first!</div>`;return;}
@@ -816,12 +841,17 @@
       try { uploaded=await _uploadMedia(key); }
       catch(e){ alert("Failed to upload media: "+e.message); if(btn)btn.disabled=false; if(ta)ta.disabled=false; return; }
       const auth=_auth();
-      const row={[_cParent()]:parentId,email:auth.email,name:auth.name,content,media:uploaded.length?uploaded:[]};
-      if(poll)row.poll=poll;
-      const {error}=await _db().from(_cTable()).insert(row);
+      const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,media:uploaded.length?uploaded:[]}).select().single();
       if(btn)btn.disabled=false;
       if(ta)ta.disabled=false;
       if(error){alert("Couldn't post: "+error.message);return;}
+      // Insert poll into relational tables — mirrors community.html submitComment()
+      if(poll&&row){
+        const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
+        if(pollRow){
+          await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
+        }
+      }
       if(ta){ta.value="";ta.style.height="";}
       _clearState(key);
       await Comments.load(parentId);
@@ -833,7 +863,8 @@
       const ta=composerEl?.querySelector("textarea");
       const content=ta?.value.trim()||"";
       const media=_inlineMedia[commentId]||[];
-      if(!content&&!media.length)return;
+      const poll=_inlinePollOpen[commentId]?_readInlinePoll(commentId):null;
+      if(!content&&!media.length&&!poll)return;
       const replyToName =composerEl?.dataset.replyToName||null;
       const replyToEmail=composerEl?.dataset.replyToEmail||null;
       if(ta)ta.disabled=true;
@@ -841,9 +872,16 @@
       try { uploaded=await _uploadMedia(commentId); }
       catch(e){ alert("Failed to upload media: "+e.message); if(ta)ta.disabled=false; return; }
       const auth=_auth();
-      const {error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,parent_comment_id:commentId,reply_to_name:replyToName,media:uploaded.length?uploaded:[]});
+      const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,parent_comment_id:commentId,reply_to_name:replyToName,media:uploaded.length?uploaded:[]}).select().single();
       if(ta)ta.disabled=false;
       if(error){alert("Couldn't post reply: "+error.message);return;}
+      // Insert poll into relational tables — mirrors community.html submitReply()
+      if(poll&&row){
+        const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
+        if(pollRow){
+          await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
+        }
+      }
       if(replyToEmail&&replyToEmail!==auth.email){
         await _db().from("notifications").insert({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
       }
@@ -1155,15 +1193,21 @@
     list.querySelectorAll(".poll-option-input").forEach((inp,i)=>{if(!inp.value)inp.placeholder=`Option ${i+1}`;});
   };
 
-  // ── Poll voting ──────────────────────────────────────────────────────────────
-  window.tcCastPollVote = async function(commentId, optionIndex, parentId) {
+  // ── Poll voting — mirrors community.html castCommentVote() exactly ───────────
+  window.tcCastCommentPollVote = async function(pollId, optionId) {
     const auth=_auth();
-    const {error}=await _db().from("comment_poll_votes").upsert(
-      {comment_id:commentId, email:auth.email, option_index:optionIndex},
-      {onConflict:"comment_id,email"}
+    const {error}=await _db().from("tc_comment_poll_votes").upsert(
+      {poll_id:pollId, option_id:optionId, email:auth.email},
+      {onConflict:"poll_id,email"}
     );
-    if(error){alert("Couldn't vote: "+error.message);return;}
-    await Comments.load(parentId);
+    if(error){alert("Couldn't cast vote: "+error.message);return;}
+    // Reload comments for the current visible parent
+    // Walk up the DOM from the poll element to find the parent ID
+    // (We re-render all comment sections that are currently loaded)
+    document.querySelectorAll("[id^='tc-comments-list-']").forEach(el=>{
+      const pid=el.id.replace("tc-comments-list-","");
+      if(pid)Comments.load(pid);
+    });
   };
 
   // ── Backward-compat aliases (for existing pages like focus.html) ─────────────
