@@ -902,17 +902,8 @@
     .share-community-nudge a:hover { color: #fff; }
 
     .share-text-box {
-      font-family: "Courier New", monospace;
-      font-size: 0.82rem;
-      line-height: 1.7;
-      color: #ccc;
-      background: #111;
-      border: 1.5px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      white-space: pre-wrap;
-      margin: 20px 24px 16px;
-      max-height: 340px;
+      margin: 16px 24px 12px;
+      max-height: 360px;
       overflow-y: auto;
     }
     .share-modal-footer {
@@ -5988,6 +5979,7 @@ let viewingEmail = null;   // whose log we're viewing
 let myEmail = null;        // the logged-in user's email
 let myName  = null;        // the logged-in user's display name (from allowed_emails.name)
 let _lastSavedSessionId = null; // id of the most recently saved session (for share modal)
+let _currentShareText   = "";   // plain-text copy of last saved session (for "Copy Text")
 let allSessions = [];      // full session list for current view
 let linkedPiecesMap = {}; // piece_id → { title, composer } for items linked to library
 let streakData = null;     // streak_tokens row
@@ -13930,7 +13922,7 @@ async function saveSession() {
     const shareText = buildShareText(dateVal, durationMins, itemDataList, notes);
     _lastSavedSessionId = savedSessionId;
     closeLogModal();
-    openShareModal(shareText, savedSessionId);
+    openShareModal(shareText, savedSessionId, { date: dateVal, durationMins, items: itemDataList, notes });
 
     // Auto-add any library pieces to the user's collection
     await autoAddPiecesToCollection(itemDataList);
@@ -13998,8 +13990,40 @@ function buildShareText(dateStr, durationMins, items, notes) {
 }
 
 // ── Share modal ───────────────────────────────────────────────────
-function openShareModal(text, sessionId) {
-  document.getElementById("share-text-box").textContent = text;
+
+// Renders a styled session card preview for the share modal
+function buildSessionPreviewHTML(dateStr, durationMins, items, notes) {
+  const dateLabel = formatDateNice(dateStr);
+  const durLabel  = formatMinutes(durationMins);
+  const itemsHtml = items.length
+    ? items.map(item => renderHistoryItem(item, "per_item")).join("")
+    : `<p style="color:var(--text-muted);font-size:0.85rem;margin:0">No items recorded.</p>`;
+  const notesHtml = notes
+    ? `<div style="margin-top:10px;font-size:0.82rem;color:var(--text-muted);font-style:italic;line-height:1.5">"${escHtml(notes)}"</div>`
+    : "";
+  return `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${items.length ? '10px' : '0'}">
+        <div>
+          <div style="font-weight:700;font-size:0.95rem;color:var(--text)">${escHtml(dateLabel)}</div>
+          ${items.length ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:1px">${items.length} item${items.length !== 1 ? "s" : ""}</div>` : ""}
+        </div>
+        <span style="font-size:0.8rem;color:#b45309;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.25);border-radius:20px;padding:3px 10px;white-space:nowrap;flex-shrink:0;margin-left:8px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" style="vertical-align:-1px;margin-right:3px;opacity:.7"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${escHtml(durLabel)}</span>
+      </div>
+      ${items.length ? `<div style="display:flex;flex-direction:column;gap:6px">${itemsHtml}</div>` : ""}
+      ${notesHtml}
+    </div>`;
+}
+
+function openShareModal(shareText, sessionId, sessionData) {
+  _currentShareText = shareText;
+  const box = document.getElementById("share-text-box");
+  if (sessionData) {
+    box.innerHTML = buildSessionPreviewHTML(sessionData.date, sessionData.durationMins, sessionData.items, sessionData.notes);
+  } else {
+    // Fallback: plain text
+    box.textContent = shareText;
+  }
   document.getElementById("share-modal-backdrop").classList.add("open");
   document.getElementById("copy-feedback").style.display = "none";
   // Reset share-to-community button state
@@ -14017,7 +14041,7 @@ function closeShareModal() {
 window.closeShareModal = closeShareModal;
 
 async function copyShareText() {
-  const text = document.getElementById("share-text-box").textContent;
+  const text = _currentShareText;
   try {
     await navigator.clipboard.writeText(text);
     const fb = document.getElementById("copy-feedback");
