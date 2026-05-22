@@ -4986,7 +4986,7 @@ async function loadPosts() {
   list.innerHTML = '<div class="posts-empty"><div class="loading-spinner" style="margin:0 auto 12px"></div>Loading posts…</div>';
 
   const [postsResult, cfResult, updatesResult] = await Promise.all([
-    db.from("community_posts").select("*").order("created_at", { ascending: false }).limit(100),
+    db.from("community_posts").select("*").order("created_at", { ascending: false }).limit(300),
     db.from("content_feed_posts").select("*").order("published_at", { ascending: false }).limit(50),
     db.from("practice_room_updates").select("*").order("published_at", { ascending: false }).limit(50),
     _loadFocusFeedItems(),
@@ -5076,9 +5076,10 @@ async function loadPosts() {
     });
   }
 
-  // Fetch avatar URLs + badges for all post authors
-  const rxEmails  = (postReactions || []).map(r => r.email);
-  const allEmails = [...new Set([...posts.map(p => p.email), 'matthew@matthewcawood.com', ...rxEmails])];
+  // Fetch avatar URLs + badges for all post authors AND likers (community_post_likes)
+  const rxEmails    = (postReactions || []).map(r => r.email);
+  const likerEmails = (allLikes      || []).map(l => l.email);
+  const allEmails   = [...new Set([...posts.map(p => p.email), 'matthew@matthewcawood.com', ...rxEmails, ...likerEmails])];
   const { data: avatarRows } = await db.from("allowed_emails")
     .select("email,avatar_url,badge,name").in("email", allEmails);
   const avatarUrlMap = {};
@@ -5092,12 +5093,18 @@ async function loadPosts() {
     _commLikerAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] };
   });
 
-  // Build _commRxLikersMap from activity_reactions (emoji picker source of truth)
+  // Build _commRxLikersMap: emoji reactions (activity_reactions) + heart likes (community_post_likes)
   _commRxLikersMap = {};
   (postReactions || []).forEach(rx => {
     if (!_commRxLikersMap[rx.item_id]) _commRxLikersMap[rx.item_id] = [];
     if (!_commRxLikersMap[rx.item_id].find(x => x.email === rx.email))
       _commRxLikersMap[rx.item_id].push({ email: rx.email, emoji: rx.emoji || "❤️" });
+  });
+  // Merge community_post_likes (used for imported Circle data and simple heart likes)
+  (allLikes || []).forEach(l => {
+    if (!_commRxLikersMap[l.post_id]) _commRxLikersMap[l.post_id] = [];
+    if (!_commRxLikersMap[l.post_id].find(x => x.email === l.email))
+      _commRxLikersMap[l.post_id].push({ email: l.email, emoji: "❤️" });
   });
 
   _posts = posts.map(p => {
@@ -5273,8 +5280,10 @@ function postCardHTML(p) {
   const postRxData = _postRxMap[p.id] || {};
   let _liveMyEmoji = null, _liveTotal = 0;
   for (const [e, d] of Object.entries(postRxData)) { _liveTotal += d.count; if (d.mine) _liveMyEmoji = e; }
-  const heartFill = _liveMyEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
-  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${_liveMyEmoji && _liveMyEmoji !== "❤️" ? ` ${_liveMyEmoji}` : ""}${_liveTotal > 0 ? ` ${_liveTotal}` : ""}`;
+  // Combined total: emoji reactions + community_post_likes (imported heart likes)
+  const _combinedTotal = (_commRxLikersMap[p.id] || []).length;
+  const heartFill = (_liveMyEmoji || p.iLiked) ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${_liveMyEmoji && _liveMyEmoji !== "❤️" ? ` ${_liveMyEmoji}` : ""}${_combinedTotal > 0 ? ` ${_combinedTotal}` : ""}`;
 
   // Build media section for card (list view) — render everything inline
   let mediaHtml = "";
@@ -5412,12 +5421,12 @@ function postCardHTML(p) {
         </button>
         <div class="post-footer-right">
           <div class="post-footer-avatars comm-likers-${p.id}" onclick="event.stopPropagation();showReactorsPopover('${p.id}',event)"
-            style="cursor:pointer;${_liveTotal === 0 ? "display:none" : ""}" title="See who reacted">
+            style="cursor:pointer;${_combinedTotal === 0 ? "display:none" : ""}" title="See who liked">
             ${_commLikerChipsInner(p.id)}
           </div>
           <span class="post-footer-meta like-count-${p.id}">
             ${[
-              _liveTotal      ? `<span>${_liveTotal} reaction${_liveTotal !== 1 ? "s" : ""}</span>` : "",
+              _combinedTotal  ? `<span>${_combinedTotal} like${_combinedTotal !== 1 ? "s" : ""}</span>` : "",
               p.commentCount  ? `<span onclick="event.stopPropagation();showDetail('${p.id}')" style="cursor:pointer">${p.commentCount} comment${p.commentCount !== 1 ? "s" : ""}</span>` : ""
             ].filter(Boolean).join(" · ")}
           </span>
@@ -5646,12 +5655,14 @@ function practiceLogCardHTML(p) {
   const postRxData = _postRxMap[p.id] || {};
   let _liveMyEmoji = null, _liveTotal = 0;
   for (const [e, d] of Object.entries(postRxData)) { _liveTotal += d.count; if (d.mine) _liveMyEmoji = e; }
-  const heartFill = _liveMyEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
-  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${_liveMyEmoji && _liveMyEmoji !== "❤️" ? ` ${_liveMyEmoji}` : ""}${_liveTotal > 0 ? ` ${_liveTotal}` : ""}`;
+  // Combined like count: emoji reactions + imported heart likes (community_post_likes)
+  const _combinedTotal = (_commRxLikersMap[p.id] || []).length;
+  const heartFill = (_liveMyEmoji || p.iLiked) ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${_liveMyEmoji && _liveMyEmoji !== "❤️" ? ` ${_liveMyEmoji}` : ""}${_combinedTotal > 0 ? ` ${_combinedTotal}` : ""}`;
 
   const commentCount = p.commentCount || 0;
   const metaText = [
-    _liveTotal ? _liveTotal + " like" + (_liveTotal !== 1 ? "s" : "") : "",
+    _combinedTotal ? _combinedTotal + " like" + (_combinedTotal !== 1 ? "s" : "") : "",
     commentCount ? commentCount + " comment" + (commentCount !== 1 ? "s" : "") : ""
   ].filter(Boolean).join(" · ");
 
@@ -5738,12 +5749,12 @@ function practiceLogCardHTML(p) {
       </button>
       <div class="post-footer-right">
         <div class="post-footer-avatars comm-likers-${escHtml(p.id)}" onclick="event.stopPropagation();showReactorsPopover('${escHtml(p.id)}',event)"
-          style="cursor:pointer;${_liveTotal === 0 ? "display:none" : ""}" title="See who reacted">
+          style="cursor:pointer;${_combinedTotal === 0 ? "display:none" : ""}" title="See who liked">
           ${_commLikerChipsInner(p.id)}
         </div>
         <span class="post-footer-meta like-count-${escHtml(p.id)}">
           ${[
-            _liveTotal     ? `<span>${_liveTotal} reaction${_liveTotal !== 1 ? "s" : ""}</span>` : "",
+            _combinedTotal ? `<span>${_combinedTotal} like${_combinedTotal !== 1 ? "s" : ""}</span>` : "",
             commentCount   ? `<span class="comment-count-${escHtml(p.id)}" onclick="event.stopPropagation();showDetail('${escHtml(p.id)}')" style="cursor:pointer">${commentCount} comment${commentCount !== 1 ? "s" : ""}</span>` : `<span class="comment-count-${escHtml(p.id)}"></span>`
           ].filter(Boolean).join(" · ")}
         </span>
