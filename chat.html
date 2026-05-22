@@ -266,30 +266,33 @@
     .comment-mux-wrap mux-player {
       width: 100%; height: 100%; display: block;
     }
-    /* Video bubble: explicit width breaks the inline-flex circular sizing dependency.
-       max-width:100% stops it overflowing .chat-msg-body on narrow screens.
-       Reduced padding so the player sits flush inside the bubble. */
+    /* Video bubble: explicit width so the inline-flex chain has a defined size.
+       aspect-ratio is set inline from stored video dimensions so mux-player
+       has the exact container size from frame one — no layout jump. */
     .chat-bubble--video {
-      width: min(380px, 68vw);
+      width: min(340px, 72vw);
       max-width: 100%;
-      padding: 6px;
+      padding: 4px;
       overflow: hidden;
     }
-    /* Mux-wrap fills the bubble width — no fixed px width needed */
     .chat-mux-wrap {
-      margin-top: 4px;
       width: 100%;
       display: block;
+      overflow: hidden;
+      border-radius: 6px;
+      /* fallback for old messages that don't have stored dims */
+      min-height: 180px;
     }
+    /* When aspect-ratio is set via inline style (new messages with stored dims)
+       the container has an exact height — player fills it, no flash */
+    .chat-mux-wrap[style*="aspect-ratio"] { min-height: unset; }
     .chat-mux-wrap mux-player {
       display: block;
       width: 100%;
-      min-height: 180px;
-      max-height: min(480px, 65vh);
-      border-radius: 6px;
+      height: 100%;
       background: transparent !important;
       --media-background-color: transparent;
-      --media-object-fit: contain;
+      --media-object-fit: cover;
     }
     .video-embed-tab {
       display: flex; gap: 8px; align-items: center; padding: 14px 16px;
@@ -1912,7 +1915,20 @@ function inlineSwitchVideoTab(tab, key) {
   if (emBtn) emBtn.style.cssText = emBtn.style.cssText.replace(/font-weight:\s*600/g, "") + (tab === "embed"  ? tabActive : "");
 }
 
-function inlineHandleVideo(input, key) {
+// Read a video file's natural pixel dimensions before uploading.
+// Returns { w, h } or null on error.
+function _getVideoDimensions(file) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file);
+    const v   = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => { URL.revokeObjectURL(url); resolve({ w: v.videoWidth, h: v.videoHeight }); };
+    v.onerror          = () => { URL.revokeObjectURL(url); resolve(null); };
+    v.src = url;
+  });
+}
+
+async function inlineHandleVideo(input, key) {
   const file = input.files[0];
   input.value = "";
   if (!file) return;
@@ -1922,7 +1938,10 @@ function inlineHandleVideo(input, key) {
   const pendingIdx = _inlineMedia[key].length;
   _inlineMedia[key].push({ type: "mux", name: file.name, _uploading: true, _localUrl: URL.createObjectURL(file) });
   _renderInlineMediaPreview(key);
+  // Detect dimensions before upload so we can set aspect-ratio at render time
+  const dims = await _getVideoDimensions(file);
   _uploadVideoToMux(file, item => {
+    if (dims) { item.w = dims.w; item.h = dims.h; }
     _inlineMedia[key][pendingIdx] = item;
     _renderInlineMediaPreview(key);
   });
@@ -2025,6 +2044,10 @@ function inlineStartCamRecording(key) {
   _inlineCamRec = mr;
   mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
   mr.onstop = () => {
+    // Capture video dimensions from stream track before stopping it
+    const vTrack  = stream.getVideoTracks()[0];
+    const tSettings = vTrack?.getSettings() || {};
+    const dims = (tSettings.width && tSettings.height) ? { w: tSettings.width, h: tSettings.height } : null;
     stream.getTracks().forEach(t => t.stop());
     const mime = mr.mimeType || "video/webm";
     const blob = new Blob(chunks, { type: mime });
@@ -2052,6 +2075,7 @@ function inlineStartCamRecording(key) {
     _inlineMedia[ck].push({ type: "mux", name, _uploading: true, _localUrl: URL.createObjectURL(blob) });
     _renderInlineMediaPreview(ck);
     _uploadVideoToMux(file, item => {
+      if (dims) { item.w = dims.w; item.h = dims.h; }
       _inlineMedia[ck][pendingIdx] = item;
       _renderInlineMediaPreview(ck);
     });
@@ -2289,7 +2313,8 @@ function _renderCommentMedia(c) {
   }
   others.forEach(m => {
     if (m.type === "mux") {
-      html += `<div class="chat-mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div>`;
+      const arStyle = (m.w && m.h) ? ` style="aspect-ratio:${m.w}/${m.h}"` : "";
+      html += `<div class="chat-mux-wrap"${arStyle}><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div>`;
     } else if (m.type === "audio") {
       html += `<div style="margin-top:6px;min-width:240px"><audio controls preload="metadata" style="width:100%;min-width:240px;border-radius:8px"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
     } else if (m.type === "youtube") {
@@ -3464,20 +3489,7 @@ function _renderChatMessages() {
     lastEmail = msg.email;
   });
 
-  // Once mux-player's custom element is defined (may be async on first load),
-  // nudge any video bubbles to re-measure so they wrap correctly.
-  customElements.whenDefined("mux-player").then(() => {
-    container.querySelectorAll(".chat-mux-wrap mux-player").forEach(p => {
-      new ResizeObserver(([e], ro) => {
-        if (e.contentRect.height > 0) {
-          // Player has a real height now — force parent bubble to reflow once
-          const inner = p.closest(".chat-bubble-inner");
-          if (inner) { inner.style.display = "none"; inner.offsetHeight; inner.style.display = ""; }
-          ro.disconnect();
-        }
-      }).observe(p);
-    });
-  });
+  // Aspect-ratio is stored on new messages so mux-player never needs to resize.
 }
 
 // Format timestamp as clock time (e.g. "12:21 PM"), falling back to date for older
