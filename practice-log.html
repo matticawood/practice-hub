@@ -5980,6 +5980,7 @@ let myEmail = null;        // the logged-in user's email
 let myName  = null;        // the logged-in user's display name (from allowed_emails.name)
 let _lastSavedSessionId = null; // id of the most recently saved session (for share modal)
 let _currentShareText   = "";   // plain-text copy of last saved session (for "Copy Text")
+let _sharedSessionIds   = new Set(); // session IDs the current user has shared to community
 let allSessions = [];      // full session list for current view
 let linkedPiecesMap = {}; // piece_id → { title, composer } for items linked to library
 let streakData = null;     // streak_tokens row
@@ -6129,6 +6130,16 @@ async function loadData() {
   if (adminSavesBtn) {
     adminSavesBtn.style.display =
       (isOwner() && viewingEmail !== myEmail && (streakData?.balance ?? 0) > 0) ? "" : "none";
+  }
+
+  // Load which sessions this user has already shared to the community
+  if (viewingEmail === myEmail) {
+    const { data: sharedPosts } = await db.from("community_posts")
+      .select("session_id")
+      .eq("email", myEmail)
+      .eq("type", "practice_log")
+      .not("session_id", "is", null);
+    _sharedSessionIds = new Set((sharedPosts || []).map(p => p.session_id));
   }
 
   switchMainLbTab('dashboard');
@@ -12468,9 +12479,16 @@ function renderSessionCard(sess, canEdit) {
   const items = sess.practice_items || [];
   const itemsHTML = items.map(item => renderHistoryItem(item, sess.timing_mode)).join("");
 
+  const isShared = _sharedSessionIds.has(sess.id);
+  const shareCommBtn = canEdit
+    ? (isShared
+        ? `<button class="btn btn-ghost btn-sm" disabled style="opacity:.5;cursor:default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>Shared</button>`
+        : `<button class="btn btn-ghost btn-sm" data-share-sess-id="${sess.id}" style="color:#a78bfa;border-color:rgba(167,139,250,.4)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:4px"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>Share</button>`)
+    : "";
   const actionsHTML = `
     <div class="session-actions">
       <button class="btn btn-ghost btn-sm" data-copy-id="${sess.id}" title="Copy to clipboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:4px"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button>
+      ${shareCommBtn}
       ${canEdit ? `<button class="btn btn-ghost btn-sm" data-edit-id="${sess.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:4px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Edit</button>` : ""}
       ${canEdit ? `<button class="btn btn-danger" data-delete-id="${sess.id}">Delete</button>` : ""}
     </div>`;
@@ -12620,6 +12638,13 @@ document.getElementById("sessions-list").addEventListener("click", async (e) => 
     return;
   }
   // Edit
+  // Share session to community
+  const shareHistBtn = e.target.closest("[data-share-sess-id]");
+  if (shareHistBtn) {
+    await shareSessionDirect(shareHistBtn.dataset.shareSessId, shareHistBtn);
+    return;
+  }
+
   const editBtn = e.target.closest("[data-edit-id]");
   if (editBtn) {
     const rawId = editBtn.dataset.editId;
@@ -12650,6 +12675,37 @@ document.getElementById("sessions-list").addEventListener("click", async (e) => 
   }
 });
 
+// Share a session from history directly to the community feed
+async function shareSessionDirect(sessId, btn) {
+  const id = parseInt(sessId, 10);
+  if (_sharedSessionIds.has(id)) return;
+  const origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = "Sharing…";
+  try {
+    const { error } = await db.from("community_posts").insert({
+      email:      myEmail,
+      name:       myName || myEmail.split("@")[0],
+      type:       "practice_log",
+      title:      "",
+      content:    "",
+      session_id: id,
+    });
+    if (error) throw error;
+    _sharedSessionIds.add(id);
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="vertical-align:-1px;margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>Shared`;
+    btn.removeAttribute("data-share-sess-id");
+    btn.style.color  = "";
+    btn.style.borderColor = "";
+    btn.style.opacity = "0.5";
+    btn.style.cursor  = "default";
+  } catch(err) {
+    console.error("Share error:", err);
+    btn.disabled  = false;
+    btn.innerHTML = origHTML;
+    alert("Couldn't share to the community: " + (err.message || "Unknown error"));
+  }
+}
 
 // ── Quick-add: recents + templates ────────────────────────────────
 function _qaKey()          { return `practice_templates_${myEmail}`; }
@@ -13921,6 +13977,14 @@ async function saveSession() {
     // Prepare share text
     const shareText = buildShareText(dateVal, durationMins, itemDataList, notes);
     _lastSavedSessionId = savedSessionId;
+    // If this session already has a community post, touch updated_at so it resurfaces in the feed
+    if (_sharedSessionIds.has(savedSessionId)) {
+      await db.from("community_posts")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("session_id", savedSessionId)
+        .eq("email", myEmail);
+    }
+
     closeLogModal();
     openShareModal(shareText, savedSessionId, { date: dateVal, durationMins, items: itemDataList, notes });
 
