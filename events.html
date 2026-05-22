@@ -7831,7 +7831,11 @@ async function saveEvent() {
   const dateVal  = document.getElementById("f-date").value;
   const duration = parseInt(document.getElementById("f-duration").value) || 60;
 
-  if (!title || !dateVal) {
+  // Use datePicker.selectedDates[0] — a real Date object — to avoid Safari's
+  // rejection of the "YYYY-MM-DD HH:MM" string that flatpickr produces.
+  const pickedDate = datePicker && datePicker.selectedDates[0] ? datePicker.selectedDates[0] : null;
+
+  if (!title || !pickedDate) {
     alert("Title and date are required.");
     _savingEvent = false;
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Event"; }
@@ -7845,7 +7849,7 @@ async function saveEvent() {
       description:    desc || null,
       cover_url:      cover || null,
       cover_position: coverPos,
-      scheduled_at:   new Date(dateVal).toISOString(),
+      scheduled_at:   pickedDate.toISOString(),
       duration_mins:  duration,
       timezone,
       created_by:     myEmail
@@ -7861,7 +7865,7 @@ async function saveEvent() {
       const until       = document.getElementById("f-end-until").value || null;
       const rule        = { frequency, monthlyType, endType, count, until };
       const groupId   = crypto.randomUUID();
-      const dates     = _getRecurrenceDates(new Date(dateVal), rule);
+      const dates     = _getRecurrenceDates(pickedDate, rule);
       const rows      = dates.map(d => ({
         ...payload,
         scheduled_at:        d.toISOString(),
@@ -7880,8 +7884,6 @@ async function saveEvent() {
       const sharedPayload = { title, description: desc || null, cover_url: cover || null, cover_position: coverPos, duration_mins: duration, timezone };
 
       // Also update the TIME across all events in the series, preserving each event's date.
-      // Extract hours/minutes from the newly picked datetime.
-      const pickedDate = new Date(dateVal);
       const newHours   = pickedDate.getHours();
       const newMinutes = pickedDate.getMinutes();
 
@@ -7899,7 +7901,9 @@ async function saveEvent() {
         d.setHours(newHours, newMinutes, 0, 0);
         return db.from("live_events").update({ ...sharedPayload, scheduled_at: d.toISOString() }).eq("id", ev.id);
       });
-      await Promise.all(updates);
+      const seriesResults = await Promise.all(updates);
+      const seriesErr = seriesResults.find(r => r.error)?.error;
+      if (seriesErr) { alert("Error updating series: " + seriesErr.message); _savingEvent = false; if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Event"; } return; }
 
       closeCreateModal();
       currentEvent = { ...currentEvent, ...sharedPayload, scheduled_at: pickedDate.toISOString() };
@@ -7909,10 +7913,12 @@ async function saveEvent() {
     }
 
     if (editingEventId) {
-      await db.from("live_events").update(payload).eq("id", editingEventId);
+      const { error: updateErr } = await db.from("live_events").update(payload).eq("id", editingEventId);
+      if (updateErr) { alert("Error saving event: " + updateErr.message); _savingEvent = false; if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Event"; } return; }
       currentEvent = { ...currentEvent, ...payload };
     } else {
-      const { data } = await db.from("live_events").insert(payload).select().single();
+      const { data, error: insertErr } = await db.from("live_events").insert(payload).select().single();
+      if (insertErr) { alert("Error creating event: " + insertErr.message); _savingEvent = false; if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Event"; } return; }
       currentEvent = data;
     }
 
