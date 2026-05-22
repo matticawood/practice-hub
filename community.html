@@ -5514,6 +5514,21 @@ function _updateLikeUI(btn, liked, count, postId) {
 }
 
 // ── Practice Log card ─────────────────────────────────────────────────────────
+// Parses Circle practice-log text: "Thursday 21 May 2026  ·  5 min\n🎹 Item…\n#hashtags"
+function _parseCircleLogText(content) {
+  if (!content) return null;
+  const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return null;
+  // First line must be "Date · Duration"
+  const headerMatch = lines[0].match(/^(.+?)\s+[·•]\s+(.+)$/);
+  if (!headerMatch) return null;
+  const dateStr = headerMatch[1].trim();
+  const durStr  = headerMatch[2].trim();
+  // Items: lines starting with an emoji character (skip hashtag lines)
+  const items = lines.slice(1).filter(l => !l.startsWith('#') && /^\p{Emoji}/u.test(l));
+  return { dateStr, durStr, items };
+}
+
 function practiceLogCardHTML(p) {
   const name    = escHtml(p.name || p.email.split("@")[0]);
   const timeAgo = relativeTime(p.created_at);
@@ -5570,13 +5585,38 @@ function practiceLogCardHTML(p) {
         ${notesHtml}
       </div>`;
   } else {
-    // ── Unstructured: just content + media ──────────────────────────
+    // ── Historical Circle post: parse text into structured card ──────
     const content = p.content || "";
-    if (content.trim()) {
+    const parsed  = _parseCircleLogText(content);
+    const media   = p.media || [];
+
+    if (parsed) {
+      const itemsHtml = parsed.items.map(item => {
+        const emojiMatch = item.match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
+        const emoji = emojiMatch ? emojiMatch[0] : "🎵";
+        const label = escHtml(item.replace(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})\s*/u, "").trim());
+        return `<div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:0.85rem;flex-shrink:0">${emoji}</span>
+          <span style="font-size:0.85rem;color:var(--text-primary);flex:1;min-width:0">${label}</span>
+        </div>`;
+      }).join("");
+      const itemCount = parsed.items.length;
+      bodyHtml = `
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${itemCount ? '4px' : '0'}">
+            <div>
+              <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary)">${escHtml(parsed.dateStr)}</div>
+              ${itemCount ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:1px">${itemCount} item${itemCount !== 1 ? "s" : ""}</div>` : ""}
+            </div>
+            <span style="font-size:0.8rem;color:#b45309;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.25);border-radius:20px;padding:3px 10px;white-space:nowrap;flex-shrink:0;margin-left:8px">⏱ ${escHtml(parsed.durStr)}</span>
+          </div>
+          ${itemCount ? `<div style="margin-top:8px">${itemsHtml}</div>` : ""}
+        </div>`;
+    } else if (content.trim()) {
       bodyHtml = `<div style="font-size:0.9rem;line-height:1.6;margin-top:8px;color:var(--text-primary);white-space:pre-wrap">${escHtml(content)}</div>`;
     }
-    // Media
-    const media = p.media || [];
+
+    // Media (videos/audio attached to the post)
     const images = media.filter(m => m.type === "image");
     if (images.length) {
       const gk = _commImgGroupStore(images.map(m => m.url));
