@@ -369,6 +369,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <a href="/community.html?filter=feedback">Get Feedback</a>
         <a href="/community.html?filter=question">Ask a Question</a>
         <a href="/community.html?filter=post">Just Post</a>
+        <a href="/community.html?tab=practice-log">Practice Logs</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
@@ -440,6 +441,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <a class="sh-item" data-page="community" href="/community.html?filter=feedback">Get Feedback</a>
         <a class="sh-item" data-page="community" href="/community.html?filter=question">Ask a Question</a>
         <a class="sh-item" data-page="community" href="/community.html?filter=post">Just Post</a>
+        <a class="sh-item" data-page="community" href="/community.html?tab=practice-log">Practice Logs</a>
       </div>
     </div>
 
