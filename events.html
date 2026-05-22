@@ -7878,9 +7878,33 @@ async function saveEvent() {
 
     if (editingEventId && editingAllInSeries && currentEvent.recurrence_group_id) {
       const sharedPayload = { title, description: desc || null, cover_url: cover || null, cover_position: coverPos, duration_mins: duration, timezone };
-      await db.from("live_events").update(sharedPayload).eq("recurrence_group_id", currentEvent.recurrence_group_id);
+
+      // Also update the TIME across all events in the series, preserving each event's date.
+      // Extract hours/minutes from the newly picked datetime.
+      const pickedDate = new Date(dateVal);
+      const newHours   = pickedDate.getHours();
+      const newMinutes = pickedDate.getMinutes();
+
+      // Fetch all events in this series so we can rewrite each scheduled_at
+      const { data: seriesEvents, error: fetchErr } = await db
+        .from("live_events")
+        .select("id, scheduled_at")
+        .eq("recurrence_group_id", currentEvent.recurrence_group_id);
+
+      if (fetchErr) { alert("Failed to load series: " + fetchErr.message); _savingEvent = false; if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Event"; } return; }
+
+      // Apply the new time to each event while keeping its own date
+      const updates = (seriesEvents || []).map(ev => {
+        const d = new Date(ev.scheduled_at);
+        d.setHours(newHours, newMinutes, 0, 0);
+        return db.from("live_events").update({ ...sharedPayload, scheduled_at: d.toISOString() }).eq("id", ev.id);
+      });
+      await Promise.all(updates);
+
       closeCreateModal();
+      currentEvent = { ...currentEvent, ...sharedPayload, scheduled_at: pickedDate.toISOString() };
       renderDetailView(currentEvent);
+      loadEvents("upcoming");
       return;
     }
 
