@@ -5118,7 +5118,7 @@ async function loadPosts() {
     const sessionIds = [...new Set(logPostsWithSession.map(p => p.session_id))];
     const [{ data: sessionRows }, { data: itemRows }] = await Promise.all([
       db.from("practice_sessions").select("id,session_date,duration_minutes,notes").in("id", sessionIds),
-      db.from("practice_items").select("session_id,item_type,piece_label,label,time_seconds,notes,position").in("session_id", sessionIds).order("position"),
+      db.from("practice_items").select("id,session_id,item_type,piece_label,label,duration_minutes,notes,sort_order,piece_request,theory_slug").in("session_id", sessionIds).order("sort_order"),
     ]);
     const sessionMap = {};
     (sessionRows || []).forEach(s => { sessionMap[s.id] = { ...s, items: [] }; });
@@ -5514,6 +5514,19 @@ function _updateLikeUI(btn, liked, count, postId) {
 }
 
 // ── Practice Log card ─────────────────────────────────────────────────────────
+// ── Practice-log item type icons (matches practice-log.html) ─────────────────
+const _LOG_TYPE_SVG = {
+  piece:        `<svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>`,
+  book:         `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
+  technique:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
+  theory:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
+  sightreading: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  eartraining:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`,
+  improvisation:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+  other:        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
+};
+function _logTypeIconSVG(type) { return _LOG_TYPE_SVG[type] || _LOG_TYPE_SVG.other; }
+
 // Parses Circle practice-log text: "Thursday 21 May 2026  ·  5 min\n🎹 Item…\n#hashtags"
 function _parseCircleLogText(content) {
   if (!content) return null;
@@ -5575,14 +5588,37 @@ function practiceLogCardHTML(p) {
     }
 
     const itemsHtml = resolvedItems.map(item => {
-      const label   = escHtml(item.piece_label || item.label || item.item_type || "Practice");
-      const mins    = item.time_seconds ? Math.round(item.time_seconds / 60) : null;
-      const durBit  = mins ? `<span style="font-size:0.75rem;color:var(--text-muted);margin-left:auto;white-space:nowrap">${mins} min</span>` : "";
-      const typeIcon = item.item_type === "technique" ? "🎯" : item.item_type === "theory" ? "📖" : item.item_type === "sightreading" ? "👁" : "🎵";
-      return `<div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:0.75rem;flex-shrink:0">${typeIcon}</span>
-        <span style="font-size:0.85rem;color:var(--text-primary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>
-        ${durBit}
+      // Build label HTML matching renderHistoryItem logic from practice-log.html
+      let labelHTML = "";
+      const t = item.item_type;
+      if (t === "piece") {
+        const pieceName = item.label || item.piece_label || "Untitled piece";
+        labelHTML = escHtml(pieceName);
+        if (item.piece_request) labelHTML += `<span style="font-size:0.7rem;color:#a78bfa;background:rgba(124,58,237,.15);border:1px solid #7c3aed;border-radius:99px;padding:1px 7px;margin-left:6px;vertical-align:middle">Requested</span>`;
+      } else if (t === "book") {
+        const bookName = item.piece_label || item.label || "Book";
+        const sep = " — ";
+        const pageRef = (item.label && item.label !== bookName && item.label.startsWith(bookName + sep))
+          ? item.label.slice(bookName.length + sep.length) : "";
+        labelHTML = escHtml(bookName);
+        if (pageRef) labelHTML += `<span style="color:var(--text-muted);font-weight:400"> — ${escHtml(pageRef)}</span>`;
+      } else {
+        labelHTML = escHtml(item.label || item.piece_label || t || "Practice");
+        if (item.piece_label && item.label && item.piece_label !== item.label) {
+          labelHTML += `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">📚 ${escHtml(item.piece_label)}</div>`;
+        }
+      }
+      const notesHtml = item.notes && !item._fromText
+        ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;line-height:1.4">${escHtml(item.notes)}</div>` : "";
+      const durHtml = item.duration_minutes
+        ? `<div style="font-size:0.75rem;color:var(--text-muted);flex-shrink:0;white-space:nowrap;padding-top:2px">${formatMinutes(item.duration_minutes)}</div>` : "";
+      return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:var(--surface-2);border-radius:8px;border:1px solid var(--border)">
+        <div style="flex-shrink:0;margin-top:2px;opacity:.6;color:var(--text-muted)">${_logTypeIconSVG(item.item_type)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.88rem;font-weight:600;color:var(--text);line-height:1.4">${labelHTML}</div>
+          ${notesHtml}
+        </div>
+        ${durHtml}
       </div>`;
     }).join("");
 
@@ -5600,7 +5636,7 @@ function practiceLogCardHTML(p) {
           </div>
           <span style="font-size:0.8rem;color:#b45309;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.25);border-radius:20px;padding:3px 10px;white-space:nowrap;flex-shrink:0;margin-left:8px">⏱ ${escHtml(durLabel)}</span>
         </div>
-        ${itemCount ? `<div style="margin-top:8px">${itemsHtml}</div>` : ""}
+        ${itemCount ? `<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">${itemsHtml}</div>` : ""}
         ${notesHtml}
       </div>`;
   } else {
@@ -5610,13 +5646,15 @@ function practiceLogCardHTML(p) {
     const media   = p.media || [];
 
     if (parsed) {
+      const emojiToType = { "🎯":"technique","📖":"theory","👁":"sightreading","🎵":"piece","🎹":"piece","🎼":"piece","🎸":"piece","🎺":"piece","🎻":"piece","🥁":"eartraining" };
       const itemsHtml = parsed.items.map(item => {
         const emojiMatch = item.match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
-        const emoji = emojiMatch ? emojiMatch[0] : "🎵";
+        const emoji = emojiMatch ? emojiMatch[0] : null;
+        const itemType = emojiToType[emoji] || "other";
         const label = escHtml(item.replace(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})\s*/u, "").trim());
-        return `<div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
-          <span style="font-size:0.85rem;flex-shrink:0">${emoji}</span>
-          <span style="font-size:0.85rem;color:var(--text-primary);flex:1;min-width:0">${label}</span>
+        return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:var(--surface-2);border-radius:8px;border:1px solid var(--border)">
+          <div style="flex-shrink:0;margin-top:2px;opacity:.6;color:var(--text-muted)">${_logTypeIconSVG(itemType)}</div>
+          <div style="flex:1;min-width:0;font-size:0.88rem;font-weight:600;color:var(--text);line-height:1.4">${label}</div>
         </div>`;
       }).join("");
       const itemCount = parsed.items.length;
@@ -5629,7 +5667,7 @@ function practiceLogCardHTML(p) {
             </div>
             <span style="font-size:0.8rem;color:#b45309;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.25);border-radius:20px;padding:3px 10px;white-space:nowrap;flex-shrink:0;margin-left:8px">⏱ ${escHtml(parsed.durStr)}</span>
           </div>
-          ${itemCount ? `<div style="margin-top:8px">${itemsHtml}</div>` : ""}
+          ${itemCount ? `<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">${itemsHtml}</div>` : ""}
         </div>`;
     } else if (content.trim()) {
       bodyHtml = `<div style="font-size:0.9rem;line-height:1.6;margin-top:8px;color:var(--text-primary);white-space:pre-wrap">${escHtml(content)}</div>`;
