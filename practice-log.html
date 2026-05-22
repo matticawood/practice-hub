@@ -5485,15 +5485,16 @@
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
       <div>
         <strong>Why not share it with the community?</strong>
-        <span>Copy your session below, then post it in the
-          <a href="https://thepracticeroom.matthewcawood.com/c/practice-log/" target="_blank" rel="noopener">Practice Room Community Practice Log</a>
+        <span>Share your session to the
+          <a href="community.html?filter=practice_log" target="_blank" rel="noopener">Shared Practice Logs</a>
           — it's a great way to stay accountable and inspire others.
         </span>
       </div>
     </div>
     <div class="share-modal-footer">
       <span class="copy-feedback" id="copy-feedback">✓ Copied!</span>
-      <button class="btn btn-ghost" onclick="copyShareText()">Copy Session</button>
+      <button class="btn btn-ghost" onclick="copyShareText()">Copy Text</button>
+      <button class="btn btn-ghost" id="share-to-community-btn" onclick="shareSessionToCommunity(this)" style="color:#a78bfa;border-color:rgba(167,139,250,.4)">Share to Community</button>
       <button class="btn btn-primary" onclick="closeShareModal()">Done</button>
     </div>
   </div>
@@ -5974,6 +5975,7 @@ function isOwner() { const s = getSession(); return s && s.email.toLowerCase() =
 let viewingEmail = null;   // whose log we're viewing
 let myEmail = null;        // the logged-in user's email
 let myName  = null;        // the logged-in user's display name (from allowed_emails.name)
+let _lastSavedSessionId = null; // id of the most recently saved session (for share modal)
 let allSessions = [];      // full session list for current view
 let linkedPiecesMap = {}; // piece_id → { title, composer } for items linked to library
 let streakData = null;     // streak_tokens row
@@ -13911,8 +13913,9 @@ async function saveSession() {
 
     // Prepare share text
     const shareText = buildShareText(dateVal, durationMins, itemDataList, notes);
+    _lastSavedSessionId = newSession.id;
     closeLogModal();
-    openShareModal(shareText);
+    openShareModal(shareText, newSession.id);
 
     // Auto-add any library pieces to the user's collection
     await autoAddPiecesToCollection(itemDataList);
@@ -13980,10 +13983,17 @@ function buildShareText(dateStr, durationMins, items, notes) {
 }
 
 // ── Share modal ───────────────────────────────────────────────────
-function openShareModal(text) {
+function openShareModal(text, sessionId) {
   document.getElementById("share-text-box").textContent = text;
   document.getElementById("share-modal-backdrop").classList.add("open");
   document.getElementById("copy-feedback").style.display = "none";
+  // Reset share-to-community button state
+  const shareBtn = document.getElementById("share-to-community-btn");
+  if (shareBtn) {
+    shareBtn.textContent = "Share to Community";
+    shareBtn.disabled    = false;
+  }
+  if (sessionId) _lastSavedSessionId = sessionId;
 }
 
 function closeShareModal() {
@@ -14013,6 +14023,35 @@ async function copyShareText() {
   }
 }
 window.copyShareText = copyShareText;
+
+async function shareSessionToCommunity(btn) {
+  if (!_lastSavedSessionId) {
+    alert("No session to share — please save a session first.");
+    return;
+  }
+  btn.disabled    = true;
+  btn.textContent = "Sharing…";
+  try {
+    const { error } = await db.from("community_posts").insert({
+      email:      myEmail,
+      name:       myName || myEmail.split("@")[0],
+      type:       "practice_log",
+      title:      "",
+      content:    "",
+      session_id: _lastSavedSessionId,
+    });
+    if (error) throw error;
+    btn.textContent = "✓ Shared!";
+    btn.style.opacity = "0.6";
+    // Don't close the modal — let user click Done
+  } catch(e) {
+    console.error("Share to community error:", e);
+    btn.disabled    = false;
+    btn.textContent = "Share to Community";
+    alert("Couldn't share to the community: " + (e.message || "Unknown error"));
+  }
+}
+window.shareSessionToCommunity = shareSessionToCommunity;
 
 // ── Owner: viewing dropdown ───────────────────────────────────────
 async function populateViewingDropdown() {

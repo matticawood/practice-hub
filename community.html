@@ -2122,6 +2122,10 @@
               <span class="space-card-label">Just Post</span>
               <span class="space-card-badge" id="badge-post" style="display:none"></span>
             </button>
+            <button class="space-card" data-filter="practice_log" onclick="setPostFilter('practice_log', this)">
+              <span class="space-card-label">📓 Practice Logs</span>
+              <span class="space-card-badge" id="badge-practice_log" style="display:none"></span>
+            </button>
           </div>
 
           <!-- Composer prompt bar (now lives under tabs) -->
@@ -2605,10 +2609,11 @@ let _bdgUID=0;
 function achBadgeSVG(id,size=38){const cat=ACH_CAT[id]||'sessions';const uid=++_bdgUID;const shape=_BADGE_CAT_SHAPE[cat]||'circle';const el=_BADGE_SHAPE[shape];const pal=_BADGE_PALETTE[cat]||_BADGE_PALETTE.sessions;const catIds=ACH_CAT_ORDER[cat]||[id];const ti=Math.max(0,catIds.indexOf(id));const t=catIds.length>1?ti/(catIds.length-1):0;const topC=t<=0.5?_lerpHex(pal[0],pal[1],t*2):pal[1];const botC=t<=0.5?pal[2]:_lerpHex(pal[2],pal[1],(1-t)*2);const iconPaths=ACH_ICON_MAP[id]||_AI.STAR;return`<svg viewBox="0 0 54 54" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g${uid}" x1="27" y1="2" x2="27" y2="52" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="${topC}"/><stop offset="100%" stop-color="${botC}"/></linearGradient></defs>${el} fill="url(#g${uid})" stroke="rgba(0,0,0,.18)" stroke-width="1.5"/>${_BADGE_SHINE[shape]}<g transform="translate(15,15)"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">${iconPaths}</svg></g></svg>`;}
 
 const POST_TYPES = {
-  progress: { label: "Share Your Progress", color: "#10b981", bg: "rgba(16,185,129,.15)", border: "rgba(16,185,129,.3)" },
-  feedback: { label: "Get Feedback",         color: "#f5c518", bg: "rgba(245,197,24,.12)", border: "rgba(245,197,24,.3)" },
-  question: { label: "Ask a Question",       color: "#60a5fa", bg: "rgba(96,165,250,.15)",  border: "rgba(96,165,250,.3)"  },
-  post:     { label: "Just Post",            color: "#9ca3af", bg: "rgba(156,163,175,.1)",  border: "rgba(156,163,175,.22)" }
+  progress:    { label: "Share Your Progress", color: "#10b981", bg: "rgba(16,185,129,.15)",  border: "rgba(16,185,129,.3)"  },
+  feedback:    { label: "Get Feedback",         color: "#f5c518", bg: "rgba(245,197,24,.12)",  border: "rgba(245,197,24,.3)"  },
+  question:    { label: "Ask a Question",       color: "#60a5fa", bg: "rgba(96,165,250,.15)",  border: "rgba(96,165,250,.3)"  },
+  post:        { label: "Just Post",            color: "#9ca3af", bg: "rgba(156,163,175,.1)",  border: "rgba(156,163,175,.22)" },
+  practice_log:{ label: "Practice Log",         color: "#a78bfa", bg: "rgba(167,139,250,.12)", border: "rgba(167,139,250,.3)" }
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -2714,7 +2719,7 @@ let _feedItems = []; // all feed rows for detail view lookup
 
   // Deep-link: ?filter=progress|feedback|question|post — jump to a specific feed filter
   const _deepFilter = new URLSearchParams(window.location.search).get("filter");
-  if (_deepFilter && ["progress","feedback","question","post"].includes(_deepFilter)) {
+  if (_deepFilter && ["progress","feedback","question","post","practice_log"].includes(_deepFilter)) {
     const filterBtn = document.querySelector(`.space-card[data-filter="${_deepFilter}"]`);
     if (filterBtn) setPostFilter(_deepFilter, filterBtn);
     history.replaceState(null, "", "/community.html");
@@ -3074,7 +3079,7 @@ function _syncCommNavActive(currFilter) {
 }
 
 function _updateSpaceBadges() {
-  const types = [null, "progress", "feedback", "question", "post"];
+  const types = [null, "progress", "feedback", "question", "post", "practice_log"];
   types.forEach(type => {
     const key    = "comm_seen_" + (type || "feed");
     const seenAt = localStorage.getItem(key);
@@ -3093,7 +3098,10 @@ function _updateSpaceBadges() {
 
 function _renderFilteredPosts() {
   const list = document.getElementById("posts-list");
-  const filtered = _postFilter ? _posts.filter(p => p.type === _postFilter) : _posts;
+  // practice_log posts live only in the Practice Logs space, never in the unfiltered feed
+  const filtered = _postFilter
+    ? _posts.filter(p => p.type === _postFilter)
+    : _posts.filter(p => p.type !== "practice_log");
 
   // When showing the unfiltered feed, weave focus cards into the post stream
   // by date so they appear naturally where they belong chronologically.
@@ -3104,12 +3112,18 @@ function _renderFilteredPosts() {
     _contentFeedItems.forEach(f => items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
     _updateItems.forEach(f => items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
     items.sort((a, b) => b.ts - a.ts);
+  } else if (_postFilter === "practice_log") {
+    items = filtered.map(p => ({ html: practiceLogCardHTML(p), ts: new Date(p.created_at).getTime() }));
+    items.sort((a, b) => b.ts - a.ts);
   } else {
     items = filtered.map(p => ({ html: postCardHTML(p), ts: 0 }));
   }
 
   if (!items.length) {
-    const label = _postFilter ? `No ${_postFilter} posts yet.` : "No posts yet — be the first to share something! 👆";
+    const label = _postFilter === "practice_log"
+      ? "No practice logs shared yet — save a session in the Practice Hub and share it here!"
+      : _postFilter ? `No ${_postFilter} posts yet.`
+      : "No posts yet — be the first to share something! 👆";
     list.innerHTML = `<div class="posts-empty">${label}</div>`;
   } else {
     const visible = items.slice(0, _postsPage * POSTS_PER_PAGE);
@@ -5098,6 +5112,24 @@ async function loadPosts() {
     };
   });
 
+  // Hydrate session_data for structured practice log posts
+  const logPostsWithSession = _posts.filter(p => p.type === "practice_log" && p.session_id);
+  if (logPostsWithSession.length) {
+    const sessionIds = [...new Set(logPostsWithSession.map(p => p.session_id))];
+    const [{ data: sessionRows }, { data: itemRows }] = await Promise.all([
+      db.from("practice_sessions").select("id,session_date,duration_minutes,notes").in("id", sessionIds),
+      db.from("practice_items").select("session_id,item_type,piece_label,label,time_seconds,notes,position").in("session_id", sessionIds).order("position"),
+    ]);
+    const sessionMap = {};
+    (sessionRows || []).forEach(s => { sessionMap[s.id] = { ...s, items: [] }; });
+    (itemRows    || []).forEach(i => { if (sessionMap[i.session_id]) sessionMap[i.session_id].items.push(i); });
+    _posts = _posts.map(p =>
+      p.session_id && sessionMap[p.session_id]
+        ? { ...p, session_data: sessionMap[p.session_id] }
+        : p
+    );
+  }
+
   // Fetch like/comment counts for content feed posts
   const cfIds = cfPosts.map(p => p.id);
   const [{ data: cfLikes }, { data: cfComments }] = cfIds.length
@@ -5481,6 +5513,106 @@ function _updateLikeUI(btn, liked, count, postId) {
   }
 }
 
+// ── Practice Log card ─────────────────────────────────────────────────────────
+function practiceLogCardHTML(p) {
+  const name    = escHtml(p.name || p.email.split("@")[0]);
+  const timeAgo = relativeTime(p.created_at);
+  const avatarHtml = p.avatarUrl
+    ? `<img src="${escHtml(p.avatarUrl)}" alt="${name}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+    : `<div style="width:36px;height:36px;border-radius:50%;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:700;color:var(--text-muted);flex-shrink:0">${escHtml((p.name||p.email)[0].toUpperCase())}</div>`;
+
+  const postRxData = _postRxMap[p.id] || {};
+  let _liveMyEmoji = null, _liveTotal = 0;
+  for (const [e, d] of Object.entries(postRxData)) { _liveTotal += d.count; if (d.mine) _liveMyEmoji = e; }
+  const heartFill = _liveMyEmoji ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"` : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const likeIcon = `<svg viewBox="0 0 24 24" width="15" height="15" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${_liveMyEmoji && _liveMyEmoji !== "❤️" ? ` ${_liveMyEmoji}` : ""}${_liveTotal > 0 ? ` ${_liveTotal}` : ""}`;
+
+  const commentCount = p.commentCount || 0;
+  const metaText = [
+    _liveTotal ? _liveTotal + " like" + (_liveTotal !== 1 ? "s" : "") : "",
+    commentCount ? commentCount + " comment" + (commentCount !== 1 ? "s" : "") : ""
+  ].filter(Boolean).join(" · ");
+
+  // ── Structured session card ──────────────────────────────────────
+  let bodyHtml = "";
+  if (p.session_data) {
+    const sd = p.session_data;
+    // Format session date
+    const dateParts = (sd.session_date || "").split("-");
+    const dateLabel = dateParts.length === 3
+      ? new Date(sd.session_date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+      : escHtml(sd.session_date || "");
+    const durLabel  = formatMinutes(sd.duration_minutes);
+
+    const itemsHtml = (sd.items || []).map(item => {
+      const label   = escHtml(item.piece_label || item.label || item.item_type || "Practice");
+      const mins    = item.time_seconds ? Math.round(item.time_seconds / 60) : null;
+      const durBit  = mins ? `<span style="font-size:0.75rem;color:var(--text-muted);margin-left:auto;white-space:nowrap">${mins} min</span>` : "";
+      const typeIcon = item.item_type === "technique" ? "🎯" : item.item_type === "theory" ? "📖" : item.item_type === "sightreading" ? "👁" : "🎵";
+      return `<div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:0.75rem;flex-shrink:0">${typeIcon}</span>
+        <span style="font-size:0.85rem;color:var(--text-primary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>
+        ${durBit}
+      </div>`;
+    }).join("");
+
+    const notesHtml = sd.notes
+      ? `<div style="margin-top:10px;font-size:0.82rem;color:var(--text-muted);font-style:italic;line-height:1.5">"${escHtml(sd.notes)}"</div>`
+      : "";
+
+    bodyHtml = `
+      <div style="background:var(--surface-2);border:1px solid rgba(167,139,250,.2);border-radius:10px;padding:12px 14px;margin-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span style="font-weight:700;font-size:0.9rem;color:#a78bfa">${escHtml(dateLabel)}</span>
+          <span style="font-size:0.8rem;color:var(--text-muted);background:var(--surface-3,#222);border-radius:20px;padding:2px 9px">${escHtml(durLabel)}</span>
+        </div>
+        <div>${itemsHtml || '<span style="font-size:0.82rem;color:var(--text-muted)">No items recorded</span>'}</div>
+        ${notesHtml}
+      </div>`;
+  } else {
+    // ── Unstructured: just content + media ──────────────────────────
+    const content = p.content || "";
+    if (content.trim()) {
+      bodyHtml = `<div style="font-size:0.9rem;line-height:1.6;margin-top:8px;color:var(--text-primary);white-space:pre-wrap">${escHtml(content)}</div>`;
+    }
+    // Media
+    const media = p.media || [];
+    const images = media.filter(m => m.type === "image");
+    if (images.length) {
+      const gk = _commImgGroupStore(images.map(m => m.url));
+      bodyHtml += `<div class="post-media-strip" style="margin-top:8px">${images.slice(0, 2).map((m, i) =>
+        `<div class="comm-img-wrap" onclick="_commImgModalOpen('${gk}',${i})" style="cursor:pointer"><img src="${escHtml(m.url)}" alt="${escHtml(m.name||'')}" loading="lazy" onload="this.parentElement.classList.add('loaded')"/></div>`
+      ).join("")}</div>`;
+    }
+    media.forEach(m => {
+      if (m.type === "mux") {
+        bodyHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()" style="margin-top:8px"><div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div></div>`;
+      } else if (m.type === "audio") {
+        bodyHtml += `<div class="post-card-inline-media" onclick="event.stopPropagation()" style="margin-top:8px"><audio controls preload="metadata" style="width:100%"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
+      }
+    });
+  }
+
+  return `<div class="post-card" onclick="showDetail('${escHtml(p.id)}')" style="cursor:pointer;border-left:3px solid rgba(167,139,250,.4)">
+    <div class="post-card-header" style="display:flex;align-items:center;gap:10px">
+      ${avatarHtml}
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary)">${name}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted)">${timeAgo}</div>
+      </div>
+      <span style="font-size:0.72rem;font-weight:600;color:#a78bfa;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);border-radius:20px;padding:2px 9px;flex-shrink:0">📓 Practice Log</span>
+    </div>
+    ${bodyHtml}
+    <div class="post-card-footer" style="display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+      <button class="post-card-like-btn${_liveMyEmoji ? " liked" : ""}" data-post-id="${escHtml(p.id)}" onclick="event.stopPropagation();toggleLike('${escHtml(p.id)}',this)">${likeIcon}</button>
+      <span class="post-card-comment-btn" onclick="event.stopPropagation();showDetail('${escHtml(p.id)}')" style="font-size:0.78rem;color:var(--text-muted);cursor:pointer">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${commentCount > 0 ? commentCount : "Comment"}
+      </span>
+      <span class="like-count-${escHtml(p.id)}" style="font-size:0.75rem;color:var(--text-muted);margin-left:auto">${metaText}</span>
+    </div>
+  </div>`;
+}
+
 // ── Detail view ───────────────────────────────────────────────────────────────
 function renderDetail(postId) {
   const p = _posts.find(p => p.id === postId);
@@ -5539,6 +5671,37 @@ function renderDetail(postId) {
   // Poll placeholder — loaded async
   const pollPlaceholder = p.poll ? `<div id="detail-poll-area" data-poll-id="${escHtml(p.poll.id)}" data-author-email="${escHtml(p.email)}"><div style="text-align:center;padding:16px 0;color:var(--text-muted);font-size:.82rem"><div class="loading-spinner" style="margin:0 auto 8px;width:18px;height:18px"></div>Loading poll…</div></div>` : "";
 
+  // Structured practice log session card for detail view
+  let sessionDetailHtml = "";
+  if (p.type === "practice_log" && p.session_data) {
+    const sd = p.session_data;
+    const dateLabel = sd.session_date
+      ? new Date(sd.session_date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+      : "";
+    const durLabel  = formatMinutes(sd.duration_minutes);
+    const itemsHtml = (sd.items || []).map(item => {
+      const label   = escHtml(item.piece_label || item.label || item.item_type || "Practice");
+      const mins    = item.time_seconds ? Math.round(item.time_seconds / 60) : null;
+      const durBit  = mins ? `<span style="font-size:0.8rem;color:var(--text-muted);margin-left:auto">${mins} min</span>` : "";
+      const typeIcon = item.item_type === "technique" ? "🎯" : item.item_type === "theory" ? "📖" : item.item_type === "sightreading" ? "👁" : "🎵";
+      return `<div style="display:flex;align-items:baseline;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span>${typeIcon}</span>
+        <span style="flex:1;font-size:0.9rem">${label}</span>${durBit}
+      </div>`;
+    }).join("");
+    const notesHtml = sd.notes
+      ? `<div style="margin-top:12px;font-size:0.88rem;color:var(--text-muted);font-style:italic;line-height:1.6">"${escHtml(sd.notes)}"</div>`
+      : "";
+    sessionDetailHtml = `<div style="background:var(--surface-2);border:1px solid rgba(167,139,250,.25);border-radius:10px;padding:14px 16px;margin-top:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span style="font-weight:700;font-size:0.95rem;color:#a78bfa">${escHtml(dateLabel)}</span>
+        <span style="font-size:0.82rem;color:var(--text-muted);background:var(--surface-3,#222);border-radius:20px;padding:2px 10px">${escHtml(durLabel)}</span>
+      </div>
+      <div>${itemsHtml || '<span style="font-size:0.85rem;color:var(--text-muted)">No items recorded</span>'}</div>
+      ${notesHtml}
+    </div>`;
+  }
+
   document.getElementById("detail-post-area").innerHTML = `
     <div class="detail-card">
       <div class="post-author-row" style="margin-bottom:12px">
@@ -5554,6 +5717,7 @@ function renderDetail(postId) {
         </div>
       </div>
       <div class="detail-title">${escHtml(p.title)}</div>
+      ${sessionDetailHtml}
       ${mediaHtml}
       <div class="detail-content">${escHtml(p.content)}</div>
       ${pollPlaceholder}
