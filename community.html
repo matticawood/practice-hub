@@ -5559,7 +5559,22 @@ function practiceLogCardHTML(p) {
       : escHtml(sd.session_date || "");
     const durLabel  = formatMinutes(sd.duration_minutes);
 
-    const itemsHtml = (sd.items || []).map(item => {
+    // If session has no items in DB, fall back to parsing them from the Circle share text
+    let resolvedItems = sd.items || [];
+    if (!resolvedItems.length && p.content) {
+      const parsed = _parseCircleLogText(p.content);
+      if (parsed && parsed.items.length) {
+        resolvedItems = parsed.items.map(line => {
+          const emojiMatch = line.match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
+          const emoji = emojiMatch ? emojiMatch[0] : null;
+          const label = line.replace(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})\s*/u, "").trim();
+          const item_type = emoji === "🎯" ? "technique" : emoji === "📖" ? "theory" : emoji === "👁" ? "sightreading" : "piece";
+          return { piece_label: label, item_type, _fromText: true };
+        });
+      }
+    }
+
+    const itemsHtml = resolvedItems.map(item => {
       const label   = escHtml(item.piece_label || item.label || item.item_type || "Practice");
       const mins    = item.time_seconds ? Math.round(item.time_seconds / 60) : null;
       const durBit  = mins ? `<span style="font-size:0.75rem;color:var(--text-muted);margin-left:auto;white-space:nowrap">${mins} min</span>` : "";
@@ -5575,13 +5590,17 @@ function practiceLogCardHTML(p) {
       ? `<div style="margin-top:10px;font-size:0.82rem;color:var(--text-muted);font-style:italic;line-height:1.5">"${escHtml(sd.notes)}"</div>`
       : "";
 
+    const itemCount = resolvedItems.length;
     bodyHtml = `
-      <div style="background:var(--surface-2);border:1px solid rgba(167,139,250,.2);border-radius:10px;padding:12px 14px;margin-top:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <span style="font-weight:700;font-size:0.9rem;color:#a78bfa">${escHtml(dateLabel)}</span>
-          <span style="font-size:0.8rem;color:var(--text-muted);background:var(--surface-3,#222);border-radius:20px;padding:2px 9px">${escHtml(durLabel)}</span>
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${itemCount ? '4px' : '0'}">
+          <div>
+            <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary)">${escHtml(dateLabel)}</div>
+            ${itemCount ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:1px">${itemCount} item${itemCount !== 1 ? "s" : ""}</div>` : ""}
+          </div>
+          <span style="font-size:0.8rem;color:#b45309;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.25);border-radius:20px;padding:3px 10px;white-space:nowrap;flex-shrink:0;margin-left:8px">⏱ ${escHtml(durLabel)}</span>
         </div>
-        <div>${itemsHtml || '<span style="font-size:0.82rem;color:var(--text-muted)">No items recorded</span>'}</div>
+        ${itemCount ? `<div style="margin-top:8px">${itemsHtml}</div>` : ""}
         ${notesHtml}
       </div>`;
   } else {
