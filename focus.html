@@ -992,10 +992,10 @@ async function loadFocuses() {
     db.from("weekly_focus_comments").select("focus_id").in("focus_id", ids),
   ]);
 
-  // Load reactions into shared-comments module
+  // Load reactions into shared-comments module (uses same table — share the result)
   await Comments.loadReactions(ids);
 
-  // Build comment counts + liker avatar chips
+  // Build comment counts + liker avatar chips from allLikes
   const cmtCountMap = {}, likersMap = {};
   (allLikes || []).forEach(l => {
     if (!likersMap[l.focus_id]) likersMap[l.focus_id] = [];
@@ -1003,13 +1003,13 @@ async function loadFocuses() {
   });
   (cmtCounts || []).forEach(c => cmtCountMap[c.focus_id] = (cmtCountMap[c.focus_id] || 0) + 1);
 
-  // Fetch avatar URLs for liker chips
-  const likerEmails = [...new Set((allLikes || []).map(l => l.email))];
+  // Fetch avatar URLs for liker chips — include current user so their avatar shows
+  const likerEmails = [...new Set([myEmail, ...(allLikes || []).map(l => l.email)])];
   const likerAvatarMap = {};
   if (likerEmails.length) {
     const { data: likerRows } = await db.from("allowed_emails")
       .select("email,avatar_url,name").in("email", likerEmails);
-    (likerRows || []).forEach(r => { likerAvatarMap[r.email] = { url: r.avatar_url, name: r.name }; });
+    (likerRows || []).forEach(r => { likerAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] }; });
   }
 
   _focuses = rows.map((r, i) => {
@@ -1125,7 +1125,11 @@ function focusDetailCardHTML(f, clickable) {
   const rxData = Comments.getReactionState(f.id);
   let totalRx = 0;
   for (const d of Object.values(rxData)) totalRx += d.count;
-  const safeKey  = `focus_det_${f.id.replace(/-/g,'_')}`;
+  // Use different safeKey prefix to avoid duplicate element IDs when both
+  // the inline list card and the detail view card are in the DOM simultaneously
+  const safeKey  = clickable
+    ? `focus_list_${f.id.replace(/-/g,'_')}`
+    : `focus_det_${f.id.replace(/-/g,'_')}`;
   const reactBtn = Comments.reactBtnHtml(f.id, safeKey);
 
   const detLikerChipsHTML = _focusLikerChips(f);
