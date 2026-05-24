@@ -2890,6 +2890,50 @@
     .feed-ach-name { font-size: 0.78rem; font-weight: 700; line-height: 1.2; }
     .feed-ach-desc { font-size: 0.68rem; color: var(--text-muted); line-height: 1.3; margin-top: 1px; }
 
+    /* Community feed section headings */
+    .feed-section-heading {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .feed-see-all-link {
+      display: block;
+      text-align: right;
+      font-size: 0.75rem;
+      color: var(--accent);
+      text-decoration: none;
+      margin-top: 4px;
+      margin-bottom: 4px;
+      opacity: .85;
+    }
+    .feed-see-all-link:hover { opacity: 1; text-decoration: underline; }
+    /* Community posts strip */
+    .comm-post-strip-item { padding: 9px 0; }
+    .comm-post-type-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 99px;
+      padding: 1px 7px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .comm-post-snippet {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin-top: 1px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
     /* Mobile viewing bar */
     #viewing-bar-mobile {
       display: none;
@@ -4887,11 +4931,7 @@
 
     <!-- Community feed panel -->
     <div id="lb-panel-community" style="display:none">
-      <div style="margin-top:14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted)">Recent Activity</div>
-        <span style="font-size:0.68rem;color:var(--text-muted)">Last 14 days</span>
-      </div>
-      <div id="community-feed-list">
+      <div id="community-feed-list" style="margin-top:14px">
         <div class="page-loading"><div class="loading-spinner"></div></div>
       </div>
     </div>
@@ -10040,6 +10080,8 @@ let _feedPage = 1;
 const FEED_PER_PAGE = 20;
 
 let _monthlyChampionsHTML = null;
+let _feedAvatarMap = {};       // email → avatar_url
+let _communityPostsHTML = "";  // rendered HTML for the posts strip
 
 async function renderCommunityFeed() {
   const list = document.getElementById("community-feed-list");
@@ -10055,9 +10097,13 @@ async function renderCommunityFeed() {
     ? db.rpc("get_last_month_leaderboard")
     : Promise.resolve({ data: [] });
 
-  const [feedResult, champResult] = await Promise.all([
+  const [feedResult, champResult, postsResult] = await Promise.all([
     db.rpc("get_activity_feed", { p_email: myEmail }),
     championsPromise,
+    db.from("community_posts")
+      .select("id,email,name,post_type,content,created_at")
+      .order("created_at", { ascending: false })
+      .limit(5),
   ]);
 
   if (feedResult.error) {
@@ -10067,6 +10113,28 @@ async function renderCommunityFeed() {
         : "Community feed coming soon."}
     </div>`;
     return;
+  }
+
+  // Fetch avatar URLs for everyone appearing in either dataset
+  const postRows = (postsResult.data || []);
+  const allEmails = [...new Set([
+    ...(feedResult.data || []).map(r => r.email).filter(Boolean),
+    ...postRows.map(r => r.email).filter(Boolean),
+  ])];
+  if (allEmails.length) {
+    const { data: avatarRows } = await db
+      .from("allowed_emails")
+      .select("email,avatar_url")
+      .in("email", allEmails);
+    _feedAvatarMap = {};
+    (avatarRows || []).forEach(r => { if (r.avatar_url) _feedAvatarMap[r.email] = r.avatar_url; });
+  }
+
+  // Build community posts strip HTML
+  if (postRows.length) {
+    _communityPostsHTML = postRows.map(p => communityPostStripHTML(p)).join("");
+  } else {
+    _communityPostsHTML = "";
   }
 
   // Build champions card HTML
@@ -10106,15 +10174,25 @@ function renderFeedPage() {
 
   const champHTML = _monthlyChampionsHTML || "";
 
+  // Community posts strip
+  const postsStripHTML = _communityPostsHTML
+    ? `<div class="feed-section-heading">Community Posts</div>
+       ${_communityPostsHTML}
+       <a href="/community.html" class="feed-see-all-link">See all in Community →</a>`
+    : "";
+
+  // Activity feed heading
+  const activityHeadingHTML = `<div class="feed-section-heading" style="margin-top:${postsStripHTML ? "20px" : "0"}">Recent Activity</div>`;
+
   if (!_feedRows.length) {
-    list.innerHTML = champHTML + '<div class="feed-empty">No activity in the last 14 days.</div>';
+    list.innerHTML = champHTML + postsStripHTML + activityHeadingHTML + '<div class="feed-empty">No activity in the last 14 days.</div>';
     return;
   }
 
   const visible = _feedRows.slice(0, _feedPage * FEED_PER_PAGE);
   const hasMore = visible.length < _feedRows.length;
 
-  list.innerHTML = champHTML + visible.map(row => feedItemHTML(row)).join("") +
+  list.innerHTML = champHTML + postsStripHTML + activityHeadingHTML + visible.map(row => feedItemHTML(row)).join("") +
     (hasMore ? `<button class="see-more-btn" onclick="loadMoreFeed()">Show 20 more <span style="opacity:.6">(${_feedRows.length - visible.length} remaining)</span></button>` : "");
 }
 
@@ -10123,6 +10201,17 @@ function loadMoreFeed() {
   renderFeedPage();
   const btn = document.getElementById("community-feed-list").querySelector(".see-more-btn");
   if (btn) btn.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function _feedAvatarHTML(email, name, size) {
+  const avatarUrl = _feedAvatarMap[email];
+  const colour    = avatarColour(email);
+  const initials  = (name || email.split("@")[0]).split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+  const sz = size || 34;
+  if (avatarUrl) {
+    return `<img src="${avatarUrl}" class="feed-avatar feed-avatar-img" width="${sz}" height="${sz}" alt="${escHtml(name)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.outerHTML='<div class=\\'feed-avatar\\' style=\\'background:${colour.bg};color:${colour.fg}\\'>${initials}</div>'">`;
+  }
+  return `<div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${initials}</div>`;
 }
 
 function feedItemHTML(row) {
@@ -10147,7 +10236,7 @@ function feedItemHTML(row) {
     const aname  = ach ? ach.name : "Achievement";
     const adesc  = ach ? ach.desc : "";
     return `<div class="feed-item">
-      <div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${initials}</div>
+      ${_feedAvatarHTML(row.email, name)}
       <div class="feed-body">
         <div class="feed-text">
           <strong style="color:${colour.fg}">${escHtml(name)}</strong>
@@ -10170,7 +10259,7 @@ function feedItemHTML(row) {
 
   const duration = formatMinutes(row.duration_minutes || 0);
   return `<div class="feed-item">
-    <div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${initials}</div>
+    ${_feedAvatarHTML(row.email, name)}
     <div class="feed-body">
       <div class="feed-text">
         <strong style="color:${colour.fg}">${escHtml(name)}</strong> logged <span class="feed-duration">${duration}</span>
@@ -10179,6 +10268,45 @@ function feedItemHTML(row) {
         <div class="feed-time">${timeAgo}</div>
         ${reactBtn}
       </div>
+    </div>
+  </div>`;
+}
+
+function communityPostStripHTML(p) {
+  const name     = p.name || p.email.split("@")[0];
+  const colour   = avatarColour(p.email);
+  const timeAgo  = feedRelativeTime(p.created_at);
+  const avatarEl = _feedAvatarHTML(p.email, name, 32);
+
+  // Badge label
+  const TYPE_LABELS = {
+    practice_log: "Practice Log",
+    discussion:   "Discussion",
+    win:          "Win",
+    question:     "Question",
+    resource:     "Resource",
+  };
+  const badgeLabel = TYPE_LABELS[p.post_type] || p.post_type || "Post";
+
+  // Snippet: for practice logs show date + duration from first line; otherwise first 80 chars
+  let snippet = "";
+  const content = (p.content || "").trim();
+  if (p.post_type === "practice_log" && content) {
+    const firstLine = content.split("\n")[0].trim();
+    snippet = firstLine; // e.g. "Monday 20 April 2026  ·  55 min"
+  } else {
+    snippet = content.length > 80 ? content.slice(0, 80).trimEnd() + "…" : content;
+  }
+
+  return `<div class="feed-item comm-post-strip-item">
+    ${avatarEl}
+    <div class="feed-body" style="min-width:0">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px">
+        <strong style="color:${colour.fg};font-size:0.82rem">${escHtml(name)}</strong>
+        <span class="comm-post-type-badge">${escHtml(badgeLabel)}</span>
+      </div>
+      ${snippet ? `<div class="comm-post-snippet">${escHtml(snippet)}</div>` : ""}
+      <div class="feed-time" style="margin-top:2px">${timeAgo}</div>
     </div>
   </div>`;
 }
