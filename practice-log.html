@@ -7614,13 +7614,21 @@ async function renderDashboard() {
   // ── Async: user's leaderboard ranks (all boards) ────────────────
   try {
     const target = (viewingEmail || myEmail)?.toLowerCase() || '';
-    const [ranksRes, piecesRes, scalesRes] = await Promise.all([
+    const [ranksRes, piecesRes, scalesRes, streakRes] = await Promise.all([
       db.rpc("get_my_leaderboard_ranks", { p_email: viewingEmail || myEmail }),
       db.rpc("get_piece_leaderboard"),
       db.rpc("get_scale_leaderboard"),
+      db.rpc("get_streak_leaderboard"),
     ]);
 
     const ranks = Object.fromEntries((ranksRes.data || []).map(r => [r.board, r]));
+
+    // Streak rank — computed from best_streak leaderboard
+    const streakRows = (streakRes.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.best_streak) > 0);
+    let myStreakRank = null;
+    for (let i = 0; i < streakRows.length; i++) {
+      if (streakRows[i].email?.toLowerCase() === target) { myStreakRank = i + 1; break; }
+    }
 
     // Piece rank
     const pieceRows = (piecesRes.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.total_minutes) > 0);
@@ -7648,7 +7656,7 @@ async function renderDashboard() {
 
     const CATS = [
       { key: 'monthly', label: 'Monthly' },
-      { key: 'streak',  label: 'Streak' },
+      { key: 'streak',  label: 'Streak',  rank: myStreakRank, total: streakRows.length },
       { key: 'pieces',  label: 'Pieces',  rank: myPieceRank, total: pieceRows.length },
       { key: 'scales',  label: 'Scales',  rank: myScaleRank, total: scaleRows.length },
       { key: 'badges',  label: 'Badges' },
