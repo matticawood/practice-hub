@@ -11,6 +11,8 @@
 -- they surpass their own record.
 -- ================================================================
 
+DROP FUNCTION IF EXISTS get_streak_leaderboard();
+
 CREATE OR REPLACE FUNCTION get_streak_leaderboard()
 RETURNS TABLE(
   email       text,
