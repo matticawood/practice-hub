@@ -7584,7 +7584,9 @@ async function renderDashboard() {
       <div class="dash-card" id="dash-content-feed-card">
         <div style="color:var(--text-muted);font-size:.8rem">Loading…</div>
       </div>
-      <div id="dash-second-card"></div>
+      <div class="dash-card" id="dash-livestream-card">
+        <div style="color:var(--text-muted);font-size:.8rem">Loading…</div>
+      </div>
     </div>
 
     <div class="dash-card" style="margin-bottom:18px">
@@ -7880,6 +7882,52 @@ async function renderDashboard() {
       }
     }
   } catch(e) { /* content feed unavailable */ }
+
+  // ── Async: latest live stream recording ──────────────────────────
+  try {
+    const lsEl = document.getElementById('dash-livestream-card');
+    if (lsEl) {
+      const { data: lsRows } = await db
+        .from("live_events")
+        .select("id,title,description,cover_url,scheduled_at,mux_playback_id")
+        .eq("status", "ended")
+        .not("mux_playback_id", "is", null)
+        .order("scheduled_at", { ascending: false })
+        .limit(1);
+      const ev = lsRows && lsRows[0];
+      if (!ev) {
+        lsEl.style.display = "none";
+      } else {
+        const escL = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        const d = new Date(ev.scheduled_at);
+        const day = d.getDate();
+        const suffix = day===1||day===21||day===31?"st":day===2||day===22?"nd":day===3||day===23?"rd":"th";
+        const dateStr = `${day}${suffix} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]} ${d.getFullYear()}`;
+
+        const thumbSrc = ev.cover_url
+          ? escL(ev.cover_url)
+          : `https://image.mux.com/${escL(ev.mux_playback_id)}/thumbnail.jpg?time=0`;
+
+        lsEl.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+            <div class="dash-section-title" style="margin-bottom:0">Latest Live Stream</div>
+            <span style="font-size:.75rem;color:var(--text-muted)">${dateStr}</span>
+          </div>
+          <div style="font-size:.95rem;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1.4">${escL(ev.title)}</div>
+          ${ev.description ? `<div style="font-size:.82rem;color:var(--text-muted);line-height:1.5;margin-bottom:10px">${escL(ev.description.slice(0, 120))}${ev.description.length > 120 ? "…" : ""}</div>` : ""}
+          <a href="/events.html?event=${ev.id}" style="display:block;position:relative;border-radius:8px;overflow:hidden;text-decoration:none">
+            <img src="${thumbSrc}" alt="${escL(ev.title)}" loading="lazy"
+              style="width:100%;display:block;max-height:220px;object-fit:cover">
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.22)">
+              <div style="width:44px;height:44px;background:var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center">
+                <div style="width:0;height:0;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:16px solid #1a1410;margin-left:4px"></div>
+              </div>
+            </div>
+          </a>
+          <a href="/events.html" class="dash-card-article-link" style="text-decoration:none;margin-top:10px;display:inline-block">All streams →</a>`;
+      }
+    }
+  } catch(e) { /* livestream unavailable */ }
 
   // ── Async: glossary term of day (lazy-load if needed) ────────────
   if (!_glossaryLoaded) {
