@@ -7579,6 +7579,11 @@ async function renderDashboard() {
       </div>
     </div>
 
+    <!-- Latest content feed post -->
+    <div class="dash-card" id="dash-content-feed-card" style="margin-bottom:18px">
+      <div style="color:var(--text-muted);font-size:.8rem">Loading…</div>
+    </div>
+
     <div class="dash-card" style="margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <div class="dash-section-title" style="margin-bottom:0">Your leaderboard positions</div>
@@ -7773,6 +7778,76 @@ async function renderDashboard() {
       }
     }
   } catch(e) { /* focus unavailable */ }
+
+  // ── Async: latest content feed post ──────────────────────────────
+  try {
+    const cfEl = document.getElementById('dash-content-feed-card');
+    if (cfEl) {
+      const { data: cfRows } = await db
+        .from("content_feed_posts")
+        .select("id,type,title,body,url,youtube_id,media,published_at")
+        .order("published_at", { ascending: false })
+        .limit(1);
+      const p = cfRows && cfRows[0];
+      if (!p) {
+        cfEl.style.display = "none";
+      } else {
+        const escHtmlCf = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        const d = new Date(p.published_at);
+        const day = d.getDate();
+        const suffix = day===1||day===21||day===31?"st":day===2||day===22?"nd":day===3||day===23?"rd":"th";
+        const dateStr = `${day}${suffix} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]} ${d.getFullYear()}`;
+
+        // Type badge
+        const typeBadge = p.type === "youtube"
+          ? `<span style="font-size:.68rem;font-weight:700;color:#dc2626;background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.25);border-radius:20px;padding:2px 8px">▶ YouTube</span>`
+          : p.type === "blog"
+          ? `<span style="font-size:.68rem;font-weight:700;color:#4338ca;background:rgba(67,56,202,.08);border:1px solid rgba(67,56,202,.22);border-radius:20px;padding:2px 8px">✏️ Monday Music Tips</span>`
+          : `<span style="font-size:.68rem;font-weight:700;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:20px;padding:2px 8px">Post</span>`;
+
+        // Body preview
+        let bodyHTML = "";
+        if (p.type === "youtube" && p.youtube_id) {
+          bodyHTML = `<div style="position:relative;border-radius:8px;overflow:hidden;margin:10px 0;max-width:320px">
+            <img src="https://img.youtube.com/vi/${escHtmlCf(p.youtube_id)}/hqdefault.jpg" alt="${escHtmlCf(p.title)}" style="width:100%;display:block" loading="lazy">
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.25)">
+              <div style="width:44px;height:44px;background:#dc2626;border-radius:50%;display:flex;align-items:center;justify-content:center">
+                <div style="width:0;height:0;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:16px solid #fff;margin-left:4px"></div>
+              </div>
+            </div>
+          </div>`;
+        } else if (p.type === "blog") {
+          const bulletData = (Array.isArray(p.media) ? p.media : []).find(m => m.type === "bullets");
+          const bullets = bulletData?.items?.slice(0, 3) || [];
+          bodyHTML = bullets.length
+            ? `<ul style="margin:8px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px">${bullets.map((item, i) =>
+                `<li style="display:flex;gap:8px;align-items:flex-start;font-size:.82rem;color:var(--text-muted)">
+                  <span style="min-width:18px;height:18px;background:#4338ca;color:#fff;border-radius:50%;font-size:.6rem;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">${i+1}</span>
+                  <span>${escHtmlCf(item)}</span>
+                </li>`).join("")}</ul>`
+            : "";
+        } else if (p.body) {
+          const snippet = p.body.length > 160 ? p.body.slice(0, 160) + "…" : p.body;
+          bodyHTML = `<div style="font-size:.83rem;color:var(--text-muted);line-height:1.5;margin-top:8px">${escHtmlCf(snippet)}</div>`;
+        }
+
+        cfEl.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+            <div class="dash-section-title" style="margin-bottom:0">Latest from the Feed</div>
+            <span style="font-size:.75rem;color:var(--text-muted)">${dateStr}</span>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:0">
+              ${typeBadge}
+              ${p.title ? `<div style="font-size:.95rem;font-weight:700;color:var(--text);margin-top:8px;line-height:1.4">${escHtmlCf(p.title)}</div>` : ""}
+              ${bodyHTML}
+            </div>
+          </div>
+          <a href="/content-feed.html?post=${p.id}" class="dash-card-article-link" style="text-decoration:none;margin-top:10px;display:inline-block">View post →</a>
+          <a href="/content-feed.html" class="dash-card-article-link" style="text-decoration:none;margin-top:10px;display:inline-block;margin-left:16px">All posts →</a>`;
+      }
+    }
+  } catch(e) { /* content feed unavailable */ }
 
   // ── Async: glossary term of day (lazy-load if needed) ────────────
   if (!_glossaryLoaded) {
