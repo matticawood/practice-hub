@@ -12717,6 +12717,7 @@ function qaGetRecentItems() {
   const addedPieceKeys = new Set();
   const addedTechNames = new Set();
   const addedBookKeys  = new Set();
+  const addedOtherKeys = new Set();
   for (const fi of formItems) {
     if (fi.type === "piece" && fi.selectedPiece) {
       const k = fi.selectedPiece.id
@@ -12732,11 +12733,17 @@ function qaGetRecentItems() {
       const bk = (bookEl?.value || "").trim().toLowerCase();
       if (bk) addedBookKeys.add(bk);
     }
+    if (fi.type === "other") {
+      const otherEl = document.getElementById(`other-label-${fi.id}`);
+      const ok = (otherEl?.value || "").trim().toLowerCase();
+      if (ok) addedOtherKeys.add(ok);
+    }
   }
 
   const pieces = new Map();
   const books  = new Map();
   const techs  = new Map();
+  const others = new Map();
   const sorted = [...allSessions].sort((a, b) => b.session_date.localeCompare(a.session_date));
   for (const sess of sorted) {
     for (const item of (sess.practice_items || [])) {
@@ -12759,13 +12766,20 @@ function qaGetRecentItems() {
           if (techs.size < 4 && !addedTechNames.has(n.toLowerCase())) techs.set(n.toLowerCase(), n);
         });
       }
+      if (item.item_type === "other" && item.label && others.size < 3) {
+        const key = item.label.toLowerCase();
+        if (!others.has(key) && !addedOtherKeys.has(key)) others.set(key, {
+          item_type: "other", label: item.label,
+        });
+      }
     }
-    if (pieces.size >= 5 && books.size >= 3 && techs.size >= 4) break;
+    if (pieces.size >= 5 && books.size >= 3 && techs.size >= 4 && others.size >= 3) break;
   }
   return {
     pieces: [...pieces.values()],
     books:  [...books.values()],
     techs:  [...techs.values()].map(n => ({ item_type: "technique", label: n })),
+    others: [...others.values()],
   };
 }
 
@@ -12773,8 +12787,8 @@ function renderQuickAdd() {
   const el = document.getElementById("quick-add-section");
   if (!el) return;
   const templates        = _qaGetTemplates();
-  const { pieces, books, techs } = qaGetRecentItems();
-  if (!templates.length && !pieces.length && !books.length && !techs.length) { el.innerHTML = ""; return; }
+  const { pieces, books, techs, others } = qaGetRecentItems();
+  if (!templates.length && !pieces.length && !books.length && !techs.length && !others.length) { el.innerHTML = ""; return; }
 
   let html = "";
 
@@ -12788,16 +12802,17 @@ function renderQuickAdd() {
   }
 
   // ── Recents row ──
-  if (pieces.length || books.length || techs.length) {
-    const mkChip = (item, icon, display) => {
+  if (pieces.length || books.length || techs.length || others.length) {
+    const mkChip = (item, display) => {
       const short = display.length > 22 ? display.slice(0, 21) + "…" : display;
       const d = escHtml(JSON.stringify(item));
       return `<button class="qa-chip" data-qa-item="${d}" title="${escHtml(display)}">${escHtml(short)}</button>`;
     };
     const rChips = [
-      ...pieces.map(p => mkChip(p, "", p.piece_label || "Piece")),
-      ...books.map(b  => mkChip(b, "", b.piece_label || "Book")),
-      ...techs.map(t  => mkChip(t, "", t.label || "Technique")),
+      ...pieces.map(p => mkChip(p, p.piece_label || "Piece")),
+      ...books.map(b  => mkChip(b, b.piece_label || "Book")),
+      ...techs.map(t  => mkChip(t, t.label || "Technique")),
+      ...others.map(o => mkChip(o, o.label || "Other")),
     ].join("");
     html += `<div class="qa-row"><span class="qa-label">Recent</span>${rChips}</div>`;
   }
@@ -13018,6 +13033,14 @@ function addItem(prefill = null) {
 
   // Wire up events
   wireItemEvents(id);
+
+  // Show chips immediately for prefilled Other / Book items
+  if (prefill && prefill.item_type === "other" && prefill.label) {
+    lockInOther(id, prefill.label);
+  }
+  if (prefill && prefill.item_type === "book" && prefill.piece_label) {
+    lockInBookName(id, prefill.piece_label, prefill.piece_id || "");
+  }
 }
 window.addItem = addItem;
 
@@ -13124,6 +13147,7 @@ function buildBookFields(id, prefill) {
   return `
     <div class="item-form-group" style="position:relative">
       <label>Book / Method name</label>
+      <div id="book-chip-${id}" style="display:none"></div>
       <input type="text" id="book-name-${id}" autocomplete="off"
              placeholder="e.g. Alfred's Basic Piano Library Book 1, John Thompson…"
              value="${escHtml(bookName)}" data-field="book-name" />
@@ -13300,14 +13324,14 @@ function wireItemEvents(id) {
     bookNameInput.addEventListener("input",  () => showBookSuggestions(bookNameInput.value.trim()));
     bookNameInput.addEventListener("focus",  () => showBookSuggestions(bookNameInput.value.trim()));
     bookNameInput.addEventListener("blur",   () => setTimeout(() => { bookDropdown.style.display = "none"; }, 200));
+    bookNameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); lockInBookName(id); }
+    });
     bookDropdown.addEventListener("mousedown", (e) => {
       const opt = e.target.closest(".book-option");
       if (!opt) return;
       e.preventDefault();
-      bookNameInput.value = opt.dataset.book;
-      // Store library piece_id on the input for collectItemData to pick up
-      bookNameInput.dataset.bookPieceId = opt.dataset.bookId || "";
-      bookDropdown.style.display = "none";
+      lockInBookName(id, opt.dataset.book, opt.dataset.bookId || "");
     });
   }
 
@@ -13339,12 +13363,14 @@ function wireItemEvents(id) {
     otherLabelInput.addEventListener("input", () => showOtherSuggestions(otherLabelInput.value.trim()));
     otherLabelInput.addEventListener("focus", () => showOtherSuggestions(otherLabelInput.value.trim()));
     otherLabelInput.addEventListener("blur",  () => setTimeout(() => { otherDropdown.style.display = "none"; }, 200));
+    otherLabelInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); lockInOther(id); }
+    });
     otherDropdown.addEventListener("mousedown", (e) => {
       const opt = e.target.closest(".book-option");
       if (!opt) return;
       e.preventDefault();
-      otherLabelInput.value = opt.dataset.label;
-      otherDropdown.style.display = "none";
+      lockInOther(id, opt.dataset.label);
     });
   }
 
@@ -13694,6 +13720,52 @@ function lockInCustomPiece(id, title) {
   hidePieceDropdown(id);
 }
 window.lockInCustomPiece = lockInCustomPiece;
+
+function lockInOther(id, label) {
+  const chipEl  = document.getElementById(`other-chip-${id}`);
+  const inputEl = document.getElementById(`other-label-${id}`);
+  const dropEl  = document.getElementById(`other-dropdown-${id}`);
+  if (!label && inputEl) label = inputEl.value.trim();
+  if (!label) return;
+  if (inputEl) { inputEl.value = label; inputEl.style.display = "none"; }
+  if (dropEl)  dropEl.style.display = "none";
+  if (chipEl) {
+    chipEl.innerHTML = `<div class="selected-piece-chip custom">${escHtml(label)}<span class="chip-remove" onclick="clearOtherSelection(${id})">×</span></div>`;
+    chipEl.style.display = "block";
+  }
+}
+function clearOtherSelection(id) {
+  const chipEl  = document.getElementById(`other-chip-${id}`);
+  const inputEl = document.getElementById(`other-label-${id}`);
+  if (chipEl)  { chipEl.innerHTML = ""; chipEl.style.display = "none"; }
+  if (inputEl) { inputEl.value = ""; inputEl.style.display = ""; inputEl.focus(); }
+}
+window.clearOtherSelection = clearOtherSelection;
+
+function lockInBookName(id, name, pieceId) {
+  const chipEl  = document.getElementById(`book-chip-${id}`);
+  const inputEl = document.getElementById(`book-name-${id}`);
+  const dropEl  = document.getElementById(`book-dropdown-${id}`);
+  if (!name && inputEl) name = inputEl.value.trim();
+  if (!name) return;
+  if (inputEl) {
+    inputEl.value = name;
+    if (pieceId) inputEl.dataset.bookPieceId = pieceId;
+    inputEl.style.display = "none";
+  }
+  if (dropEl) dropEl.style.display = "none";
+  if (chipEl) {
+    chipEl.innerHTML = `<div class="selected-piece-chip custom">${escHtml(name)}<span class="chip-remove" onclick="clearBookName(${id})">×</span></div>`;
+    chipEl.style.display = "block";
+  }
+}
+function clearBookName(id) {
+  const chipEl  = document.getElementById(`book-chip-${id}`);
+  const inputEl = document.getElementById(`book-name-${id}`);
+  if (chipEl)  { chipEl.innerHTML = ""; chipEl.style.display = "none"; }
+  if (inputEl) { inputEl.value = ""; inputEl.dataset.bookPieceId = ""; inputEl.style.display = ""; inputEl.focus(); }
+}
+window.clearBookName = clearBookName;
 
 async function requestPieceAddition(id) {
   const item = formItems.find(i => i.id === id);
