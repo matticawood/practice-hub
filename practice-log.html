@@ -18,6 +18,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3/dist/mux-player.mjs"></script>
   <style>
     /* ── Page-specific overrides & additions ── */
 
@@ -1839,6 +1840,66 @@
     .dash-card {
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
       padding: 14px 16px;
+    }
+
+    /* ── Live event banner ─────────────────────────────────────────── */
+    #dash-live-banner {
+      display: none;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+    .live-banner-inner {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .live-banner-soon  { background: #1a1200; border: 1.5px solid var(--accent); }
+    .live-banner-live  { background: #1a0000; border: 1.5px solid #ef4444; }
+    .live-dot-pulse {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+      background: #ef4444;
+      box-shadow: 0 0 0 0 rgba(239,68,68,.5);
+      animation: livepulse 1.4s ease-in-out infinite;
+    }
+    @keyframes livepulse {
+      0%   { box-shadow: 0 0 0 0 rgba(239,68,68,.5); }
+      70%  { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+      100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+    }
+    .live-banner-soon .live-dot-pulse { background: var(--accent); box-shadow: 0 0 0 0 rgba(201,168,76,.5); }
+    @keyframes soonpulse {
+      0%   { box-shadow: 0 0 0 0 rgba(201,168,76,.5); }
+      70%  { box-shadow: 0 0 0 8px rgba(201,168,76,0); }
+      100% { box-shadow: 0 0 0 0 rgba(201,168,76,0); }
+    }
+    .live-banner-soon .live-dot-pulse { animation-name: soonpulse; }
+    .live-banner-label { font-size: .7rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .live-banner-soon .live-banner-label { color: var(--accent); }
+    .live-banner-live .live-banner-label { color: #ef4444; }
+    .live-banner-title { font-size: .92rem; font-weight: 600; color: #fff; }
+    .live-banner-btn {
+      margin-left: auto;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: .78rem;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .live-banner-soon .live-banner-btn { background: var(--accent); color: #1a1410; }
+    .live-banner-live .live-banner-btn { background: #ef4444; color: #fff; }
+    .live-banner-preview {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 4px;
     }
     .dash-card-eyebrow {
       font-size: .62rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
@@ -7531,6 +7592,9 @@ async function renderDashboard() {
       </div>
     </div>
 
+    <!-- Live event banner (starting soon / live now) -->
+    <div id="dash-live-banner"></div>
+
     <div class="dash-cards-row">
       <div class="dash-card">
         <div class="dash-section-title">${MONTHS_LONG[calMonth]} ${calYear}</div>
@@ -7588,6 +7652,9 @@ async function renderDashboard() {
         <div style="color:var(--text-muted);font-size:.8rem">Loading…</div>
       </div>
     </div>
+
+    <!-- Next live event card (hidden until an upcoming event exists) -->
+    <div id="dash-next-event-card" style="display:none;margin-bottom:18px"></div>
 
     <div class="dash-card" style="margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -7930,6 +7997,20 @@ async function renderDashboard() {
     }
   } catch(e) { /* livestream unavailable */ }
 
+  // ── Async: next live event + live-now / starting-soon banner ─────
+  try {
+    await _refreshLiveEventBanner();
+
+    // Realtime: auto-update banner when any live_event row changes
+    if (!window._dashLiveChannel) {
+      window._dashLiveChannel = db.channel("dash-live-watcher")
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "live_events" }, () => {
+          _refreshLiveEventBanner();
+        })
+        .subscribe();
+    }
+  } catch(e) { /* live event banner unavailable */ }
+
   // ── Async: glossary term of day (lazy-load if needed) ────────────
   if (!_glossaryLoaded) {
     try {
@@ -7942,6 +8023,144 @@ async function renderDashboard() {
       }
     } catch(e) {}
   }
+}
+
+// ── Live event banner helpers ──────────────────────────────────────────
+
+async function _refreshLiveEventBanner() {
+  // Fetch: anything live right now?  And next upcoming scheduled event?
+  const [liveRes, upcomingRes] = await Promise.all([
+    db.from("live_events")
+      .select("id,title,scheduled_at,mux_playback_id,status")
+      .eq("status", "live")
+      .limit(1),
+    db.from("live_events")
+      .select("id,title,scheduled_at,status")
+      .eq("status", "scheduled")
+      .gt("scheduled_at", new Date().toISOString())
+      .order("scheduled_at", { ascending: true })
+      .limit(1),
+  ]);
+  const liveEv   = liveRes.data   && liveRes.data[0]   || null;
+  const nextEv   = upcomingRes.data && upcomingRes.data[0] || null;
+
+  _renderLiveBanner(liveEv, nextEv);
+  _renderNextEventCard(nextEv, liveEv);
+
+  // Schedule a "starting soon" show when event enters 10-min window
+  if (nextEv && !liveEv) {
+    const scheduledAt  = new Date(nextEv.scheduled_at);
+    const now          = Date.now();
+    const msTilStart   = scheduledAt.getTime() - now;
+    const msTilSoon    = msTilStart - 10 * 60 * 1000; // 10 min before
+
+    // If the event is already within 10 min but not yet started, show soon now
+    if (msTilStart > 0 && msTilSoon <= 0) {
+      _renderLiveBanner(null, nextEv, true); // force "soon" state
+    }
+
+    // Schedule the transition to "starting soon" if still in the future
+    if (msTilSoon > 0 && msTilSoon < 12 * 60 * 60 * 1000) {
+      clearTimeout(window._dashSoonTimer);
+      window._dashSoonTimer = setTimeout(() => {
+        _renderLiveBanner(null, nextEv, true);
+      }, msTilSoon);
+    }
+
+    // Schedule a refresh a few seconds after scheduled start (may now be live)
+    if (msTilStart > 0 && msTilStart < 12 * 60 * 60 * 1000) {
+      clearTimeout(window._dashGoLiveTimer);
+      window._dashGoLiveTimer = setTimeout(() => {
+        _refreshLiveEventBanner();
+      }, msTilStart + 8000);
+    }
+  }
+}
+
+function _renderLiveBanner(liveEv, nextEv, forceSoon = false) {
+  const bannerEl = document.getElementById("dash-live-banner");
+  if (!bannerEl) return;
+
+  if (liveEv) {
+    // ── LIVE NOW ──────────────────────────────────────────────────────
+    const escL = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const playerHTML = liveEv.mux_playback_id
+      ? `<div class="live-banner-preview">
+           <mux-player stream-type="live" playback-id="${escL(liveEv.mux_playback_id)}"
+             muted autoplay style="width:100%;height:100%"></mux-player>
+         </div>`
+      : "";
+    bannerEl.innerHTML = `
+      <div class="live-banner-inner live-banner-live">
+        <div class="live-dot-pulse"></div>
+        <span class="live-banner-label">Live Now</span>
+        <span class="live-banner-title">${escL(liveEv.title)}</span>
+        <a class="live-banner-btn" href="/events.html?event=${escL(liveEv.id)}">Join →</a>
+        ${playerHTML}
+      </div>`;
+    bannerEl.style.display = "block";
+
+  } else if (nextEv && (forceSoon || (() => {
+    const ms = new Date(nextEv.scheduled_at).getTime() - Date.now();
+    return ms > 0 && ms <= 10 * 60 * 1000;
+  })())) {
+    // ── STARTING SOON ─────────────────────────────────────────────────
+    const escL = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    bannerEl.innerHTML = `
+      <div class="live-banner-inner live-banner-soon">
+        <div class="live-dot-pulse"></div>
+        <span class="live-banner-label">Starting Soon</span>
+        <span class="live-banner-title">${escL(nextEv.title)}</span>
+        <a class="live-banner-btn" href="/events.html?event=${escL(nextEv.id)}">Get Ready →</a>
+      </div>`;
+    bannerEl.style.display = "block";
+
+  } else {
+    bannerEl.innerHTML = "";
+    bannerEl.style.display = "none";
+  }
+}
+
+function _renderNextEventCard(nextEv, liveEv) {
+  const cardEl = document.getElementById("dash-next-event-card");
+  if (!cardEl) return;
+
+  // Hide the card when there's nothing upcoming or a live event is on (banner takes over)
+  if (!nextEv || liveEv) {
+    cardEl.style.display = "none";
+    return;
+  }
+
+  const escL = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  const dt = new Date(nextEv.scheduled_at);
+  const day = dt.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  const time = dt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+  // Show a "starts in X" label if within the next 24 h
+  const msUntil = dt.getTime() - Date.now();
+  let countdownBadge = "";
+  if (msUntil > 0 && msUntil < 24 * 60 * 60 * 1000) {
+    const h = Math.floor(msUntil / 3600000);
+    const m = Math.round((msUntil % 3600000) / 60000);
+    const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    countdownBadge = `<span style="font-size:.68rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:#1a1200;color:var(--accent);border:1px solid var(--accent);padding:2px 8px;border-radius:999px">Starts in ${escL(label)}</span>`;
+  }
+
+  cardEl.innerHTML = `
+    <div class="dash-card" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="flex-shrink:0;width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 rgba(201,168,76,.5);animation:soonpulse 1.4s ease-in-out infinite"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.62rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px">Next Live Event</div>
+        <div style="font-size:.97rem;font-weight:700;color:#fff;line-height:1.3">${escL(nextEv.title)}</div>
+        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">${escL(day)} · ${escL(time)}</div>
+      </div>
+      ${countdownBadge ? `<div style="flex-shrink:0">${countdownBadge}</div>` : ""}
+      <a href="/events.html?event=${escL(nextEv.id)}"
+         style="flex-shrink:0;padding:7px 16px;border-radius:999px;background:var(--accent);color:#1a1410;font-size:.8rem;font-weight:700;text-decoration:none">
+        View event →
+      </a>
+    </div>`;
+  cardEl.style.display = "block";
 }
 
 function renderStatsGoalsSummary(weekMins) {
