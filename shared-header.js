@@ -88,7 +88,7 @@ const SH_SUBNAV = {
     /* ── Desktop tab bar ── */
     .sh-tab-bar {
       display: flex; gap: 0;
-      background: #141414; border: 1px solid #2a2a2a; border-top: none;
+      background: #000000; border: 1px solid #2a2a2a; border-top: none;
       border-radius: 0 0 10px 10px; padding: 3px; overflow: visible;
       margin-bottom: 20px;
     }
@@ -102,10 +102,10 @@ const SH_SUBNAV = {
       justify-content: center; font-family: inherit;
     }
     .sh-tab.active { background: var(--accent, #f5c518); color: #1a1410; }
-    .sh-tab:hover:not(.active) { color: #e5e5e5; background: #1e1e1e; }
+    .sh-tab:hover:not(.active) { color: #e5e5e5; background: #111111; }
     .sh-tab-drop {
       display: none; position: absolute; top: 100%; left: 0;
-      background: #141414; border: 1.5px solid #2a2a2a;
+      background: #000000; border: 1.5px solid #2a2a2a;
       border-top: none; border-radius: 0 0 10px 10px;
       min-width: 190px; z-index: 300;
       box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 4px 4px 6px;
@@ -118,7 +118,7 @@ const SH_SUBNAV = {
       transition: background .12s, color .12s; white-space: nowrap;
       text-decoration: none; font-family: inherit; box-sizing: border-box;
     }
-    .sh-tab-drop a:hover { background: #1e1e1e; color: #e5e5e5; }
+    .sh-tab-drop a:hover { background: #111111; color: #e5e5e5; }
     .sh-tab-drop a.active { background: rgba(245,197,24,.12); color: var(--accent, #f5c518); }
     /* ── Hamburger: always hidden ── */
     #sh-hamburger-btn { display: none !important; }
