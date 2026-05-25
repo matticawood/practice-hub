@@ -1,7 +1,7 @@
 /**
  * shared-header.js
  * Injects the full Practice Hub header, desktop tab bar, notification panel,
- * and mobile hamburger sheet into any page.
+ * mobile bottom tab bar, and mobile scrollable pill subnav into any page.
  *
  * Usage in HTML:
  *   <header id="app-header" style="display:none"></header>
@@ -12,6 +12,43 @@
  *
  * activePage values: "hub" | "resources" | "tools" | "studio" | "community" | "events" | "chat"
  */
+
+// ── Sub-nav data ──────────────────────────────────────────────────────────────
+const SH_SUBNAV = {
+  hub: [
+    { label: "Dashboard", href: "/practice-log.html" },
+    { label: "Stats", href: "/practice-log.html?goto=stats" },
+    { label: "Goals", href: "/practice-log.html?goto=goals" },
+    { label: "History", href: "/practice-log.html?goto=history" },
+    { label: "Leaderboard", href: "/practice-log.html?goto=leaderboard" },
+  ],
+  community: [
+    { label: "Feed", href: "/community.html" },
+    { label: "Progress", href: "/community.html?filter=progress" },
+    { label: "Feedback", href: "/community.html?filter=feedback" },
+    { label: "Questions", href: "/community.html?filter=question" },
+    { label: "Just Post", href: "/community.html?filter=post" },
+    { label: "Practice Logs", href: "/community.html?tab=practice-log" },
+  ],
+  resources: [
+    { label: "Pieces Library", href: "/practice-log.html#library" },
+    { label: "Piano Practice Daily", href: "/practice-log.html#theory" },
+    { label: "Glossary", href: "/practice-log.html?goto=glossary" },
+    { label: "Key Explorer", href: "/practice-log.html?goto=key" },
+  ],
+  tools: [
+    { label: "Passage Fixer", href: "/practice-log.html?goto=game" },
+    { label: "Metronome", href: "/practice-log.html?goto=metro" },
+    { label: "Note Recognition", href: "/practice-log.html?goto=note" },
+  ],
+  studio: [
+    { label: "Weekly Focus", href: "/focus.html" },
+    { label: "Content Feed", href: "/content-feed.html" },
+    { label: "Live Clinics", href: "/events.html" },
+    { label: "One-to-One", href: "/clinic-booking.html" },
+    { label: "Updates", href: "/updates.html" },
+  ],
+};
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 (function() {
@@ -83,11 +120,85 @@
     }
     .sh-tab-drop a:hover { background: var(--surface-2, #1e1e1e); color: var(--text, #e5e5e5); }
     .sh-tab-drop a.active { background: rgba(245,197,24,.12); color: var(--accent, #f5c518); }
-    /* ── Hamburger: desktop hidden, mobile visible ── */
-    #sh-hamburger-btn { display: none; }
+    /* ── Hamburger: always hidden ── */
+    #sh-hamburger-btn { display: none !important; }
     @media (max-width: 768px) {
       .sh-tab-bar { display: none; }
-      #sh-hamburger-btn { display: inline-flex; align-items: center; }
+    }
+
+    /* ── Mobile bottom tab bar ── */
+    #sh-mob-bottom-bar {
+      display: none;
+    }
+    @media (max-width: 768px) {
+      #sh-mob-bottom-bar {
+        display: flex;
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: #141414;
+        border-top: 1px solid #1e1e1e;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        z-index: 500;
+      }
+      .sh-mob-tab {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 2px 6px;
+        color: var(--text-muted, #666);
+        text-decoration: none;
+        font-size: 0.58rem;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        gap: 4px;
+        -webkit-tap-highlight-color: transparent;
+        transition: color .15s;
+      }
+      .sh-mob-tab svg { flex-shrink: 0; stroke: currentColor; fill: none; }
+      .sh-mob-tab.active { color: var(--accent, #f5c518); }
+      /* push content above bottom bar */
+      body { padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
+    }
+
+    /* ── Mobile pill subnav ── */
+    #sh-mob-subnav {
+      display: none;
+    }
+    @media (max-width: 768px) {
+      #sh-mob-subnav {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        background: var(--surface, #141414);
+        border-bottom: 1px solid var(--border, #1e1e1e);
+        padding: 10px 12px;
+        white-space: nowrap;
+      }
+      #sh-mob-subnav::-webkit-scrollbar { display: none; }
+      .sh-mob-pill {
+        display: inline-block;
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-muted, #888);
+        background: var(--surface-2, #1e1e1e);
+        text-decoration: none;
+        margin-right: 6px;
+        white-space: nowrap;
+        transition: background .15s, color .15s;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .sh-mob-pill:last-child { margin-right: 0; }
+      .sh-mob-pill.active {
+        background: var(--accent, #f5c518);
+        color: #1a1410;
+        font-weight: 800;
+      }
     }
 
     /* ── Notif overlay + panel ── */
@@ -148,52 +259,6 @@
       font-family: inherit; margin-bottom: 7px;
     }
     .notif-admin-wrap textarea { resize: none; height: 50px; }
-
-    /* ── Mobile sheet ── */
-    #sh-mob-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 180;
-      opacity: 0; pointer-events: none; transition: opacity .3s ease;
-    }
-    #sh-mob-backdrop.open { opacity: 1; pointer-events: auto; }
-    #sh-mob-sheet {
-      position: fixed; bottom: 0; left: 0; right: 0;
-      background: #1a1410; border-radius: 18px 18px 0 0; z-index: 9999;
-      padding-bottom: max(20px, env(safe-area-inset-bottom, 20px));
-      max-height: 80vh; overflow-y: auto;
-      transform: translateY(100%);
-      transition: transform .38s cubic-bezier(0.32,0.72,0,1);
-      will-change: transform;
-    }
-    #sh-mob-sheet.open { transform: translateY(0); }
-    .sh-handle { width: 38px; height: 4px; background: rgba(255,255,255,.18); border-radius: 2px; margin: 12px auto 2px; }
-    .sh-group-toggle {
-      display: flex; width: 100%; background: none; border: none;
-      border-top: 1px solid rgba(255,255,255,.08); padding: 16px 20px;
-      font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
-      color: rgba(200,180,155,.6); text-align: left; cursor: pointer;
-      align-items: center; justify-content: space-between;
-      -webkit-tap-highlight-color: transparent; font-family: inherit;
-    }
-    .sh-group.open .sh-group-toggle { color: rgba(240,220,190,.9); }
-    .sh-chevron { width: 15px; height: 15px; flex-shrink: 0; stroke: currentColor; transition: transform .28s ease; }
-    .sh-group.open .sh-chevron { transform: rotate(180deg); }
-    .sh-group-items { overflow: hidden; max-height: 0; transition: max-height .32s ease; }
-    .sh-group.open .sh-group-items { max-height: 600px; }
-    .sh-item {
-      display: flex; align-items: center; width: 100%; background: none; border: none;
-      border-top: 1px solid rgba(255,255,255,.08); padding: 14px 20px 14px 32px;
-      font-size: .9rem; color: #e8e0d4; text-align: left; cursor: pointer;
-      text-decoration: none; -webkit-tap-highlight-color: transparent; font-family: inherit;
-    }
-    .sh-item.active { color: var(--accent, #f5c518); font-weight: 700; }
-    .sh-group-toggle.active { color: var(--accent, #f5c518); }
-    .sh-section-btn {
-      display: flex; align-items: center; width: 100%; background: none; border: none;
-      border-top: 1px solid rgba(255,255,255,.08); padding: 16px 20px;
-      font-size: .9rem; font-weight: 700; color: #e8e0d4; text-align: left; cursor: pointer;
-      text-decoration: none; -webkit-tap-highlight-color: transparent; font-family: inherit;
-    }
-    .sh-section-btn.active { color: var(--accent, #f5c518); }
 
     /* ── Bell button: force visible on dark header ── */
     #notif-bell-btn.btn-ghost {
@@ -334,15 +399,6 @@ document.addEventListener("DOMContentLoaded", function() {
             <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
           </div>
         </div>
-        <button class="btn btn-ghost btn-sm" id="sh-hamburger-btn" onclick="window._shOpenSheet()"
-          aria-label="Open menu" style="padding:6px 8px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-            stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-            <line x1="3" y1="6" x2="21" y2="6"/>
-            <line x1="3" y1="12" x2="21" y2="12"/>
-            <line x1="3" y1="18" x2="21" y2="18"/>
-          </svg>
-        </button>
       </div>
     `;
   }
@@ -401,124 +457,68 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
   `;
-  // Insert after header, before main
+
+  // Mobile pill subnav
+  const subNav = document.createElement("div");
+  subNav.id = "sh-mob-subnav";
+
+  // Insert tab bar and subnav before <main>
   const main = document.querySelector("main") || header?.nextElementSibling;
-  if (main) main.prepend(tabBar);
+  if (main) {
+    main.prepend(subNav);
+    main.prepend(tabBar);
+  }
 
-  // Mobile sheet backdrop
-  const bd = document.createElement("div");
-  bd.id = "sh-mob-backdrop";
-  bd.onclick = () => window._shCloseSheet();
-  document.body.appendChild(bd);
-
-  // Mobile sheet
-  const sheet = document.createElement("div");
-  sheet.id = "sh-mob-sheet";
-  sheet.innerHTML = `
-    <div class="sh-handle"></div>
-
-    <div class="sh-group open">
-      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
-        Practice Hub
-        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      <div class="sh-group-items">
-        <a class="sh-item" data-page="hub" href="/practice-log.html">Dashboard</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=stats">Stats</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=goals">Goals</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=history">History</a>
-        <a class="sh-item" data-page="hub" href="/practice-log.html?goto=leaderboard">Leaderboard</a>
-      </div>
-    </div>
-
-    <div class="sh-group">
-      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
-        Community
-        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      <div class="sh-group-items">
-        <a class="sh-item" data-page="community" href="/community.html">Feed</a>
-        <a class="sh-item" data-page="community" href="/community.html?filter=progress">Share Your Progress</a>
-        <a class="sh-item" data-page="community" href="/community.html?filter=feedback">Get Feedback</a>
-        <a class="sh-item" data-page="community" href="/community.html?filter=question">Ask a Question</a>
-        <a class="sh-item" data-page="community" href="/community.html?filter=post">Just Post</a>
-        <a class="sh-item" data-page="community" href="/community.html?tab=practice-log">Practice Logs</a>
-      </div>
-    </div>
-
-    <div class="sh-group">
-      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
-        Resources
-
-        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      <div class="sh-group-items">
-        <a class="sh-item" data-page="resources" href="/practice-log.html#library">Pieces Library</a>
-        <a class="sh-item" data-page="resources" href="/practice-log.html#theory">Piano Practice Daily</a>
-        <a class="sh-item" data-page="resources" href="/practice-log.html?goto=glossary">Glossary</a>
-        <a class="sh-item" data-page="resources" href="/practice-log.html?goto=key">Key Explorer</a>
-      </div>
-    </div>
-
-    <div class="sh-group">
-      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
-        Practice Tools
-        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      <div class="sh-group-items">
-        <a class="sh-item" data-page="tools" href="/practice-log.html?goto=game">Passage Fixer</a>
-        <a class="sh-item" data-page="tools" href="/practice-log.html?goto=metro">Metronome</a>
-        <a class="sh-item" data-page="tools" href="/practice-log.html?goto=note">Note Recognition</a>
-      </div>
-    </div>
-
-    <div class="sh-group">
-      <button class="sh-group-toggle" onclick="window._shToggleGroup(this)">
-        Matt's Studio
-        <svg class="sh-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      <div class="sh-group-items">
-        <a class="sh-item" data-page="studio" href="/focus.html">Weekly Practice Focus</a>
-        <a class="sh-item" data-page="studio" href="/content-feed.html">Content Feed</a>
-        <a class="sh-item" data-page="studio" href="/events.html">Live Practice Clinics</a>
-        <a class="sh-item" data-page="studio" href="/clinic-booking.html">One-to-One Clinics</a>
-        <a class="sh-item" data-page="studio" href="/updates.html">Practice Room Updates</a>
-      </div>
-    </div>
-
-    <hr style="border:none;border-top:1px solid rgba(255,255,255,.1);margin:8px 20px;">
-    <a class="sh-section-btn" href="/profile.html">Edit Profile</a>
-    <a class="sh-section-btn" href="/feedback.html">Report Bug / Request Feature</a>
-    <button class="sh-section-btn" id="sh-mob-logout-btn">Log out</button>
+  // Mobile bottom tab bar
+  const bottomBar = document.createElement("nav");
+  bottomBar.id = "sh-mob-bottom-bar";
+  bottomBar.innerHTML = `
+    <a class="sh-mob-tab" data-page="hub" href="/practice-log.html">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+      <span>Hub</span>
+    </a>
+    <a class="sh-mob-tab" data-page="community" href="/community.html">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+      <span>Community</span>
+    </a>
+    <a class="sh-mob-tab" data-page="resources" href="/practice-log.html#library">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+      </svg>
+      <span>Resources</span>
+    </a>
+    <a class="sh-mob-tab" data-page="tools" href="/practice-log.html?goto=game">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="21" x2="4" y2="14"/>
+        <line x1="4" y1="10" x2="4" y2="3"/>
+        <line x1="12" y1="21" x2="12" y2="12"/>
+        <line x1="12" y1="8" x2="12" y2="3"/>
+        <line x1="20" y1="21" x2="20" y2="16"/>
+        <line x1="20" y1="12" x2="20" y2="3"/>
+        <line x1="1" y1="14" x2="7" y2="14"/>
+        <line x1="9" y1="8" x2="15" y2="8"/>
+        <line x1="17" y1="16" x2="23" y2="16"/>
+      </svg>
+      <span>Tools</span>
+    </a>
+    <a class="sh-mob-tab" data-page="studio" href="/events.html">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="23 7 16 12 23 17 23 7"/>
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+      </svg>
+      <span>Studio</span>
+    </a>
   `;
-  document.body.appendChild(sheet);
-
-  // Drag-to-dismiss
-  let startY = 0, dragging = false, cancelled = false;
-  sheet.addEventListener("touchstart", e => {
-    dragging = cancelled = false; startY = e.touches[0].clientY;
-  }, { passive: true });
-  sheet.addEventListener("touchmove", e => {
-    const dy = e.touches[0].clientY - startY;
-    if (!dragging && sheet.scrollTop > 0) { cancelled = true; }
-    if (cancelled) return;
-    if (!dragging && dy <= 4) return;
-    dragging = true;
-    e.preventDefault();
-    sheet.style.transition = "none";
-    sheet.style.transform = `translateY(${Math.max(0, dy)}px)`;
-    bd.style.opacity = Math.max(0, 1 - Math.max(0, dy) / (sheet.offsetHeight * 0.6));
-  }, { passive: false });
-  sheet.addEventListener("touchend", e => {
-    if (!dragging) return; dragging = false;
-    const dy = e.changedTouches[0].clientY - startY;
-    sheet.style.transition = "";
-    if (dy > 120 || dy > sheet.offsetHeight * 0.28) {
-      sheet.style.transform = "translateY(100%)";
-      bd.style.opacity = "";
-      setTimeout(() => { sheet.classList.remove("open"); bd.classList.remove("open"); sheet.style.transform = ""; bd.style.opacity = ""; }, 400);
-    } else { sheet.style.transform = ""; bd.style.opacity = ""; }
-  }, { passive: true });
+  document.body.appendChild(bottomBar);
 
   // Notification overlay + panel
   const overlay = document.createElement("div");
@@ -536,12 +536,12 @@ document.addEventListener("DOMContentLoaded", function() {
     <div class="notif-panel-head">
       <h3>Notifications</h3>
       <button class="notif-mark-all" onclick="window._shMarkAllRead()">Mark all read</button>
-      <button class="notif-close-btn" onclick="window._shCloseNotif()">✕</button>
+      <button class="notif-close-btn" onclick="window._shCloseNotif()">&#x2715;</button>
     </div>
-    <div class="notif-list" id="notif-list"><div class="notif-empty">Loading…</div></div>
+    <div class="notif-list" id="notif-list"><div class="notif-empty">Loading&#8230;</div></div>
     <div class="notif-admin-wrap" id="notif-admin-wrap" style="display:none">
       <h4>Send App Update</h4>
-      <input id="notif-admin-title" placeholder="Title (e.g. New feature: …)" />
+      <input id="notif-admin-title" placeholder="Title (e.g. New feature: ...)" />
       <textarea id="notif-admin-body" placeholder="More detail (optional)"></textarea>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-ghost" onclick="window._shSendUpdate(false)" style="flex:1;font-size:0.8rem">Send to me</button>
@@ -552,18 +552,11 @@ document.addEventListener("DOMContentLoaded", function() {
   document.body.appendChild(panel);
 }); // end DOMContentLoaded
 
-// ── Sheet helpers ─────────────────────────────────────────────────────────────
-window._shOpenSheet  = () => { document.getElementById("sh-mob-sheet")?.classList.add("open"); document.getElementById("sh-mob-backdrop")?.classList.add("open"); };
-window._shCloseSheet = () => { document.getElementById("sh-mob-sheet")?.classList.remove("open"); document.getElementById("sh-mob-backdrop")?.classList.remove("open"); };
+// ── Sheet helpers (kept as no-ops for backward compat) ────────────────────────
+window._shOpenSheet  = function() {};
+window._shCloseSheet = function() {};
 window.openMobSheet  = window._shOpenSheet;
 window.closeMobSheet = window._shCloseSheet;
-window._shToggleGroup = function(btn) {
-  const group = btn.closest(".sh-group");
-  const isOpen = group.classList.contains("open");
-  // Accordion: close all groups, then open this one if it was closed
-  document.querySelectorAll(".sh-group").forEach(g => g.classList.remove("open"));
-  if (!isOpen) group.classList.add("open");
-};
 
 // ── User menu helpers ─────────────────────────────────────────────────────────
 window._shToggleUserMenu = function() {
@@ -666,7 +659,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     }
   }
 
-  // Logout — user menu button (desktop) and mobile sheet button
+  // Logout — user menu button (desktop only; mobile sheet removed)
   const logoutHandler = async () => {
     try { await db.auth.signOut(); } catch(e) {}
     // Clear the custom session key that practice-log stores separately from Supabase auth
@@ -674,72 +667,55 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     window.location.href = "/practice-log.html";
   };
   document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
-  document.getElementById("sh-mob-logout-btn")?.addEventListener("click", logoutHandler);
 
   // Clear any previously active states (initSharedHeader can be called more than
   // once per page if auth state changes fire bootApp again — without this clear,
   // active classes accumulate across calls).
-  document.querySelectorAll(".sh-item.active").forEach(i => i.classList.remove("active"));
   document.querySelectorAll(".sh-tab-drop a.active").forEach(a => a.classList.remove("active"));
 
   // Mark active tab (desktop)
   document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
     t.classList.toggle("active", t.dataset.page === activePage)
   );
-  // Mark active section button (top-level items like Community)
-  document.querySelectorAll(".sh-section-btn[data-page]").forEach(t =>
+
+  // Mark active mobile bottom tab
+  document.querySelectorAll(".sh-mob-tab[data-page]").forEach(t =>
     t.classList.toggle("active", t.dataset.page === activePage)
   );
-  // For grouped sub-items, only highlight the group toggle — not every sub-item
-  document.querySelectorAll(".sh-group-toggle").forEach(toggle => {
-    const items = toggle.closest(".sh-group")?.querySelectorAll(".sh-item[data-page]");
-    const groupPage = items?.[0]?.dataset?.page;
-    toggle.classList.toggle("active", groupPage === activePage);
-  });
 
-  // Auto-highlight the exact sh-item whose href matches the current page,
-  // and auto-open its parent group (accordion: close all others).
-  // We match the full href (pathname + ?goto + #hash) so that pages like
-  // practice-log.html — where many items share the same pathname — only
-  // highlight the one item that actually corresponds to the current URL.
+  // URL matching helpers
   const _currPath   = window.location.pathname;
-  const _currGoto   = new URLSearchParams(window.location.search).get("goto") || "";
-  const _currHash   = window.location.hash; // e.g. "#library"
-  let activeGroup = null;
+  const _currParams = new URLSearchParams(window.location.search);
+  const _currGoto   = _currParams.get("goto")   || "";
+  const _currFilter = _currParams.get("filter") || "";
+  const _currTab    = _currParams.get("tab")    || "";
+  const _currHash   = window.location.hash;
 
-  document.querySelectorAll(".sh-item").forEach(item => {
+  function _pillIsActive(href) {
     try {
-      const raw  = item.getAttribute("href") || "";
-      const iUrl = new URL(raw, window.location.origin);
-      if (iUrl.pathname !== _currPath) return;           // different page → skip
-
-      const iGoto   = iUrl.searchParams.get("goto")   || "";
-      const iFilter = iUrl.searchParams.get("filter") || "";
-      const iHash   = iUrl.hash;
-
-      const _currFilter = new URLSearchParams(window.location.search).get("filter") || "";
-
-      // Require exact goto, filter, and hash match (empty matches empty)
-      if (iGoto   !== _currGoto)   return;
-      if (iFilter !== _currFilter) return;
-      if (iHash   !== _currHash)   return;
-
-      item.classList.add("active");
-      activeGroup = item.closest(".sh-group");
-    } catch(e) {}
-  });
-
-  // If no URL match (e.g. community.html, or a hash-only tab on practice-log),
-  // fall back to opening the group whose items belong to activePage.
-  if (!activeGroup && activePage) {
-    document.querySelectorAll(".sh-group").forEach(g => {
-      const firstItem = g.querySelector(".sh-item[data-page]");
-      if (firstItem?.dataset?.page === activePage) activeGroup = g;
-    });
+      const u = new URL(href, window.location.origin);
+      if (u.pathname !== _currPath) return false;
+      const iGoto   = u.searchParams.get("goto")   || "";
+      const iFilter = u.searchParams.get("filter") || "";
+      const iTab    = u.searchParams.get("tab")    || "";
+      const iHash   = u.hash;
+      return iGoto === _currGoto && iFilter === _currFilter && iTab === _currTab && iHash === _currHash;
+    } catch(e) { return false; }
   }
-  // Apply accordion: only the matched group is open
-  document.querySelectorAll(".sh-group").forEach(g => {
-    g.classList.toggle("open", g === activeGroup);
+
+  // Populate mobile pill subnav
+  const subNav = document.getElementById("sh-mob-subnav");
+  if (subNav) {
+    const pills = SH_SUBNAV[activePage] || [];
+    subNav.innerHTML = pills.map(p => {
+      const active = _pillIsActive(p.href) ? " active" : "";
+      return `<a class="sh-mob-pill${active}" href="${p.href}">${p.label}</a>`;
+    }).join("");
+  }
+
+  // Mark active desktop dropdown links using same URL matching logic
+  document.querySelectorAll(".sh-tab-drop a").forEach(a => {
+    a.classList.toggle("active", _pillIsActive(a.getAttribute("href") || ""));
   });
 
   // ── Notifications ──────────────────────────────────────────────────────────
