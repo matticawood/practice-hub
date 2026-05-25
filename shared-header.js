@@ -173,8 +173,8 @@ const SH_SUBNAV = {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
-        background: var(--surface, #141414);
-        border-bottom: 1px solid var(--border, #1e1e1e);
+        background: #141414;
+        border-bottom: 1px solid #1e1e1e;
         padding: 10px 12px;
         white-space: nowrap;
       }
@@ -185,8 +185,8 @@ const SH_SUBNAV = {
         border-radius: 999px;
         font-size: 0.75rem;
         font-weight: 600;
-        color: var(--text-muted, #888);
-        background: var(--surface-2, #1e1e1e);
+        color: #888;
+        background: #1e1e1e;
         text-decoration: none;
         margin-right: 6px;
         white-space: nowrap;
@@ -195,7 +195,7 @@ const SH_SUBNAV = {
       }
       .sh-mob-pill:last-child { margin-right: 0; }
       .sh-mob-pill.active {
-        background: var(--accent, #f5c518);
+        background: #f5c518;
         color: #1a1410;
         font-weight: 800;
       }
