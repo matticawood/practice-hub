@@ -15315,7 +15315,13 @@ async function bootApp() {
   document.getElementById("app-main").style.display = "block";
 
   // Shared header (handles app-header show, bell, notifications, nav bar)
-  initSharedHeader({ db, myEmail, myName, isAdmin: isOwner(), activePage: "hub", avatarUrl: _avatarUrl });
+  // Wrapped in try-catch so a UI/nav error never propagates to the outer
+  // catch which would incorrectly clear the session and log the user out.
+  try {
+    initSharedHeader({ db, myEmail, myName, isAdmin: isOwner(), activePage: "hub", avatarUrl: _avatarUrl });
+  } catch(headerErr) {
+    console.error("initSharedHeader error:", headerErr);
+  }
 
   // Default: highlight Dashboard sub-item on initial load
   const _dashLink = document.querySelector('.sh-tab-drop a[href="/practice-log.html"]') ||
@@ -16095,9 +16101,21 @@ function redirectToRoot() {
     }
   } catch(e) {
     console.error("Init error:", e);
-    clearSession();
-    document.getElementById("loading-screen").style.display = "none";
-    window.location.href = "/";
+    // Only clear session + redirect for genuine auth errors, not UI/JS errors
+    const isAuthError = e?.message?.toLowerCase().includes("auth")
+      || e?.message?.toLowerCase().includes("jwt")
+      || e?.code === "PGRST301"
+      || e instanceof TypeError && String(e).includes("session");
+    if (isAuthError) {
+      clearSession();
+      document.getElementById("loading-screen").style.display = "none";
+      window.location.href = "/";
+    } else {
+      // Non-auth error: log it but don't log the user out
+      document.getElementById("loading-screen").style.display = "none";
+      document.getElementById("login-screen").style.display = "none";
+      document.getElementById("app-main").style.display = "block";
+    }
   }
 })();
 
