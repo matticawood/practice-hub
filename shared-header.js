@@ -170,17 +170,26 @@ const SH_SUBNAV = {
     @media (max-width: 768px) {
       #sh-mob-subnav {
         display: block;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
         background: #141414;
         border-bottom: 1px solid #1e1e1e;
-        padding: 10px 12px;
-        white-space: nowrap;
+        height: 48px;
       }
-      #sh-mob-subnav::-webkit-scrollbar { display: none; }
+      .sh-mob-subnav-scroll {
+        display: flex;
+        align-items: center;
+        height: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0 12px;
+        gap: 6px;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      .sh-mob-subnav-scroll::-webkit-scrollbar { display: none; }
       .sh-mob-pill {
-        display: inline-block;
+        display: inline-flex;
+        align-items: center;
+        flex-shrink: 0;
         padding: 6px 14px;
         border-radius: 999px;
         font-size: 0.75rem;
@@ -188,12 +197,10 @@ const SH_SUBNAV = {
         color: #888;
         background: #1e1e1e;
         text-decoration: none;
-        margin-right: 6px;
         white-space: nowrap;
         transition: background .15s, color .15s;
         -webkit-tap-highlight-color: transparent;
       }
-      .sh-mob-pill:last-child { margin-right: 0; }
       .sh-mob-pill.active {
         background: #f5c518;
         color: #1a1410;
@@ -707,10 +714,10 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   const subNav = document.getElementById("sh-mob-subnav");
   if (subNav) {
     const pills = SH_SUBNAV[activePage] || [];
-    subNav.innerHTML = pills.map(p => {
+    subNav.innerHTML = `<div class="sh-mob-subnav-scroll">${pills.map(p => {
       const active = _pillIsActive(p.href) ? " active" : "";
       return `<a class="sh-mob-pill${active}" href="${p.href}">${p.label}</a>`;
-    }).join("");
+    }).join("")}</div>`;
   }
 
   // Mark active desktop dropdown links using same URL matching logic
