@@ -704,6 +704,19 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // active classes accumulate across calls).
   document.querySelectorAll(".sh-tab-drop a.active").forEach(a => a.classList.remove("active"));
 
+  // URL match helper — shared by _updateNav and desktop dropdown highlighting
+  function _pillIsActive(href) {
+    try {
+      const u = new URL(href, location.origin);
+      if (u.pathname !== location.pathname) return false;
+      const p = new URLSearchParams(location.search);
+      return u.searchParams.get("goto")   === (p.get("goto")   || "") &&
+             u.searchParams.get("filter") === (p.get("filter") || "") &&
+             u.searchParams.get("tab")    === (p.get("tab")    || "") &&
+             u.hash === location.hash;
+    } catch(e) { return false; }
+  }
+
   // Update nav active states and pill row — called at init and on hashchange
   function _updateNav(section) {
     // Desktop tabs
@@ -718,22 +731,6 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     const subNav = document.getElementById("sh-mob-subnav");
     if (!subNav) return;
     const pills = SH_SUBNAV[section] || [];
-    const path    = location.pathname;
-    const params  = new URLSearchParams(location.search);
-    const goto    = params.get("goto")   || "";
-    const filter  = params.get("filter") || "";
-    const tab     = params.get("tab")    || "";
-    const hash    = location.hash;
-    function _pillIsActive(href) {
-      try {
-        const u = new URL(href, location.origin);
-        if (u.pathname !== path) return false;
-        return u.searchParams.get("goto")   === goto   &&
-               u.searchParams.get("filter") === filter &&
-               u.searchParams.get("tab")    === tab    &&
-               u.hash === hash;
-      } catch(e) { return false; }
-    }
     subNav.innerHTML = `<div class="sh-mob-subnav-scroll">${pills.map(p => {
       const active = _pillIsActive(p.href) ? " active" : "";
       return `<a class="sh-mob-pill${active}" href="${p.href}">${p.label}</a>`;
