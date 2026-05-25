@@ -329,6 +329,7 @@ document.addEventListener("DOMContentLoaded", function() {
           </button>
           <div class="sh-user-menu" id="sh-user-menu">
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
+            <a class="sh-user-menu-item" href="/billing.html">Billing</a>
             <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
             <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
           </div>
