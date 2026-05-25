@@ -612,6 +612,17 @@ window.closeNotifPanel  = window._shCloseNotif;
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
   window._shIsAdmin = isAdmin;
 
+  // Auto-detect resources/tools when everything lives on practice-log.html
+  if (activePage === "hub") {
+    const goto = new URLSearchParams(location.search).get("goto") || "";
+    const hash = location.hash.replace("#", "");
+    if (["glossary", "key", "library", "theory"].includes(goto) || ["library", "theory"].includes(hash)) {
+      activePage = "resources";
+    } else if (["game", "metro", "note"].includes(goto)) {
+      activePage = "tools";
+    }
+  }
+
   // Show header
   const header = document.getElementById("app-header");
   if (header) header.style.display = "";
