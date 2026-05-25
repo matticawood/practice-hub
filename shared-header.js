@@ -163,16 +163,20 @@ const SH_SUBNAV = {
       body { padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
     }
 
-    /* ── Mobile pill subnav ── */
+    /* ── Mobile pill subnav — fixed just above bottom tab bar ── */
     #sh-mob-subnav {
       display: none;
     }
     @media (max-width: 768px) {
       #sh-mob-subnav {
         display: block;
-        background: #141414;
-        border-bottom: 1px solid #1e1e1e;
+        position: fixed;
+        left: 0; right: 0;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0px));
         height: 48px;
+        background: #0d0d0d;
+        border-top: 1px solid #1e1e1e;
+        z-index: 499;
       }
       .sh-mob-subnav-scroll {
         display: flex;
@@ -190,12 +194,12 @@ const SH_SUBNAV = {
         display: inline-flex;
         align-items: center;
         flex-shrink: 0;
-        padding: 6px 14px;
+        padding: 5px 13px;
         border-radius: 999px;
-        font-size: 0.75rem;
+        font-size: 0.72rem;
         font-weight: 600;
-        color: #888;
-        background: #1e1e1e;
+        color: #666;
+        background: #1a1a1a;
         text-decoration: none;
         white-space: nowrap;
         transition: background .15s, color .15s;
@@ -206,6 +210,8 @@ const SH_SUBNAV = {
         color: #1a1410;
         font-weight: 800;
       }
+      /* push content above both bottom bar and pill row */
+      body { padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }
     }
 
     /* ── Notif overlay + panel ── */
@@ -469,12 +475,13 @@ document.addEventListener("DOMContentLoaded", function() {
   const subNav = document.createElement("div");
   subNav.id = "sh-mob-subnav";
 
-  // Insert tab bar and subnav before <main>
-  const main = document.querySelector("main") || header?.nextElementSibling;
-  if (main) {
-    main.prepend(subNav);
-    main.prepend(tabBar);
+  // Insert desktop tab bar after the header
+  if (header && header.parentNode) {
+    header.parentNode.insertBefore(tabBar, header.nextSibling);
   }
+
+  // Append fixed-position subnav to body (position: fixed, sits above bottom bar)
+  document.body.appendChild(subNav);
 
   // Mobile bottom tab bar
   const bottomBar = document.createElement("nav");
