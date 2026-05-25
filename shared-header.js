@@ -31,15 +31,15 @@ const SH_SUBNAV = {
     { label: "Practice Logs", href: "/community.html?tab=practice-log" },
   ],
   resources: [
-    { label: "Pieces Library", href: "/practice-log.html#library" },
-    { label: "Piano Practice Daily", href: "/practice-log.html#theory" },
-    { label: "Glossary", href: "/practice-log.html?goto=glossary" },
-    { label: "Key Explorer", href: "/practice-log.html?goto=key" },
+    { label: "Pieces Library", href: "/resources.html" },
+    { label: "Piano Practice Daily", href: "/resources.html?section=ppd" },
+    { label: "Glossary", href: "/resources.html?section=glossary" },
+    { label: "Key Explorer", href: "/resources.html?section=key" },
   ],
   tools: [
-    { label: "Passage Fixer", href: "/practice-log.html?goto=game" },
-    { label: "Metronome", href: "/practice-log.html?goto=metro" },
-    { label: "Note Recognition", href: "/practice-log.html?goto=note" },
+    { label: "Passage Fixer", href: "/tools.html" },
+    { label: "Metronome", href: "/tools.html?section=metro" },
+    { label: "Note Recognition", href: "/tools.html?section=note" },
   ],
   studio: [
     { label: "Weekly Focus", href: "/focus.html" },
@@ -441,20 +441,20 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="resources" href="/practice-log.html#library">Resources</a>
+      <a class="sh-tab" data-page="resources" href="/resources.html">Resources</a>
       <div class="sh-tab-drop">
-        <a href="/practice-log.html#library">Pieces Library</a>
-        <a href="/practice-log.html#theory">Piano Practice Daily</a>
-        <a href="/practice-log.html?goto=glossary">Glossary</a>
-        <a href="/practice-log.html?goto=key">Key Explorer</a>
+        <a href="/resources.html">Pieces Library</a>
+        <a href="/resources.html?section=ppd">Piano Practice Daily</a>
+        <a href="/resources.html?section=glossary">Glossary</a>
+        <a href="/resources.html?section=key">Key Explorer</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="tools" href="/practice-log.html#tools">Practice Tools</a>
+      <a class="sh-tab" data-page="tools" href="/tools.html">Practice Tools</a>
       <div class="sh-tab-drop">
-        <a href="/practice-log.html?goto=game">Passage Fixer</a>
-        <a href="/practice-log.html?goto=metro">Metronome</a>
-        <a href="/practice-log.html?goto=note">Note Recognition</a>
+        <a href="/tools.html">Passage Fixer</a>
+        <a href="/tools.html?section=metro">Metronome</a>
+        <a href="/tools.html?section=note">Note Recognition</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
@@ -502,14 +502,14 @@ document.addEventListener("DOMContentLoaded", function() {
       </svg>
       <span>Community</span>
     </a>
-    <a class="sh-mob-tab" data-page="resources" href="/practice-log.html#library">
+    <a class="sh-mob-tab" data-page="resources" href="/resources.html">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
       </svg>
       <span>Resources</span>
     </a>
-    <a class="sh-mob-tab" data-page="tools" href="/practice-log.html?goto=game">
+    <a class="sh-mob-tab" data-page="tools" href="/tools.html">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <line x1="4" y1="21" x2="4" y2="14"/>
         <line x1="4" y1="10" x2="4" y2="3"/>
