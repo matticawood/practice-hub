@@ -704,11 +704,14 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // active classes accumulate across calls).
   document.querySelectorAll(".sh-tab-drop a.active").forEach(a => a.classList.remove("active"));
 
+  // Normalise a pathname so /foo and /foo.html both compare equal
+  function _normPath(p) { return p.replace(/\.html$/, "").replace(/\/$/, "") || "/"; }
+
   // URL match helper — shared by _updateNav and desktop dropdown highlighting
   function _pillIsActive(href) {
     try {
       const u = new URL(href, location.origin);
-      if (u.pathname !== location.pathname) return false;
+      if (_normPath(u.pathname) !== _normPath(location.pathname)) return false;
       const p = new URLSearchParams(location.search);
       return u.searchParams.get("goto")   === (p.get("goto")   || "") &&
              u.searchParams.get("filter") === (p.get("filter") || "") &&
@@ -731,8 +734,9 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     const subNav = document.getElementById("sh-mob-subnav");
     if (!subNav) return;
     const pills = SH_SUBNAV[section] || [];
-    subNav.innerHTML = `<div class="sh-mob-subnav-scroll">${pills.map(p => {
-      const active = _pillIsActive(p.href) ? " active" : "";
+    const anyActive = pills.some(p => _pillIsActive(p.href));
+    subNav.innerHTML = `<div class="sh-mob-subnav-scroll">${pills.map((p, i) => {
+      const active = (_pillIsActive(p.href) || (!anyActive && i === 0)) ? " active" : "";
       return `<a class="sh-mob-pill${active}" href="${p.href}">${p.label}</a>`;
     }).join("")}</div>`;
   }
