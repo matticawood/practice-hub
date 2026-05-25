@@ -48,6 +48,12 @@ exports.handler = async (event) => {
 
   // ── Create Stripe Customer Portal session ────────────────────────────────
   const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+  if (!STRIPE_SECRET_KEY) {
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "STRIPE_SECRET_KEY not set in environment" }) };
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "SUPABASE_SERVICE_ROLE_KEY not set in environment" }) };
+  }
   const returnUrl = event.headers.referer
     ? new URL("/practice-log.html", event.headers.referer).href
     : "https://thepracticeroom.matthewcawood.com/practice-log.html";
