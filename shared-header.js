@@ -54,6 +54,11 @@ const SH_SUBNAV = {
 (function() {
   const s = document.createElement("style");
   s.textContent = `
+    /* ── Header background token (matches per-page header colour) ── */
+    :root                        { --sh-hdr: #000000; }
+    body.hub-mode, body.theory-mode { --sh-hdr: #1a1410; }
+    body.tools-mode              { --sh-hdr: #06080f; }
+
     /* ── Header ── */
     #app-header h1 { margin: 0; }
     /* Mobile: override style.css so user row has no border-top and stays auto-width
@@ -88,7 +93,7 @@ const SH_SUBNAV = {
     /* ── Desktop tab bar ── */
     .sh-tab-bar {
       display: flex; gap: 0;
-      background: #000000; border: 1px solid #2a2a2a; border-top: none;
+      background: var(--sh-hdr); border: 1px solid #2a2a2a; border-top: none;
       border-radius: 0 0 10px 10px; padding: 3px; overflow: visible;
       margin-bottom: 20px;
     }
@@ -105,7 +110,7 @@ const SH_SUBNAV = {
     .sh-tab:hover:not(.active) { color: #e5e5e5; background: #111111; }
     .sh-tab-drop {
       display: none; position: absolute; top: 100%; left: 0;
-      background: #000000; border: 1.5px solid #2a2a2a;
+      background: var(--sh-hdr); border: 1.5px solid #2a2a2a;
       border-top: none; border-radius: 0 0 10px 10px;
       min-width: 190px; z-index: 300;
       box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 4px 4px 6px;
