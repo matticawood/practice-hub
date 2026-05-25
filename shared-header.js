@@ -88,24 +88,24 @@ const SH_SUBNAV = {
     /* ── Desktop tab bar ── */
     .sh-tab-bar {
       display: flex; gap: 0;
-      background: var(--surface, #141414); border: 1px solid var(--border, #2a2a2a);
-      border-radius: 10px; padding: 3px; overflow: visible;
+      background: #141414; border: 1px solid #2a2a2a; border-top: none;
+      border-radius: 0 0 10px 10px; padding: 3px; overflow: visible;
       margin-bottom: 20px;
     }
     .sh-tab-wrap { position: relative; display: flex; flex: 1; }
     .sh-tab {
       width: 100%; min-width: fit-content; background: transparent; border: none;
-      color: var(--text-muted, #888); font-size: 0.82rem; font-weight: 700;
+      color: #888; font-size: 0.82rem; font-weight: 700;
       padding: 8px 12px; border-radius: 8px; cursor: pointer;
       transition: background .15s, color .15s; white-space: nowrap;
       text-decoration: none; display: inline-flex; align-items: center;
       justify-content: center; font-family: inherit;
     }
     .sh-tab.active { background: var(--accent, #f5c518); color: #1a1410; }
-    .sh-tab:hover:not(.active) { color: var(--text, #e5e5e5); background: var(--surface-2, #1e1e1e); }
+    .sh-tab:hover:not(.active) { color: #e5e5e5; background: #1e1e1e; }
     .sh-tab-drop {
       display: none; position: absolute; top: 100%; left: 0;
-      background: var(--surface, #141414); border: 1.5px solid var(--border, #2a2a2a);
+      background: #141414; border: 1.5px solid #2a2a2a;
       border-top: none; border-radius: 0 0 10px 10px;
       min-width: 190px; z-index: 300;
       box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 4px 4px 6px;
@@ -114,11 +114,11 @@ const SH_SUBNAV = {
     .sh-tab-drop a {
       display: block; width: 100%; padding: 8px 14px; background: none;
       border: none; border-radius: 6px; font-size: .84rem; font-weight: 600;
-      color: var(--text-muted, #888); cursor: pointer; text-align: left;
+      color: #888; cursor: pointer; text-align: left;
       transition: background .12s, color .12s; white-space: nowrap;
       text-decoration: none; font-family: inherit; box-sizing: border-box;
     }
-    .sh-tab-drop a:hover { background: var(--surface-2, #1e1e1e); color: var(--text, #e5e5e5); }
+    .sh-tab-drop a:hover { background: #1e1e1e; color: #e5e5e5; }
     .sh-tab-drop a.active { background: rgba(245,197,24,.12); color: var(--accent, #f5c518); }
     /* ── Hamburger: always hidden ── */
     #sh-hamburger-btn { display: none !important; }
@@ -713,9 +713,10 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       const u = new URL(href, location.origin);
       if (_normPath(u.pathname) !== _normPath(location.pathname)) return false;
       const p = new URLSearchParams(location.search);
-      return u.searchParams.get("goto")   === (p.get("goto")   || "") &&
-             u.searchParams.get("filter") === (p.get("filter") || "") &&
-             u.searchParams.get("tab")    === (p.get("tab")    || "") &&
+      return u.searchParams.get("goto")    === (p.get("goto")    || "") &&
+             u.searchParams.get("filter")  === (p.get("filter")  || "") &&
+             u.searchParams.get("tab")     === (p.get("tab")     || "") &&
+             u.searchParams.get("section") === (p.get("section") || "") &&
              u.hash === location.hash;
     } catch(e) { return false; }
   }
