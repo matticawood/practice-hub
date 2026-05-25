@@ -612,16 +612,23 @@ window.closeNotifPanel  = window._shCloseNotif;
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
   window._shIsAdmin = isAdmin;
 
-  // Auto-detect resources/tools when everything lives on practice-log.html
-  if (activePage === "hub") {
-    const goto = new URLSearchParams(location.search).get("goto") || "";
-    const hash = location.hash.replace("#", "");
-    if (["glossary", "key", "library", "theory"].includes(goto) || ["library", "theory"].includes(hash)) {
-      activePage = "resources";
-    } else if (["game", "metro", "note"].includes(goto)) {
-      activePage = "tools";
+  // basePage is what the page declared; _resolveSection re-detects for pages
+  // where multiple sections share the same URL (practice-log.html).
+  const basePage = activePage;
+  function _resolveSection() {
+    if (basePage === "hub") {
+      const goto = new URLSearchParams(location.search).get("goto") || "";
+      const hash = location.hash.replace("#", "");
+      if (["glossary", "key", "library", "theory"].includes(goto) || ["library", "theory"].includes(hash)) {
+        return "resources";
+      }
+      if (["game", "metro", "note"].includes(goto)) {
+        return "tools";
+      }
     }
+    return basePage;
   }
+  activePage = _resolveSection();
 
   // Show header
   const header = document.getElementById("app-header");
@@ -697,45 +704,46 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // active classes accumulate across calls).
   document.querySelectorAll(".sh-tab-drop a.active").forEach(a => a.classList.remove("active"));
 
-  // Mark active tab (desktop)
-  document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
-    t.classList.toggle("active", t.dataset.page === activePage)
-  );
-
-  // Mark active mobile bottom tab
-  document.querySelectorAll(".sh-mob-tab[data-page]").forEach(t =>
-    t.classList.toggle("active", t.dataset.page === activePage)
-  );
-
-  // URL matching helpers
-  const _currPath   = window.location.pathname;
-  const _currParams = new URLSearchParams(window.location.search);
-  const _currGoto   = _currParams.get("goto")   || "";
-  const _currFilter = _currParams.get("filter") || "";
-  const _currTab    = _currParams.get("tab")    || "";
-  const _currHash   = window.location.hash;
-
-  function _pillIsActive(href) {
-    try {
-      const u = new URL(href, window.location.origin);
-      if (u.pathname !== _currPath) return false;
-      const iGoto   = u.searchParams.get("goto")   || "";
-      const iFilter = u.searchParams.get("filter") || "";
-      const iTab    = u.searchParams.get("tab")    || "";
-      const iHash   = u.hash;
-      return iGoto === _currGoto && iFilter === _currFilter && iTab === _currTab && iHash === _currHash;
-    } catch(e) { return false; }
-  }
-
-  // Populate mobile pill subnav
-  const subNav = document.getElementById("sh-mob-subnav");
-  if (subNav) {
-    const pills = SH_SUBNAV[activePage] || [];
+  // Update nav active states and pill row — called at init and on hashchange
+  function _updateNav(section) {
+    // Desktop tabs
+    document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
+      t.classList.toggle("active", t.dataset.page === section)
+    );
+    // Mobile bottom tabs
+    document.querySelectorAll(".sh-mob-tab[data-page]").forEach(t =>
+      t.classList.toggle("active", t.dataset.page === section)
+    );
+    // Pill subnav
+    const subNav = document.getElementById("sh-mob-subnav");
+    if (!subNav) return;
+    const pills = SH_SUBNAV[section] || [];
+    const path    = location.pathname;
+    const params  = new URLSearchParams(location.search);
+    const goto    = params.get("goto")   || "";
+    const filter  = params.get("filter") || "";
+    const tab     = params.get("tab")    || "";
+    const hash    = location.hash;
+    function _pillIsActive(href) {
+      try {
+        const u = new URL(href, location.origin);
+        if (u.pathname !== path) return false;
+        return u.searchParams.get("goto")   === goto   &&
+               u.searchParams.get("filter") === filter &&
+               u.searchParams.get("tab")    === tab    &&
+               u.hash === hash;
+      } catch(e) { return false; }
+    }
     subNav.innerHTML = `<div class="sh-mob-subnav-scroll">${pills.map(p => {
       const active = _pillIsActive(p.href) ? " active" : "";
       return `<a class="sh-mob-pill${active}" href="${p.href}">${p.label}</a>`;
     }).join("")}</div>`;
   }
+
+  _updateNav(activePage);
+
+  // Re-detect section when hash changes (e.g. tapping Resources from Hub)
+  window.addEventListener("hashchange", () => _updateNav(_resolveSection()));
 
   // Mark active desktop dropdown links using same URL matching logic
   document.querySelectorAll(".sh-tab-drop a").forEach(a => {
