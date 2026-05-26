@@ -1285,24 +1285,43 @@ document.getElementById('piece-modal-inner').addEventListener('click', async fun
 
 // ── COLLECTION ────────────────────────────────────────────────────────────────
 const COL_STATUS_LABELS = { aspire:"Aspire to Play", learning:"Learning", completed:"Completed" };
-let myCollection = {};
+let myCollection = {};         // keyed by "piece_id" or "u_<user_piece_id>"
 let _collectionLoaded = false;
 let currentColStatus  = "aspire";
+
+// Custom piece key helpers
+function customKey(userPieceId) { return "u_" + userPieceId; }
+function isCustomKey(k)         { return String(k).startsWith("u_"); }
+function userPieceIdFromKey(k)  { return Number(String(k).slice(2)); }
 
 async function loadCollection() {
   _collectionLoaded = true;
   myCollection = {};
   const { data: colRows, error: colErr } = await db.from("user_collections")
-    .select("piece_id, status").eq("email", myEmail);
+    .select("piece_id, user_piece_id, status").eq("email", myEmail);
   if (!colErr && colRows && colRows.length > 0) {
-    const ids = colRows.map(function(r) { return Number(r.piece_id); });
-    const { data: piecesData } = await db.from("pieces").select("*").in("id", ids);
-    const pMap = {};
-    (piecesData || []).forEach(function(p) { pMap[Number(p.id)] = p; });
-    colRows.forEach(function(row) {
-      const piece = pMap[Number(row.piece_id)];
-      if (piece) myCollection[Number(row.piece_id)] = Object.assign({ status: row.status }, piece);
-    });
+    // Library pieces
+    const libIds = colRows.filter(function(r) { return r.piece_id; }).map(function(r) { return Number(r.piece_id); });
+    if (libIds.length > 0) {
+      const { data: piecesData } = await db.from("pieces").select("*").in("id", libIds);
+      const pMap = {};
+      (piecesData || []).forEach(function(p) { pMap[Number(p.id)] = p; });
+      colRows.filter(function(r) { return r.piece_id; }).forEach(function(row) {
+        const piece = pMap[Number(row.piece_id)];
+        if (piece) myCollection[Number(row.piece_id)] = Object.assign({ status: row.status }, piece);
+      });
+    }
+    // Custom pieces
+    const customIds = colRows.filter(function(r) { return r.user_piece_id; }).map(function(r) { return Number(r.user_piece_id); });
+    if (customIds.length > 0) {
+      const { data: customData } = await db.from("user_pieces").select("*").in("id", customIds);
+      const cMap = {};
+      (customData || []).forEach(function(p) { cMap[Number(p.id)] = p; });
+      colRows.filter(function(r) { return r.user_piece_id; }).forEach(function(row) {
+        const piece = cMap[Number(row.user_piece_id)];
+        if (piece) myCollection[customKey(row.user_piece_id)] = Object.assign({ status: row.status, _custom: true }, piece);
+      });
+    }
   }
   if (colErr) console.error("Collection load error:", colErr);
   renderCollection();
@@ -1328,7 +1347,7 @@ document.getElementById("panel-lib-collection").addEventListener("click", async 
     return;
   }
   const removeBtn = e.target.closest("[data-col-remove]");
-  if (removeBtn) { await colRemove(Number(removeBtn.dataset.colRemove)); }
+  if (removeBtn) { await colRemove(removeBtn.dataset.colRemove); }
 });
 
 function findAnyLibPiece(id) {
@@ -1345,31 +1364,34 @@ function refreshAllLibFooters() {
 }
 
 function renderCollectionCard(p) {
-  const currentStatus = (myCollection[p.id] && myCollection[p.id].status) || p.status;
+  const colKey = p._colKey != null ? p._colKey : String(p.id);
+  const safeId = colKey.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const currentStatus = (myCollection[colKey] && myCollection[colKey].status) || p.status;
   const tags = (p.tags || []).map(function(t) {
     return '<span class="tag" data-lib-tag="' + escHtml(t) + '">' + escHtml(t) + '</span>';
   }).join("");
   const hasBody = p.background || p.pianist_notes || p.challenges || tags || p.sheet_music_url || (p.youtube_url && !p.youtube_reported);
-  return '<div class="col-piece-card" id="col-card-' + p.id + '">' +
-    '<div class="col-piece-row" onclick="if(!event.target.closest(\'.col-piece-actions\'))colToggleCard(' + p.id + ')" style="display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:' + (hasBody ? "pointer" : "default") + '">' +
+  const customBadge = p._custom ? '<span style="font-size:0.68rem;color:var(--text-muted);margin-left:4px;opacity:0.7">(custom)</span>' : '';
+  return '<div class="col-piece-card" id="col-card-' + safeId + '">' +
+    '<div class="col-piece-row" onclick="if(!event.target.closest(\'.col-piece-actions\'))colToggleCard(\'' + safeId + '\')" style="display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:' + (hasBody ? "pointer" : "default") + '">' +
       '<div class="col-piece-info">' +
-        '<div class="col-piece-title">' + escHtml(p.title) + '</div>' +
+        '<div class="col-piece-title">' + escHtml(p.title) + customBadge + '</div>' +
         '<div class="col-piece-meta-row">' +
           (p.composer ? '<span class="col-piece-composer">' + (p.kind === "book" ? "Author: " : "") + escHtml(p.composer) + '</span>' : '') +
           (p.composer ? '<span style="color:var(--border);font-size:0.7rem">&middot;</span>' : '') +
           Object.entries({ aspire:"Aspire", learning:"Learning", completed:"Done" }).map(function(pair) {
             const s = pair[0], label = pair[1];
-            return '<button class="col-status-chip' + (currentStatus === s ? " active" : "") + '" onclick="event.stopPropagation();colChipClick(' + p.id + ',\'' + s + '\')">' + label + '</button>';
+            return '<button class="col-status-chip' + (currentStatus === s ? " active" : "") + '" onclick="event.stopPropagation();colChipClick(\'' + colKey + '\',\'' + s + '\')">' + label + '</button>';
           }).join("") +
         '</div>' +
       '</div>' +
       '<div class="col-piece-actions">' +
         (p.difficulty != null ? '<span class="col-diff-mini">' + renderLibStars(p.difficulty) + '</span>' : '') +
-        '<button class="col-remove-btn" data-col-remove="' + p.id + '" title="Remove from collection">&times;</button>' +
-        (hasBody ? '<span class="col-expand-chevron" id="col-chev-' + p.id + '" style="color:var(--text-muted);font-size:1.1rem;transition:transform 0.15s;line-height:1;margin-left:2px">&rsaquo;</span>' : '') +
+        '<button class="col-remove-btn" data-col-remove="' + escHtml(colKey) + '" title="Remove from collection">&times;</button>' +
+        (hasBody ? '<span class="col-expand-chevron" id="col-chev-' + safeId + '" style="color:var(--text-muted);font-size:1.1rem;transition:transform 0.15s;line-height:1;margin-left:2px">&rsaquo;</span>' : '') +
       '</div>' +
     '</div>' +
-    (hasBody ? '<div class="col-card-body" id="col-body-' + p.id + '" style="display:none;padding:0 14px 14px;border-top:1px solid var(--border)">' +
+    (hasBody ? '<div class="col-card-body" id="col-body-' + safeId + '" style="display:none;padding:0 14px 14px;border-top:1px solid var(--border)">' +
       (p.background ? '<div class="card-section"><div class="section-label">Background</div><div class="section-text">' + renderLibText(p.background) + '</div></div>' : '') +
       (p.pianist_notes ? '<div class="card-section"><div class="section-label">Pianist Notes</div><div class="section-text">' + renderLibText(p.pianist_notes) + '</div></div>' : '') +
       (p.challenges ? '<div class="card-section"><div class="section-label">Challenges &amp; Level Rationale</div><div class="section-text">' + renderLibText(p.challenges) + '</div></div>' : '') +
@@ -1378,9 +1400,9 @@ function renderCollectionCard(p) {
   '</div>';
 }
 
-function colToggleCard(id) {
-  const body = document.getElementById("col-body-" + id);
-  const chev = document.getElementById("col-chev-" + id);
+function colToggleCard(safeId) {
+  const body = document.getElementById("col-body-" + safeId);
+  const chev = document.getElementById("col-chev-" + safeId);
   if (!body) return;
   const open = body.style.display !== "none";
   body.style.display = open ? "none" : "block";
@@ -1394,8 +1416,11 @@ function renderCollection() {
 
   const groups = { learning: [], aspire: [], completed: [] };
   Object.entries(myCollection).forEach(function(pair) {
-    const pieceId = pair[0], info = pair[1];
-    if (groups[info.status]) groups[info.status].push(Object.assign({ id: Number(pieceId) }, info));
+    const key = pair[0], info = pair[1];
+    if (groups[info.status]) {
+      // For custom pieces, use the string key as _colKey so we can identify them later
+      groups[info.status].push(Object.assign({ _colKey: key, id: isCustomKey(key) ? null : Number(key) }, info));
+    }
   });
 
   ["learning","aspire","completed"].forEach(function(status) {
@@ -1419,35 +1444,50 @@ function renderCollection() {
   listEl.innerHTML = items.map(function(p) { return renderCollectionCard(p); }).join("");
 }
 
-window.colChipClick = async function(pieceId, status) {
-  if (myCollection[pieceId] && myCollection[pieceId].status === status) return;
-  await colSetStatus(pieceId, status);
+window.colChipClick = async function(colKey, status) {
+  if (myCollection[colKey] && myCollection[colKey].status === status) return;
+  await colSetStatus(colKey, status);
 };
 
-async function colSetStatus(pieceId, status) {
+async function colSetStatus(colKey, status) {
   if (!await requireAuth()) return;
-  const { error } = await db.rpc("set_collection_status", {
-    p_email: myEmail, p_piece_id: pieceId, p_status: status
-  });
-  if (error) { showToast("Error updating collection — please try again."); return; }
-  if (myCollection[pieceId]) {
-    myCollection[pieceId].status = status;
+  if (isCustomKey(colKey)) {
+    // Custom piece — update via user_piece_id
+    const upId = userPieceIdFromKey(colKey);
+    const { error } = await db.from("user_collections")
+      .update({ status: status }).eq("email", myEmail).eq("user_piece_id", upId);
+    if (error) { showToast("Error updating collection — please try again."); return; }
   } else {
-    const piece = findAnyLibPiece(pieceId);
-    myCollection[pieceId] = piece ? Object.assign({}, piece, { status: status }) : { status: status };
+    const { error } = await db.rpc("set_collection_status", {
+      p_email: myEmail, p_piece_id: Number(colKey), p_status: status
+    });
+    if (error) { showToast("Error updating collection — please try again."); return; }
+  }
+  if (myCollection[colKey]) {
+    myCollection[colKey].status = status;
+  } else {
+    const piece = isCustomKey(colKey) ? null : findAnyLibPiece(Number(colKey));
+    myCollection[colKey] = piece ? Object.assign({}, piece, { status: status }) : { status: status };
   }
   renderCollection();
   refreshAllLibFooters();
   if (status === "completed") showToast("Marked as Completed — well done!", 4000);
 }
 
-async function colRemove(pieceId) {
+async function colRemove(colKey) {
   if (!await requireAuth()) return;
-  const { error } = await db.rpc("remove_collection_piece", {
-    p_email: myEmail, p_piece_id: pieceId
-  });
-  if (error) { showToast("Error removing piece — please try again."); return; }
-  delete myCollection[pieceId];
+  if (isCustomKey(colKey)) {
+    const upId = userPieceIdFromKey(colKey);
+    const { error } = await db.from("user_collections")
+      .delete().eq("email", myEmail).eq("user_piece_id", upId);
+    if (error) { showToast("Error removing piece — please try again."); return; }
+  } else {
+    const { error } = await db.rpc("remove_collection_piece", {
+      p_email: myEmail, p_piece_id: Number(colKey)
+    });
+    if (error) { showToast("Error removing piece — please try again."); return; }
+  }
+  delete myCollection[colKey];
   renderCollection();
   refreshAllLibFooters();
 }
@@ -1495,6 +1535,26 @@ async function colAdd(pieceId, title, composer, status, fullPiece) {
 }
 window.colAdd = colAdd;
 
+// Add a brand-new custom piece (not in library) to the collection
+async function colAddCustom(title, composer, status) {
+  // Insert into user_pieces
+  const { data: upData, error: upErr } = await db.from("user_pieces")
+    .insert({ email: myEmail, title: title.trim(), composer: (composer || "").trim() })
+    .select().single();
+  if (upErr || !upData) { showToast("Error saving custom piece"); return; }
+  // Add to user_collections
+  const { error: ucErr } = await db.from("user_collections")
+    .insert({ email: myEmail, user_piece_id: upData.id, status: status });
+  if (ucErr) { showToast("Error adding to collection"); return; }
+  const key = customKey(upData.id);
+  myCollection[key] = Object.assign({ status: status, _custom: true }, upData);
+  renderCollection();
+  document.getElementById("col-search-dropdown").style.display = "none";
+  document.getElementById("col-search-input").value = "";
+  showToast("✓ Custom piece added to " + COL_STATUS_LABELS[status]);
+}
+window.colAddCustom = colAddCustom;
+
 document.getElementById("col-search-input").addEventListener("input", async function() {
   const query = this.value.trim();
   const dropdown = document.getElementById("col-search-dropdown");
@@ -1502,8 +1562,11 @@ document.getElementById("col-search-input").addEventListener("input", async func
   const { data } = await db.from("pieces").select("*")
     .or("title.ilike.%" + query + "%,composer.ilike.%" + query + "%")
     .order("title").limit(10);
-  if (!data || data.length === 0) { dropdown.style.display = "none"; return; }
-  dropdown.innerHTML = data.map(function(p) {
+  const results = data || [];
+  const searchResultMap = {};
+  results.forEach(function(p) { searchResultMap[p.id] = p; });
+
+  const rows = results.map(function(p) {
     const currentStatus = myCollection[p.id] && myCollection[p.id].status;
     return '<div class="col-search-item">' +
       '<div class="col-search-item-info">' +
@@ -1521,13 +1584,34 @@ document.getElementById("col-search-input").addEventListener("input", async func
       '</div>' +
     '</div>';
   }).join("");
-  const searchResultMap = {};
-  data.forEach(function(p) { searchResultMap[p.id] = p; });
+
+  // "Add as custom piece" row — always shown at bottom so user can add anything
+  const customRow = '<div class="col-search-item col-search-custom-row">' +
+    '<div class="col-search-item-info">' +
+      '<div class="col-search-item-title">&#43; Add &ldquo;' + escHtml(query) + '&rdquo; as a custom piece</div>' +
+      '<div class="col-search-item-composer" style="color:#7a6a5a">Not in the library &mdash; save it anyway</div>' +
+    '</div>' +
+    '<div class="col-search-item-add">' +
+      Object.entries(COL_STATUS_LABELS).map(function(pair) {
+        const s = pair[0], label = pair[1];
+        return '<button class="col-status-btn" data-custom-title="' + escHtml(query) + '" data-add-status="' + s + '">' + label + '</button>';
+      }).join("") +
+    '</div>' +
+  '</div>';
+
+  dropdown.innerHTML = rows + customRow;
+
   dropdown.querySelectorAll("[data-add-id]").forEach(function(btn) {
     btn.addEventListener("click", function(e) {
       e.stopPropagation();
       const pieceId = Number(btn.dataset.addId);
       colAdd(pieceId, btn.dataset.addTitle, btn.dataset.addComposer, btn.dataset.addStatus, searchResultMap[pieceId]);
+    });
+  });
+  dropdown.querySelectorAll("[data-custom-title]").forEach(function(btn) {
+    btn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      colAddCustom(btn.dataset.customTitle, "", btn.dataset.addStatus);
     });
   });
   dropdown.style.display = "block";

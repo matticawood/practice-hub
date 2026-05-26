@@ -9696,12 +9696,20 @@ async function pgHandleInput(val) {
       return aLogged === bLogged ? 0 : aLogged ? -1 : 1;
     });
 
+    // Also match custom user pieces
+    const libIds = new Set(matches.map(p => String(p.id)));
+    const customMatches = _myUserPieces.filter(p => {
+      if (p.linked_piece_id && libIds.has(String(p.linked_piece_id))) return false; // covered by library
+      return (p.title + " " + (p.composer || "")).toLowerCase().includes(q);
+    });
+
     const display = matches.slice(0, 8);
-    if (!display.length) { ac.style.display = "none"; return; }
+    if (!display.length && !customMatches.length) { ac.style.display = "none"; return; }
     ac.style.display = "";
-    ac.innerHTML = display.map(p => {
-      const logged = loggedPieceIds.has(String(p.id));
-      return `
+    ac.innerHTML = [
+      ...display.map(p => {
+        const logged = loggedPieceIds.has(String(p.id));
+        return `
         <div class="pg-autocomplete-item" data-pg-piece="${p.id}">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="flex:1;min-width:0">${escHtml(p.title)}</span>
@@ -9709,9 +9717,29 @@ async function pgHandleInput(val) {
           </div>
           ${p.composer ? `<div class="pg-ac-sub">${escHtml(p.composer)}</div>` : ""}
         </div>`;
-    }).join("");
+      }),
+      ...customMatches.slice(0, 5).map(p => `
+        <div class="pg-autocomplete-item" data-pg-custom-piece="${escHtml(String(p.id))}">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="flex:1;min-width:0">${escHtml(p.title)}</span>
+            <span style="font-size:0.65rem;color:#9ca3af;flex-shrink:0;font-weight:500">(custom)</span>
+          </div>
+          ${p.composer ? `<div class="pg-ac-sub">${escHtml(p.composer)}</div>` : ""}
+        </div>`)
+    ].join("");
     ac.querySelectorAll("[data-pg-piece]").forEach(item =>
       item.addEventListener("mousedown", () => pgSelectPiece(Number(item.dataset.pgPiece)))
+    );
+    ac.querySelectorAll("[data-pg-custom-piece]").forEach(item =>
+      item.addEventListener("mousedown", () => {
+        const cp = _myUserPieces.find(p => String(p.id) === item.dataset.pgCustomPiece);
+        if (!cp) return;
+        _pgSelPiece = { id: null, title: cp.title, composer: cp.composer || "", _custom: true, _userPieceId: cp.id };
+        _pgLabelVal = cp.title;
+        const inp = document.getElementById("pg-label-input");
+        if (inp) inp.value = cp.title;
+        pgHideAc();
+      })
     );
   } else if (_pgCategory === "book") {
     // Ensure library books are loaded
@@ -13921,7 +13949,7 @@ function wireItemEvents(id) {
       const opt = e.target.closest(".piece-option");
       if (!opt) return;
       e.preventDefault();
-      selectPiece(id, opt.dataset.pieceId, opt.dataset.pieceTitle, opt.dataset.pieceComposer);
+      selectPiece(id, opt.dataset.pieceId, opt.dataset.pieceTitle, opt.dataset.pieceComposer, opt.dataset.userPieceId || null);
     });
   }
 
@@ -14256,6 +14284,14 @@ function renderTheoryChips(id) {
 }
 
 // ── Piece search ──────────────────────────────────────────────────
+async function loadMyUserPieces() {
+  if (!myEmail) return;
+  const { data } = await db.from("user_pieces")
+    .select("id, title, composer, linked_piece_id")
+    .eq("email", myEmail);
+  _myUserPieces = data || [];
+}
+
 async function performPieceSearch(id, query) {
   const { data } = await db.from("pieces")
     .select("id, title, composer")
@@ -14263,22 +14299,42 @@ async function performPieceSearch(id, query) {
     .or("kind.is.null,kind.eq.piece")
     .limit(8);
 
+  // Also query the user's custom pieces
+  const { data: customData } = await db.from("user_pieces")
+    .select("id, title, composer, linked_piece_id")
+    .eq("email", myEmail)
+    .or(`title.ilike.%${query}%,composer.ilike.%${query}%`)
+    .limit(5);
+
   const dropdown = document.getElementById(`piece-dropdown-${id}`);
   if (!dropdown) return;
 
   const q       = query.toLowerCase();
   const results = data || [];
 
+  // Merge custom pieces: if linked to a library piece already in results, skip it;
+  // otherwise add it as a custom entry
+  const libIds    = new Set(results.map(p => String(p.id)));
+  const libTitles = new Set(results.map(p => p.title.toLowerCase()));
+  const customResults = [];
+  for (const p of (customData || [])) {
+    if (p.linked_piece_id && libIds.has(String(p.linked_piece_id))) continue; // already shown
+    customResults.push({ ...p, _custom: true, _userPieceId: p.id });
+  }
+
   // Also surface pieces the user has set a goal for but aren't in the library yet
   const goalPieces = allGoals.filter(g =>
     g.category === "piece" && !g.piece_id &&
     g.piece_label?.toLowerCase().includes(q)
   );
-  // Remove any goal pieces that are already covered by library results
-  const libTitles = new Set(results.map(p => p.title.toLowerCase()));
-  const uniqueGoalPieces = goalPieces.filter(g => !libTitles.has(g.piece_label.toLowerCase()));
+  // Remove any goal pieces that are already covered by library or custom results
+  const allShownTitles = new Set([
+    ...libTitles,
+    ...customResults.map(p => p.title.toLowerCase())
+  ]);
+  const uniqueGoalPieces = goalPieces.filter(g => !allShownTitles.has(g.piece_label.toLowerCase()));
 
-  if (results.length === 0 && uniqueGoalPieces.length === 0) {
+  if (results.length === 0 && customResults.length === 0 && uniqueGoalPieces.length === 0) {
     dropdown.style.display = "none";
     return;
   }
@@ -14290,6 +14346,15 @@ async function performPieceSearch(id, query) {
            data-piece-title="${escHtml(p.title)}"
            data-piece-composer="${escHtml(p.composer || '')}">
         <div class="piece-option-title">${escHtml(p.title)}</div>
+        ${p.composer ? `<div class="piece-option-composer">${escHtml(p.composer)}</div>` : ""}
+      </div>`),
+    ...customResults.map(p => `
+      <div class="piece-option"
+           data-piece-id=""
+           data-piece-title="${escHtml(p.title)}"
+           data-piece-composer="${escHtml(p.composer || '')}"
+           data-user-piece-id="${escHtml(String(p._userPieceId))}">
+        <div class="piece-option-title">${escHtml(p.title)} <span style="font-size:0.7rem;color:#9ca3af;font-weight:500">(custom)</span></div>
         ${p.composer ? `<div class="piece-option-composer">${escHtml(p.composer)}</div>` : ""}
       </div>`),
     ...uniqueGoalPieces.map(g => `
@@ -14308,10 +14373,10 @@ function hidePieceDropdown(id) {
   if (dd) dd.style.display = "none";
 }
 
-function selectPiece(id, pieceId, title, composer) {
+function selectPiece(id, pieceId, title, composer, userPieceId) {
   const item = formItems.find(i => i.id === id);
   if (item) {
-    item.selectedPiece = { id: pieceId, title, composer };
+    item.selectedPiece = { id: pieceId, title, composer, userPieceId: userPieceId || null };
   }
   updatePieceSelection(id, { id: pieceId, title, composer }, false);
 }
@@ -14992,6 +15057,7 @@ const LIB_DIFFICULTY_LABELS = { 0: "Absolute Beginner", 1: "Beginner", 2: "Lower
 let libAllPieces = [];
 let libAllBooks  = [];
 let _libraryLoaded = false;
+let _myUserPieces = [];  // custom pieces from user_pieces table, loaded at boot
 
 function renderLibStars(n) {
   return Array.from({ length: 5 }, (_, i) =>
@@ -15461,6 +15527,7 @@ async function bootApp() {
 
   // loadNotifications() is now handled by shared-header's initSharedHeader
   await loadData();
+  loadMyUserPieces(); // non-blocking — populates _myUserPieces for piece search
   await checkFulfilledRequests();
 
   // Deep-link routing: support both #tab and ?goto=sub-section from shared nav
