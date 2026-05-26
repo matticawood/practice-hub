@@ -718,11 +718,13 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       const u = new URL(href, location.origin);
       if (_normPath(u.pathname) !== _normPath(location.pathname)) return false;
       const p = new URLSearchParams(location.search);
-      return u.searchParams.get("goto")    === (p.get("goto")    || "") &&
-             u.searchParams.get("filter")  === (p.get("filter")  || "") &&
-             u.searchParams.get("tab")     === (p.get("tab")     || "") &&
-             u.searchParams.get("section") === (p.get("section") || "") &&
-             u.hash === location.hash;
+      // Normalise null to "" on BOTH sides so links without a param match
+      // pages that also lack that param (null === "" is false without the cast).
+      return (u.searchParams.get("goto")    || "") === (p.get("goto")    || "") &&
+             (u.searchParams.get("filter")  || "") === (p.get("filter")  || "") &&
+             (u.searchParams.get("tab")     || "") === (p.get("tab")     || "") &&
+             (u.searchParams.get("section") || "") === (p.get("section") || "") &&
+             (u.hash || "") === (location.hash || "");
     } catch(e) { return false; }
   }
 
@@ -756,6 +758,14 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   document.querySelectorAll(".sh-tab-drop a").forEach(a => {
     a.classList.toggle("active", _pillIsActive(a.getAttribute("href") || ""));
   });
+
+  // Expose so individual pages can refresh nav after SPA pushState
+  window._shUpdateNav = function(section) {
+    _updateNav(section);
+    document.querySelectorAll(".sh-tab-drop a").forEach(a => {
+      a.classList.toggle("active", _pillIsActive(a.getAttribute("href") || ""));
+    });
+  };
 
   // ── Notifications ──────────────────────────────────────────────────────────
   let _notifs = [];
