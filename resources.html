@@ -99,12 +99,32 @@
       padding: 8px 14px 10px; display: flex; align-items: center; gap: 6px;
       border-top: 1px solid #f0ebe0;
     }
-    /* Admin controls invisible by default, shown on hover (visibility keeps layout stable) */
+    /* Admin icon buttons — absolute, top-right, appear on hover */
     #ppd-index .ppd-card-admin {
-      display: flex; align-items: center; gap: 4px; margin-left: auto;
-      visibility: hidden;
+      position: absolute; top: 8px; right: 8px;
+      display: flex; gap: 3px; opacity: 0; transition: opacity .15s;
     }
-    #ppd-index .ppd-sheet-card:hover .ppd-card-admin { visibility: visible; }
+    #ppd-index .ppd-sheet-card:hover .ppd-card-admin { opacity: 1; }
+    #ppd-index .ppd-card-admin-btn {
+      background: rgba(255,255,255,.9); border: 1px solid #e0d5c8; border-radius: 5px;
+      width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; padding: 0; color: #6b5c4e; transition: background .12s, color .12s;
+    }
+    #ppd-index .ppd-card-admin-btn:hover { background: #fff; color: #1a1410; border-color: #a09585; }
+    #ppd-index .ppd-card-admin-btn svg { display: block; }
+    /* Floating category popup */
+    #ppd-cat-popup {
+      position: fixed; z-index: 999; background: #fff; border: 1px solid #e0d5c8;
+      border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.14);
+      padding: 4px; min-width: 160px; font-family: Georgia, serif;
+    }
+    #ppd-cat-popup button {
+      display: block; width: 100%; text-align: left; background: none; border: none;
+      padding: 6px 10px; font-size: 8.5pt; color: #1a1410; cursor: pointer; border-radius: 5px;
+    }
+    #ppd-cat-popup button:hover { background: #f5f0e8; }
+    #ppd-cat-popup button.current { font-weight: 700; color: #b8920a; }
+    #ppd-cat-popup hr { border: none; border-top: 1px solid #e0d5c8; margin: 3px 0; }
     #ppd-index .ppd-sheet-row { display: none; } /* legacy */
     #ppd-index .ppd-new-badge {
       display: inline-block; font-size: 6.5pt; font-family: Georgia, serif; font-weight: 700;
@@ -1838,12 +1858,15 @@ function _ppdRenderSheets(sheets) {
                 _ppdPillHTML(sheet.id) +
                 (hasNotes ? '<span title="You have notes" style="font-size:10pt;opacity:0.4;margin-left:2px">&#9998;</span>' : '') +
                 (isOwner() ? '<div class="ppd-card-admin">' +
-                  '<select class="ppd-cat-select" title="Move to category" onchange="ppdMoveSheet(\'' + sheet.id + '\', this)">' +
-                    allCats.map(function(c) { return '<option value="' + _ppdEsc(c) + '"' + (c === group ? ' selected' : '') + '>' + _ppdEsc(c) + '</option>'; }).join('') +
-                    '<option value="__new__">+ New category&hellip;</option>' +
-                  '</select>' +
-                  '<a class="ppd-edit-btn" href="theory/editor.html?sheet=' + _ppdEsc(sheet.slug) + '">Edit</a>' +
-                  '<button class="ppd-delete-btn" title="Delete" onclick="ppdDeleteSheet(\'' + sheet.id + '\', this)">&times;</button>' +
+                  '<button class="ppd-card-admin-btn" title="Move category" onclick="event.stopPropagation();ppdShowCatPopup(event,\'' + sheet.id + '\',\'' + _ppdEsc(group) + '\')">' +
+                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4h3l2-2h7v10H2z"/></svg>' +
+                  '</button>' +
+                  '<a class="ppd-card-admin-btn" href="theory/editor.html?sheet=' + _ppdEsc(sheet.slug) + '" title="Edit" onclick="event.stopPropagation()">' +
+                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 2l3 3-8 8H3v-3z"/></svg>' +
+                  '</a>' +
+                  '<button class="ppd-card-admin-btn" title="Delete" onclick="event.stopPropagation();ppdDeleteSheet(\'' + sheet.id + '\', this)">' +
+                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3l10 10M13 3L3 13"/></svg>' +
+                  '</button>' +
                 '</div>' : '') +
               '</div>' +
             '</div>' +
@@ -1852,6 +1875,37 @@ function _ppdRenderSheets(sheets) {
       '</ul>';
   }).join('');
 }
+
+// ── Category popup ──────────────────────────────────────────────
+var _ppdCatPopupSheetId = null;
+window.ppdShowCatPopup = function(e, sheetId, currentCat) {
+  _ppdCatPopupSheetId = sheetId;
+  let popup = document.getElementById('ppd-cat-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'ppd-cat-popup';
+    document.body.appendChild(popup);
+    document.addEventListener('click', function(ev) {
+      if (!popup.contains(ev.target)) popup.style.display = 'none';
+    });
+  }
+  const allCats = Array.from(new Set(_ppdAllSheets.map(function(s) { return _ppdCleanCat(s.category); }))).sort();
+  popup.innerHTML = allCats.map(function(c) {
+    return '<button class="' + (c === currentCat ? 'current' : '') + '" onclick="ppdCatPopupSelect(\'' + _ppdEsc(c) + '\')">' + _ppdEsc(c) + '</button>';
+  }).join('') +
+  '<hr><button onclick="ppdCatPopupSelect(\'__new__\')">+ New category…</button>';
+  const r = e.target.closest('.ppd-card-admin-btn').getBoundingClientRect();
+  popup.style.display = 'block';
+  popup.style.top = (r.bottom + 4 + window.scrollY) + 'px';
+  popup.style.left = Math.min(r.left, window.innerWidth - 180) + 'px';
+};
+window.ppdCatPopupSelect = function(cat) {
+  document.getElementById('ppd-cat-popup').style.display = 'none';
+  if (!_ppdCatPopupSheetId) return;
+  // Reuse existing ppdMoveSheet by creating a fake select-like object
+  const fakeSelect = { value: cat };
+  ppdMoveSheet(_ppdCatPopupSheetId, fakeSelect);
+};
 
 window.ppdFilterSheets = function() {
   const q   = document.getElementById('ppd-search-input').value.toLowerCase().trim();
