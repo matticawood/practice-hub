@@ -114,6 +114,40 @@
     }
 
     /* ── Composer prompt bar (list view) ─────────────────────────────────────── */
+    /* ── Community search bar ─────────────────────────────────────────────────── */
+    .comm-search-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      padding: 0 14px;
+      margin-bottom: 12px;
+      transition: border-color .15s;
+    }
+    .comm-search-wrap:focus-within { border-color: rgba(245,197,24,.5); }
+    .comm-search-icon {
+      width: 16px; height: 16px; flex-shrink: 0; color: var(--text-muted);
+    }
+    #comm-search-input {
+      flex: 1; border: none; background: transparent; outline: none;
+      font-size: 0.88rem; color: var(--text); padding: 11px 0;
+      font-family: inherit;
+    }
+    #comm-search-input::placeholder { color: var(--text-muted); }
+    #comm-search-input::-webkit-search-cancel-button { display: none; }
+    .comm-search-clear {
+      background: none; border: none; cursor: pointer; padding: 0;
+      font-size: 0.78rem; color: var(--text-muted); line-height: 1;
+      transition: color .12s;
+    }
+    .comm-search-clear:hover { color: var(--text); }
+    .comm-search-results-label {
+      font-size: 0.78rem; color: var(--text-muted); margin-bottom: 10px;
+      padding: 0 2px;
+    }
+
     .composer-card {
       background: var(--surface);
       border: 1.5px solid var(--border);
@@ -2134,6 +2168,17 @@
             </button>
           </div>
 
+          <!-- Search bar -->
+          <div class="comm-search-wrap" id="comm-search-wrap">
+            <svg class="comm-search-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M13 13L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <input type="search" id="comm-search-input" placeholder="Search posts…" autocomplete="off"
+              oninput="communitySearch(this.value)" />
+            <button class="comm-search-clear" id="comm-search-clear" onclick="clearCommunitySearch()" style="display:none" aria-label="Clear search">✕</button>
+          </div>
+
           <!-- Composer prompt bar (now lives under tabs) -->
           <div class="composer-card" id="composer-card" onclick="openComposer()">
             <div class="composer-prompt">
@@ -2632,6 +2677,7 @@ let _selectedType  = null;
 let _currentPostId = null;
 let _posts         = [];
 let _postFilter    = null; // null = all, or 'progress'|'feedback'|'question'|'post'
+let _searchQuery   = "";  // live text search across post content + title
 let _postsPage     = 1;
 const POSTS_PER_PAGE = 50;
 const _commImgGroups = {}; // groupKey → [url, ...]
@@ -3131,18 +3177,43 @@ function _updateSpaceBadges() {
 
 function _renderFilteredPosts() {
   const list = document.getElementById("posts-list");
-  const filtered = _postFilter
+  const q = _searchQuery.trim().toLowerCase();
+
+  // Base filter by type
+  let filtered = _postFilter
     ? _posts.filter(p => p.type === _postFilter)
     : _posts;
 
+  // Apply text search across title + content + author name
+  if (q) {
+    filtered = filtered.filter(p => {
+      const haystack = [p.title || "", p.content || "", p.body || "", p.name || ""].join(" ").toLowerCase();
+      return haystack.includes(q);
+    });
+  }
+
+  // Show result count label when searching
+  const label = document.getElementById("comm-search-results-label");
+  if (label) label.remove();
+  if (q) {
+    const lbl = document.createElement("div");
+    lbl.id = "comm-search-results-label";
+    lbl.className = "comm-search-results-label";
+    lbl.textContent = filtered.length === 1 ? "1 result" : `${filtered.length} results`;
+    list.before(lbl);
+  }
+
   // When showing the unfiltered feed, weave focus cards into the post stream
   // by date so they appear naturally where they belong chronologically.
+  // When a search query is active, only show matching community posts.
   let items = []; // { html, ts }
   if (!_postFilter) {
     filtered.forEach(p => items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime() }));
-    _focusFeedItems.forEach(f => items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
-    _contentFeedItems.forEach(f => items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
-    _updateItems.forEach(f => items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
+    if (!q) {
+      _focusFeedItems.forEach(f => items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
+      _contentFeedItems.forEach(f => items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
+      _updateItems.forEach(f => items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
+    }
     items.sort((a, b) => b.ts - a.ts);
   } else if (_postFilter === "practice_log") {
     items = filtered.map(p => ({ html: practiceLogCardHTML(p), ts: new Date(p.created_at).getTime() }));
@@ -3152,10 +3223,12 @@ function _renderFilteredPosts() {
   }
 
   if (!items.length) {
-    const label = _postFilter === "practice_log"
-      ? "No practice logs shared yet — save a session in the Practice Hub and share it here!"
-      : _postFilter ? `No ${_postFilter} posts yet.`
-      : "No posts yet — be the first to share something! 👆";
+    const label = q
+      ? `No posts found for "${q}".`
+      : _postFilter === "practice_log"
+        ? "No practice logs shared yet — save a session in the Practice Hub and share it here!"
+        : _postFilter ? `No ${_postFilter} posts yet.`
+        : "No posts yet — be the first to share something! 👆";
     list.innerHTML = `<div class="posts-empty">${label}</div>`;
   } else {
     const visible = items.slice(0, _postsPage * POSTS_PER_PAGE);
@@ -3172,6 +3245,29 @@ function loadMorePosts() {
   _renderFilteredPosts();
   // Re-fix Mux players that were just added
   setTimeout(fixMuxAspectRatios, 100);
+}
+
+// ── Community search ──────────────────────────────────────────────────────────
+let _searchDebounce = null;
+function communitySearch(val) {
+  clearTimeout(_searchDebounce);
+  _searchDebounce = setTimeout(function() {
+    _searchQuery = val.trim();
+    _postsPage   = 1;
+    const clearBtn = document.getElementById("comm-search-clear");
+    if (clearBtn) clearBtn.style.display = _searchQuery ? "" : "none";
+    _renderFilteredPosts();
+  }, 250);
+}
+
+function clearCommunitySearch() {
+  _searchQuery = "";
+  const input    = document.getElementById("comm-search-input");
+  const clearBtn = document.getElementById("comm-search-clear");
+  if (input)    input.value = "";
+  if (clearBtn) clearBtn.style.display = "none";
+  _postsPage = 1;
+  _renderFilteredPosts();
 }
 
 // ── View switching: list ↔ detail ──────────────────────────────────────────────
