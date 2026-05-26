@@ -60,6 +60,7 @@ const SH_SUBNAV = {
     body.tools-mode              { --sh-hdr: #06080f; }
 
     /* ── Header ── */
+    #app-header { position: relative; z-index: 300; }
     #app-header h1 { margin: 0; }
     /* Mobile: override style.css so user row has no border-top and stays auto-width
        (matches practice-log.html behaviour exactly) */
