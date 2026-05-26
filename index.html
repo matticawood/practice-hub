@@ -285,7 +285,7 @@
     <div id="login-step-otp" style="display:none">
       <div style="text-align:center;margin-top:22px;margin-bottom:18px">
         <div style="font-size:1.8rem;margin-bottom:10px">📬</div>
-        <p style="font-size:0.84rem;color:var(--text-muted);line-height:1.7">
+        <p id="login-otp-desc" style="font-size:0.84rem;color:var(--text-muted);line-height:1.7">
           Check your inbox at<br>
           <strong id="login-sent-to" style="color:var(--text)"></strong><br>
           and enter the 6-digit code below.
@@ -550,6 +550,9 @@ function hideEl(id) { document.getElementById(id).style.display = "none"; }
 function show(id, d="block") { document.getElementById(id).style.display = d; }
 
 // ── Login ─────────────────────────────────────────────────────
+const REVIEWER_EMAIL = "reviewer@matthewcawood.com";
+const REVIEWER_PASS = "ReviewPass2026!";
+let reviewerMode = false;
 let pendingLoginEmail = null;
 
 function showLoginError(msg) {
@@ -573,6 +576,26 @@ async function attemptSendCode() {
   if (!email) { showLoginError("Please enter your email address."); return; }
   const btn = document.getElementById("login-btn");
   btn.textContent = "Checking…"; btn.disabled = true;
+
+  // Reviewer bypass — skip OTP, show password field instead
+  if (email === REVIEWER_EMAIL) {
+    reviewerMode = true;
+    pendingLoginEmail = email;
+    const otpInput = document.getElementById("login-otp");
+    otpInput.type = "password";
+    otpInput.placeholder = "Enter password";
+    otpInput.removeAttribute("maxlength");
+    otpInput.setAttribute("inputmode", "text");
+    otpInput.style.letterSpacing = "normal";
+    otpInput.style.fontSize = "1rem";
+    document.getElementById("login-otp-desc").textContent = "Enter reviewer password to continue.";
+    document.getElementById("login-step-email").style.display = "none";
+    document.getElementById("login-step-otp").style.display = "block";
+    btn.textContent = "Send verification code"; btn.disabled = false;
+    setTimeout(() => otpInput.focus(), 80);
+    return;
+  }
+
   try {
     const { data, error } = await db.from("allowed_emails").select("email").eq("email", email).maybeSingle();
     if (error || !data) {
@@ -609,17 +632,51 @@ document.getElementById("login-otp").addEventListener("keydown", e => {
 document.getElementById("login-back-btn").addEventListener("click", () => {
   document.getElementById("login-step-otp").style.display = "none";
   document.getElementById("login-step-email").style.display = "block";
-  document.getElementById("login-otp").value = "";
   document.getElementById("login-otp-error").style.display = "none";
   document.getElementById("login-error").style.display = "none";
+  // Reset OTP input in case reviewer mode modified it
+  const otpInput = document.getElementById("login-otp");
+  otpInput.value = "";
+  otpInput.type = "text";
+  otpInput.placeholder = "123456";
+  otpInput.setAttribute("maxlength", "6");
+  otpInput.setAttribute("inputmode", "numeric");
+  otpInput.style.letterSpacing = "0.25em";
+  otpInput.style.fontSize = "1.4rem";
+  document.getElementById("login-otp-desc").innerHTML =
+    "Check your inbox at<br><strong id=\"login-sent-to\" style=\"color:var(--text)\"></strong><br>and enter the 6-digit code below.";
   pendingLoginEmail = null;
+  reviewerMode = false;
 });
 
 async function attemptVerifyCode() {
-  const token = document.getElementById("login-otp").value.replace(/\D/g, "");
   document.getElementById("login-otp-error").style.display = "none";
-  if (token.length !== 6) { showOtpError("Please enter the full 6-digit code."); return; }
   const btn = document.getElementById("login-verify-btn");
+
+  // Reviewer bypass — verify hardcoded password
+  if (reviewerMode) {
+    const pwd = document.getElementById("login-otp").value;
+    btn.textContent = "Verifying…"; btn.disabled = true;
+    if (pwd !== REVIEWER_PASS) {
+      btn.textContent = "Verify & enter"; btn.disabled = false;
+      showOtpError("Invalid password.");
+      return;
+    }
+    try {
+      const { error } = await db.auth.signInWithPassword({ email: REVIEWER_EMAIL, password: REVIEWER_PASS });
+      btn.textContent = "Verify & enter"; btn.disabled = false;
+      if (error) { showOtpError("Reviewer login failed: " + error.message); return; }
+      setSession(REVIEWER_EMAIL);
+      bootApp();
+    } catch(e) {
+      btn.textContent = "Verify & enter"; btn.disabled = false;
+      showOtpError("Something went wrong — please try again.");
+    }
+    return;
+  }
+
+  const token = document.getElementById("login-otp").value.replace(/\D/g, "");
+  if (token.length !== 6) { showOtpError("Please enter the full 6-digit code."); return; }
   btn.textContent = "Verifying…"; btn.disabled = true;
   try {
     const { error } = await db.auth.verifyOtp({ email: pendingLoginEmail, token, type: "email" });
