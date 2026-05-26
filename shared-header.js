@@ -178,9 +178,9 @@ const SH_SUBNAV = {
         position: sticky;
         top: 0;
         left: 0; right: 0;
-        height: 44px;
+        height: 54px;
         background: #141414;
-        border-bottom: 1px solid #1e1e1e;
+        border-bottom: 1px solid #2a2a2a;
         z-index: 200;
       }
       .sh-mob-subnav-scroll {
@@ -189,8 +189,8 @@ const SH_SUBNAV = {
         height: 100%;
         overflow-x: auto;
         overflow-y: hidden;
-        padding: 0 12px;
-        gap: 6px;
+        padding: 0 14px;
+        gap: 8px;
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
       }
@@ -199,16 +199,17 @@ const SH_SUBNAV = {
         display: inline-flex;
         align-items: center;
         flex-shrink: 0;
-        padding: 5px 13px;
+        padding: 8px 16px;
         border-radius: 999px;
-        font-size: 0.72rem;
+        font-size: 0.78rem;
         font-weight: 600;
-        color: #888;
-        background: #1e1e1e;
+        color: #aaa;
+        background: #252525;
         text-decoration: none;
         white-space: nowrap;
         transition: background .15s, color .15s;
         -webkit-tap-highlight-color: transparent;
+        min-height: 34px;
       }
       .sh-mob-pill.active {
         background: #f5c518;
