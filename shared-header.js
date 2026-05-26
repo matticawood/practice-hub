@@ -463,7 +463,7 @@ document.addEventListener("DOMContentLoaded", function() {
       </div>
     </div>
     <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="studio" href="/events.html">Matt's Studio</a>
+      <a class="sh-tab" data-page="studio" href="/focus.html">Matt's Studio</a>
       <div class="sh-tab-drop">
         <a href="/focus.html">Weekly Practice Focus</a>
         <a href="/content-feed.html">Content Feed</a>
@@ -528,7 +528,7 @@ document.addEventListener("DOMContentLoaded", function() {
       </svg>
       <span>Tools</span>
     </a>
-    <a class="sh-mob-tab" data-page="studio" href="/events.html">
+    <a class="sh-mob-tab" data-page="studio" href="/focus.html">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="23 7 16 12 23 17 23 7"/>
         <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
