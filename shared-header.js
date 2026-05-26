@@ -414,6 +414,7 @@ document.addEventListener("DOMContentLoaded", function() {
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
             <a class="sh-user-menu-item" href="/billing.html">Billing</a>
             <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
+            <a class="sh-user-menu-item" href="/privacy.html">Privacy Policy</a>
             <button class="sh-user-menu-item" id="sh-logout-btn">Log out</button>
           </div>
         </div>
