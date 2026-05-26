@@ -65,18 +65,38 @@
       margin-bottom: 3mm; border-bottom: 1px solid #e0d5c8; padding-bottom: 2mm;
       display: flex; align-items: center; gap: 8px; color: #6b5c4e;
     }
+    /* ── Sheet cards ── */
     #ppd-index .sheet-list {
-      display: flex; flex-direction: column; list-style: none; margin-bottom: 6mm; padding: 0;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px; list-style: none; margin-bottom: 6mm; padding: 0;
     }
-    #ppd-index .ppd-sheet-row {
-      display: flex; align-items: center; border-bottom: 1px solid #e0d5c8; gap: 6px;
+    #ppd-index .ppd-sheet-card {
+      background: #fff; border-radius: 10px; border: 1px solid #e0d5c8;
+      border-top: 3px solid var(--ppd-cat-color, #c8a84b);
+      display: flex; flex-direction: column;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+      transition: box-shadow .15s, transform .15s;
+      overflow: hidden;
     }
-    #ppd-index .ppd-sheet-row:last-child { border-bottom: none; }
-    #ppd-index .ppd-sheet-link {
-      display: flex; justify-content: space-between; text-decoration: none; color: #1a1410;
-      font-size: 9.5pt; padding: 2mm 0; flex: 1; transition: color .15s;
+    #ppd-index .ppd-sheet-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.12); transform: translateY(-2px); }
+    #ppd-index .ppd-sheet-card-body {
+      padding: 12px 14px 10px; flex: 1; display: flex; flex-direction: column; gap: 6px;
     }
-    #ppd-index .ppd-sheet-link:hover { color: #b8920a; }
+    #ppd-index .ppd-sheet-title {
+      font-size: 0.92rem; font-weight: 700; color: #1a1410; line-height: 1.3;
+      text-decoration: none; display: block; transition: color .15s;
+    }
+    #ppd-index .ppd-sheet-title:hover { color: #b8920a; }
+    #ppd-index .ppd-sheet-intro {
+      font-size: 0.74rem; color: #6b5c4e; line-height: 1.5;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+      font-family: Georgia, serif; flex: 1;
+    }
+    #ppd-index .ppd-sheet-card-footer {
+      padding: 8px 14px 10px; display: flex; align-items: center; justify-content: space-between;
+      border-top: 1px solid #f0ebe0; gap: 6px;
+    }
+    #ppd-index .ppd-sheet-row { display: none; } /* legacy — hidden, cards replace it */
     #ppd-index .ppd-new-badge {
       display: inline-block; font-size: 6.5pt; font-family: Georgia, serif; font-weight: 700;
       text-transform: uppercase; letter-spacing: 0.06em; background: var(--accent); color: #1a1410;
@@ -1771,6 +1791,14 @@ function _ppdSyncPills(sheetId, next) {
   });
 }
 
+// Assign a consistent colour to each category name
+var _ppdCatColors = ['#c8a84b','#7a9e7a','#89b4d4','#c47a5a','#9a7ab4','#7aaba8','#b47a7a','#a8a84b'];
+function _ppdCatColor(cat) {
+  var hash = 0;
+  for (var i = 0; i < cat.length; i++) { hash = (hash * 31 + cat.charCodeAt(i)) & 0xffffffff; }
+  return _ppdCatColors[Math.abs(hash) % _ppdCatColors.length];
+}
+
 function _ppdRenderSheets(sheets) {
   const container = document.getElementById('ppd-sheets-container');
   if (!sheets.length) { container.innerHTML = '<p class="ppd-no-results">No sheets match your search.</p>'; return; }
@@ -1779,23 +1807,40 @@ function _ppdRenderSheets(sheets) {
   sheets.forEach(function(s) { const g = _ppdCleanCat(s.category); if (!groups[g]) groups[g] = []; groups[g].push(s); });
   container.innerHTML = Object.entries(groups).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(pair) {
     const group = pair[0], gs = pair[1];
-    return '<h2>' +
-        '<span>' + _ppdEsc(group) + '</span>' +
+    const catColor = _ppdCatColor(group);
+    return '<h2 style="--ppd-cat-color:' + catColor + '">' +
+        '<span style="border-left:3px solid ' + catColor + ';padding-left:8px">' + _ppdEsc(group) + '</span>' +
         (isOwner() ? '<button onclick="ppdStartRenameCategory(\'' + _ppdEsc(group) + '\')" style="font-size:8pt;padding:1px 6px;background:none;border:1px dashed #ccc;border-radius:3px;color:#aaa;cursor:pointer;font-family:Georgia,serif;">rename</button>' : '') +
       '</h2>' +
       '<ul class="sheet-list">' +
         gs.map(function(sheet) {
-          return '<li><div class="ppd-sheet-row">' +
-            '<a class="ppd-sheet-link" href="theory/sheets/view.html?slug=' + _ppdEsc(sheet.slug) + '">' +
-              '<span>' + _ppdEsc(_ppdDisplayTitle(sheet.title)) + (_ppdIsNew(sheet) ? '<span class="ppd-new-badge">New</span>' : '') + (_ppdNoteSlugs.has(sheet.slug) ? '<span title="You have notes on this sheet" style="font-size:9pt;margin-left:5px;opacity:0.5">&#9998;</span>' : '') + '</span>' +
-            '</a>' +
-            _ppdPillHTML(sheet.id) +
-            (isOwner() ? '<select class="ppd-cat-select" title="Move to category" onchange="ppdMoveSheet(\'' + sheet.id + '\', this)">' +
-              allCats.map(function(c) { return '<option value="' + _ppdEsc(c) + '"' + (c === group ? ' selected' : '') + '>' + _ppdEsc(c) + '</option>'; }).join('') +
-              '<option value="__new__">+ New category&hellip;</option></select>' +
-              '<a class="ppd-edit-btn" href="theory/editor.html?sheet=' + _ppdEsc(sheet.slug) + '">Edit</a>' +
-              '<button class="ppd-delete-btn" title="Delete sheet" onclick="ppdDeleteSheet(\'' + sheet.id + '\', this)">&times;</button>' : '') +
-          '</div></li>';
+          const intro = (sheet.intro || '').trim();
+          const hasNotes = _ppdNoteSlugs.has(sheet.slug);
+          return '<li>' +
+            '<div class="ppd-sheet-card" style="--ppd-cat-color:' + catColor + '">' +
+              '<div class="ppd-sheet-card-body">' +
+                '<a class="ppd-sheet-title" href="theory/sheets/view.html?slug=' + _ppdEsc(sheet.slug) + '">' +
+                  _ppdEsc(_ppdDisplayTitle(sheet.title)) +
+                  (_ppdIsNew(sheet) ? '<span class="ppd-new-badge">New</span>' : '') +
+                '</a>' +
+                (intro ? '<p class="ppd-sheet-intro">' + _ppdEsc(intro) + '</p>' : '') +
+              '</div>' +
+              '<div class="ppd-sheet-card-footer">' +
+                '<div style="display:flex;align-items:center;gap:6px">' +
+                  _ppdPillHTML(sheet.id) +
+                  (hasNotes ? '<span title="You have notes on this sheet" style="font-size:10pt;opacity:0.45">&#9998;</span>' : '') +
+                '</div>' +
+                (isOwner() ? '<div style="display:flex;align-items:center;gap:4px">' +
+                  '<select class="ppd-cat-select" title="Move to category" onchange="ppdMoveSheet(\'' + sheet.id + '\', this)">' +
+                    allCats.map(function(c) { return '<option value="' + _ppdEsc(c) + '"' + (c === group ? ' selected' : '') + '>' + _ppdEsc(c) + '</option>'; }).join('') +
+                    '<option value="__new__">+ New category&hellip;</option>' +
+                  '</select>' +
+                  '<a class="ppd-edit-btn" href="theory/editor.html?sheet=' + _ppdEsc(sheet.slug) + '">Edit</a>' +
+                  '<button class="ppd-delete-btn" title="Delete" onclick="ppdDeleteSheet(\'' + sheet.id + '\', this)">&times;</button>' +
+                '</div>' : '') +
+              '</div>' +
+            '</div>' +
+          '</li>';
         }).join('') +
       '</ul>';
   }).join('');
@@ -1891,7 +1936,7 @@ async function _ppdRenderMyList() {
   }
   _ppdCachedListMap = new Map(listData.map(function(r) { return [r.sheet_id, r.status]; }));
   const ids = Array.from(_ppdCachedListMap.keys());
-  const { data: sheets } = await db.from('theory_sheets').select('id, title, slug').in('id', ids);
+  const { data: sheets } = await db.from('theory_sheets').select('id, title, slug, intro, category').in('id', ids);
   _ppdCachedListSheetMap = new Map((sheets || []).map(function(s) { return [s.id, s]; }));
   const rc = ids.filter(function(id) { return _ppdCachedListMap.get(id) === 'reading'; }).length;
   const dc = ids.filter(function(id) { return _ppdCachedListMap.get(id) === 'read'; }).length;
@@ -1920,10 +1965,20 @@ function _ppdRenderMyListTab() {
   ids.forEach(function(id) {
     const sheet = _ppdCachedListSheetMap.get(id);
     if (!sheet) return;
-    html += '<li><div class="ppd-sheet-row">' +
-      '<a class="ppd-sheet-link" href="theory/sheets/view.html?slug=' + _ppdEsc(sheet.slug) + '">' + _ppdEsc(_ppdDisplayTitle(sheet.title)) + '</a>' +
-      '<button class="ppd-status-pill ' + pillCls + '" data-ppd-sheet="' + sheet.id + '" title="' + pillTitle + '" onclick="ppdCycleStatus(\'' + sheet.id + '\', this)">' + pillLabel + '</button>' +
-    '</div></li>';
+    const cat = _ppdCleanCat(sheet.category || '');
+    const catColor = cat ? _ppdCatColor(cat) : '#c8a84b';
+    const intro = (sheet.intro || '').trim();
+    html += '<li>' +
+      '<div class="ppd-sheet-card" style="--ppd-cat-color:' + catColor + '">' +
+        '<div class="ppd-sheet-card-body">' +
+          '<a class="ppd-sheet-title" href="theory/sheets/view.html?slug=' + _ppdEsc(sheet.slug) + '">' + _ppdEsc(_ppdDisplayTitle(sheet.title)) + '</a>' +
+          (intro ? '<p class="ppd-sheet-intro">' + _ppdEsc(intro) + '</p>' : '') +
+        '</div>' +
+        '<div class="ppd-sheet-card-footer">' +
+          '<button class="ppd-status-pill ' + pillCls + '" data-ppd-sheet="' + sheet.id + '" title="' + pillTitle + '" onclick="ppdCycleStatus(\'' + sheet.id + '\', this)">' + pillLabel + '</button>' +
+        '</div>' +
+      '</div>' +
+    '</li>';
   });
   html += '</ul>';
   container.innerHTML = html;
