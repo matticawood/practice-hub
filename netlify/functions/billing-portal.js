@@ -66,7 +66,7 @@ exports.handler = async (event) => {
   }
   const returnUrl = event.headers.referer
     ? new URL("/practice-log.html", event.headers.referer).href
-    : "https://thepracticeroom.matthewcawood.com/practice-log.html";
+    : "https://app.matthewcawood.com/practice-log.html";
 
   const stripeRes = await fetch("https://api.stripe.com/v1/billing_portal/sessions", {
     method: "POST",
