@@ -586,9 +586,16 @@
       transition: border-color .15s;
     }
     .wiz-date-card:hover { border-color: var(--accent,#a78bfa); }
-    .wiz-date-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted,#888); margin-bottom: 6px; }
-    .wiz-date-value { font-size: 1.6rem; font-weight: 700; color: var(--text); line-height: 1.2; }
-    .wiz-date-card { cursor: pointer; }
+    .wiz-date-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted,#888); margin-bottom: 10px; }
+    .wiz-date-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .wiz-date-value { font-size: 1.45rem; font-weight: 700; color: var(--text); line-height: 1.2; flex: 1; text-align: center; }
+    .wiz-date-arrow {
+      background: none; border: none; color: var(--text-muted,#888);
+      font-size: 2.2rem; line-height: 1; cursor: pointer; padding: 0 4px;
+      transition: color .15s; flex-shrink: 0; display: flex; align-items: center;
+    }
+    .wiz-date-arrow:hover { color: var(--text); }
+    .wiz-date-arrow:disabled { opacity: .2; cursor: default; }
     .wiz-section-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted,#888); font-weight: 600; }
     #wiz-structures-list { display: flex; flex-wrap: wrap; gap: 8px; }
     .wiz-structure-chip {
@@ -5770,11 +5777,14 @@
 
       <!-- Screen 0: Date -->
       <div class="wiz-screen active" id="wiz-screen-date">
-        <button class="wiz-date-card" onclick="wizOpenDatePicker()" type="button">
+        <div class="wiz-date-card">
           <div class="wiz-date-label">Practice Date</div>
-          <div class="wiz-date-value" id="wiz-date-display">Today</div>
-          <div style="font-size:.68rem;color:var(--text-muted,#888);margin-top:5px;opacity:.7">Tap to change</div>
-        </button>
+          <div class="wiz-date-nav">
+            <button class="wiz-date-arrow" id="wiz-date-prev" type="button">&#8249;</button>
+            <div class="wiz-date-value" id="wiz-date-display">Today</div>
+            <button class="wiz-date-arrow" id="wiz-date-next" type="button">&#8250;</button>
+          </div>
+        </div>
         <div id="wiz-structures-wrap" style="display:none">
           <div class="wiz-section-label" style="margin-bottom:8px">Practice Structures</div>
           <div id="wiz-structures-list"></div>
@@ -5813,6 +5823,7 @@
 
     <!-- Hidden backing store (functional elements read by existing JS) -->
     <div id="wiz-backing">
+      <input type="date" id="session-date" />
       <div id="items-container"></div>
       <div id="quick-add-section"></div>
       <button id="log-save-btn">Save</button>
@@ -5822,8 +5833,6 @@
     </div>
 
   </div>
-  <!-- Date input lives outside overflow:hidden containers so picker can open freely -->
-  <input type="date" id="session-date" style="position:fixed;top:50%;left:50%;width:1px;height:1px;opacity:0.01;border:none;padding:0;margin:0;font-size:16px" />
 </div>
 
 <!-- ── Share Modal ── -->
@@ -13921,8 +13930,9 @@ function resetLogForm() {
 
 // ── Wizard: date screen ────────────────────────────────────────
 function _wizRenderDateDisplay() {
-  const val = document.getElementById("session-date").value || todayStr();
-  document.getElementById("session-date").value = val;
+  const input = document.getElementById("session-date");
+  const val = input.value || todayStr();
+  input.value = val;
   const [y, m, d] = val.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
   const tod = new Date(); tod.setHours(0,0,0,0);
@@ -13932,6 +13942,9 @@ function _wizRenderDateDisplay() {
   else if (dt.getTime() === yes.getTime()) display = "Yesterday";
   else display = dt.toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" });
   document.getElementById("wiz-date-display").textContent = display;
+  // Disable next arrow if already on today
+  const nextBtn = document.getElementById("wiz-date-next");
+  if (nextBtn) nextBtn.disabled = val >= todayStr();
 }
 
 function _wizRenderStructures() {
@@ -14195,28 +14208,24 @@ document.getElementById("wiz-next-btn").addEventListener("click", wizHandleNext)
 document.getElementById("wiz-add-first-btn").addEventListener("click", wizAddFirstItem);
 document.getElementById("wiz-add-another-btn").addEventListener("click", wizAddAnotherItem);
 
-// Date picker updates display
-document.getElementById("session-date").addEventListener("change", _wizRenderDateDisplay);
-
-function wizOpenDatePicker() {
+// Date arrow navigation
+document.getElementById("wiz-date-prev").addEventListener("click", () => {
   const input = document.getElementById("session-date");
-  input.style.opacity = "1";
-  input.style.width = "120px";
-  input.style.height = "40px";
-  if (typeof input.showPicker === "function") {
-    try { input.showPicker(); } catch(e) {}
-  } else {
-    input.focus();
-    input.click();
-  }
-  // Re-hide after a moment
-  setTimeout(() => {
-    input.style.opacity = "0.01";
-    input.style.width = "1px";
-    input.style.height = "1px";
-  }, 500);
-}
-window.wizOpenDatePicker = wizOpenDatePicker;
+  const [y, m, d] = input.value.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() - 1);
+  input.value = toDateStr(dt);
+  _wizRenderDateDisplay();
+});
+document.getElementById("wiz-date-next").addEventListener("click", () => {
+  const input = document.getElementById("session-date");
+  const [y, m, d] = input.value.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + 1);
+  if (toDateStr(dt) > todayStr()) return; // can't log future dates
+  input.value = toDateStr(dt);
+  _wizRenderDateDisplay();
+});
 
 // Backdrop click to close
 document.getElementById("log-wizard-backdrop").addEventListener("click", e => {
