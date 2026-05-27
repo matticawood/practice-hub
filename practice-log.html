@@ -652,8 +652,67 @@
     }
     .wiz-recent-chip:hover { border-color: var(--accent,#a78bfa); color: var(--text); }
     .wiz-recent-chip-label { font-size: .62rem; opacity: .55; margin-right: 3px; }
-    /* Item slot: remove margin-bottom (one item at a time, no need for spacing) */
-    #wiz-item-slot .item-form-block { margin-bottom: 0; }
+    /* Type picker chips */
+    #wiz-type-picker {
+      display: flex;
+      gap: 7px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    #wiz-type-picker::-webkit-scrollbar { display: none; }
+    .wiz-type-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 7px 13px;
+      background: var(--surface-2);
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      font-size: .82rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .wiz-type-chip.active {
+      border-color: var(--accent,#a78bfa);
+      color: var(--accent,#a78bfa);
+      background: rgba(167,139,250,.1);
+    }
+    .wiz-type-chip:hover:not(.active) { border-color: var(--accent,#a78bfa); color: var(--text); }
+    /* Hide the old type picker row and remove button inside the item slot */
+    #wiz-item-slot .item-block-header { display: none !important; }
+    /* Item slot styling */
+    #wiz-item-slot .item-form-block { margin-bottom: 0; border-radius: 12px; }
+    /* Item action buttons at bottom */
+    .wiz-item-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    #wiz-add-another-btn {
+      background: none;
+      border: 1.5px dashed var(--border);
+      border-radius: 10px;
+      padding: 11px 16px;
+      font-size: .83rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      width: 100%;
+      transition: border-color .15s, color .15s;
+    }
+    #wiz-add-another-btn:hover { border-color: var(--accent,#a78bfa); color: var(--text); }
+    #wiz-remove-item-btn {
+      background: none;
+      border: none;
+      color: #e53e3e;
+      font-size: .78rem;
+      cursor: pointer;
+      padding: 4px 0;
+      opacity: .7;
+      transition: opacity .15s;
+      text-align: center;
+    }
+    #wiz-remove-item-btn:hover { opacity: 1; }
     #wiz-add-another-btn {
       background: none;
       border: 1.5px dashed var(--border);
@@ -5794,9 +5853,13 @@
 
       <!-- Screen N: Item (one item shown here at a time) -->
       <div class="wiz-screen" id="wiz-screen-item">
+        <div id="wiz-type-picker"></div>
         <div id="wiz-recent-chips"></div>
         <div id="wiz-item-slot"></div>
-        <button id="wiz-add-another-btn">+ Add Another Item</button>
+        <div class="wiz-item-actions">
+          <button id="wiz-add-another-btn">+ Add Another Item</button>
+          <button id="wiz-remove-item-btn">Remove this item</button>
+        </div>
       </div>
 
       <!-- Screen last: Overview / review -->
@@ -13961,6 +14024,29 @@ function _wizRenderStructures() {
   ).join("");
 }
 
+// ── Wizard: type picker ────────────────────────────────────────
+function _wizRenderTypePicker() {
+  const el = document.getElementById("wiz-type-picker");
+  if (!el) return;
+  const fi = formItems[_wizItemIdx];
+  if (!fi) { el.innerHTML = ""; return; }
+  el.innerHTML = ITEM_TYPES.map(t =>
+    `<button class="wiz-type-chip${t.type === fi.type ? " active" : ""}"
+             data-wiz-type="${t.type}">
+      ${t.icon} ${t.label}
+    </button>`
+  ).join("");
+}
+
+function _wizChangeType(type) {
+  const fi = formItems[_wizItemIdx];
+  if (!fi) return;
+  changeItemType(fi.id, type);
+  _wizRenderTypePicker();
+  _wizRenderRecentChips();
+  _wizUpdateHeader();
+}
+
 // ── Wizard: item screen ────────────────────────────────────────
 function _wizRenderRecentChips() {
   const el = document.getElementById("wiz-recent-chips");
@@ -13994,6 +14080,7 @@ function _wizShowItemInSlot(index) {
   document.getElementById("wiz-item-slot").appendChild(block);
   _wizSlotId  = fi.id;
   _wizItemIdx = index;
+  _wizRenderTypePicker();
 }
 
 // Move current slot item back to backing store
@@ -14255,6 +14342,18 @@ document.getElementById("wiz-structures-list").addEventListener("click", e => {
   if (delBtn) { e.stopPropagation(); wizDeleteStructure(parseInt(delBtn.dataset.wizDel)); return; }
   const chip = e.target.closest("[data-wiz-load]");
   if (chip) wizLoadStructure(parseInt(chip.dataset.wizLoad));
+});
+
+// Type picker click
+document.getElementById("wiz-type-picker").addEventListener("click", e => {
+  const chip = e.target.closest("[data-wiz-type]");
+  if (chip) _wizChangeType(chip.dataset.wizType);
+});
+
+// Remove item button
+document.getElementById("wiz-remove-item-btn").addEventListener("click", () => {
+  const fi = formItems[_wizItemIdx];
+  if (fi) removeItem(fi.id);
 });
 
 // Recent chips click
@@ -15201,9 +15300,10 @@ function changeItemType(id, newType) {
 
   // Re-wire events
   wireItemEvents(id);
-  // Update wizard header if this item is currently shown
+  // Update wizard if this item is currently shown
   if (_wizSlotId === id) {
     _wizUpdateHeader();
+    _wizRenderTypePicker();
     _wizRenderRecentChips();
   }
 }
