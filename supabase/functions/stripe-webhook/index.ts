@@ -6,7 +6,7 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-const APP_URL = Deno.env.get("APP_URL") ?? "https://practicehub.matthewcawood.com";
+const APP_URL = Deno.env.get("APP_URL") ?? "https://app.matthewcawood.com";
 const WEBHOOK_SECRET = Deno.env.get("STRIPE_MEMBERSHIP_WEBHOOK_SECRET") ?? "";
 
 // ── Stripe signature verification (HMAC-SHA256) ───────────────────────────
@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
           </p>
         </td></tr>
         <tr><td style="padding-top:24px;text-align:center;">
-          <p style="margin:0;font-size:12px;color:#444444;">The Practice Room · <a href="https://practicehub.matthewcawood.com" style="color:#444;text-decoration:none;">practicehub.matthewcawood.com</a></p>
+          <p style="margin:0;font-size:12px;color:#444444;">The Practice Room · <a href="https://app.matthewcawood.com" style="color:#444;text-decoration:none;">app.matthewcawood.com</a></p>
         </td></tr>
       </table>
     </td></tr>

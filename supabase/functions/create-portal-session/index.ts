@@ -6,7 +6,7 @@ const supabase = createClient(
 );
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
-const RETURN_URL = Deno.env.get("APP_URL") ?? "https://thepracticeroom.matthewcawood.com";
+const RETURN_URL = Deno.env.get("APP_URL") ?? "https://app.matthewcawood.com";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
