@@ -407,6 +407,7 @@ export default async (request) => {
     if (!eventId) return json({ error: "eventId required" }, 400);
 
     const SERVICE_KEY  = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    if (!SERVICE_KEY) return json({ error: "Server misconfiguration: SUPABASE_SERVICE_KEY not set" }, 500);
     const admin        = await isAdmin();
 
     // Get event
@@ -415,7 +416,8 @@ export default async (request) => {
       { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
     );
     const evRows = await evRes.json();
-    if (!Array.isArray(evRows) || !evRows.length) return json({ error: "Event not found" }, 404);
+    if (!evRes.ok || !Array.isArray(evRows)) return json({ error: "Event not found", _debug: { status: evRes.status, body: evRows } }, 404);
+    if (!evRows.length) return json({ error: "Event not found", _debug: { eventId, note: "no rows returned" } }, 404);
     const ev = evRows[0];
     if (!ev.daily_room_name) return json({ error: "Room not created yet — host must open Backstage first." }, 404);
 
