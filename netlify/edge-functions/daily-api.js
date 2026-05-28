@@ -404,7 +404,8 @@ export default async (request) => {
   //   Any other member   → is_owner:false (audience viewer, watch-only)
   if (action === "get-room-token") {
     const { eventId } = body;
-    if (!eventId) return json({ error: "eventId required" }, 400);
+    if (!eventId) return json({ error: "eventId required", v: 2 }, 400);
+    return json({ error: "TEST_CANARY_v2", eventId }, 400);
 
     const SERVICE_KEY  = Netlify.env.get("SUPABASE_SERVICE_KEY");
     if (!SERVICE_KEY) return json({ error: "Server misconfiguration: SUPABASE_SERVICE_KEY not set" }, 500);
