@@ -736,6 +736,21 @@
       _refreshReactBtn(parentId,safeKey);
       _cfg?.onReactionChange?.(parentId);
       await _db().from(_rTable()).upsert({[_rParent()]:parentId,email:auth.email,emoji},{onConflict:`${_rParent()},email`});
+      // Notify the owner that someone reacted (skip self).
+      if (_cfg?.ownerEmail
+          && auth.email
+          && auth.email.toLowerCase() !== _cfg.ownerEmail.toLowerCase()) {
+        const titleFn = _cfg.ownerReactionTitleFn
+          || ((name, em) => `${name} reacted ${em} to your post`);
+        await _db().from("notifications").insert({
+          email:    _cfg.ownerEmail,
+          type:     "reaction",
+          title:    titleFn(auth.name || "Someone", emoji),
+          body:     "",
+          link_url: _notifyLink(parentId),
+          metadata: { parent_id: parentId, emoji },
+        }).catch(() => {});
+      }
     },
 
     // Show likers popover for a parent ID

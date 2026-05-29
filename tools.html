@@ -2064,6 +2064,12 @@ async function nrSaveScore() {
   if (!myEmail || nrGameScore === 0) return;
   if (!await requireAuth()) return;
 
+  // Look up the user's previous best so we can fire a "new personal best"
+  // notification to the owner if this score beats it.
+  const { data: prevRows } = await db.from("note_game_scores")
+    .select("score").eq("email", myEmail).order("score", { ascending: false }).limit(1);
+  const prevBest = prevRows?.[0]?.score ?? -1;
+
   const { error } = await db.from("note_game_scores").insert({
     email:         myEmail,
     name:          myName || myEmail.split("@")[0],
@@ -2073,6 +2079,20 @@ async function nrSaveScore() {
     attempts:      nrGameTotal,
     key_signature: nrMode === "key" ? nrKeyId : null,
   });
+
+  // Personal best → notify owner (skip when owner is the player).
+  if (!error
+      && nrGameScore > prevBest
+      && myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+    db.from("notifications").insert({
+      email:    OWNER_EMAIL,
+      type:     "member_milestone",
+      title:    `${myName || "Someone"} set a new high score in Note Recognition`,
+      body:     `${nrGameScore} (${nrClef})`,
+      link_url: `/tools.html?tab=note-recognition`,
+      metadata: { kind: "note_high_score", score: nrGameScore, clef: nrClef },
+    }).then(() => {}).catch(() => {});
+  }
 
   if (error) {
     const isAuthErr = error.code === "PGRST301"
@@ -3394,11 +3414,28 @@ function crEndGame() {
 async function crSaveScore() {
   if (!myEmail) return;
   try {
+    const lowerEmail = myEmail.toLowerCase();
+    // Check previous best for PB-triggered owner notification.
+    const { data: prevRows } = await db.from("chord_game_scores")
+      .select("score").eq("email", lowerEmail).order("score", { ascending: false }).limit(1);
+    const prevBest = prevRows?.[0]?.score ?? -1;
+
     await db.from("chord_game_scores").insert({
-      email:myEmail.toLowerCase(), name:myName||null, score:crScore,
+      email: lowerEmail, name:myName||null, score:crScore,
       clef:crClef, tier:crGetTier(), mode:crMode,
       key_signature:crMode==="key"?crKeyId:null, attempts:crTotal,
     });
+
+    if (crScore > prevBest && lowerEmail !== OWNER_EMAIL.toLowerCase()) {
+      db.from("notifications").insert({
+        email:    OWNER_EMAIL,
+        type:     "member_milestone",
+        title:    `${myName || "Someone"} set a new high score in Chord Recognition`,
+        body:     `${crScore} (${crClef})`,
+        link_url: `/tools.html?tab=chord-recognition`,
+        metadata: { kind: "chord_high_score", score: crScore, clef: crClef },
+      }).then(() => {}).catch(() => {});
+    }
   } catch(e) { console.error("CR save:",e); }
 }
 

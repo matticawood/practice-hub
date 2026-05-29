@@ -6890,6 +6890,30 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
 
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: eventType, item_id: String(itemId), emoji });
+
+  // Notify the activity item's owner (skip self).
+  const _row = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId));
+  if (_row?.email && _row.email.toLowerCase() !== myEmail.toLowerCase()) {
+    const _kind = ({
+      session:         "practice session",
+      achievement:     "achievement",
+      piece_added:     "new piece",
+      note_high_score: "high score",
+      chord_high_score:"high score",
+      note_game_first: "first game",
+      chord_game_first:"first game",
+      comment:         "comment",
+      reply:           "reply",
+    })[eventType] || "activity";
+    await db.from("notifications").insert({
+      email:    _row.email,
+      type:     "reaction",
+      title:    `${myName || "Someone"} reacted ${emoji} to your ${_kind}`,
+      body:     "",
+      link_url: `/community.html`,
+      metadata: { event_type: eventType, item_id: String(itemId), emoji },
+    }).catch(() => {});
+  }
 }
 
 function _refreshLikeBtn(safeKey, key) {
@@ -7007,6 +7031,19 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
 
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: "post", item_id: postId, emoji });
+
+  // Notify the post author when someone reacts to their post (skip self).
+  const _post = _posts.find(p => p.id === postId);
+  if (_post?.email && _post.email.toLowerCase() !== myEmail.toLowerCase()) {
+    await db.from("notifications").insert({
+      email:    _post.email,
+      type:     "reaction",
+      title:    `${myName || "Someone"} reacted ${emoji} to your post`,
+      body:     (_post.content || "").slice(0, 120),
+      link_url: `/community.html?post=${postId}`,
+      metadata: { post_id: postId, emoji },
+    }).catch(() => {});
+  }
 }
 
 function _refreshPostLikeBtn(safeKey, postId) {
