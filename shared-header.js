@@ -21,6 +21,7 @@ const SH_SUBNAV = {
     { label: "Goals", href: "/practice-log.html?goto=goals" },
     { label: "History", href: "/practice-log.html?goto=history" },
     { label: "Leaderboard", href: "/practice-log.html?goto=leaderboard" },
+    { label: "Achievements", href: "/practice-log.html?goto=achievements" },
   ],
   community: [
     { label: "Feed", href: "/community.html" },
@@ -515,6 +516,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <a href="/practice-log.html?goto=goals">Goals</a>
         <a href="/practice-log.html?goto=history">History</a>
         <a href="/practice-log.html?goto=leaderboard">Leaderboard</a>
+        <a href="/practice-log.html?goto=achievements">Achievements</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
