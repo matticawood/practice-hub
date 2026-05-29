@@ -2711,6 +2711,7 @@ let   _inlineCamPreviewKey    = null; // key that owns the open preview panel
 
 // Activity feed state
 let _feedRows = [], _feedPage = 1;
+let _feedAvatarMap = {};  // email → avatar_url (for feed cards + activity detail)
 const FEED_PER_PAGE = 20;
 let _activityLoaded = false;
 const ACTIVITY_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
@@ -6518,6 +6519,15 @@ async function loadActivity() {
   _feedRows = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
   _feedItems = _feedRows;
 
+  // Fetch avatar URLs for every email appearing in the feed
+  const feedEmails = [...new Set(_feedRows.map(r => r.email).filter(Boolean))];
+  if (feedEmails.length) {
+    const { data: avRows } = await db.from("allowed_emails")
+      .select("email,avatar_url").in("email", feedEmails);
+    _feedAvatarMap = {};
+    (avRows || []).forEach(r => { if (r.avatar_url) _feedAvatarMap[r.email] = r.avatar_url; });
+  }
+
   // Bulk-load reactions + comment counts for all feed items that have an item_id
   _rxMap = {}; _cmtMap = {};
   const validRows = _feedRows.filter(r => r.item_id != null);
@@ -6672,7 +6682,9 @@ function feedItemHTML(row) {
   const wrap = (verbLine, bodyHtml, openHref) => {
     const click = openHref ? ` style="cursor:pointer" onclick="${openHref}"` : "";
     return `<div class="feed-item"${click}>
-      <div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
+      ${_feedAvatarMap[row.email]
+        ? `<div class="feed-avatar" style="overflow:hidden;padding:0"><img src="${escHtml(_feedAvatarMap[row.email])}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
+        : `<div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>`}
       <div class="feed-body">
         ${verbLine}
         ${bodyHtml || ""}
@@ -7085,7 +7097,7 @@ async function showActivityDetail(eventType, itemId) {
 
     detailArea.innerHTML = `<div class="detail-card">
       <div class="post-author-row" style="margin-bottom:4px">
-        <div style="width:28px;height:28px;border-radius:50%;background:${colour.bg};color:${colour.fg};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;flex-shrink:0">${escHtml(ini)}</div>
+        ${avatarHtml(row.email, name, 28, _feedAvatarMap[row.email] || null)}
         <span class="post-author-name">${escHtml(name)}</span>
         <span class="post-author-time" style="margin-left:auto">${timeAgo}</span>
       </div>
