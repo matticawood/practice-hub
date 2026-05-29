@@ -279,6 +279,81 @@ const SH_SUBNAV = {
     }
     .notif-admin-wrap textarea { resize: none; height: 50px; }
 
+    /* ── Admin presence indicator + panel ──────────────────────────────────── */
+    #presence-btn {
+      display: none; align-items: center; gap: 5px;
+      background: transparent; border: 1.5px solid rgba(255,255,255,.18);
+      color: rgba(255,255,255,.75);
+      padding: 5px 9px; border-radius: 8px;
+      font-family: inherit; font-size: 0.78rem; font-weight: 700;
+      cursor: pointer; transition: border-color .12s, color .12s;
+    }
+    #presence-btn:hover { border-color: #22c55e; color: #22c55e; }
+    #presence-btn .presence-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.7);
+      flex-shrink: 0;
+    }
+    #presence-btn .presence-count { line-height: 1; }
+    .presence-panel {
+      position: fixed; top: 72px; right: 10px;
+      width: min(340px, calc(100vw - 20px));
+      max-height: calc(100vh - 100px);
+      background: #141414; border: 1px solid #2a2a2a; border-radius: 12px;
+      z-index: 1100; display: flex; flex-direction: column;
+      box-shadow: 0 10px 40px rgba(0,0,0,.7);
+      opacity: 0; transform: translateY(-6px) scale(.97); pointer-events: none;
+      transition: opacity .17s ease, transform .17s ease; overflow: hidden;
+    }
+    .presence-panel.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: all; }
+    .presence-panel-head {
+      display: flex; align-items: center; gap: 6px;
+      padding: 12px 14px 10px; border-bottom: 1px solid #1e1e1e; flex-shrink: 0;
+    }
+    .presence-panel-head h3 { flex: 1; margin: 0; font-size: 0.92rem; color: #fff; }
+    .presence-close-btn {
+      background: none; border: none; cursor: pointer;
+      color: #555; font-size: 1rem; padding: 3px 7px; border-radius: 5px;
+      transition: color .12s; line-height: 1;
+    }
+    .presence-close-btn:hover { color: #fff; }
+    .presence-list { overflow-y: auto; padding: 4px 0; }
+    .presence-section-label {
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: #5a5a5a;
+      padding: 12px 14px 6px;
+    }
+    .presence-section-label .count { color: #22c55e; margin-left: 4px; }
+    .presence-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 14px; transition: background .12s;
+    }
+    .presence-row:hover { background: #1a1a1a; }
+    .presence-row .pres-avatar {
+      width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+      background: #1a1a1a; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.65rem; font-weight: 800; color: rgba(255,255,255,.7);
+    }
+    .presence-row .pres-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .presence-row .pres-body { flex: 1; min-width: 0; }
+    .presence-row .pres-name {
+      font-size: 0.84rem; font-weight: 600; color: #e0e0e0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .presence-row .pres-meta {
+      font-size: 0.72rem; color: #6a6a6a; line-height: 1.4;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .presence-row.online .pres-name::after {
+      content: ""; display: inline-block;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #22c55e; margin-left: 6px; vertical-align: middle;
+    }
+    .presence-empty {
+      padding: 18px 16px; text-align: center; color: #555; font-size: 0.78rem;
+    }
+
     /* ── Bell button: force visible on dark header ── */
     #notif-bell-btn.btn-ghost {
       border-color: rgba(255,255,255,.18);
@@ -390,6 +465,10 @@ document.addEventListener("DOMContentLoaded", function() {
       <div style="flex:1"><h1>The Practice Room</h1></div>
       <div class="header-user">
         <span id="header-email" style="display:none"></span>
+        <button id="presence-btn" onclick="window._shTogglePresence()" title="Online members" aria-label="Online members">
+          <span class="presence-dot"></span>
+          <span class="presence-count">0</span>
+        </button>
         <a class="btn btn-ghost btn-sm btn-bell" id="header-chat-btn"
           href="/chat.html" title="Chat" aria-label="Chat" style="display:none;text-decoration:none">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
@@ -573,6 +652,23 @@ document.addEventListener("DOMContentLoaded", function() {
     </div>
   `;
   document.body.appendChild(panel);
+
+  // Admin presence panel
+  const presencePanel = document.createElement("aside");
+  presencePanel.className = "presence-panel";
+  presencePanel.id = "presence-panel";
+  presencePanel.setAttribute("role", "dialog");
+  presencePanel.setAttribute("aria-label", "Online members");
+  presencePanel.innerHTML = `
+    <div class="presence-panel-head">
+      <h3>Members</h3>
+      <button class="presence-close-btn" onclick="window._shClosePresence()" aria-label="Close">&#x2715;</button>
+    </div>
+    <div class="presence-list" id="presence-list">
+      <div class="presence-empty">Loading&#8230;</div>
+    </div>
+  `;
+  document.body.appendChild(presencePanel);
 }); // end DOMContentLoaded
 
 // ── Sheet helpers (kept as no-ops for backward compat) ────────────────────────
@@ -617,6 +713,196 @@ window._shToggleNotif = () => {
 // Alias used by practice-log.html
 window.toggleNotifPanel = window._shToggleNotif;
 window.closeNotifPanel  = window._shCloseNotif;
+
+// ── Admin presence (online members) helpers ───────────────────────────────────
+// _shStartPresence(db, email) starts the heartbeat for the signed-in member.
+// _shEnableAdminPresence() shows the dropdown button when isAdmin.
+// Panel renders Online now (≤2 min) + Recently seen (everyone with any record,
+// sorted by last_seen DESC). Auto-refreshes every 30s while open.
+const _SH_PAGE_LABELS = {
+  "/":                    "Home",
+  "/practice-log.html":   "Hub",
+  "/community.html":      "Community",
+  "/chat.html":           "Chat",
+  "/resources.html":      "Resources",
+  "/tools.html":          "Practice Tools",
+  "/focus.html":          "Weekly Focus",
+  "/content-feed.html":   "Content Feed",
+  "/events.html":         "Live Clinics",
+  "/clinic-booking.html": "Book a Clinic",
+  "/updates.html":        "Updates",
+  "/profile.html":        "Profile",
+  "/billing.html":        "Billing",
+  "/feedback.html":       "Feedback",
+  "/privacy.html":        "Privacy",
+  "/support.html":        "Support",
+  "/admin-analytics.html":"Admin",
+};
+function _shPageLabel(path) {
+  if (!path) return "";
+  const clean = path.split("?")[0].split("#")[0];
+  return _SH_PAGE_LABELS[clean] || clean.replace(/\.html$/, "").replace(/^\//, "") || "Home";
+}
+function _shRelTime(ts) {
+  if (!ts) return "";
+  const d = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (d < 60)     return "just now";
+  if (d < 3600)   return `${Math.floor(d/60)}m ago`;
+  if (d < 86400)  return `${Math.floor(d/3600)}h ago`;
+  if (d < 604800) return `${Math.floor(d/86400)}d ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+function _shInitials(name) {
+  if (!name) return "?";
+  return name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
+}
+
+let _shPresenceDb = null;
+let _shPresenceEmail = null;
+let _shHeartbeatTimer = null;
+async function _shHeartbeat() {
+  if (!_shPresenceDb || !_shPresenceEmail) return;
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+  try {
+    await _shPresenceDb.from("user_presence").upsert({
+      email: _shPresenceEmail,
+      last_seen_at: new Date().toISOString(),
+      page: location.pathname + (location.search || ""),
+    }, { onConflict: "email" });
+  } catch (e) { /* silent */ }
+}
+window._shStartPresence = function(db, email) {
+  if (!db || !email) return;
+  _shPresenceDb = db;
+  _shPresenceEmail = email.toLowerCase();
+  if (_shHeartbeatTimer) clearInterval(_shHeartbeatTimer);
+  _shHeartbeat();
+  _shHeartbeatTimer = setInterval(_shHeartbeat, 60_000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") _shHeartbeat();
+  });
+};
+
+let _shPresenceRefreshTimer = null;
+window._shEnableAdminPresence = function() {
+  const btn = document.getElementById("presence-btn");
+  if (!btn) return;
+  btn.style.display = "inline-flex";
+  // Initial count fetch so the badge isn't always 0 before first open
+  _shRefreshOnlineCount();
+};
+
+async function _shRefreshOnlineCount() {
+  if (!_shPresenceDb) return;
+  try {
+    const twoMin = new Date(Date.now() - 2 * 60_000).toISOString();
+    const { count } = await _shPresenceDb.from("user_presence")
+      .select("email", { count: "exact", head: true })
+      .gte("last_seen_at", twoMin);
+    const el = document.querySelector("#presence-btn .presence-count");
+    if (el) el.textContent = String(count ?? 0);
+  } catch (e) { /* silent */ }
+}
+
+window._shClosePresence = function() {
+  document.getElementById("presence-panel")?.classList.remove("open");
+  if (_shPresenceRefreshTimer) { clearInterval(_shPresenceRefreshTimer); _shPresenceRefreshTimer = null; }
+};
+window._shTogglePresence = function() {
+  const panel = document.getElementById("presence-panel");
+  if (!panel) return;
+  if (panel.classList.contains("open")) { window._shClosePresence(); return; }
+  // Position under the button
+  const btn = document.getElementById("presence-btn");
+  if (btn) {
+    const r = btn.getBoundingClientRect();
+    const w = Math.min(340, window.innerWidth - 20);
+    panel.style.top   = (r.bottom + 6) + "px";
+    panel.style.right = Math.max(10, Math.min(window.innerWidth - r.right, window.innerWidth - w - 10)) + "px";
+    panel.style.width = w + "px";
+  }
+  panel.classList.add("open");
+  _shRenderPresence();
+  _shPresenceRefreshTimer = setInterval(_shRenderPresence, 30_000);
+};
+// Close presence panel on click outside
+document.addEventListener("click", function(e) {
+  if (e.target.closest("#presence-panel") || e.target.closest("#presence-btn")) return;
+  window._shClosePresence?.();
+});
+
+async function _shRenderPresence() {
+  if (!_shPresenceDb) return;
+  const listEl = document.getElementById("presence-list");
+  if (!listEl) return;
+  try {
+    const { data: rows, error } = await _shPresenceDb.from("user_presence")
+      .select("email, last_seen_at, page")
+      .order("last_seen_at", { ascending: false });
+    if (error) throw error;
+    const all = rows || [];
+    // Hydrate names + avatars
+    const emails = all.map(r => r.email);
+    let profiles = [];
+    if (emails.length) {
+      const { data: p } = await _shPresenceDb.from("allowed_emails")
+        .select("email, name, avatar_url")
+        .in("email", emails);
+      profiles = p || [];
+    }
+    const pmap = {};
+    profiles.forEach(p => { pmap[(p.email||"").toLowerCase()] = p; });
+
+    const now = Date.now();
+    const TWO_MIN = 2 * 60_000;
+    const online = [];
+    const seen = [];
+    all.forEach(r => {
+      const lower = (r.email||"").toLowerCase();
+      const prof = pmap[lower] || {};
+      const item = {
+        email: r.email,
+        name: prof.name || r.email,
+        avatar: prof.avatar_url || null,
+        last_seen_at: r.last_seen_at,
+        page: r.page || "",
+      };
+      if (now - new Date(r.last_seen_at).getTime() < TWO_MIN) online.push(item);
+      else seen.push(item);
+    });
+
+    // Update header count
+    const countEl = document.querySelector("#presence-btn .presence-count");
+    if (countEl) countEl.textContent = String(online.length);
+
+    function rowHtml(it, isOnline) {
+      const initials = _shInitials(it.name);
+      const avatar = it.avatar
+        ? `<div class="pres-avatar"><img src="${it.avatar}" alt=""/></div>`
+        : `<div class="pres-avatar">${initials}</div>`;
+      const meta = isOnline
+        ? `Viewing ${_shPageLabel(it.page)}`
+        : `Last seen ${_shRelTime(it.last_seen_at)}`;
+      const safeName = String(it.name||"").replace(/</g, "&lt;");
+      return `
+        <div class="presence-row${isOnline ? " online" : ""}">
+          ${avatar}
+          <div class="pres-body">
+            <div class="pres-name">${safeName}</div>
+            <div class="pres-meta">${meta}</div>
+          </div>
+        </div>`;
+    }
+    listEl.innerHTML = `
+      <div class="presence-section-label">Online now<span class="count">${online.length}</span></div>
+      ${online.length ? online.map(it => rowHtml(it, true)).join("") : `<div class="presence-empty">Nobody online right now.</div>`}
+      <div class="presence-section-label">Recently seen<span class="count">${seen.length}</span></div>
+      ${seen.length ? seen.map(it => rowHtml(it, false)).join("") : `<div class="presence-empty">No previous activity yet.</div>`}
+    `;
+  } catch (e) {
+    listEl.innerHTML = `<div class="presence-empty">Couldn't load: ${String(e.message || e)}</div>`;
+  }
+}
 
 // ── Main init ─────────────────────────────────────────────────────────────────
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
@@ -708,6 +994,14 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     window.location.href = "/practice-log.html";
   };
   document.getElementById("sh-logout-btn")?.addEventListener("click", logoutHandler);
+
+  // ── Online presence ──
+  // Start the heartbeat for every signed-in member. The admin gets the
+  // visible "X online" button + dropdown panel.
+  if (myEmail && db) {
+    window._shStartPresence?.(db, myEmail);
+    if (isAdmin) window._shEnableAdminPresence?.();
+  }
 
   // Clear any previously active states (initSharedHeader can be called more than
   // once per page if auth state changes fire bootApp again — without this clear,
