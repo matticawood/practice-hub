@@ -649,6 +649,7 @@ document.addEventListener("DOMContentLoaded", function() {
       <h4>Send App Update</h4>
       <input id="notif-admin-title" placeholder="Title (e.g. New feature: ...)" />
       <textarea id="notif-admin-body" placeholder="More detail (optional)"></textarea>
+      <input id="notif-admin-link" placeholder="Link URL (optional)" />
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-ghost" onclick="window._shSendUpdate(false)" style="flex:1;font-size:0.8rem">Send to me</button>
         <button class="btn btn-sm" onclick="window._shSendUpdate(true)" style="flex:1;font-size:0.8rem">Broadcast to all</button>
@@ -1180,19 +1181,23 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   window.markAllNotifsRead = window._shMarkAllRead;
 
   window._shSendUpdate = async function(broadcast) {
-    const title = document.getElementById("notif-admin-title")?.value.trim();
-    const body  = document.getElementById("notif-admin-body")?.value.trim();
+    const title    = document.getElementById("notif-admin-title")?.value.trim();
+    const body     = document.getElementById("notif-admin-body")?.value.trim();
+    const linkUrl  = document.getElementById("notif-admin-link")?.value.trim() || null;
     if (!title) { alert("Title is required"); return; }
+    const baseRow  = { type: "app_update", title, body: body || null, link_url: linkUrl };
     if (broadcast) {
       const { data: members } = await db.from("allowed_emails").select("email");
       for (const m of (members || [])) {
-        await db.from("notifications").insert({ email: m.email, type: "app_update", title, body: body || null });
+        await db.from("notifications").insert({ ...baseRow, email: m.email });
       }
     } else {
-      await db.from("notifications").insert({ email: myEmail, type: "app_update", title, body: body || null });
+      await db.from("notifications").insert({ ...baseRow, email: myEmail });
     }
     document.getElementById("notif-admin-title").value = "";
     document.getElementById("notif-admin-body").value  = "";
+    const linkEl = document.getElementById("notif-admin-link");
+    if (linkEl) linkEl.value = "";
     alert(broadcast ? "Sent to all members!" : "Sent to you!");
     await window._shLoadNotifs(); window._shRenderNotifs();
   };
