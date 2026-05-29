@@ -10430,6 +10430,21 @@ async function removeGoalById(id) {
 }
 
 async function markGoalDone(id) {
+  // Notify owner that a member completed a goal (skip when owner is the user).
+  if (myEmail && myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+    const g = allGoals.find(x => x.id === id);
+    if (g) {
+      const what = g.piece_label || "their goal";
+      await db.from("notifications").insert({
+        email:    OWNER_EMAIL,
+        type:     "member_milestone",
+        title:    `${myName || "Someone"} completed a goal`,
+        body:     `${what}`,
+        link_url: `/practice-log.html?u=${encodeURIComponent(myEmail)}&goto=goals`,
+        metadata: { goal_id: id, kind: "goal_complete" },
+      }).catch(() => {});
+    }
+  }
   // Animate the row, then delete
   const row = document.querySelector(`.pg-goal-row[data-goal-id="${id}"]`);
   if (row) {
@@ -11612,7 +11627,9 @@ async function checkNewAchievements() {
         email: myEmail, type: "achievement",
         title: `Achievement unlocked: ${ach.name}`,
         body: ach.desc || null, link_url: "/practice-log.html?goto=achievements",
-        source_id: sourceId, metadata: {}, read: true
+        source_id: sourceId,
+        metadata: { achievement_id: id, badge_svg: achBadgeSVG(ach, true, 40) },
+        read: true
       };
       await db.from("notifications").insert(row).select("id,created_at").single();
     }
@@ -11633,7 +11650,8 @@ async function checkNewAchievements() {
           `Achievement unlocked: ${ach.name}`,
           ach.desc,
           "/practice-log.html?goto=achievements",
-          "ach_" + id
+          "ach_" + id,
+          { achievement_id: id, badge_svg: achBadgeSVG(ach, true, 40) }
         );
       }
     });
@@ -11872,6 +11890,11 @@ async function nrSaveScore() {
   if (!myEmail || nrGameScore === 0) return;
   if (!await requireAuth()) return;
 
+  // Previous best — for PB-triggered owner notification.
+  const { data: prevRows } = await db.from("note_game_scores")
+    .select("score").eq("email", myEmail).order("score", { ascending: false }).limit(1);
+  const prevBest = prevRows?.[0]?.score ?? -1;
+
   const { error } = await db.from("note_game_scores").insert({
     email:       myEmail,
     name:        myName || myEmail.split("@")[0],
@@ -11880,6 +11903,19 @@ async function nrSaveScore() {
     accidentals: nrAccidentals,
     attempts:    nrGameTotal,
   });
+
+  if (!error
+      && nrGameScore > prevBest
+      && myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+    db.from("notifications").insert({
+      email:    OWNER_EMAIL,
+      type:     "member_milestone",
+      title:    `${myName || "Someone"} set a new high score in Note Recognition`,
+      body:     `${nrGameScore} (${nrClef})`,
+      link_url: `/tools.html?tab=note-recognition`,
+      metadata: { kind: "note_high_score", score: nrGameScore, clef: nrClef },
+    }).then(() => {}).catch(() => {});
+  }
 
   if (error) {
     // Auth errors (expired token, invalid JWT) → force logout
@@ -13100,12 +13136,12 @@ async function handleNotifClick(el) {
 async function markAllNotifsRead() { await window._shMarkAllRead?.(); }
 
 // Insert a notification for the current user (duplicate inserts are blocked by DB unique constraint)
-async function insertNotification(type, title, body, linkUrl, sourceId) {
+async function insertNotification(type, title, body, linkUrl, sourceId, metadata) {
   if (!myEmail) return;
 
   // Build row without optional columns first, add them if the table supports them
   const baseRow = { email: myEmail, type, title, body: body || null, link_url: linkUrl || null };
-  const fullRow = { ...baseRow, source_id: sourceId || null, metadata: {} };
+  const fullRow = { ...baseRow, source_id: sourceId || null, metadata: metadata || {} };
 
   // Try full insert first; if it fails (schema mismatch) try base row
   let data, error;

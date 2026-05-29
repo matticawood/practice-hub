@@ -736,6 +736,21 @@
       _refreshReactBtn(parentId,safeKey);
       _cfg?.onReactionChange?.(parentId);
       await _db().from(_rTable()).upsert({[_rParent()]:parentId,email:auth.email,emoji},{onConflict:`${_rParent()},email`});
+      // Notify the owner that someone reacted (skip self).
+      if (_cfg?.ownerEmail
+          && auth.email
+          && auth.email.toLowerCase() !== _cfg.ownerEmail.toLowerCase()) {
+        const titleFn = _cfg.ownerReactionTitleFn
+          || ((name, em) => `${name} reacted ${em} to your post`);
+        await _db().from("notifications").insert({
+          email:    _cfg.ownerEmail,
+          type:     "reaction",
+          title:    titleFn(auth.name || "Someone", emoji),
+          body:     "",
+          link_url: _notifyLink(parentId),
+          metadata: { parent_id: parentId, emoji },
+        }).catch(() => {});
+      }
     },
 
     // Show likers popover for a parent ID
@@ -877,6 +892,24 @@
         if(pollRow){
           await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
         }
+      }
+      // Notify the content owner (e.g. Matthew for weekly focus / updates /
+      // content-feed posts) about new top-level comments. Skipped when the
+      // commenter IS the owner. Config: ownerEmail + ownerNotifyTitleFn(name).
+      if (_cfg?.ownerEmail
+          && auth.email
+          && auth.email.toLowerCase() !== _cfg.ownerEmail.toLowerCase()) {
+        const title = (typeof _cfg.ownerNotifyTitleFn === "function")
+          ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
+          : `${auth.name || "Someone"} left a new comment`;
+        await _db().from("notifications").insert({
+          email:    _cfg.ownerEmail,
+          type:     "new_comment",
+          title,
+          body:     (content || "Sent an attachment").slice(0, 120),
+          link_url: _notifyLink(parentId),
+          metadata: {},
+        }).catch(() => {});
       }
       if(ta){ta.value="";ta.style.height="";}
       _clearState(key);
