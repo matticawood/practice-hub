@@ -70,6 +70,9 @@
   // discriminator from config.commentReactionEventType (e.g. "focus_comment").
   // Keyed by commentId → { emoji: { count, mine } }.
   const _cmtRxState = {};
+  // Maps commentId → { email, name } so reaction handlers can notify the
+  // comment author. Populated each time Comments.load(parentId) runs.
+  const _cmtMetaMap = {};
   let   _cmtOpenPicker = null;
   const _CMT_RX_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
   let _openPicker = null;
@@ -918,6 +921,14 @@
       if(!count){listEl.innerHTML=`<div class="tc-comments-empty">No comments yet — be the first!</div>`;return;}
       // Pre-load per-comment reactions so the heart buttons render with correct counts.
       await _loadCmtReactions(comments.map(c => c.id));
+      // Track each comment's author + parentId for notification routing on reaction.
+      (comments || []).forEach(c => {
+        _cmtMetaMap[String(c.id)] = {
+          email:    c.email,
+          name:     c.name || c.email.split("@")[0],
+          parentId: parentId,
+        };
+      });
       const emails=[...new Set(comments.map(c=>c.email))];
       const {data:avRows}=await _db().from("allowed_emails").select("email,avatar_url").in("email",emails);
       const avatarMap={};
@@ -1089,6 +1100,37 @@
       _cmtRefreshBtn(safeKey, idStr);
       await _db().from("activity_reactions")
         .insert({ email: auth.email, event_type: eventType, item_id: idStr, emoji });
+
+      // Notify the comment author (skip self). The link target is derived from
+      // the page's reply-notification link function so the destination matches
+      // existing comment-reply notifications for each surface.
+      const meta = _cmtMetaMap[idStr];
+      if (meta?.email && meta.email.toLowerCase() !== auth.email.toLowerCase()) {
+        // Look up which parent post this comment belongs to so the link goes
+        // to the right page. The comment row in DB has the parent FK so we
+        // could query, but the simpler fix is to compute the link from the
+        // already-loaded comment if shared-comments retained the parentId.
+        // Here we fall back to a generic link based on the comments table name.
+        const fallbackLink = (() => {
+          switch (eventType) {
+            case "focus_comment":  return "/focus.html";
+            case "update_comment": return "/updates.html";
+            case "content_comment":return "/content-feed.html";
+            default: return "/";
+          }
+        })();
+        const linkUrl = (typeof _cfg.replyNotificationLinkFn === "function" && meta.parentId)
+          ? _cfg.replyNotificationLinkFn(meta.parentId)
+          : fallbackLink;
+        await _db().from("notifications").insert({
+          email:    meta.email,
+          type:     "reaction",
+          title:    `${auth.name || "Someone"} reacted ${emoji} to your comment`,
+          body:     "",
+          link_url: linkUrl,
+          metadata: { event_type: eventType, item_id: idStr, emoji },
+        }).catch(() => {});
+      }
     },
 
     // Show reply composer for a comment

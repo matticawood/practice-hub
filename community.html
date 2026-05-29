@@ -6256,6 +6256,13 @@ async function loadComments(postId) {
   // Pre-load any existing reactions on these comments so the heart buttons
   // render with correct counts/state on first paint.
   await _loadCommentReactions("community_comment", comments.map(c => c.id));
+  // Track each comment's author + link target so reaction handlers can fire
+  // notifications.
+  comments.forEach(c => _registerCommentMeta("community_comment", c.id, {
+    email:    c.email,
+    name:     c.name || c.email.split("@")[0],
+    link_url: `/community.html?post=${postId}`,
+  }));
 
   // Fetch polls attached to comments (submitted via reply/comment poll builder)
   const commentIds = comments.map(c => c.id);
@@ -6863,6 +6870,20 @@ function toggleReactPicker(safeKey, eventType, itemId) {
 // focus_comment / update_comment / content_comment / event_comment.
 const COMMENT_REACT_EMOJIS = ACTIVITY_EMOJIS;
 
+// Caches the author email + link destination for each comment so reaction
+// handlers know who to notify (and where the click should land). Keyed by
+// `${eventType}:${commentId}`.
+const _commentMetaMap = {};
+function _commentMetaKey(eventType, commentId) {
+  return `${eventType}:${String(commentId)}`;
+}
+function _registerCommentMeta(eventType, commentId, meta) {
+  _commentMetaMap[_commentMetaKey(eventType, commentId)] = meta;
+}
+function _getCommentMeta(eventType, commentId) {
+  return _commentMetaMap[_commentMetaKey(eventType, commentId)] || null;
+}
+
 function _commentReactKey(eventType, commentId) {
   return `${eventType}:${String(commentId)}`;
 }
@@ -6995,6 +7016,22 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
 
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: eventType, item_id: String(itemId), emoji });
+
+  // Comment reactions notify the comment author rather than an activity row.
+  if (eventType.endsWith("_comment")) {
+    const _meta = _getCommentMeta(eventType, itemId);
+    if (_meta?.email && _meta.email.toLowerCase() !== myEmail.toLowerCase()) {
+      await db.from("notifications").insert({
+        email:    _meta.email,
+        type:     "reaction",
+        title:    `${myName || "Someone"} reacted ${emoji} to your comment`,
+        body:     "",
+        link_url: _meta.link_url || "/community.html",
+        metadata: { event_type: eventType, item_id: String(itemId), emoji },
+      }).catch(() => {});
+    }
+    return;
+  }
 
   // Notify the activity item's owner (skip self).
   const _row = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId));
@@ -7304,6 +7341,12 @@ async function loadActivityDetailComments(eventType, itemId) {
   // Pre-load reactions for these activity-feed comments so the heart buttons
   // render with correct counts/state on first paint.
   await _loadCommentReactions("activity_comment", comments.map(c => c.id));
+  // Track each comment's author + link target for reaction notifications.
+  comments.forEach(c => _registerCommentMeta("activity_comment", c.id, {
+    email:    c.email,
+    name:     c.name || c.email.split("@")[0],
+    link_url: `/community.html`,
+  }));
 
   const count = comments.length;
   if (hdrEl) hdrEl.textContent = count ? `${count} Comment${count!==1?"s":""}` : "Comments";

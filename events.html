@@ -2890,6 +2890,7 @@ let _currentEventId = null;
 // Uses activity_reactions with event_type='event_comment'.
 const _evCmtRxEmojis = ["❤️","👏","🔥","🎉","💪","😂"];
 const _evCmtRxMap = {};            // commentId → { emoji: {count, mine} }
+const _evCmtMetaMap = {};          // commentId → { email, name } for notifications
 let   _evCmtOpenPicker = null;     // currently open picker safeKey
 
 function _evCmtSafeKey(commentId) {
@@ -2987,6 +2988,19 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
   _evRefreshCmtBtn(safeKey, idStr);
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: "event_comment", item_id: idStr, emoji });
+
+  // Notify the comment author (skip self).
+  const meta = _evCmtMetaMap[idStr];
+  if (meta?.email && meta.email.toLowerCase() !== myEmail.toLowerCase()) {
+    await db.from("notifications").insert({
+      email:    meta.email,
+      type:     "reaction",
+      title:    `${myName || "Someone"} reacted ${emoji} to your comment`,
+      body:     "",
+      link_url: `/events.html?event=${_currentEventId}`,
+      metadata: { event_type: "event_comment", item_id: idStr, emoji },
+    }).catch(() => {});
+  }
 }
 window._evPickCmtReaction = _evPickCmtReaction;
 
@@ -3047,6 +3061,13 @@ async function loadComments(eventId) {
 
   // Pre-load existing reactions on these event comments.
   await _evLoadCommentReactions(comments.map(c => c.id));
+  // Track each comment's author for reaction notifications.
+  comments.forEach(c => {
+    _evCmtMetaMap[String(c.id)] = {
+      email: c.email,
+      name:  c.name || c.email.split("@")[0],
+    };
+  });
 
   // Fetch polls attached to comments
   const commentIds = comments.map(c => c.id);
