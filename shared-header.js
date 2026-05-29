@@ -764,12 +764,17 @@ async function _shHeartbeat() {
   if (!_shPresenceDb || !_shPresenceEmail) return;
   if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
   try {
-    await _shPresenceDb.from("user_presence").upsert({
+    const { error } = await _shPresenceDb.from("user_presence").upsert({
       email: _shPresenceEmail,
       last_seen_at: new Date().toISOString(),
       page: location.pathname + (location.search || ""),
     }, { onConflict: "email" });
-  } catch (e) { /* silent */ }
+    // Expose last error on window so we can spot RLS / schema issues from devtools.
+    window._shPresenceLastError = error || null;
+    if (error) console.warn("[presence] upsert failed:", error.message);
+  } catch (e) {
+    window._shPresenceLastError = e;
+  }
 }
 window._shStartPresence = function(db, email) {
   if (!db || !email) return;
