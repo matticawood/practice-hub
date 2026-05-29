@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Presence Debug</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 16px; line-height: 1.5; max-width: 600px; margin: 0 auto; }
+    pre { background: #f4f4f4; padding: 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+    .ok { color: #0a7d2c; }
+    .err { color: #b91c1c; }
+    h2 { margin-top: 24px; font-size: 16px; }
+    button { padding: 12px 20px; font-size: 16px; border-radius: 8px; border: 1px solid #c8b8a8; background: #f5c518; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>Presence Debug</h1>
+  <p>This page tries to write to <code>user_presence</code> and shows exactly what happens. Open it, sign in if needed, and screenshot the output.</p>
+  <button onclick="runTest()">Run test</button>
+  <pre id="out">Ready.</pre>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="supabase.js"></script>
+  <script>
+    async function runTest() {
+      const out = document.getElementById("out");
+      const lines = [];
+      const log = (k, v) => lines.push(`${k}: ${typeof v === "string" ? v : JSON.stringify(v, null, 2)}`);
+      try {
+        const { data: { session } } = await db.auth.getSession();
+        if (!session) { out.textContent = "Not signed in. Sign in first via /practice-log.html then return."; return; }
+        log("session.user.email", session.user.email);
+        log("session.user.id", session.user.id);
+
+        // 1. Test SELECT on user_presence (RLS read)
+        const sel = await db.from("user_presence").select("email,last_seen_at").limit(5);
+        log("select.error", sel.error?.message || null);
+        log("select.data", sel.data);
+
+        // 2. Test the actual upsert the heartbeat does
+        const payload = {
+          email: session.user.email.toLowerCase(),
+          last_seen_at: new Date().toISOString(),
+          page: "/presence-debug.html",
+        };
+        log("upsert.payload", payload);
+        const up = await db.from("user_presence").upsert(payload, { onConflict: "email" });
+        log("upsert.error", up.error?.message || null);
+        log("upsert.error.full", up.error || null);
+        log("upsert.status", up.status);
+
+        // 3. Re-read to see if it stuck
+        const after = await db.from("user_presence").select("*").eq("email", payload.email).maybeSingle();
+        log("after_upsert.data", after.data);
+        log("after_upsert.error", after.error?.message || null);
+
+        // 4. Check allowed_emails (FK target) — case sensitivity
+        const ae = await db.from("allowed_emails").select("email").eq("email", payload.email).maybeSingle();
+        log("allowed_emails.lowercase.match", ae.data || null);
+        const aeMixed = await db.from("allowed_emails").select("email").ilike("email", payload.email).maybeSingle();
+        log("allowed_emails.ilike.match", aeMixed.data || null);
+
+        out.textContent = lines.join("\n\n");
+      } catch (e) {
+        out.textContent = "Exception: " + (e?.message || String(e)) + "\n" + (e?.stack || "");
+      }
+    }
+  </script>
+</body>
+</html>
