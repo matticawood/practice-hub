@@ -16,6 +16,8 @@
 -- item_id is the source-row id (text), used by community.html as the
 -- reactions/comments key. NULL for aggregate event types (firsts).
 
+DROP FUNCTION IF EXISTS get_activity_feed_v2();
+
 CREATE OR REPLACE FUNCTION get_activity_feed_v2()
 RETURNS TABLE (
   email             text,
