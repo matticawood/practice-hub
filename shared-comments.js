@@ -346,6 +346,25 @@
     if(st &&o.status!==undefined) st.textContent=o.status;
   }
 
+  // Safely parse a JSON response from /api/daily. When the edge function crashes,
+  // Netlify returns a plain-text wrapper (e.g. "edge function failed to respond")
+  // and JSON.parse blows up with a useless "Unexpected token 'e'..." error.
+  // We capture the raw text and surface it to the user instead.
+  async function _readJsonOrThrow(res, what) {
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch {
+      const snippet = (text || "").slice(0, 200).trim() || "(empty response)";
+      throw new Error(`${what} failed (HTTP ${res.status}): ${snippet}`);
+    }
+    if (!res.ok || data?.error) {
+      const msg = (data && (data.error?.messages?.[0] || data.error?.message || data.error)) || `HTTP ${res.status}`;
+      throw new Error(`${what}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}`);
+    }
+    return data;
+  }
+
   async function _uploadVideoToMux(file, onDone) {
     if (!file||!file.type.startsWith("video/")) { alert("Please select a video file."); return; }
     if (_muxUploading) { alert("A video upload is already in progress."); return; }
@@ -353,9 +372,8 @@
     try {
       const token=(await _db().auth.getSession()).data.session?.access_token;
       if (!token) throw new Error("You appear to be signed out.");
-      const res   = await fetch(_muxPath(),{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({action:"create-mux-upload"})});
-      const data  = await res.json();
-      if (data.error) throw new Error(JSON.stringify(data.error));
+      const res  = await fetch(_muxPath(),{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({action:"create-mux-upload"})});
+      const data = await _readJsonOrThrow(res, "Create upload");
       const {uploadId, uploadUrl} = data;
       if (!uploadUrl) throw new Error("No upload URL returned");
 
@@ -364,17 +382,18 @@
         const xhr=new XMLHttpRequest();
         xhr.open("PUT",uploadUrl);
         xhr.upload.onprogress=e=>{if(e.lengthComputable)onDone?.({_progress:`Uploading… ${Math.round(e.loaded/e.total*100)}%`});};
-        xhr.onload=()=>xhr.status<300?res():rej(new Error("Upload failed ("+xhr.status+")"));
-        xhr.onerror=()=>rej(new Error("Network error"));
+        xhr.onload=()=>xhr.status<300?res():rej(new Error("Upload to Mux failed ("+xhr.status+")"));
+        xhr.onerror=()=>rej(new Error("Network error uploading to Mux"));
         xhr.send(file);
       });
       onDone?.({_progress:"Processing…"});
       let playbackId=null, assetId=null;
       for (let i=0;i<72;i++) {
         await new Promise(r=>setTimeout(r,5000));
-        const s=await (await fetch(_muxPath(),{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({action:"get-mux-upload-status",uploadId})})).json();
+        const sRes = await fetch(_muxPath(),{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({action:"get-mux-upload-status",uploadId})});
+        const s    = await _readJsonOrThrow(sRes, "Status check");
         if(s.playbackId&&s.assetStatus==="ready"){playbackId=s.playbackId;assetId=s.assetId;break;}
-        if(s.status==="errored"||s.assetStatus==="errored") throw new Error("Mux reported an error");
+        if(s.status==="errored"||s.assetStatus==="errored") throw new Error("Mux reported an error processing the asset");
       }
       if (!playbackId) throw new Error("Video processing timed out — try again");
       if (onDone) onDone({type:"mux",playbackId,assetId,name:file.name});
