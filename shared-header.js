@@ -40,6 +40,7 @@ const SH_SUBNAV = {
     { label: "Passage Fixer", href: "/tools.html" },
     { label: "Metronome", href: "/tools.html?section=metro" },
     { label: "Note Recognition", href: "/tools.html?section=note" },
+    { label: "Chord Recognition", href: "/tools.html?section=chord" },
   ],
   studio: [
     { label: "Weekly Focus", href: "/focus.html" },
@@ -463,6 +464,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <a href="/tools.html">Passage Fixer</a>
         <a href="/tools.html?section=metro">Metronome</a>
         <a href="/tools.html?section=note">Note Recognition</a>
+        <a href="/tools.html?section=chord">Chord Recognition</a>
       </div>
     </div>
     <div class="sh-tab-wrap">
