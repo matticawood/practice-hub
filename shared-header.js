@@ -387,7 +387,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const header = document.getElementById("app-header");
   if (header) {
     header.innerHTML = `
-      <div style="flex:1"><h1>Practice Hub</h1></div>
+      <div style="flex:1"><h1>The Practice Room</h1></div>
       <div class="header-user">
         <span id="header-email" style="display:none"></span>
         <a class="btn btn-ghost btn-sm btn-bell" id="header-chat-btn"
