@@ -176,7 +176,13 @@ Deno.serve(async (req) => {
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "invalid json" }, 400); }
 
-  // Either resolve notification by id (DB trigger path) or take an explicit
+  // Supabase Database Webhooks send `{ type, table, record, schema, old_record }`.
+  // Normalise that into a notification_id so the rest of the handler is uniform.
+  if (body.type === "INSERT" && body.record?.id && body.table === "notifications") {
+    body = { notification_id: body.record.id };
+  }
+
+  // Either resolve notification by id (DB webhook path) or take an explicit
   // payload (manual broadcast / future custom callers).
   let email: string, title: string, content: string, linkUrl: string | null, metadata: any;
   if (body.notification_id) {
