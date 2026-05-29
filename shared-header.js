@@ -914,6 +914,91 @@ async function _shRenderPresence() {
   }
 }
 
+// ── iOS push (inside the native PWAShell wrapper only) ───────────────────────
+// Bridges Firebase Cloud Messaging tokens from the native shell into Supabase
+// so an edge function can send pushes targeted at the signed-in member.
+// The native side exposes four message handlers and dispatches four window
+// events (see PushNotifications.swift + WebView.swift in the iOS project):
+//   handlers:  push-permission-request, push-permission-state, push-token,
+//              push-subscribe
+//   events:    push-permission-state, push-permission-request, push-token,
+//              push-notification, push-notification-click
+let _shPushDb = null;
+let _shPushEmail = null;
+let _shPushToken = null;
+
+function _shPostBridge(name, payload) {
+  try {
+    window.webkit?.messageHandlers?.[name]?.postMessage(payload || "");
+  } catch (e) { /* not in app shell, ignore */ }
+}
+
+async function _shSavePushToken(token) {
+  if (!_shPushDb || !_shPushEmail || !token) return;
+  try {
+    await _shPushDb.from("device_tokens").upsert({
+      email:    _shPushEmail.toLowerCase(),
+      platform: "ios",
+      token,
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: "token" });
+  } catch (e) { console.warn("[push] token upsert failed:", e); }
+}
+
+window._shInitIOSPush = function(db, email) {
+  _shPushDb    = db;
+  _shPushEmail = email;
+
+  // Native dispatches `push-token` with detail = the FCM token string.
+  window.addEventListener("push-token", (e) => {
+    const raw = e.detail;
+    // The Swift side wraps the token in quotes; strip them if present.
+    const token = typeof raw === "string"
+      ? raw.replace(/^['"]|['"]$/g, "")
+      : (raw && raw.toString && raw.toString());
+    if (!token || token === "ERROR GET TOKEN") return;
+    _shPushToken = token;
+    _shSavePushToken(token);
+  }, { once: false });
+
+  // Native dispatches `push-permission-request` with detail "granted"/"denied".
+  window.addEventListener("push-permission-request", (e) => {
+    if (e.detail === "granted") {
+      // After permission granted, ask for the token explicitly.
+      _shPostBridge("push-token");
+    }
+  });
+
+  // Native dispatches `push-notification-click` when user taps a notification
+  // while the app is backgrounded. Payload may carry a link_url to navigate to.
+  window.addEventListener("push-notification-click", (e) => {
+    try {
+      const payload = typeof e.detail === "string" ? JSON.parse(e.detail) : e.detail;
+      const dest = payload?.link_url || payload?.data?.link_url;
+      if (dest) window.location.href = dest;
+    } catch (err) { /* ignore */ }
+  });
+
+  // Foreground pushes — refresh the notification bell so the new item appears
+  // immediately without waiting for a reload.
+  window.addEventListener("push-notification", () => {
+    window._shLoadNotifs?.().then(() => window._shRenderNotifs?.());
+  });
+
+  // Kick off: first check the current permission state, then request if needed.
+  _shPostBridge("push-permission-state");
+  window.addEventListener("push-permission-state", (e) => {
+    const state = e.detail;
+    if (state === "notDetermined") {
+      _shPostBridge("push-permission-request");
+    } else if (state === "authorized" || state === "ephemeral" || state === "provisional") {
+      // Already authorised — just fetch the token.
+      _shPostBridge("push-token");
+    }
+    // "denied" → nothing to do.
+  }, { once: true });
+};
+
 // ── Main init ─────────────────────────────────────────────────────────────────
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
   window._shIsAdmin = isAdmin;
@@ -1011,6 +1096,11 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   if (myEmail && db) {
     window._shStartPresence?.(db, myEmail);
     if (isAdmin) window._shEnableAdminPresence?.();
+  }
+
+  // ── iOS push notifications (only inside the native PWA shell) ──
+  if (myEmail && db && /PWAShell/i.test(navigator.userAgent || "")) {
+    window._shInitIOSPush?.(db, myEmail);
   }
 
   // Clear any previously active states (initSharedHeader can be called more than
