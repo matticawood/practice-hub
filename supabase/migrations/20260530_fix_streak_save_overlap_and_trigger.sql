@@ -67,6 +67,8 @@ WHERE n.source_id IN ('ach_sv1','ach_sv3','ach_sv5')
   );
 
 -- ── 3. Trigger: a real session always clears a save on the same date ─────────
+-- Also revokes any sv1/sv3/sv5 achievement (+ notification + activity_events
+-- row) the user no longer qualifies for once the bogus save is refunded.
 CREATE OR REPLACE FUNCTION clear_streak_save_on_session()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -74,10 +76,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  removed_count int;
+  hit_count    int := 0;
+  saves_used   int := 0;
 BEGIN
-  -- Remove NEW.session_date from saved_dates and bump balance by however many
-  -- rows we strip (defensive — should always be 0 or 1).
+  -- 3a. Remove NEW.session_date from saved_dates, refund tokens.
   WITH old AS (
     SELECT saved_dates FROM streak_tokens WHERE email = NEW.email FOR UPDATE
   ),
@@ -91,7 +93,37 @@ BEGIN
       balance     = st.balance + COALESCE((SELECT hits FROM filtered), 0),
       updated_at  = now()
   WHERE st.email = NEW.email
-    AND COALESCE((SELECT hits FROM filtered), 0) > 0;
+    AND COALESCE((SELECT hits FROM filtered), 0) > 0
+  RETURNING COALESCE((SELECT hits FROM filtered), 0) INTO hit_count;
+
+  -- Nothing changed → no achievement bookkeeping to do.
+  IF COALESCE(hit_count, 0) = 0 THEN
+    RETURN NEW;
+  END IF;
+
+  -- 3b. Recompute saves_used and revoke any sv-tier the user no longer earns.
+  SELECT GREATEST(0, COALESCE(total_earned,0) - COALESCE(balance,0))
+    INTO saves_used
+    FROM streak_tokens
+    WHERE email = NEW.email;
+
+  -- sv1 needs >=1, sv3 needs >=3, sv5 needs >=5.
+  DELETE FROM achievement_events
+  WHERE email = NEW.email
+    AND (
+      (achievement_id = 'sv1' AND saves_used < 1) OR
+      (achievement_id = 'sv3' AND saves_used < 3) OR
+      (achievement_id = 'sv5' AND saves_used < 5)
+    );
+
+  DELETE FROM notifications
+  WHERE email = NEW.email
+    AND source_id IN ('ach_sv1','ach_sv3','ach_sv5')
+    AND NOT EXISTS (
+      SELECT 1 FROM achievement_events ae
+      WHERE ae.email = NEW.email
+        AND ae.achievement_id = REPLACE(notifications.source_id, 'ach_', '')
+    );
 
   RETURN NEW;
 END;
