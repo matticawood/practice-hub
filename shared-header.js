@@ -400,6 +400,20 @@ const SH_SUBNAV = {
   document.head.appendChild(s);
 })();
 
+// ── Apple Smart App Banner ───────────────────────────────────────────────────
+// Drops Apple's native "Get the App" banner at the top of Safari iOS pages.
+// Skipped when we're already inside the native PWAShell wrapper so we don't
+// nag users who already have the app installed.
+(function _shAppleAppBanner() {
+  try {
+    if (/PWAShell/i.test(navigator.userAgent || "")) return;
+    const meta = document.createElement("meta");
+    meta.name    = "apple-itunes-app";
+    meta.content = "app-id=6773475130";
+    document.head.appendChild(meta);
+  } catch (e) { /* silent */ }
+})();
+
 // ── Early avatar paint (synchronous, before any async call) ──────────────────
 // Reads the Supabase session from localStorage and applies cached avatar
 // colours immediately so the avatar never flickers on back navigation.
