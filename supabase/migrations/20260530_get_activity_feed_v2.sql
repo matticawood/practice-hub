@@ -2,7 +2,8 @@
 --
 -- Unified feed for the community activity card. Returns up to ~200 recent
 -- events across multiple event_types so the client can group consecutive
--- same-person events into a single summary card.
+-- same-person events into a single summary card (dashboard) OR render each
+-- event as its own card (community.html — uses item_id for reactions).
 --
 -- Excludes Matthew + secondary + reviewer accounts.
 -- Each per-type CTE caps at 50 rows so one chatty member doesn't drown out
@@ -11,6 +12,9 @@
 -- event_type values:
 --   session, achievement, post, comment, reply, piece_added,
 --   note_high_score, chord_high_score, note_game_first, chord_game_first
+--
+-- item_id is the source-row id (text), used by community.html as the
+-- reactions/comments key. NULL for aggregate event types (firsts).
 
 CREATE OR REPLACE FUNCTION get_activity_feed_v2()
 RETURNS TABLE (
@@ -18,6 +22,7 @@ RETURNS TABLE (
   name              text,
   created_at        timestamptz,
   event_type        text,
+  item_id           text,
   -- Per-type metadata (NULL where not applicable)
   achievement_id    text,
   duration_minutes  integer,
@@ -49,6 +54,7 @@ sessions AS (
   SELECT
     ps.email, ae.name, ps.session_date AS created_at,
     'session'::text                AS event_type,
+    ps.id::text                    AS item_id,
     NULL::text                     AS achievement_id,
     ps.duration_minutes,
     NULL::text                     AS post_id,
@@ -71,7 +77,8 @@ sessions AS (
 achievements AS (
   SELECT
     aev.email, ae.name, aev.earned_at AS created_at,
-    'achievement'::text, aev.achievement_id::text,
+    'achievement'::text, aev.id::text,
+    aev.achievement_id::text,
     NULL::integer,
     NULL::text, NULL::text, NULL::text,
     NULL::text, NULL::text, NULL::text,
@@ -87,7 +94,8 @@ achievements AS (
 posts AS (
   SELECT
     cp.email, ae.name, cp.created_at,
-    'post'::text, NULL::text,
+    'post'::text, cp.id::text,
+    NULL::text,
     NULL::integer,
     cp.id::text, cp.type::text, NULL::text,
     NULL::text, NULL::text, NULL::text,
@@ -104,6 +112,7 @@ comments AS (
   SELECT
     cpc.email, ae.name, cpc.created_at,
     CASE WHEN cpc.parent_comment_id IS NULL THEN 'comment' ELSE 'reply' END::text,
+    cpc.id::text,
     NULL::text, NULL::integer,
     cpc.post_id::text, NULL::text, cpc.parent_comment_id::text,
     NULL::text, NULL::text, NULL::text,
@@ -119,7 +128,8 @@ comments AS (
 pieces_added AS (
   SELECT
     uc.email, ae.name, uc.created_at,
-    'piece_added'::text, NULL::text,
+    'piece_added'::text, uc.id::text,
+    NULL::text,
     NULL::integer,
     NULL::text, NULL::text, NULL::text,
     COALESCE(p.title,    up.title)    AS piece_title,
@@ -138,8 +148,8 @@ pieces_added AS (
 -- 6. Note-game personal bests (each row where score beats all previous scores
 --    for that email — includes the FIRST score because prev_best is NULL).
 note_pbs AS (
-  SELECT email, score, clef, created_at FROM (
-    SELECT email, score, clef, created_at,
+  SELECT id, email, score, clef, created_at FROM (
+    SELECT id, email, score, clef, created_at,
       MAX(score) OVER (
         PARTITION BY email
         ORDER BY created_at
@@ -152,7 +162,8 @@ note_pbs AS (
 note_high_scores AS (
   SELECT
     nb.email, ae.name, nb.created_at,
-    'note_high_score'::text, NULL::text,
+    'note_high_score'::text, nb.id::text,
+    NULL::text,
     NULL::integer,
     NULL::text, NULL::text, NULL::text,
     NULL::text, NULL::text, NULL::text,
@@ -166,8 +177,8 @@ note_high_scores AS (
 
 -- 7. Chord-game personal bests
 chord_pbs AS (
-  SELECT email, score, clef, created_at FROM (
-    SELECT email, score, clef, created_at,
+  SELECT id, email, score, clef, created_at FROM (
+    SELECT id, email, score, clef, created_at,
       MAX(score) OVER (
         PARTITION BY email
         ORDER BY created_at
@@ -180,7 +191,8 @@ chord_pbs AS (
 chord_high_scores AS (
   SELECT
     cb.email, ae.name, cb.created_at,
-    'chord_high_score'::text, NULL::text,
+    'chord_high_score'::text, cb.id::text,
+    NULL::text,
     NULL::integer,
     NULL::text, NULL::text, NULL::text,
     NULL::text, NULL::text, NULL::text,
@@ -202,6 +214,7 @@ note_first_events AS (
   SELECT
     nf.email, ae.name, nf.created_at,
     'note_game_first'::text, NULL::text,
+    NULL::text,
     NULL::integer,
     NULL::text, NULL::text, NULL::text,
     NULL::text, NULL::text, NULL::text,
@@ -223,6 +236,7 @@ chord_first_events AS (
   SELECT
     cf.email, ae.name, cf.created_at,
     'chord_game_first'::text, NULL::text,
+    NULL::text,
     NULL::integer,
     NULL::text, NULL::text, NULL::text,
     NULL::text, NULL::text, NULL::text,

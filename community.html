@@ -6487,7 +6487,7 @@ async function loadActivity() {
     : Promise.resolve({ data: [] });
 
   const [feedResult, champResult] = await Promise.all([
-    db.rpc("get_activity_feed", { p_email: myEmail }),
+    db.rpc("get_activity_feed_v2"),
     champPromise,
   ]);
 
@@ -6667,6 +6667,23 @@ function feedItemHTML(row) {
       </div>
     </div>` : "";
 
+  // Helper to wrap a body block in the standard feed-item shell.
+  // openHref: if set, the whole card becomes clickable to that handler.
+  const wrap = (verbLine, bodyHtml, openHref) => {
+    const click = openHref ? ` style="cursor:pointer" onclick="${openHref}"` : "";
+    return `<div class="feed-item"${click}>
+      <div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
+      <div class="feed-body">
+        ${verbLine}
+        ${bodyHtml || ""}
+        ${footer}
+      </div>
+    </div>`;
+  };
+
+  const verb = (text) =>
+    `<div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> <span style="color:var(--text-muted)">${text}</span> <span class="feed-time">· ${timeAgo}</span></div>`;
+
   if (row.event_type === "achievement") {
     const ach   = ACH[row.achievement_id] || {};
     const aname = ach.name || row.achievement_id || "Achievement";
@@ -6674,33 +6691,93 @@ function feedItemHTML(row) {
     const cat   = ACH_CAT[row.achievement_id] || "sessions";
     const col   = _BADGE_PALETTE[cat] || _BADGE_PALETTE.sessions;
     const badge = achBadgeSVG(row.achievement_id, 46);
-    return `<div class="feed-item" style="cursor:pointer" onclick="showActivityDetail('${row.event_type}','${String(row.item_id)}')">
-      <div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
-      <div class="feed-body">
-        <div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> <span style="color:var(--text-muted)">unlocked an achievement</span> <span class="feed-time">· ${timeAgo}</span></div>
-        <div class="feed-ach-badge" style="background:${col[0]}12;border-color:${col[0]}40">
-          <span class="feed-ach-icon">${badge}</span>
-          <div>
-            <div class="feed-ach-name" style="color:${col[0]}">${escHtml(aname)}</div>
-            ${adesc ? `<div class="feed-ach-desc">${escHtml(adesc)}</div>` : ""}
-          </div>
+    return wrap(
+      verb("unlocked an achievement"),
+      `<div class="feed-ach-badge" style="background:${col[0]}12;border-color:${col[0]}40">
+        <span class="feed-ach-icon">${badge}</span>
+        <div>
+          <div class="feed-ach-name" style="color:${col[0]}">${escHtml(aname)}</div>
+          ${adesc ? `<div class="feed-ach-desc">${escHtml(adesc)}</div>` : ""}
         </div>
-        ${footer}
-      </div>
-    </div>`;
+      </div>`,
+      `showActivityDetail('${row.event_type}','${String(row.item_id)}')`
+    );
   }
 
-  return `<div class="feed-item" style="cursor:pointer" onclick="showActivityDetail('${row.event_type}','${String(row.item_id)}')">
-    <div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${ini}</div>
-    <div class="feed-body">
-      <div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> logged a practice session <span class="feed-time">· ${timeAgo}</span></div>
-      <div class="feed-session-block" style="background:rgba(245,197,24,.07);border-color:rgba(245,197,24,.25)">
-        <div class="feed-session-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-        <div class="feed-session-duration">${formatMinutes(row.duration_minutes||0)}</div>
-      </div>
-      ${footer}
-    </div>
-  </div>`;
+  // ── New event types (v2) ──────────────────────────────────────────────────
+  if (row.event_type === "post") {
+    return wrap(verb("posted in the community"), "", `showDetail('${String(row.post_id)}')`);
+  }
+  if (row.event_type === "comment") {
+    return wrap(verb("commented on a post"), "", `showDetail('${String(row.post_id)}')`);
+  }
+  if (row.event_type === "reply") {
+    return wrap(verb("replied to a comment"), "", `showDetail('${String(row.post_id)}')`);
+  }
+  if (row.event_type === "piece_added") {
+    const STATUS_LABEL = { aspire: "Aspire to play", learning: "Learning", completed: "Completed" };
+    const STATUS_COL   = { aspire: "#a78bfa", learning: "#60a5fa", completed: "#34d399" };
+    const sLabel = STATUS_LABEL[row.piece_status] || "their collection";
+    const sCol   = STATUS_COL[row.piece_status]   || "#94a3b8";
+    const title    = row.piece_title    || "a piece";
+    const composer = row.piece_composer || "";
+    return wrap(
+      verb(`added a piece to ${sLabel}`),
+      `<div class="feed-session-block" style="background:${sCol}10;border-color:${sCol}40">
+        <div class="feed-session-icon" style="color:${sCol}">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        </div>
+        <div style="min-width:0">
+          <div style="font-size:1rem;font-weight:700;color:${sCol};line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</div>
+          ${composer ? `<div class="feed-session-label">${escHtml(composer)}</div>` : ""}
+        </div>
+      </div>`
+    );
+  }
+  if (row.event_type === "note_high_score" || row.event_type === "chord_high_score") {
+    const isNote = row.event_type === "note_high_score";
+    const label  = isNote ? "Note Recognition" : "Chord Recognition";
+    const tint   = isNote ? "#f59e0b" : "#a78bfa";
+    return wrap(
+      verb(`set a new high score in ${label}`),
+      `<div class="feed-session-block" style="background:${tint}12;border-color:${tint}40">
+        <div class="feed-session-icon" style="color:${tint}">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 9a6 6 0 0 0 12 0"/><path d="M12 15v4"/><path d="M8 22h8"/></svg>
+        </div>
+        <div>
+          <div class="feed-session-duration" style="color:${tint}">${row.game_score ?? 0}</div>
+          <div class="feed-session-label">${escHtml(label)}${row.game_clef ? ` · ${escHtml(row.game_clef)}` : ""}</div>
+        </div>
+      </div>`
+    );
+  }
+  if (row.event_type === "note_game_first" || row.event_type === "chord_game_first") {
+    const isNote = row.event_type === "note_game_first";
+    const label  = isNote ? "Note Recognition" : "Chord Recognition";
+    const tint   = isNote ? "#f59e0b" : "#a78bfa";
+    return wrap(
+      verb(`played ${label} for the first time`),
+      `<div class="feed-session-block" style="background:${tint}10;border-color:${tint}30">
+        <div class="feed-session-icon" style="color:${tint}">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+        <div>
+          <div style="font-size:1rem;font-weight:700;color:${tint};line-height:1.2">${escHtml(label)}</div>
+          <div class="feed-session-label">First play</div>
+        </div>
+      </div>`
+    );
+  }
+
+  // Default: practice session
+  return wrap(
+    `<div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> logged a practice session <span class="feed-time">· ${timeAgo}</span></div>`,
+    `<div class="feed-session-block" style="background:rgba(245,197,24,.07);border-color:rgba(245,197,24,.25)">
+      <div class="feed-session-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+      <div class="feed-session-duration">${formatMinutes(row.duration_minutes||0)}</div>
+    </div>`,
+    `showActivityDetail('${row.event_type}','${String(row.item_id)}')`
+  );
 }
 
 // ── Activity reactions — picker ───────────────────────────────────────────────
