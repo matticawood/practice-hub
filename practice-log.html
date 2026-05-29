@@ -8260,10 +8260,11 @@ async function renderDashboard() {
 
   // ── Async: community feed preview ────────────────────────────────
   try {
-    let feedRows = _feedRows;
+    let feedRows = _feedRows; // already-grouped if main feed loaded
     if (!_feedLoaded) {
-      const { data } = await db.rpc("get_activity_feed", { p_email: myEmail });
-      feedRows = (data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+      const { data } = await db.rpc("get_activity_feed_v2");
+      const raw = (data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+      feedRows = groupFeedEvents(raw);
     }
     const preview = feedRows.slice(0, 5);
     const feedEl  = document.getElementById('dash-feed-preview');
@@ -11115,7 +11116,10 @@ async function renderCommunityFeed() {
     : Promise.resolve({ data: [] });
 
   const [feedResult, champResult, postsResult] = await Promise.all([
-    db.rpc("get_activity_feed", { p_email: myEmail }),
+    // v2 returns a richer set of event types (posts, comments, replies, pieces
+    // added, game high-scores, first-time game plays) — the client groups
+    // consecutive same-person events into one summary card.
+    db.rpc("get_activity_feed_v2"),
     championsPromise,
     db.from("community_posts")
       .select("id,email,name,type,content,created_at")
@@ -11179,10 +11183,36 @@ async function renderCommunityFeed() {
     _monthlyChampionsHTML = null;
   }
 
-  _feedRows = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+  const rawFeed = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+  // Group consecutive same-person events into single summary cards
+  _feedRows = groupFeedEvents(rawFeed);
   _feedPage = 1;
   _feedLoaded = true;
   renderFeedPage();
+}
+
+// Group consecutive same-email events (within 60 min) into single summary
+// cards. Walks the rows in their existing order (already DESC by time).
+function groupFeedEvents(rows) {
+  const GROUP_WINDOW_MS = 60 * 60 * 1000;
+  const groups = [];
+  rows.forEach(row => {
+    const t = new Date(row.created_at || row.session_date).getTime();
+    const cur = groups[groups.length - 1];
+    if (cur && cur.email === row.email && Math.abs(cur.latestTime - t) <= GROUP_WINDOW_MS) {
+      cur.events.push(row);
+      cur.latestTime = Math.max(cur.latestTime, t);
+    } else {
+      groups.push({
+        email: row.email,
+        name: row.name || (row.email || "").split("@")[0],
+        latestTime: t,
+        latest_created_at: row.created_at || row.session_date,
+        events: [row],
+      });
+    }
+  });
+  return groups;
 }
 
 function renderFeedPage() {
@@ -11221,60 +11251,101 @@ function _feedAvatarHTML(email, name, size) {
   return `<div class="feed-avatar" style="background:${colour.bg};color:${colour.fg}">${initials}</div>`;
 }
 
-function feedItemHTML(row) {
-  const name     = row.name || row.email.split("@")[0];
-  const initials = name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
-  const colour   = avatarColour(row.email);
-  const timeAgo  = feedRelativeTime(row.created_at || row.session_date);
-  const count    = row.reaction_count || 0;
-  const reacted  = row.i_reacted || false;
+// Render a *group* of consecutive same-person events as one summary card.
+// (Wrapped in a tally + sentence builder.)
+function feedItemHTML(group) {
+  // Backward compat: if a single raw event row was passed, wrap it as a 1-event group
+  if (!group.events) {
+    group = {
+      email: group.email,
+      name: group.name || (group.email || "").split("@")[0],
+      latestTime: new Date(group.created_at || group.session_date).getTime(),
+      latest_created_at: group.created_at || group.session_date,
+      events: [group],
+    };
+  }
+  const name    = group.name || (group.email || "").split("@")[0];
+  const colour  = avatarColour(group.email || "");
+  const timeAgo = feedRelativeTime(new Date(group.latestTime).toISOString());
 
-  const reactBtn = row.item_id != null
-    ? `<button class="feed-react-btn${reacted ? " reacted" : ""}"
-         data-count="${count}"
-         onclick="toggleReaction(this,'${row.event_type}',${row.item_id})"
-       ><svg viewBox="0 0 24 24" width="14" height="14" fill="${reacted ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span class="react-count">${count > 0 ? count : ""}</span></button>`
-    : "";
+  // Tally
+  const t = {
+    posts: 0, comments: 0, replies: 0,
+    sessionMinutes: 0,
+    pieces: { aspire: [], learning: [], completed: [] },
+    achievements: [],          // achievement ids
+    highScores: [],            // { kind: 'note'|'chord', score }
+    firstGames: [],            // 'note' | 'chord'
+  };
+  group.events.forEach(e => {
+    switch (e.event_type) {
+      case "post":             t.posts++; break;
+      case "comment":          t.comments++; break;
+      case "reply":            t.replies++; break;
+      case "session":          t.sessionMinutes += (e.duration_minutes || 0); break;
+      case "piece_added":
+        if (t.pieces[e.piece_status]) t.pieces[e.piece_status].push(e.piece_title || "a piece");
+        break;
+      case "achievement":      t.achievements.push(e.achievement_id); break;
+      case "note_high_score":  t.highScores.push({ kind: "note",  score: e.game_score }); break;
+      case "chord_high_score": t.highScores.push({ kind: "chord", score: e.game_score }); break;
+      case "note_game_first":  t.firstGames.push("note"); break;
+      case "chord_game_first": t.firstGames.push("chord"); break;
+    }
+  });
 
-  if (row.event_type === "achievement") {
-    const ach    = ACHIEVEMENTS.find(a => a.id === row.achievement_id);
-    const col    = ach ? (ACH_COLOURS[ach.cat] || ACH_COLOURS.time) : ACH_COLOURS.time;
-    const icon   = ach ? achBadgeSVG(ach, true, 38) : achIconSVG("sessions");
-    const aname  = ach ? ach.name : "Achievement";
-    const adesc  = ach ? ach.desc : "";
-    return `<div class="feed-item">
-      ${_feedAvatarHTML(row.email, name)}
-      <div class="feed-body">
-        <div class="feed-text">
-          <strong style="color:${colour.fg}">${escHtml(name)}</strong>
-          <span style="color:var(--text-muted)"> unlocked</span>
-        </div>
-        <div class="feed-ach-badge" style="background:${col[0]};border-color:${col[1]}">
-          <span class="feed-ach-icon">${icon}</span>
-          <div>
-            <div class="feed-ach-name" style="color:${col[2]}">${aname}</div>
-            ${adesc ? `<div class="feed-ach-desc">${adesc}</div>` : ""}
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px">
-          <div class="feed-time">${timeAgo}</div>
-          ${reactBtn}
-        </div>
-      </div>
-    </div>`;
+  // Sentence fragments — built in approx. order of importance
+  const parts = [];
+  // First-time games first — milestone moments deserve top billing
+  if (t.firstGames.length) {
+    const labels = t.firstGames.map(g => g === "note" ? "<strong>Note Recognition</strong>" : "<strong>Chord Recognition</strong>");
+    parts.push(`played ${labels.join(" and ")} for the first time`);
+  }
+  // High scores
+  t.highScores.forEach(hs => {
+    const label = hs.kind === "note" ? "Note Recognition" : "Chord Recognition";
+    parts.push(`got a new high score in <strong>${label}</strong> (${hs.score})`);
+  });
+  // Achievements
+  if (t.achievements.length) {
+    const names = t.achievements.map(id => {
+      const ach = typeof ACHIEVEMENTS !== "undefined" ? ACHIEVEMENTS.find(a => a.id === id) : null;
+      return ach ? ach.name : id;
+    });
+    if (names.length === 1) parts.push(`unlocked <strong>${escHtml(names[0])}</strong>`);
+    else                    parts.push(`unlocked ${names.length} achievements`);
+  }
+  // Posts and comments
+  if (t.posts)    parts.push(t.posts === 1 ? `posted in the community` : `posted ${t.posts} times in the community`);
+  if (t.comments) parts.push(t.comments === 1 ? `left a comment` : `left ${t.comments} comments`);
+  if (t.replies)  parts.push(t.replies === 1 ? `replied to a comment` : `replied to ${t.replies} comments`);
+  // Pieces by status
+  const STATUS_LABEL = { aspire: "<em>Aspire to play</em>", learning: "<em>Learning</em>", completed: "<em>Completed</em>" };
+  ["aspire", "learning", "completed"].forEach(s => {
+    const list = t.pieces[s];
+    if (!list.length) return;
+    if (list.length === 1) {
+      parts.push(`added <strong>${escHtml(list[0])}</strong> to ${STATUS_LABEL[s]}`);
+    } else {
+      parts.push(`added <strong>${escHtml(list[0])}</strong> and ${list.length - 1} other${list.length > 2 ? "s" : ""} to ${STATUS_LABEL[s]}`);
+    }
+  });
+  // Practice session last — usually the "wrap-up" action of a session
+  if (t.sessionMinutes) {
+    parts.push(`logged a ${formatMinutes(t.sessionMinutes)} practice`);
   }
 
-  const duration = formatMinutes(row.duration_minutes || 0);
+  // Join with "·" separators
+  let sentence;
+  if (parts.length === 0)      sentence = `<span style="color:var(--text-muted)">was active</span>`;
+  else if (parts.length === 1) sentence = parts[0];
+  else                         sentence = parts.join(` <span style="color:var(--text-muted);opacity:.6">·</span> `);
+
   return `<div class="feed-item">
-    ${_feedAvatarHTML(row.email, name)}
+    ${_feedAvatarHTML(group.email, name)}
     <div class="feed-body">
-      <div class="feed-text">
-        <strong style="color:${colour.fg}">${escHtml(name)}</strong> logged <span class="feed-duration">${duration}</span>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div class="feed-time">${timeAgo}</div>
-        ${reactBtn}
-      </div>
+      <div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> ${sentence}</div>
+      <div class="feed-time">${timeAgo}</div>
     </div>
   </div>`;
 }
