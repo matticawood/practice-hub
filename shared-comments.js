@@ -155,7 +155,7 @@
 /* Reply composer — uses same .tc-comment-item.is-reply structure as community.html */
 .tc-reply-composer { padding:13px 20px; width:100%; box-sizing:border-box; }
 .tc-reply-composer-inner { display:flex; gap:10px; align-items:flex-start; width:100%; }
-.tc-reply-composer-inner > div:not([class]) { flex:1 1 auto; min-width:0; }
+.tc-reply-composer-body { flex:1 1 auto; min-width:0; }
 .tc-reply-composer textarea { width:100%; box-sizing:border-box; background:transparent; border:1.5px solid var(--accent); border-radius:16px; color:var(--text); font-size:.85rem; font-family:inherit; padding:7px 12px; resize:none; min-height:34px; max-height:100px; display:block; }
 .tc-reply-composer textarea:focus { outline:none; }
 .tc-irc-actions { display:flex; justify-content:flex-end; gap:14px; margin-top:8px; margin-bottom:6px; }
@@ -836,7 +836,7 @@
           <div id="tc-reply-composer-${c.id}" class="tc-reply-composer" style="display:none">
             <div class="tc-reply-composer-inner">
             ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl)}
-            <div style="flex:1;min-width:0">
+            <div class="tc-reply-composer-body">
               <textarea placeholder="Write a reply…" rows="1"
                 oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();Comments.submitReply('${parentId}','${c.id}',this.closest('.tc-reply-composer'))}"></textarea>
