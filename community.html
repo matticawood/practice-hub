@@ -1159,6 +1159,21 @@
       padding: 2px 0; transition: color .15s;
     }
     .comment-reply-btn:hover { color: var(--accent); }
+    .comment-action-row {
+      display: flex; align-items: center; gap: 14px; margin-top: 4px;
+    }
+    .comment-react-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: none; border: none; padding: 2px 0;
+      font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+      cursor: pointer; font-family: inherit;
+      transition: color .15s;
+      line-height: 1;
+    }
+    .comment-react-btn:hover { color: var(--text); }
+    .comment-react-btn.liked,
+    .comment-react-btn.reacted { color: #e879a0; }
+    .comment-react-btn svg { flex-shrink: 0; }
     .comment-replies { margin-left: 36px; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
     .reply-to-name { color: var(--accent); font-weight: 600; margin-right: 4px; }
     .inline-reply-composer {
@@ -6238,6 +6253,17 @@ async function loadComments(postId) {
   const cmtAvatarMap = {};
   (cmtAvatarRows || []).forEach(r => { if (r.avatar_url) cmtAvatarMap[r.email] = r.avatar_url; });
 
+  // Pre-load any existing reactions on these comments so the heart buttons
+  // render with correct counts/state on first paint.
+  await _loadCommentReactions("community_comment", comments.map(c => c.id));
+  // Track each comment's author + link target so reaction handlers can fire
+  // notifications.
+  comments.forEach(c => _registerCommentMeta("community_comment", c.id, {
+    email:    c.email,
+    name:     c.name || c.email.split("@")[0],
+    link_url: `/community.html?post=${postId}`,
+  }));
+
   // Fetch polls attached to comments (submitted via reply/comment poll builder)
   const commentIds = comments.map(c => c.id);
   const pollByComment = {};
@@ -6283,6 +6309,7 @@ async function loadComments(postId) {
     const rootId   = threadId || c.id;
     const replyPrefix = (isReply && c.reply_to_name)
       ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
+    const reactBar = _commentReactBarHTML("community_comment", c.id);
     return `
       <div class="comment-item${isReply ? " is-reply" : ""}" id="comment-${c.id}">
         <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="display:contents;text-decoration:none">
@@ -6297,7 +6324,10 @@ async function loadComments(postId) {
           ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderCommentMedia(c)}
           ${commentPollHtml(c.id, c.email)}
-          <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
+          <div class="comment-action-row">
+            ${reactBar}
+            <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
+          </div>
         </div>
       </div>`;
   }
@@ -6833,6 +6863,89 @@ function toggleReactPicker(safeKey, eventType, itemId) {
   _openPicker = isOpen ? null : safeKey;
 }
 
+// ── Comment reactions ────────────────────────────────────────────────────────
+// Comments across the app (community posts, focus, updates, content-feed,
+// events, activity items) all use activity_reactions with a per-source
+// event_type discriminator: community_comment / activity_comment /
+// focus_comment / update_comment / content_comment / event_comment.
+const COMMENT_REACT_EMOJIS = ACTIVITY_EMOJIS;
+
+// Caches the author email + link destination for each comment so reaction
+// handlers know who to notify (and where the click should land). Keyed by
+// `${eventType}:${commentId}`.
+const _commentMetaMap = {};
+function _commentMetaKey(eventType, commentId) {
+  return `${eventType}:${String(commentId)}`;
+}
+function _registerCommentMeta(eventType, commentId, meta) {
+  _commentMetaMap[_commentMetaKey(eventType, commentId)] = meta;
+}
+function _getCommentMeta(eventType, commentId) {
+  return _commentMetaMap[_commentMetaKey(eventType, commentId)] || null;
+}
+
+function _commentReactKey(eventType, commentId) {
+  return `${eventType}:${String(commentId)}`;
+}
+function _commentSafeKey(eventType, commentId) {
+  return `cmtrx_${eventType}_${String(commentId).replace(/[^a-z0-9]/gi, "_")}`;
+}
+
+// Render the inline "like" button + hidden picker for a single comment.
+// Counts/state come from _rxMap (populated alongside post reactions).
+function _commentReactBarHTML(eventType, commentId) {
+  const key     = _commentReactKey(eventType, commentId);
+  const safeKey = _commentSafeKey(eventType, commentId);
+  const rxData  = _rxMap[key] || {};
+  let myEmoji = null, total = 0;
+  for (const [e, d] of Object.entries(rxData)) { total += d.count; if (d.mine) myEmoji = e; }
+  // Match activity-feed button structure exactly so _refreshLikeBtn /
+  // _refreshPickerCounts can update it without bespoke code: SVG + optional
+  // emoji label + optional count, all inline.
+  const heartFill = myEmoji
+    ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"`
+    : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+  const countLabel = total > 0 ? ` ${total}` : "";
+  return `
+    <div style="position:relative;display:inline-flex">
+      <button class="comment-react-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
+        onclick="toggleReactPicker('${safeKey}','${eventType}','${String(commentId)}')">
+        ${heartSvg}${emojiLabel}${countLabel}
+      </button>
+      <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
+        ${COMMENT_REACT_EMOJIS.map(e => {
+          const d = rxData[e] || { count: 0, mine: false };
+          return `<button class="${d.mine ? "picked" : ""}"
+            onclick="pickReaction(event,'${safeKey}','${eventType}','${String(commentId)}','${e}')"
+          >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+// Bulk-load reactions for a list of comment ids into _rxMap. Call from any
+// loadComments-style function before rendering. eventType is one of the
+// *_comment discriminators above.
+async function _loadCommentReactions(eventType, commentIds) {
+  if (!commentIds.length) return;
+  const ids = commentIds.map(String);
+  const { data: rows } = await db.from("activity_reactions")
+    .select("item_id,email,emoji")
+    .eq("event_type", eventType)
+    .in("item_id", ids);
+  // Clear any stale entries for these comments first.
+  ids.forEach(id => { delete _rxMap[_commentReactKey(eventType, id)]; });
+  (rows || []).forEach(r => {
+    const k = _commentReactKey(eventType, r.item_id);
+    if (!_rxMap[k]) _rxMap[k] = {};
+    if (!_rxMap[k][r.emoji]) _rxMap[k][r.emoji] = { count: 0, mine: false };
+    _rxMap[k][r.emoji].count++;
+    if (r.email === myEmail) _rxMap[k][r.emoji].mine = true;
+  });
+}
+
 async function pickReaction(event, safeKey, eventType, itemId, emoji) {
   event.stopPropagation(); // don't bubble to document close listener
 
@@ -6903,6 +7016,22 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
 
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: eventType, item_id: String(itemId), emoji });
+
+  // Comment reactions notify the comment author rather than an activity row.
+  if (eventType.endsWith("_comment")) {
+    const _meta = _getCommentMeta(eventType, itemId);
+    if (_meta?.email && _meta.email.toLowerCase() !== myEmail.toLowerCase()) {
+      await db.from("notifications").insert({
+        email:    _meta.email,
+        type:     "reaction",
+        title:    `${myName || "Someone"} reacted ${emoji} to your comment`,
+        body:     "",
+        link_url: _meta.link_url || "/community.html",
+        metadata: { event_type: eventType, item_id: String(itemId), emoji },
+      }).catch(() => {});
+    }
+    return;
+  }
 
   // Notify the activity item's owner (skip self).
   const _row = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId));
@@ -7209,6 +7338,16 @@ async function loadActivityDetailComments(eventType, itemId) {
 
   if (error || !comments) { listEl.innerHTML=""; return; }
 
+  // Pre-load reactions for these activity-feed comments so the heart buttons
+  // render with correct counts/state on first paint.
+  await _loadCommentReactions("activity_comment", comments.map(c => c.id));
+  // Track each comment's author + link target for reaction notifications.
+  comments.forEach(c => _registerCommentMeta("activity_comment", c.id, {
+    email:    c.email,
+    name:     c.name || c.email.split("@")[0],
+    link_url: `/community.html`,
+  }));
+
   const count = comments.length;
   if (hdrEl) hdrEl.textContent = count ? `${count} Comment${count!==1?"s":""}` : "Comments";
 
@@ -7243,7 +7382,10 @@ async function loadActivityDetailComments(eventType, itemId) {
         </div>
         ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix?`<div class="comment-text">${replyPrefix}</div>`:"")}
         ${mediaHtml}
-        <button class="comment-reply-btn" onclick="startActivityDetailReply('${threadId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}','${eventType}','${String(itemId)}')">Reply</button>
+        <div class="comment-action-row">
+          ${_commentReactBarHTML("activity_comment", c.id)}
+          <button class="comment-reply-btn" onclick="startActivityDetailReply('${threadId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}','${eventType}','${String(itemId)}')">Reply</button>
+        </div>
       </div>
     </div>`;
   }

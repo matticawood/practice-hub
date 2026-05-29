@@ -66,6 +66,15 @@
 
   // Reaction state: _rxState[parentId][emoji] = { count, mine }
   const _rxState = {};
+  // Per-comment reactions — uses activity_reactions table with the event_type
+  // discriminator from config.commentReactionEventType (e.g. "focus_comment").
+  // Keyed by commentId → { emoji: { count, mine } }.
+  const _cmtRxState = {};
+  // Maps commentId → { email, name } so reaction handlers can notify the
+  // comment author. Populated each time Comments.load(parentId) runs.
+  const _cmtMetaMap = {};
+  let   _cmtOpenPicker = null;
+  const _CMT_RX_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
   let _openPicker = null;
 
   // Likers popover
@@ -149,8 +158,13 @@
 .tc-comment-text { font-size:.87rem; color:var(--text-muted); line-height:1.5; white-space:pre-wrap; word-break:break-word; }
 .tc-reply-to-name { color:var(--accent); font-weight:600; margin-right:4px; }
 .tc-comments-empty { padding:24px 20px; text-align:center; color:var(--text-muted); font-size:.82rem; }
-.tc-comment-reply-btn { background:none; border:none; cursor:pointer; font-family:inherit; font-size:.72rem; font-weight:600; color:var(--text-muted); padding:3px 0; transition:color .15s; display:inline-block; margin-top:3px; }
+.tc-comment-reply-btn { background:none; border:none; cursor:pointer; font-family:inherit; font-size:.72rem; font-weight:600; color:var(--text-muted); padding:3px 0; transition:color .15s; display:inline-block; }
 .tc-comment-reply-btn:hover { color:var(--accent); }
+.tc-comment-action-row { display:flex; align-items:center; gap:14px; margin-top:4px; }
+.tc-cmt-react-btn { display:inline-flex; align-items:center; gap:4px; background:none; border:none; padding:2px 0; font-size:.72rem; font-weight:600; color:var(--text-muted); cursor:pointer; font-family:inherit; transition:color .15s; line-height:1; }
+.tc-cmt-react-btn:hover { color:var(--text); }
+.tc-cmt-react-btn.liked { color:#e879a0; }
+.tc-cmt-react-btn svg { flex-shrink:0; }
 .tc-comment-replies { margin-left:36px; margin-top:8px; display:flex; flex-direction:column; gap:4px; }
 /* Reply composer — uses same .tc-comment-item.is-reply structure as community.html */
 .tc-reply-composer { padding:13px 20px; width:100%; box-sizing:border-box; }
@@ -665,9 +679,78 @@
           ${c.content?`<div class="tc-comment-text">${replyPrefix}${_escHtml(c.content)}</div>`:(replyPrefix?`<div class="tc-comment-text">${replyPrefix}</div>`:"")}
           ${media?`<div class="tc-comment-media">${media}</div>`:""}
           ${pollHtml}
-          ${!isReply?`<button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>`:""}
+          <div class="tc-comment-action-row">
+            ${_cmtReactBarHTML(c.id)}
+            ${!isReply?`<button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>`:""}
+          </div>
         </div>
       </div>`;
+  }
+
+  // ── Per-comment reactions ───────────────────────────────────────────────────
+  function _cmtSafeKey(commentId) {
+    return `tccrx_${String(commentId).replace(/[^a-z0-9]/gi, "_")}`;
+  }
+
+  async function _loadCmtReactions(commentIds) {
+    const eventType = _cfg?.commentReactionEventType;
+    if (!eventType || !commentIds.length) return;
+    const auth = _auth();
+    const ids = commentIds.map(String);
+    const { data } = await _db().from("activity_reactions")
+      .select("item_id,email,emoji")
+      .eq("event_type", eventType)
+      .in("item_id", ids);
+    ids.forEach(id => { delete _cmtRxState[id]; });
+    (data || []).forEach(r => {
+      if (!_cmtRxState[r.item_id]) _cmtRxState[r.item_id] = {};
+      if (!_cmtRxState[r.item_id][r.emoji]) _cmtRxState[r.item_id][r.emoji] = { count: 0, mine: false };
+      _cmtRxState[r.item_id][r.emoji].count++;
+      if (r.email === auth.email) _cmtRxState[r.item_id][r.emoji].mine = true;
+    });
+  }
+
+  function _cmtReactBarHTML(commentId) {
+    if (!_cfg?.commentReactionEventType) return "";
+    const safeKey = _cmtSafeKey(commentId);
+    const data    = _cmtRxState[String(commentId)] || {};
+    let myEmoji = null, total = 0;
+    for (const [e, d] of Object.entries(data)) { total += d.count; if (d.mine) myEmoji = e; }
+    const heartFill = myEmoji
+      ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"`
+      : `fill="none" stroke="currentColor" stroke-width="2"`;
+    const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+    const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+    const countLabel = total > 0 ? ` ${total}` : "";
+    return `
+      <div style="position:relative;display:inline-flex">
+        <button class="tc-cmt-react-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
+          onclick="Comments.toggleCmtPicker('${safeKey}','${String(commentId)}')">
+          ${heartSvg}${emojiLabel}${countLabel}
+        </button>
+        <div class="tc-react-picker" id="picker-${safeKey}" style="display:none">
+          ${_CMT_RX_EMOJIS.map(e => {
+            const d = data[e] || { count: 0, mine: false };
+            return `<button class="${d.mine ? "picked" : ""}"
+              onclick="Comments.pickCmtReact(event,'${safeKey}','${String(commentId)}','${e}')"
+            >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }
+
+  function _cmtRefreshBtn(safeKey, commentId) {
+    const data = _cmtRxState[commentId] || {};
+    let myEmoji = null, total = 0;
+    for (const [e, d] of Object.entries(data)) { total += d.count; if (d.mine) myEmoji = e; }
+    const heartFill = myEmoji
+      ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"`
+      : `fill="none" stroke="currentColor" stroke-width="2"`;
+    const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+    const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+    const countLabel = total > 0 ? ` ${total}` : "";
+    const btn = document.getElementById(`like-btn-${safeKey}`);
+    if (btn) { btn.classList.toggle("liked", !!myEmoji); btn.innerHTML = heartSvg + emojiLabel + countLabel; }
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -836,6 +919,16 @@
       const count=comments?.length||0;
       if(hdrEl)hdrEl.textContent=count===0?"Comments":`${count} Comment${count!==1?"s":""}`;
       if(!count){listEl.innerHTML=`<div class="tc-comments-empty">No comments yet — be the first!</div>`;return;}
+      // Pre-load per-comment reactions so the heart buttons render with correct counts.
+      await _loadCmtReactions(comments.map(c => c.id));
+      // Track each comment's author + parentId for notification routing on reaction.
+      (comments || []).forEach(c => {
+        _cmtMetaMap[String(c.id)] = {
+          email:    c.email,
+          name:     c.name || c.email.split("@")[0],
+          parentId: parentId,
+        };
+      });
       const emails=[...new Set(comments.map(c=>c.email))];
       const {data:avRows}=await _db().from("allowed_emails").select("email,avatar_url").in("email",emails);
       const avatarMap={};
@@ -957,6 +1050,89 @@
       _cfg?.onCommentChange?.(parentId);
     },
 
+    // ── Per-comment reaction picker (open/close) ──────────────────────────────
+    toggleCmtPicker(safeKey, commentId) {
+      const picker = document.getElementById(`picker-${safeKey}`);
+      if (!picker) return;
+      if (_cmtOpenPicker && _cmtOpenPicker !== safeKey) {
+        const prev = document.getElementById(`picker-${_cmtOpenPicker}`);
+        if (prev) prev.style.display = "none";
+      }
+      const opening = picker.style.display === "none";
+      picker.style.display = opening ? "flex" : "none";
+      _cmtOpenPicker = opening ? safeKey : null;
+    },
+
+    // ── Per-comment reaction pick / unpick ────────────────────────────────────
+    async pickCmtReact(event, safeKey, commentId, emoji) {
+      event.stopPropagation();
+      const eventType = _cfg?.commentReactionEventType;
+      if (!eventType) return;
+      const picker = document.getElementById(`picker-${safeKey}`);
+      if (picker) picker.style.display = "none";
+      _cmtOpenPicker = null;
+
+      const auth   = _auth();
+      const idStr  = String(commentId);
+      if (!_cmtRxState[idStr]) _cmtRxState[idStr] = {};
+      const data   = _cmtRxState[idStr];
+      const pickerBtn   = event.currentTarget;
+      const wasPicked   = pickerBtn.classList.contains("picked");
+      const existingEm  = Object.keys(data).find(e => data[e]?.mine);
+
+      if (wasPicked) {
+        pickerBtn.classList.remove("picked");
+        if (data[emoji]) { data[emoji].mine = false; data[emoji].count = Math.max(0, data[emoji].count - 1); }
+        _cmtRefreshBtn(safeKey, idStr);
+        await _db().from("activity_reactions").delete()
+          .eq("email", auth.email).eq("event_type", eventType).eq("item_id", idStr).eq("emoji", emoji);
+        return;
+      }
+      if (existingEm) {
+        if (data[existingEm]) { data[existingEm].mine = false; data[existingEm].count = Math.max(0, data[existingEm].count - 1); }
+        await _db().from("activity_reactions").delete()
+          .eq("email", auth.email).eq("event_type", eventType).eq("item_id", idStr).eq("emoji", existingEm);
+      }
+      pickerBtn.classList.add("picked");
+      if (!data[emoji]) data[emoji] = { count: 0, mine: false };
+      data[emoji].mine = true;
+      data[emoji].count++;
+      _cmtRefreshBtn(safeKey, idStr);
+      await _db().from("activity_reactions")
+        .insert({ email: auth.email, event_type: eventType, item_id: idStr, emoji });
+
+      // Notify the comment author (skip self). The link target is derived from
+      // the page's reply-notification link function so the destination matches
+      // existing comment-reply notifications for each surface.
+      const meta = _cmtMetaMap[idStr];
+      if (meta?.email && meta.email.toLowerCase() !== auth.email.toLowerCase()) {
+        // Look up which parent post this comment belongs to so the link goes
+        // to the right page. The comment row in DB has the parent FK so we
+        // could query, but the simpler fix is to compute the link from the
+        // already-loaded comment if shared-comments retained the parentId.
+        // Here we fall back to a generic link based on the comments table name.
+        const fallbackLink = (() => {
+          switch (eventType) {
+            case "focus_comment":  return "/focus.html";
+            case "update_comment": return "/updates.html";
+            case "content_comment":return "/content-feed.html";
+            default: return "/";
+          }
+        })();
+        const linkUrl = (typeof _cfg.replyNotificationLinkFn === "function" && meta.parentId)
+          ? _cfg.replyNotificationLinkFn(meta.parentId)
+          : fallbackLink;
+        await _db().from("notifications").insert({
+          email:    meta.email,
+          type:     "reaction",
+          title:    `${auth.name || "Someone"} reacted ${emoji} to your comment`,
+          body:     "",
+          link_url: linkUrl,
+          metadata: { event_type: eventType, item_id: idStr, emoji },
+        }).catch(() => {});
+      }
+    },
+
     // Show reply composer for a comment
     startReply(parentId, commentId, authorName, authorEmail) {
       document.querySelectorAll("[id^='tc-reply-composer-']").forEach(el=>{ if(el.style.display!=="none")el.style.display="none"; });
@@ -1051,6 +1227,16 @@
         const prev = document.getElementById(`tc-picker-${_openPicker}`);
         if (prev) prev.style.display = "none";
         _openPicker = null;
+      }
+    });
+    // Close per-comment reaction picker on outside click
+    document.addEventListener("click", (e) => {
+      if (!_cmtOpenPicker) return;
+      const picker  = document.getElementById(`picker-${_cmtOpenPicker}`);
+      const likeBtn = document.getElementById(`like-btn-${_cmtOpenPicker}`);
+      if (picker && !picker.contains(e.target) && !likeBtn?.contains(e.target)) {
+        picker.style.display = "none";
+        _cmtOpenPicker = null;
       }
     });
   };

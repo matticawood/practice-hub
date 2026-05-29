@@ -474,6 +474,40 @@
       padding: 2px 0; transition: color .15s;
     }
     .comment-reply-btn:hover { color: var(--accent); }
+    .comment-action-row {
+      display: flex; align-items: center; gap: 14px; margin-top: 4px;
+    }
+    .comment-react-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: none; border: none; padding: 2px 0;
+      font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+      cursor: pointer; font-family: inherit;
+      transition: color .15s;
+      line-height: 1;
+    }
+    .comment-react-btn:hover { color: var(--text); }
+    .comment-react-btn.liked,
+    .comment-react-btn.reacted { color: #e879a0; }
+    .comment-react-btn svg { flex-shrink: 0; }
+    .activity-react-picker {
+      position: absolute; bottom: calc(100% + 8px); left: 0;
+      background: var(--surface-2); border: 1.5px solid var(--border);
+      border-radius: 32px; padding: 6px 8px;
+      display: flex; align-items: center; gap: 2px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5);
+      z-index: 200; white-space: nowrap;
+    }
+    .activity-react-picker button {
+      background: none; border: none; cursor: pointer;
+      font-size: 1.1rem; padding: 4px 6px; border-radius: 50%;
+      transition: background .15s, transform .15s;
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .activity-react-picker button:hover { background: var(--surface); transform: scale(1.15); }
+    .activity-react-picker button.picked { background: rgba(245,197,24,.18); }
+    .activity-react-picker .picker-count {
+      font-size: 0.65rem; color: var(--text-muted); font-weight: 600;
+    }
     .comment-replies { margin-left: 36px; margin-top: 4px; display: flex; flex-direction: column; gap: 0; }
     .reply-to-name { color: var(--accent); font-weight: 600; margin-right: 4px; }
     .delete-btn {
@@ -2852,6 +2886,149 @@ async function removeRsvp(eventId) {
 // ── Comments ──────────────────────────────────────────────────────────────────
 let _currentEventId = null;
 
+// ── Event comment reactions ──────────────────────────────────────────────────
+// Uses activity_reactions with event_type='event_comment'.
+const _evCmtRxEmojis = ["❤️","👏","🔥","🎉","💪","😂"];
+const _evCmtRxMap = {};            // commentId → { emoji: {count, mine} }
+const _evCmtMetaMap = {};          // commentId → { email, name } for notifications
+let   _evCmtOpenPicker = null;     // currently open picker safeKey
+
+function _evCmtSafeKey(commentId) {
+  return `evcrx_${String(commentId).replace(/[^a-z0-9]/gi, "_")}`;
+}
+
+async function _evLoadCommentReactions(commentIds) {
+  if (!commentIds.length) return;
+  const ids = commentIds.map(String);
+  const { data: rows } = await db.from("activity_reactions")
+    .select("item_id,email,emoji")
+    .eq("event_type", "event_comment")
+    .in("item_id", ids);
+  ids.forEach(id => { delete _evCmtRxMap[id]; });
+  (rows || []).forEach(r => {
+    if (!_evCmtRxMap[r.item_id]) _evCmtRxMap[r.item_id] = {};
+    if (!_evCmtRxMap[r.item_id][r.emoji]) _evCmtRxMap[r.item_id][r.emoji] = { count: 0, mine: false };
+    _evCmtRxMap[r.item_id][r.emoji].count++;
+    if (r.email === myEmail) _evCmtRxMap[r.item_id][r.emoji].mine = true;
+  });
+}
+
+function _evCommentReactBarHTML(commentId) {
+  const safeKey = _evCmtSafeKey(commentId);
+  const rxData  = _evCmtRxMap[String(commentId)] || {};
+  let myEmoji = null, total = 0;
+  for (const [e, d] of Object.entries(rxData)) { total += d.count; if (d.mine) myEmoji = e; }
+  const heartFill = myEmoji
+    ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"`
+    : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+  const countLabel = total > 0 ? ` ${total}` : "";
+  return `
+    <div style="position:relative;display:inline-flex">
+      <button class="comment-react-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
+        onclick="_evToggleCmtPicker('${safeKey}','${String(commentId)}')">
+        ${heartSvg}${emojiLabel}${countLabel}
+      </button>
+      <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
+        ${_evCmtRxEmojis.map(e => {
+          const d = rxData[e] || { count: 0, mine: false };
+          return `<button class="${d.mine ? "picked" : ""}"
+            onclick="_evPickCmtReaction(event,'${safeKey}','${String(commentId)}','${e}')"
+          >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+function _evToggleCmtPicker(safeKey, commentId) {
+  const picker = document.getElementById(`picker-${safeKey}`);
+  if (!picker) return;
+  // Close any other picker first
+  if (_evCmtOpenPicker && _evCmtOpenPicker !== safeKey) {
+    const prev = document.getElementById(`picker-${_evCmtOpenPicker}`);
+    if (prev) prev.style.display = "none";
+  }
+  const opening = picker.style.display === "none";
+  picker.style.display = opening ? "flex" : "none";
+  _evCmtOpenPicker = opening ? safeKey : null;
+}
+window._evToggleCmtPicker = _evToggleCmtPicker;
+
+async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
+  event.stopPropagation();
+  const picker = document.getElementById(`picker-${safeKey}`);
+  if (picker) picker.style.display = "none";
+  _evCmtOpenPicker = null;
+
+  const idStr = String(commentId);
+  if (!_evCmtRxMap[idStr]) _evCmtRxMap[idStr] = {};
+  const data = _evCmtRxMap[idStr];
+  const pickerBtn = event.currentTarget;
+  const wasPicked = pickerBtn.classList.contains("picked");
+  const existingEmoji = Object.keys(data).find(e => data[e]?.mine);
+
+  if (wasPicked) {
+    pickerBtn.classList.remove("picked");
+    if (data[emoji]) { data[emoji].mine = false; data[emoji].count = Math.max(0, data[emoji].count - 1); }
+    _evRefreshCmtBtn(safeKey, idStr);
+    await db.from("activity_reactions").delete()
+      .eq("email", myEmail).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", emoji);
+    return;
+  }
+  if (existingEmoji) {
+    if (data[existingEmoji]) { data[existingEmoji].mine = false; data[existingEmoji].count = Math.max(0, data[existingEmoji].count - 1); }
+    await db.from("activity_reactions").delete()
+      .eq("email", myEmail).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", existingEmoji);
+  }
+  pickerBtn.classList.add("picked");
+  if (!data[emoji]) data[emoji] = { count: 0, mine: false };
+  data[emoji].mine = true;
+  data[emoji].count++;
+  _evRefreshCmtBtn(safeKey, idStr);
+  await db.from("activity_reactions")
+    .insert({ email: myEmail, event_type: "event_comment", item_id: idStr, emoji });
+
+  // Notify the comment author (skip self).
+  const meta = _evCmtMetaMap[idStr];
+  if (meta?.email && meta.email.toLowerCase() !== myEmail.toLowerCase()) {
+    await db.from("notifications").insert({
+      email:    meta.email,
+      type:     "reaction",
+      title:    `${myName || "Someone"} reacted ${emoji} to your comment`,
+      body:     "",
+      link_url: `/events.html?event=${_currentEventId}`,
+      metadata: { event_type: "event_comment", item_id: idStr, emoji },
+    }).catch(() => {});
+  }
+}
+window._evPickCmtReaction = _evPickCmtReaction;
+
+function _evRefreshCmtBtn(safeKey, commentId) {
+  const data = _evCmtRxMap[commentId] || {};
+  let myEmoji = null, total = 0;
+  for (const [e, d] of Object.entries(data)) { total += d.count; if (d.mine) myEmoji = e; }
+  const heartFill = myEmoji
+    ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"`
+    : `fill="none" stroke="currentColor" stroke-width="2"`;
+  const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+  const countLabel = total > 0 ? ` ${total}` : "";
+  const btn = document.getElementById(`like-btn-${safeKey}`);
+  if (btn) { btn.classList.toggle("liked", !!myEmoji); btn.innerHTML = heartSvg + emojiLabel + countLabel; }
+}
+
+// Close picker on outside click
+document.addEventListener("click", (e) => {
+  if (!_evCmtOpenPicker) return;
+  const picker  = document.getElementById(`picker-${_evCmtOpenPicker}`);
+  const likeBtn = document.getElementById(`like-btn-${_evCmtOpenPicker}`);
+  if (picker && !picker.contains(e.target) && !likeBtn?.contains(e.target)) {
+    picker.style.display = "none";
+    _evCmtOpenPicker = null;
+  }
+});
+
 async function loadComments(eventId) {
   _currentEventId = eventId;
   const listEl = document.getElementById("comments-list");
@@ -2881,6 +3058,16 @@ async function loadComments(eventId) {
     .select("email,avatar_url").in("email", commentEmails);
   const avatarMap = {};
   (avatarRows || []).forEach(r => { if (r.avatar_url) avatarMap[r.email] = r.avatar_url; });
+
+  // Pre-load existing reactions on these event comments.
+  await _evLoadCommentReactions(comments.map(c => c.id));
+  // Track each comment's author for reaction notifications.
+  comments.forEach(c => {
+    _evCmtMetaMap[String(c.id)] = {
+      email: c.email,
+      name:  c.name || c.email.split("@")[0],
+    };
+  });
 
   // Fetch polls attached to comments
   const commentIds = comments.map(c => c.id);
@@ -2918,7 +3105,10 @@ async function loadComments(eventId) {
           ${c.content ? `<div class="comment-text">${replyPrefix}${esc(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderAttHtml(c)}
           ${poll ? _renderPollHtml(poll, c.id, c.email) : ""}
-          ${!isReply ? `<button class="comment-reply-btn" onclick="startEvReply('${c.id}','${dispName.replace(/'/g,"\\'")}')">Reply</button>` : ""}
+          <div class="comment-action-row">
+            ${_evCommentReactBarHTML(c.id)}
+            ${!isReply ? `<button class="comment-reply-btn" onclick="startEvReply('${c.id}','${dispName.replace(/'/g,"\\'")}')">Reply</button>` : ""}
+          </div>
         </div>
       </div>`;
   }
