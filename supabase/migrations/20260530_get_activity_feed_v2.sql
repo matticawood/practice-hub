@@ -52,9 +52,15 @@ WITH excl AS (
 ),
 
 -- 1. Practice sessions
+-- Use COALESCE(ps.created_at, ps.session_date) so sessions sort against the
+-- other event types by real timestamp. session_date is a DATE (midnight UTC)
+-- which used to push session rows below same-day events that had a proper
+-- timestamptz, eventually beyond the LIMIT 200 cutoff and making the
+-- "logged X practice" entries disappear from the feed.
 sessions AS (
   SELECT
-    ps.email, ae.name, ps.session_date AS created_at,
+    ps.email, ae.name,
+    COALESCE(ps.created_at, ps.session_date::timestamptz) AS created_at,
     'session'::text                AS event_type,
     ps.id::text                    AS item_id,
     NULL::text                     AS achievement_id,
@@ -71,7 +77,7 @@ sessions AS (
   FROM practice_sessions ps
   LEFT JOIN allowed_emails ae ON ae.email = ps.email
   WHERE ps.email NOT IN (SELECT email FROM excl)
-  ORDER BY ps.session_date DESC
+  ORDER BY COALESCE(ps.created_at, ps.session_date::timestamptz) DESC
   LIMIT 50
 ),
 
