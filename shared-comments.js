@@ -140,7 +140,8 @@
 /* ── Comments ─────────────────────────────────────────────────────────────── */
 .tc-comments-section { background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius,10px); overflow:hidden; }
 .tc-comments-hdr { padding:14px 20px; border-bottom:1px solid var(--border); font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); }
-.tc-comment-item { display:flex; gap:10px; padding:13px 20px; border-bottom:1px solid rgba(0,0,0,.04); }
+.tc-comment-item { display:flex; gap:10px; padding:13px 20px; border-bottom:1px solid rgba(0,0,0,.04); transition: background .6s ease; }
+.tc-comment-item.tc-just-posted { background: rgba(245,197,24,.14); }
 .tc-comment-item:last-of-type { border-bottom:none; }
 .tc-comment-body { flex:1; min-width:0; }
 .tc-comment-meta { display:flex; align-items:baseline; gap:8px; margin-bottom:3px; }
@@ -881,6 +882,19 @@
       _clearState(key);
       await Comments.load(parentId);
       _cfg?.onCommentChange?.(parentId);
+      // Scroll the new comment into view — important on mobile where the
+      // keyboard dismiss + layout shift can hide it, making it look like
+      // nothing happened even though the post succeeded.
+      if (row?.id) {
+        requestAnimationFrame(() => {
+          const newEl = document.getElementById(`tc-cmt-${row.id}`);
+          if (newEl) {
+            newEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            newEl.classList.add("tc-just-posted");
+            setTimeout(() => newEl.classList.remove("tc-just-posted"), 1600);
+          }
+        });
+      }
     },
 
     // Submit a reply
@@ -913,6 +927,18 @@
       Comments.cancelReply(commentId);
       await Comments.load(parentId);
       _cfg?.onCommentChange?.(parentId);
+      // Scroll the new reply into view + brief highlight (mobile keyboard
+      // dismiss can otherwise hide it).
+      if (row?.id) {
+        requestAnimationFrame(() => {
+          const newEl = document.getElementById(`tc-cmt-${row.id}`);
+          if (newEl) {
+            newEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            newEl.classList.add("tc-just-posted");
+            setTimeout(() => newEl.classList.remove("tc-just-posted"), 1600);
+          }
+        });
+      }
     },
 
     // Delete a comment
