@@ -11315,7 +11315,7 @@ function feedItemHTML(group) {
   // Sentence fragments — short and scannable, no <strong>; uses .feed-emph
   // so colour adapts to dark vs light hub theme.
   const emph  = s => `<span class="feed-emph">${escHtml(s)}</span>`;
-  const parts = [];
+  const parts = [];  // non-achievement actions, joined into the sentence
   // First-time games (milestone)
   if (t.firstNote && t.firstChord) {
     parts.push(`played ${emph("Note")} and ${emph("Chord Recognition")} for the first time`);
@@ -11324,23 +11324,11 @@ function feedItemHTML(group) {
   } else if (t.firstChord) {
     parts.push(`played ${emph("Chord Recognition")} for the first time`);
   }
-  // One high-score line per kind (if not already covered by first-game line)
   if (t.bestNote != null  && !t.firstNote)  parts.push(`new high score in ${emph("Note Recognition")} (${t.bestNote})`);
   if (t.bestChord != null && !t.firstChord) parts.push(`new high score in ${emph("Chord Recognition")} (${t.bestChord})`);
-  // Achievements
-  if (t.achievements.length) {
-    const names = t.achievements.map(id => {
-      const ach = typeof ACHIEVEMENTS !== "undefined" ? ACHIEVEMENTS.find(a => a.id === id) : null;
-      return ach ? ach.name : id;
-    });
-    if (names.length === 1) parts.push(`unlocked ${emph(names[0])}`);
-    else                    parts.push(`unlocked ${names.length} achievements`);
-  }
-  // Posts and comments
   if (t.posts)    parts.push(t.posts === 1 ? `posted in the community` : `posted ${t.posts} times`);
   if (t.replies)  parts.push(t.replies === 1 ? `replied to a comment` : `replied to ${t.replies} comments`);
   if (t.comments) parts.push(t.comments === 1 ? `left a comment` : `left ${t.comments} comments`);
-  // Pieces by status
   const STATUS_LABEL = { aspire: "Aspire to play", learning: "Learning", completed: "Completed" };
   ["aspire", "learning", "completed"].forEach(s => {
     const list = t.pieces[s];
@@ -11352,21 +11340,66 @@ function feedItemHTML(group) {
       parts.push(`added ${emph(list[0])} and ${list.length - 1} other${list.length > 2 ? "s" : ""} to ${sLabel}`);
     }
   });
-  // Practice session last
   if (t.sessionMinutes) {
     parts.push(`logged a ${formatMinutes(t.sessionMinutes)} practice`);
   }
 
-  // Join with subtle "·" separators
-  let sentence;
-  if (parts.length === 0)      sentence = `<span style="color:var(--text-muted)">was active</span>`;
-  else if (parts.length === 1) sentence = parts[0];
-  else                         sentence = parts.join(`<span class="feed-sep">·</span>`);
+  // Achievement badges — keep the same visual style as v1 single rows.
+  // Show up to 3 badges; collapse the rest into a "+N more" tag.
+  let badgesHTML = "";
+  let leadVerbLine = "";
+  if (t.achievements.length) {
+    const ACH_LIST = (typeof ACHIEVEMENTS !== "undefined") ? ACHIEVEMENTS : [];
+    const ACH_COLS = (typeof ACH_COLOURS !== "undefined") ? ACH_COLOURS : { time: ["#1f1f1f","#333","#fff"] };
+    const showCount = Math.min(t.achievements.length, 3);
+    const extra     = t.achievements.length - showCount;
+
+    badgesHTML = t.achievements.slice(0, showCount).map(id => {
+      const ach   = ACH_LIST.find(a => a.id === id);
+      const col   = ach ? (ACH_COLS[ach.cat] || ACH_COLS.time) : ACH_COLS.time;
+      const icon  = ach && typeof achBadgeSVG === "function"
+        ? achBadgeSVG(ach, true, 38)
+        : (typeof achIconSVG === "function" ? achIconSVG("sessions") : "");
+      const aname = ach ? ach.name : id;
+      const adesc = ach ? (ach.desc || "") : "";
+      return `<div class="feed-ach-badge" style="background:${col[0]};border-color:${col[1]}">
+        <span class="feed-ach-icon">${icon}</span>
+        <div>
+          <div class="feed-ach-name" style="color:${col[2]}">${escHtml(aname)}</div>
+          ${adesc ? `<div class="feed-ach-desc">${escHtml(adesc)}</div>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+    if (extra > 0) {
+      badgesHTML += `<div class="feed-ach-badge" style="background:transparent;border-color:var(--border)">
+        <div><div class="feed-ach-name" style="color:var(--text-muted)">+ ${extra} more</div></div>
+      </div>`;
+    }
+    leadVerbLine = `<div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> unlocked</div>`;
+  }
+
+  // Build the supporting sentence (other actions). If there are achievements,
+  // prefix with "Also" so it reads as supplementary.
+  let sentenceHTML = "";
+  if (parts.length) {
+    const joined = parts.length === 1 ? parts[0]
+                 : parts.join(`<span class="feed-sep">·</span>`);
+    if (badgesHTML) {
+      sentenceHTML = `<div class="feed-text" style="margin-top:6px"><span style="color:var(--text-muted)">Also</span> ${joined}</div>`;
+    } else {
+      sentenceHTML = `<div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> ${joined}</div>`;
+    }
+  } else if (!badgesHTML) {
+    // Pure no-op — shouldn't really happen
+    sentenceHTML = `<div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> <span style="color:var(--text-muted)">was active</span></div>`;
+  }
 
   return `<div class="feed-item">
     ${_feedAvatarHTML(group.email, name)}
     <div class="feed-body">
-      <div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> ${sentence}</div>
+      ${leadVerbLine}
+      ${badgesHTML}
+      ${sentenceHTML}
       <div class="feed-time">${timeAgo}</div>
     </div>
   </div>`;
