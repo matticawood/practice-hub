@@ -268,6 +268,8 @@ const SH_SUBNAV = {
     .notif-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #f5c518); flex-shrink: 0; margin-top: 5px; }
     .notif-dot.read { background: transparent; }
     .notif-item-body { flex: 1; min-width: 0; }
+    .notif-item-badge { flex-shrink: 0; display: flex; align-items: center; }
+    .notif-item-badge svg { display: block; }
     .notif-item-title { font-size: 0.82rem; font-weight: 600; color: #e0e0e0; margin-bottom: 2px; line-height: 1.35; }
     .notif-item-desc { font-size: 0.75rem; color: #5a5a5a; line-height: 1.4; }
     .notif-item-time { font-size: 0.68rem; color: #3a3a3a; margin-top: 4px; }
@@ -1101,15 +1103,22 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       list.innerHTML = `<div class="notif-empty">No notifications yet.<br><span style="color:#333">App updates and activity will appear here.</span></div>`;
       return;
     }
-    list.innerHTML = _notifs.map(n => `
+    list.innerHTML = _notifs.map(n => {
+      // Achievement notifications carry a pre-rendered badge SVG in metadata
+      // so the bell panel can show the same coloured badge as the activity
+      // feed / toast (no need to duplicate the SVG generator in this file).
+      const badgeSvg = (n.type === "achievement" && n.metadata?.badge_svg) ? n.metadata.badge_svg : null;
+      return `
       <div class="notif-item ${n.read ? "" : "unread"}" data-id="${n.id}" onclick="window._shNotifClick(this)">
         <div class="notif-dot ${n.read ? "read" : ""}"></div>
+        ${badgeSvg ? `<div class="notif-item-badge">${badgeSvg}</div>` : ""}
         <div class="notif-item-body">
           <div class="notif-item-title">${_esc(n.title)}</div>
           ${n.body ? `<div class="notif-item-desc">${_esc(n.body)}</div>` : ""}
           <div class="notif-item-time">${_ago(n.created_at)}</div>
         </div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
   };
 
   window._shLoadNotifs = async function() {
