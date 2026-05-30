@@ -183,6 +183,45 @@ Deno.serve(async (req) => {
     body = { notification_id: body.record.id };
   }
 
+  // ── Chat / DM push path ──────────────────────────────────────────────────────
+  // Direct push for a new chat message. Deliberately does NOT insert a
+  // notifications row (so it never shows in the bell) and omits the badge key
+  // (so the app-icon badge — which tracks bell notifications — is left
+  // untouched; chat unread is handled by the in-app chat badge).
+  if (body.chat_push && body.email) {
+    const devices = await supaSelect(
+      `device_tokens?email=eq.${encodeURIComponent(String(body.email).toLowerCase())}&select=token`,
+    );
+    if (!devices.length) return json({ sent: 0, reason: "no devices" });
+    const accessToken = await getFirebaseAccessToken();
+    const sender  = String(body.sender || "Someone");
+    const preview = String(body.preview || "Sent a message");
+    const chatId  = body.chat_id ? String(body.chat_id) : "";
+    let sent = 0;
+    const invalid: string[] = [];
+    await Promise.all(devices.map(async (d: any) => {
+      const msg = {
+        message: {
+          token: d.token,
+          notification: { title: "New message", body: `${sender}: ${preview}` },
+          data: chatId ? { link_url: `/chat.html?chat=${chatId}` } : {},
+          apns: { payload: { aps: { sound: "default" } } }, // no badge key
+        },
+      };
+      const res = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${FB_PROJECT_ID}/messages:send`,
+        { method: "POST", headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify(msg) },
+      );
+      if (res.ok) sent++;
+      else {
+        const errBody = await res.text();
+        if (/UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND/i.test(errBody)) invalid.push(d.token);
+      }
+    }));
+    if (invalid.length) await supaDeleteTokens(invalid);
+    return json({ sent, total: devices.length });
+  }
+
   // ── Badge sync path ─────────────────────────────────────────────────────────
   // Called from the web app whenever the user reads notification(s). Sends a
   // silent (content-available, no alert) push to every device for that email

@@ -3894,7 +3894,60 @@ async function sendChatMessage() {
 
   // Refresh conversation list so new/updated convos always appear immediately
   _loadConversationsList();
+
+  // Fire DM push notifications to the other participants (best-effort).
+  _pushChatNotification(inserted);
   if (sendBtn) sendBtn.disabled = false;
+}
+
+// Fire a DM push to every other participant of the current chat, except
+// anyone who is actively on the chat page right now (presence-based) so we
+// don't ping someone who's reading the message live. Best-effort: failures
+// are swallowed. Sends via the send-push edge function directly so it does
+// NOT create a bell notification.
+async function _pushChatNotification(msg) {
+  try {
+    if (!_currentChatId || !myEmail) return;
+    const { data: parts } = await db.from("community_chat_participants")
+      .select("email").eq("chat_id", _currentChatId);
+    let recipients = (parts || [])
+      .map(p => p.email)
+      .filter(e => e && e.toLowerCase() !== myEmail.toLowerCase());
+    if (!recipients.length) return;
+
+    // Drop anyone currently on the chat page (seen within the last 2 min).
+    try {
+      const { data: pres } = await db.from("user_presence")
+        .select("email,page,last_seen_at").in("email", recipients);
+      const now = Date.now();
+      const activeOnChat = new Set((pres || [])
+        .filter(r => (r.page || "").includes("/chat") &&
+                     (now - new Date(r.last_seen_at).getTime() < 120000))
+        .map(r => (r.email || "").toLowerCase()));
+      recipients = recipients.filter(e => !activeOnChat.has(e.toLowerCase()));
+    } catch (e) { /* presence optional */ }
+    if (!recipients.length) return;
+
+    const preview = (msg.content
+      || (msg.media && msg.media.length ? "Sent an attachment" : "Sent a message")).slice(0, 80);
+    const { data: { session } } = await db.auth.getSession();
+    const token = session?.access_token;
+    if (!token) return;
+
+    recipients.forEach(email => {
+      fetch(`${SUPA_URL}/functions/v1/send-push`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_push: true,
+          email,
+          sender: myName || "Someone",
+          preview,
+          chat_id: _currentChatId,
+        }),
+      }).catch(() => {});
+    });
+  } catch (e) { /* best-effort */ }
 }
 
 // Open a DM from a member card/name — called from existing member UI
@@ -4083,7 +4136,15 @@ async function _loadAllMembers() {
   initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "chat", avatarUrl: myAvatarUrl });
 
   await _loadAllMembers(); // load members first so avatars are ready when chat renders
-  await showChat("group");
+  // Deep link: ?chat=<id> opens that conversation directly (e.g. from a DM
+  // push notification tap). Falls back to the group chat.
+  const _deepChat = new URLSearchParams(window.location.search).get("chat");
+  if (_deepChat) {
+    try { await showChat(_deepChat); }
+    catch (e) { await showChat("group"); }
+  } else {
+    await showChat("group");
+  }
 })();
 
 </script>
