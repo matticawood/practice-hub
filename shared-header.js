@@ -1277,11 +1277,16 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   };
 
   window._shMarkAllRead = async function() {
-    const ids = _notifs.filter(n => !n.read).map(n => n.id);
-    if (!ids.length) return;
+    // Optimistically clear the in-app bell immediately.
     _notifs.forEach(n => n.read = true);
     _badge(); window._shRenderNotifs();
-    await db.from("notifications").update({ read: true }).in("id", ids).eq("email", myEmail);
+    // Mark ALL unread rows read for this user — not just the 60 loaded in the
+    // bell, and case-insensitively so it matches the badge count query in
+    // send-push (which lowercases the email). Otherwise older/other-cased
+    // unread rows survive and the app-icon badge stays stuck > 0.
+    await db.from("notifications").update({ read: true })
+      .ilike("email", myEmail).eq("read", false);
+    // Always re-sync the app-icon badge, even if nothing was loaded unread.
     _shSyncAppBadge();
   };
   window.markAllNotifsRead = window._shMarkAllRead;
