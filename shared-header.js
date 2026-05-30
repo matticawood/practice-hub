@@ -1240,6 +1240,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     if (n && !n.read) {
       n.read = true; _badge(); window._shRenderNotifs();
       await db.from("notifications").update({ read: true }).eq("id", id).eq("email", myEmail);
+      _shSyncAppBadge();
     }
     // Navigate to the linked content
     // Derive a destination: prefer stored link_url, fall back to community page for comment notifications
@@ -1281,14 +1282,15 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     _notifs.forEach(n => n.read = true);
     _badge(); window._shRenderNotifs();
     await db.from("notifications").update({ read: true }).in("id", ids).eq("email", myEmail);
-    _shClearAppBadge();
+    _shSyncAppBadge();
   };
   window.markAllNotifsRead = window._shMarkAllRead;
 
-  // Clear the native iOS app-icon badge by asking the send-push edge function
-  // to fire a silent badge:0 push to this user's devices. No-op outside the
-  // app shell / for users with no registered devices.
-  async function _shClearAppBadge() {
+  // Sync the native iOS app-icon badge to the user's current unread count by
+  // asking the send-push edge function to fire a silent push with that badge
+  // value. Reading one notification drops the badge by one; reading the last
+  // clears it. No-op outside the app shell / for users with no devices.
+  async function _shSyncAppBadge() {
     if (!myEmail || !db) return;
     try {
       const { data: { session } } = await db.auth.getSession();
@@ -1300,11 +1302,12 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       await fetch(`${SUPA_URL}/functions/v1/send-push`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ clear_badge: true, email: myEmail }),
+        body: JSON.stringify({ sync_badge: true, email: myEmail }),
       });
-    } catch (e) { /* silent — badge clear is best-effort */ }
+    } catch (e) { /* silent — badge sync is best-effort */ }
   }
-  window._shClearAppBadge = _shClearAppBadge;
+  window._shSyncAppBadge = _shSyncAppBadge;
+  window._shClearAppBadge = _shSyncAppBadge; // back-compat alias
 
   window._shSendUpdate = async function(broadcast) {
     const title    = document.getElementById("notif-admin-title")?.value.trim();

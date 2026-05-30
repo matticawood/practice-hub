@@ -183,17 +183,35 @@ Deno.serve(async (req) => {
     body = { notification_id: body.record.id };
   }
 
-  // ── Badge clear path ────────────────────────────────────────────────────────
-  // Called from the web app when the user marks notifications read. Sends a
-  // silent (content-available, no alert) push with badge:0 to every device for
-  // that email, which resets the iOS app-icon badge.
-  if (body.clear_badge && body.email) {
+  // ── Badge sync path ─────────────────────────────────────────────────────────
+  // Called from the web app whenever the user reads notification(s). Sends a
+  // silent (content-available, no alert) push to every device for that email
+  // with badge = the user's *current* unread count. So marking one read drops
+  // the icon badge by one; marking all read clears it to 0.
+  // (clear_badge is accepted as an alias for backwards compatibility.)
+  if ((body.sync_badge || body.clear_badge) && body.email) {
+    const emailLc = String(body.email).toLowerCase();
     const devices = await supaSelect(
-      `device_tokens?email=eq.${encodeURIComponent(String(body.email).toLowerCase())}&select=token`,
+      `device_tokens?email=eq.${encodeURIComponent(emailLc)}&select=token`,
     );
-    if (!devices.length) return json({ cleared: 0, reason: "no devices" });
+    if (!devices.length) return json({ synced: 0, reason: "no devices" });
+
+    // Count current unread (0 when clear_badge was the explicit intent).
+    let unread = 0;
+    if (!body.clear_badge) {
+      try {
+        const cnt = await fetch(
+          `${SUPA_URL}/rest/v1/notifications?email=eq.${encodeURIComponent(emailLc)}&read=eq.false&select=id`,
+          { headers: { "apikey": SUPA_SERVICE, "Authorization": `Bearer ${SUPA_SERVICE}`, "Prefer": "count=exact", "Range": "0-0" } },
+        );
+        const cr = cnt.headers.get("content-range");
+        const total = cr && cr.includes("/") ? parseInt(cr.split("/")[1], 10) : NaN;
+        if (!isNaN(total)) unread = total;
+      } catch { /* default 0 */ }
+    }
+
     const accessToken = await getFirebaseAccessToken();
-    let cleared = 0;
+    let synced = 0;
     const invalid: string[] = [];
     await Promise.all(devices.map(async (d: any) => {
       const msg = {
@@ -201,7 +219,7 @@ Deno.serve(async (req) => {
           token: d.token,
           apns: {
             headers: { "apns-priority": "5" },
-            payload: { aps: { "content-available": 1, badge: 0 } },
+            payload: { aps: { "content-available": 1, badge: unread } },
           },
         },
       };
@@ -209,14 +227,14 @@ Deno.serve(async (req) => {
         `https://fcm.googleapis.com/v1/projects/${FB_PROJECT_ID}/messages:send`,
         { method: "POST", headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify(msg) },
       );
-      if (res.ok) cleared++;
+      if (res.ok) synced++;
       else {
         const errBody = await res.text();
         if (/UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND/i.test(errBody)) invalid.push(d.token);
       }
     }));
     if (invalid.length) await supaDeleteTokens(invalid);
-    return json({ cleared, total: devices.length });
+    return json({ synced, badge: unread, total: devices.length });
   }
 
   // Either resolve notification by id (DB webhook path) or take an explicit
