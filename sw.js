@@ -1,5 +1,5 @@
 // The Practice Room — Service Worker
-const CACHE = 'practice-room-v5';
+const CACHE = 'practice-room-v6';
 const PRECACHE = [
   '/',
   '/practice-log.html',
@@ -43,15 +43,13 @@ self.addEventListener('fetch', event => {
       url.hostname.includes('cdn.')) return;
 
   if (event.request.mode === 'navigate') {
-    // HTML pages: try network, serve cached shell if offline
+    // HTML pages: ALWAYS network (no-store so no intermediary cache serves a
+    // stale page), and we never write HTML into the SW cache. The only cache
+    // fallback is when the device is genuinely offline. This guarantees a
+    // deployed change is visible on the next page load — no stale-HTML dance.
     event.respondWith(
-      fetch(event.request)
-        .then(response => {
-          const clone = response.clone();
-          caches.open(CACHE).then(c => c.put(event.request, clone));
-          return response;
-        })
-        .catch(() => caches.match(event.request))
+      fetch(event.request, { cache: 'no-store' })
+        .catch(() => caches.match(event.request) || caches.match('/'))
     );
     return;
   }
