@@ -281,7 +281,14 @@ Deno.serve(async (req) => {
     app_update:           "The Practice Room",
   };
   const pushTitle = PUSH_HEADLINE[ntype] || "The Practice Room";
-  const pushBody  = content ? `${title} — ${content}` : title;
+  // Join the sentence + detail with natural punctuation rather than an em dash
+  // (which reads a bit "auto-generated"). If the title already ends in
+  // sentence punctuation, just add a space; otherwise a full stop.
+  const pushBody = (() => {
+    if (!content) return title;
+    const t = title.trim();
+    return /[.!?…:]$/.test(t) ? `${t} ${content}` : `${t}. ${content}`;
+  })();
 
   // Look up devices for this email.
   const devices = await supaSelect(
