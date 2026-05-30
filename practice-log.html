@@ -6359,7 +6359,10 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
 });
 
 // Silently refresh the auth token — called before any write operation
-// and whenever the tab becomes visible again after being hidden
+// and whenever the tab becomes visible again after being hidden.
+// Retries the refresh a few times because a single transient failure
+// (e.g. network reconnecting as the device wakes) should NOT log the user
+// out — the refresh token is still valid, the request just needs another go.
 async function ensureFreshToken() {
   try {
     const { data: { session } } = await db.auth.getSession();
@@ -6367,8 +6370,16 @@ async function ensureFreshToken() {
     // Refresh if token expires within the next 5 minutes
     const expiresAt = session.expires_at * 1000;
     if (Date.now() > expiresAt - 5 * 60 * 1000) {
-      const { error } = await db.auth.refreshSession();
-      if (error) return false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await db.auth.refreshSession();
+        if (!error && data?.session) return true;
+        // Wait a moment and retry — covers transient network errors on wake.
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+      }
+      // All retries failed. Only treat as logged-out if we genuinely have no
+      // valid session left; otherwise keep the existing one.
+      const { data: { session: still } } = await db.auth.getSession();
+      return !!still;
     }
     return true;
   } catch(e) { return false; }
