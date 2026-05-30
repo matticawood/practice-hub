@@ -261,23 +261,41 @@
       display: flex; flex-direction: column; align-items: stretch;
       gap: 10px; max-width: 480px; margin: 0 auto; padding-top: 4px;
     }
-    /* Hero card: disc on the left + BPM display on the right, packed into
-       the same card style as the others. Removes the loose pulse-disc and
-       redundant "BPM" label. */
+    /* Hero card: big BPM number on top + a horizontal beat-pip "bar"
+       beneath it that lights up left-to-right as the metronome plays.
+       The decorative circle is gone — the pips are the actual beat tracker. */
     .metro-hero {
-      display: flex; align-items: center; justify-content: center;
-      gap: 18px;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 12px;
       background: rgba(255,255,255,.04);
       border: 1.5px solid rgba(255,255,255,.08);
       border-radius: 12px;
-      padding: 14px 16px;
+      padding: 16px 16px 18px;
     }
     body.hub-mode .metro-hero { background: rgba(0,0,0,.02); border-color: rgba(0,0,0,.06); }
-    .metro-hero .metro-disc-wrap,
-    .metro-hero .metro-disc { width: 64px; height: 64px; margin-bottom: 0; }
-    .metro-hero .metro-disc-pips { max-width: 50px; }
     .metro-hero .metro-bpm-block { margin: 0; }
     .metro-hero .metro-bpm-lbl { display: none; }
+    /* Horizontal beat bar */
+    .metro-beatbar {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; min-height: 16px;
+    }
+    .metro-beat-dot {
+      width: 11px; height: 11px; border-radius: 50%;
+      background: rgba(255,255,255,.16);
+      transition: background .05s, box-shadow .05s, transform .05s;
+    }
+    body.hub-mode .metro-beat-dot { background: rgba(0,0,0,.14); }
+    .metro-beat-dot.lit {
+      background: rgba(255,255,255,.85);
+      transform: scale(1.15);
+    }
+    body.hub-mode .metro-beat-dot.lit { background: rgba(26,20,16,.75); }
+    .metro-beat-dot.accent-lit {
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(245,197,24,.7);
+      transform: scale(1.25);
+    }
     .metro-card {
       background: rgba(255,255,255,.04);
       border: 1.5px solid rgba(255,255,255,.08);
@@ -414,10 +432,8 @@
     .metro-tap-sound-row { display: contents; }
 
     @media (min-width: 700px) {
-      .metro-hero { gap: 24px; padding: 16px 18px; }
-      .metro-hero .metro-disc-wrap,
-      .metro-hero .metro-disc      { width: 80px; height: 80px; }
-      .metro-hero .metro-disc-pips { max-width: 62px; }
+      .metro-hero { padding: 18px 18px 20px; }
+      .metro-beat-dot { width: 13px; height: 13px; }
       .metro-nudge-row { max-width: 480px; }
       .metro-bpm-input { width: 96px; font-size: 1.05rem; }
       .metro-sig-section { max-width: 480px; }
@@ -717,20 +733,20 @@
         <div class="tool-title">Metronome</div>
         <div class="metro-wrap">
 
-          <!-- Hero: pulse disc + BPM display -->
+          <!-- Hero: BPM number on top + horizontal beat-pip bar beneath -->
           <div class="metro-hero">
-            <div class="metro-disc-wrap">
-              <div class="metro-disc" id="metro-disc">
-                <div class="metro-disc-pips" id="metro-disc-pips"></div>
-              </div>
-            </div>
             <div class="metro-bpm-block">
               <div class="metro-mark-int">
                 <span class="metro-mark-note-wrap" id="metro-mark-svg-wrap"></span>
                 <span class="metro-mark-eq">=</span>
                 <span class="metro-bpm-num" id="metro-bpm-display">80</span>
               </div>
-              <div class="metro-bpm-lbl">BPM</div>
+            </div>
+            <div class="metro-beatbar" id="metro-beatbar"></div>
+            <!-- Legacy disc kept hidden so existing JS that toggles
+                 #metro-disc / #metro-disc-pips classes doesn't error. -->
+            <div id="metro-disc" style="display:none">
+              <div id="metro-disc-pips"></div>
             </div>
           </div>
 
@@ -1404,14 +1420,28 @@ const LOOKAHEAD      = 25;
 const SCHEDULE_AHEAD = 0.12;
 
 function buildDiscPips(num) {
+  // Legacy disc pips (hidden disc element) — kept so nothing referencing them
+  // breaks, but the visible beat indicator is now the horizontal beat bar.
   const wrap = document.getElementById("metro-disc-pips");
-  if (!wrap) return;
-  wrap.innerHTML = "";
-  for (let i = 0; i < num; i++) {
-    const pip = document.createElement("div");
-    pip.className = "metro-disc-pip";
-    pip.id = "dpip-" + i;
-    wrap.appendChild(pip);
+  if (wrap) {
+    wrap.innerHTML = "";
+    for (let i = 0; i < num; i++) {
+      const pip = document.createElement("div");
+      pip.className = "metro-disc-pip";
+      pip.id = "dpip-" + i;
+      wrap.appendChild(pip);
+    }
+  }
+  // Visible horizontal beat bar.
+  const bar = document.getElementById("metro-beatbar");
+  if (bar) {
+    bar.innerHTML = "";
+    for (let i = 0; i < num; i++) {
+      const dot = document.createElement("div");
+      dot.className = "metro-beat-dot";
+      dot.id = "bdot-" + i;
+      bar.appendChild(dot);
+    }
   }
 }
 
@@ -1547,6 +1577,7 @@ function stopMetro() {
   const disc = document.getElementById("metro-disc");
   if (disc) disc.className = "metro-disc";
   document.querySelectorAll(".metro-disc-pip").forEach(function(p) { p.className = "metro-disc-pip"; });
+  document.querySelectorAll(".metro-beat-dot").forEach(function(d) { d.className = "metro-beat-dot"; });
   const btn = document.getElementById("metro-start-btn");
   btn.textContent = "Start"; btn.className = "metro-start-btn stopped";
 }
@@ -1633,17 +1664,14 @@ function scheduleClickClave(accent, time) {
 }
 
 function flashBeat(beat) {
-  const disc = document.getElementById("metro-disc");
-  if (!disc) return;
-  disc.className = "metro-disc " + (beat === 0 ? "accent" : "beat");
-  document.querySelectorAll(".metro-disc-pip").forEach(function(p, i) {
-    p.className = "metro-disc-pip" + (i === beat ? (beat === 0 ? " accent-lit" : " lit") : "");
+  // Horizontal beat bar — the visible indicator.
+  document.querySelectorAll(".metro-beat-dot").forEach(function(d, i) {
+    d.className = "metro-beat-dot" + (i === beat ? (beat === 0 ? " accent-lit" : " lit") : "");
   });
   setTimeout(function() {
-    if (disc) disc.className = "metro-disc";
-    const pip = document.getElementById("dpip-" + beat);
-    if (pip) pip.className = "metro-disc-pip";
-  }, 90);
+    const dot = document.getElementById("bdot-" + beat);
+    if (dot) dot.className = "metro-beat-dot";
+  }, 110);
 }
 
 // ── NOTE RECOGNITION ──────────────────────────────────────────────────────────
