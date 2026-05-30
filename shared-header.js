@@ -1280,22 +1280,30 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     // Optimistically clear the in-app bell immediately.
     _notifs.forEach(n => n.read = true);
     _badge(); window._shRenderNotifs();
+    // Clear the app-icon badge instantly via the web Badging API (works for an
+    // installed PWA; no-op/harmless in the native shell). The silent push below
+    // is the path that actually clears the native-wrapper badge.
+    try { navigator.clearAppBadge?.(); } catch {}
     // Mark ALL unread rows read for this user — not just the 60 loaded in the
     // bell, and case-insensitively so it matches the badge count query in
     // send-push (which lowercases the email). Otherwise older/other-cased
     // unread rows survive and the app-icon badge stays stuck > 0.
     await db.from("notifications").update({ read: true })
       .ilike("email", myEmail).eq("read", false);
-    // Always re-sync the app-icon badge, even if nothing was loaded unread.
-    _shSyncAppBadge();
+    // "Mark all read" means unread is now 0 by definition, so force the app-icon
+    // badge straight to 0 (clear_badge) rather than re-counting. Re-counting is
+    // race-prone — the UPDATE above may not yet be visible to the send-push
+    // query — which left the badge stuck at 1. Await it so failures surface.
+    await _shSyncAppBadge(true);
   };
   window.markAllNotifsRead = window._shMarkAllRead;
 
-  // Sync the native iOS app-icon badge to the user's current unread count by
-  // asking the send-push edge function to fire a silent push with that badge
-  // value. Reading one notification drops the badge by one; reading the last
-  // clears it. No-op outside the app shell / for users with no devices.
-  async function _shSyncAppBadge() {
+  // Sync the native iOS app-icon badge. By default it asks send-push to fire a
+  // silent push with the user's *current* unread count (so reading one drops the
+  // badge by one). Pass forceClear=true to force the badge to 0 regardless — used
+  // by "mark all read", where the count is 0 by definition and re-counting races
+  // with the DB write. No-op outside the app shell / for users with no devices.
+  async function _shSyncAppBadge(forceClear = false) {
     if (!myEmail || !db) return;
     try {
       const { data: { session } } = await db.auth.getSession();
@@ -1304,10 +1312,13 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       const SUPA_URL = db?.supabaseUrl
         || (db?.rest?.url ? db.rest.url.replace(/\/rest\/v1$/, "") : null)
         || "https://gyskfutmncprqxazgatv.supabase.co";
+      const payload = forceClear
+        ? { clear_badge: true, email: myEmail }
+        : { sync_badge: true, email: myEmail };
       await fetch(`${SUPA_URL}/functions/v1/send-push`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_badge: true, email: myEmail }),
+        body: JSON.stringify(payload),
       });
     } catch (e) { /* silent — badge sync is best-effort */ }
   }
