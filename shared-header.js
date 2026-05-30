@@ -1281,8 +1281,30 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     _notifs.forEach(n => n.read = true);
     _badge(); window._shRenderNotifs();
     await db.from("notifications").update({ read: true }).in("id", ids).eq("email", myEmail);
+    _shClearAppBadge();
   };
   window.markAllNotifsRead = window._shMarkAllRead;
+
+  // Clear the native iOS app-icon badge by asking the send-push edge function
+  // to fire a silent badge:0 push to this user's devices. No-op outside the
+  // app shell / for users with no registered devices.
+  async function _shClearAppBadge() {
+    if (!myEmail || !db) return;
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      const SUPA_URL = db?.supabaseUrl
+        || (db?.rest?.url ? db.rest.url.replace(/\/rest\/v1$/, "") : null)
+        || "https://gyskfutmncprqxazgatv.supabase.co";
+      await fetch(`${SUPA_URL}/functions/v1/send-push`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ clear_badge: true, email: myEmail }),
+      });
+    } catch (e) { /* silent — badge clear is best-effort */ }
+  }
+  window._shClearAppBadge = _shClearAppBadge;
 
   window._shSendUpdate = async function(broadcast) {
     const title    = document.getElementById("notif-admin-title")?.value.trim();
