@@ -10934,6 +10934,63 @@ function _achMaxMonthDays(s) {
   return Object.values(byMonth).reduce((m, set) => Math.max(m, set.size), 0);
 }
 
+// Most minutes practised within a single calendar month
+function _achMaxMonthMins(s) {
+  const byMonth = {};
+  s.forEach(ss => {
+    if (!ss.session_date) return;
+    const month = ss.session_date.slice(0, 7);
+    byMonth[month] = (byMonth[month] || 0) + (ss.duration_minutes || 0);
+  });
+  return Object.values(byMonth).reduce((m, v) => Math.max(m, v), 0);
+}
+
+// ISO-8601 week key (Mon–Sun) for a YYYY-MM-DD string, e.g. "2026-W22"
+function _isoWeekKey(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const day = (dt.getUTCDay() + 6) % 7;           // Mon=0 … Sun=6
+  dt.setUTCDate(dt.getUTCDate() - day + 3);        // Thursday of this week
+  const firstThu = new Date(Date.UTC(dt.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((dt - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+  return dt.getUTCFullYear() + "-W" + week;
+}
+// True if any calendar week (Mon–Sun) has all 7 days practised
+function _achHasPerfectWeek(s) {
+  const byWeek = {};
+  s.forEach(ss => {
+    if (!ss.session_date) return;
+    const k = _isoWeekKey(ss.session_date);
+    (byWeek[k] = byWeek[k] || new Set()).add(ss.session_date);
+  });
+  return Object.values(byWeek).some(set => set.size >= 7);
+}
+// How many of the 7 core practice types the user has touched at least once
+function _achRenaissanceCount(s) {
+  return [
+    _achUniquePieces(s) >= 1,
+    _achUniqueScales(s) >= 1,
+    _achItemTypeSessions(s, "sightreading")  >= 1,
+    _achItemTypeSessions(s, "improvisation") >= 1,
+    _achItemTypeSessions(s, "theory")        >= 1,
+    _achItemTypeSessions(s, "eartraining")   >= 1,
+    _achItemTypeSessions(s, "book")          >= 1,
+  ].filter(Boolean).length;
+}
+// True if any Saturday and its following Sunday were both practised
+function _achHasWeekendWarrior(s) {
+  const dates = new Set(s.map(x => x.session_date).filter(Boolean));
+  for (const ds of dates) {
+    const [y, m, d] = ds.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (dt.getDay() !== 6) continue;               // Saturday only
+    const nx = new Date(y, m - 1, d + 1);
+    const nk = `${nx.getFullYear()}-${String(nx.getMonth() + 1).padStart(2, "0")}-${String(nx.getDate()).padStart(2, "0")}`;
+    if (dates.has(nk)) return true;
+  }
+  return false;
+}
+
 // Category colours: [bg, border, fill]
 const ACH_COLOURS = {
   sessions: ["rgba(59,130,246,.14)", "rgba(59,130,246,.35)",  "#3b82f6"],
@@ -10953,6 +11010,9 @@ const ACH_COLOURS = {
   books:       ["rgba(234,179,8,.13)",   "rgba(234,179,8,.35)",   "#eab308"],
   variety:     ["rgba(34,197,94,.13)",   "rgba(34,197,94,.35)",   "#22c55e"],
   saves:       ["rgba(168,85,247,.13)",  "rgba(168,85,247,.35)",  "#a855f7"],
+  chordrec:    ["rgba(217,70,239,.13)",  "rgba(217,70,239,.35)",  "#d946ef"],
+  community:   ["rgba(2,132,199,.13)",   "rgba(2,132,199,.35)",   "#0284c7"],
+  live:        ["rgba(225,29,72,.13)",   "rgba(225,29,72,.35)",   "#e11d48"],
 };
 
 // ── Per-achievement unique SVG icon inner-paths ───────────────────────────
@@ -11066,7 +11126,23 @@ const ACH_ICON_MAP = {
   // Note Recognition Game
   nrg1:_AI.NOTES2, nrg10:_AI.PIANO, nrg50:_AI.STAGE,
   nrs5:_AI.NOTE, nrs10:_AI.EYE, nrs20:_AI.BINOS, nrs30:_AI.SCOPE, nrs50:_AI.STARF,
-  nrb10:_AI.WAVE, nrmix:_AI.LAYERS, nracc:_AI.SPARKLE,
+  nrtreb:_AI.EYE, nrb10:_AI.WAVE, nrmix:_AI.LAYERS, nracc:_AI.SPARKLE,
+  nrkey:_AI.STEPS, nrkey3:_AI.COMPASS,
+  // Chord Recognition Game
+  crg1:_AI.PIANO, crg10:_AI.LAYERS, crg50:_AI.STAGE,
+  crs10:_AI.TARGET, crs20:_AI.BINOS, crs30:_AI.STARF,
+  crtreb:_AI.EYE, crbass:_AI.WAVE, crkey:_AI.STEPS,
+  // Community — posts
+  cmp1:_AI.SPARKLE, cmp10:_AI.NOTES2, cmp25:_AI.AWARD, cmp50:_AI.CROWN,
+  // Community — comments
+  cmc1:_AI.BELL, cmc10:_AI.LAYERS, cmc50:_AI.STAR, cmc100:_AI.STARF,
+  // Community — reactions
+  cmr1:_AI.SPARKLE, cmr25:_AI.GEM, cmr100:_AI.CROWN,
+  // Live streams
+  lv1:_AI.BOLT, lv5:_AI.STAR, lv10:_AI.TROPHY,
+  // Consistency / variety / profile additions
+  tmo25:_AI.CALCK, pweek:_AI.CALCK, wkwarr:_AI.SUNRISE, renais:_AI.PALETTE,
+  cmcs:_AI.BELL, cmav:_AI.SPARKLE,
 };
 
 function achBadgeIcon(id) {
@@ -11097,7 +11173,7 @@ const _BADGE_CAT_SHAPE = {
   scales:'hex', sightread:'circle', improv:'star', theorycat:'circle',
   eartraining:'hex', depth:'star', books:'circle', variety:'star',
   saves:'shield', reading:'shield', community:'circle', game:'hex',
-  library:'diamond', noterec:'star',
+  library:'diamond', noterec:'star', chordrec:'diamond', live:'star',
 };
 // Colour palette per category [light, mid, dark] — interpolated by tier
 const _BADGE_PALETTE = {
@@ -11119,6 +11195,8 @@ const _BADGE_PALETTE = {
   game:        ['#fdba74','#c2410c','#9a3412'],  // peach → vivid orange-red → deep
   library:     ['#f9a8d4','#be185d','#9d174d'],  // soft pink → vivid rose → deep rose
   noterec:     ['#d9f99d','#65a30d','#3f6212'],  // light lime → vivid → deep green
+  chordrec:    ['#f0abfc','#c026d3','#86198f'],  // light fuchsia → vivid → deep magenta
+  live:        ['#fda4af','#e11d48','#9f1239'],  // soft rose → vivid → deep crimson
 };
 function _lerpHex(h1, h2, t) {
   const p = s => parseInt(s, 16);
@@ -11200,6 +11278,7 @@ const ACHIEVEMENTS = [
   { id:"t50", cat:"time",     icon:"⭐", name:"Fifty Hours",      desc:"Practise for 50 hours total",            check:s=>_achTotalMins(s)>=3000,  prog:s=>[_achTotalMins(s),3000]  },
   { id:"t100",cat:"time",     icon:"🌟", name:"100 Hours",        desc:"Practise for 100 hours total",           check:s=>_achTotalMins(s)>=6000,  prog:s=>[_achTotalMins(s),6000]  },
   { id:"t500",cat:"time",     icon:"💫", name:"500 Hours",        desc:"Practise for 500 hours total",           check:s=>_achTotalMins(s)>=30000, prog:s=>[_achTotalMins(s),30000] },
+  { id:"tmo25",cat:"time",    icon:"📆", name:"Big Month",        desc:"Log 25 hours of practice in a single calendar month", check:s=>_achMaxMonthMins(s)>=1500, prog:s=>[Math.round(_achMaxMonthMins(s)),1500] },
   // Streak
   { id:"k3",  cat:"streak",   icon:"🔥", name:"On a Roll",        desc:"Achieve a 3-day streak",                 check:s=>_achMaxStreak(s)>=3,    prog:s=>[_achMaxStreak(s),3]   },
   { id:"k7",  cat:"streak",   icon:"🔥", name:"Week Warrior",     desc:"Achieve a 7-day streak",                 check:s=>_achMaxStreak(s)>=7,    prog:s=>[_achMaxStreak(s),7]   },
@@ -11270,6 +11349,8 @@ const ACHIEVEMENTS = [
   { id:"d180",cat:"depth",    icon:"🌋", name:"In the Zone",      desc:"Complete a session of 3 hours or more",  check:s=>s.some(ss=>(ss.duration_minutes||0)>=180) },
   // Monthly consistency
   { id:"mo20",cat:"sessions", icon:"📅", name:"Monthly Commitment", desc:"Practice 20 or more days in a single calendar month", check:s=>_achMaxMonthDays(s)>=20, prog:s=>[_achMaxMonthDays(s),20] },
+  { id:"pweek",cat:"streak",  icon:"🗓️", name:"Perfect Week",       desc:"Practise all 7 days of a single calendar week",       check:s=>_achHasPerfectWeek(s) },
+  { id:"wkwarr",cat:"sessions",icon:"🌅", name:"Weekend Warrior",    desc:"Practise on both Saturday and Sunday of the same weekend", check:s=>_achHasWeekendWarrior(s) },
   // Books / Method books — sessions
   { id:"bk1",  cat:"books",  icon:"📗", name:"First Chapter",    desc:"Log your first method book session",               check:s=>_achItemTypeSessions(s,"book")>=1,   prog:s=>[_achItemTypeSessions(s,"book"),1]   },
   { id:"bk10", cat:"books",  icon:"📘", name:"Methodical",       desc:"Log 10 method book sessions",                     check:s=>_achItemTypeSessions(s,"book")>=10,  prog:s=>[_achItemTypeSessions(s,"book"),10]  },
@@ -11280,6 +11361,7 @@ const ACHIEVEMENTS = [
   // Variety / Well-Rounded
   { id:"vcomp",cat:"variety", icon:"🎨", name:"Complete Session",  desc:"Log a session with a piece, technique, and theory/ear training/improvisation/sight-reading", check:s=>_achHasCompleteSession(s) },
   { id:"v4",   cat:"variety", icon:"🌈", name:"Well-Rounded",     desc:"Include 4 or more different practice types in a single session",                              check:s=>_achMaxVarietyTypes(s)>=4, prog:s=>[_achMaxVarietyTypes(s),4] },
+  { id:"renais",cat:"variety", icon:"🎨", name:"Renaissance Musician", desc:"Practise every type: piece, technique, sight-reading, improvisation, theory, ear training and method book", check:s=>_achRenaissanceCount(s)>=7, prog:s=>[_achRenaissanceCount(s),7] },
   // Streak saves
   { id:"sv1",  cat:"saves",  icon:"🛡️", name:"Safety Net",       desc:"Use your first streak save token",                check:(s,x)=>(x.streakSaves||0)>=1, prog:(s,x)=>[(x.streakSaves||0),1] },
   { id:"sv3",  cat:"saves",  icon:"🔄", name:"Resilient",        desc:"Save your streak 3 times",                        check:(s,x)=>(x.streakSaves||0)>=3, prog:(s,x)=>[(x.streakSaves||0),3] },
@@ -11323,9 +11405,46 @@ const ACHIEVEMENTS = [
   { id:"nrs20", cat:"noterec", icon:"🎵", name:"Sharp Eyes",       desc:"Score 20 correct in a single game",                   check:(s,x)=>(x.nrBestScore||0)>=20,    prog:(s,x)=>[(x.nrBestScore||0),20]    },
   { id:"nrs30", cat:"noterec", icon:"🎵", name:"Note Ace",         desc:"Score 30 correct in a single game",                   check:(s,x)=>(x.nrBestScore||0)>=30,    prog:(s,x)=>[(x.nrBestScore||0),30]    },
   { id:"nrs50", cat:"noterec", icon:"🎵", name:"Note Master",      desc:"Score 50 correct in a single game",                   check:(s,x)=>(x.nrBestScore||0)>=50,    prog:(s,x)=>[(x.nrBestScore||0),50]    },
+  { id:"nrtreb",cat:"noterec", icon:"🎵", name:"Treble Reader",    desc:"Score 10 correct in the treble clef",                 check:(s,x)=>(x.nrBestTreble||0)>=10,   prog:(s,x)=>[(x.nrBestTreble||0),10]   },
   { id:"nrb10", cat:"noterec", icon:"🎵", name:"Bass Reader",      desc:"Score 10 correct in the bass clef",                   check:(s,x)=>(x.nrBestBass||0)>=10,     prog:(s,x)=>[(x.nrBestBass||0),10]     },
   { id:"nrmix", cat:"noterec", icon:"🎵", name:"Mixed Master",     desc:"Score 10 correct with mixed clef",                    check:(s,x)=>(x.nrBestMixed||0)>=10,    prog:(s,x)=>[(x.nrBestMixed||0),10]    },
   { id:"nracc", cat:"noterec", icon:"🎵", name:"Sharps & Flats",   desc:"Score 10 correct with accidentals enabled",            check:(s,x)=>(x.nrBestAcc||0)>=10,      prog:(s,x)=>[(x.nrBestAcc||0),10]      },
+  // Note Recognition — key-signature mode (new key selector)
+  { id:"nrkey", cat:"noterec", icon:"🎵", name:"In Key",           desc:"Score 10 correct in key-signature mode",               check:(s,x)=>(x.nrBestKey||0)>=10,      prog:(s,x)=>[(x.nrBestKey||0),10]      },
+  { id:"nrkey3",cat:"noterec", icon:"🎵", name:"Key Explorer",     desc:"Play key-signature mode in 3 different keys",          check:(s,x)=>(x.nrKeysPlayed||0)>=3,    prog:(s,x)=>[(x.nrKeysPlayed||0),3]    },
+  // Chord Recognition Game — games played
+  { id:"crg1",  cat:"chordrec", icon:"🎹", name:"First Chord",      desc:"Play your first chord recognition game",               check:(s,x)=>(x.crGamesPlayed||0)>=1,   prog:(s,x)=>[(x.crGamesPlayed||0),1]   },
+  { id:"crg10", cat:"chordrec", icon:"🎹", name:"Chord Keen",       desc:"Play 10 chord recognition games",                      check:(s,x)=>(x.crGamesPlayed||0)>=10,  prog:(s,x)=>[(x.crGamesPlayed||0),10]  },
+  { id:"crg50", cat:"chordrec", icon:"🎹", name:"Chord Enthusiast", desc:"Play 50 chord recognition games",                      check:(s,x)=>(x.crGamesPlayed||0)>=50,  prog:(s,x)=>[(x.crGamesPlayed||0),50]  },
+  // Chord Recognition Game — best score
+  { id:"crs10", cat:"chordrec", icon:"🎹", name:"Chord Spotter",    desc:"Score 10 correct in a single chord game",              check:(s,x)=>(x.crBestScore||0)>=10,    prog:(s,x)=>[(x.crBestScore||0),10]    },
+  { id:"crs20", cat:"chordrec", icon:"🎹", name:"Triad Tracker",    desc:"Score 20 correct in a single chord game",              check:(s,x)=>(x.crBestScore||0)>=20,    prog:(s,x)=>[(x.crBestScore||0),20]    },
+  { id:"crs30", cat:"chordrec", icon:"🎹", name:"Chord Master",     desc:"Score 30 correct in a single chord game",              check:(s,x)=>(x.crBestScore||0)>=30,    prog:(s,x)=>[(x.crBestScore||0),30]    },
+  // Chord Recognition Game — clef / mode
+  { id:"crtreb",cat:"chordrec", icon:"🎹", name:"Treble Chords",    desc:"Score 10 correct in the treble clef",                  check:(s,x)=>(x.crBestTreble||0)>=10,   prog:(s,x)=>[(x.crBestTreble||0),10]   },
+  { id:"crbass",cat:"chordrec", icon:"🎹", name:"Bass Chords",      desc:"Score 10 correct in the bass clef",                    check:(s,x)=>(x.crBestBass||0)>=10,     prog:(s,x)=>[(x.crBestBass||0),10]     },
+  { id:"crkey", cat:"chordrec", icon:"🎹", name:"Key Aware",        desc:"Score 10 correct in key-signature mode",               check:(s,x)=>(x.crBestKey||0)>=10,      prog:(s,x)=>[(x.crBestKey||0),10]      },
+  // Community — posts
+  { id:"cmp1",  cat:"community", icon:"📣", name:"First Post",       desc:"Share your first post with the community",             check:(s,x)=>(x.postCount||0)>=1,       prog:(s,x)=>[(x.postCount||0),1]       },
+  { id:"cmp10", cat:"community", icon:"📣", name:"Contributor",      desc:"Share 10 posts with the community",                    check:(s,x)=>(x.postCount||0)>=10,      prog:(s,x)=>[(x.postCount||0),10]      },
+  { id:"cmp25", cat:"community", icon:"📣", name:"Active Voice",     desc:"Share 25 posts with the community",                    check:(s,x)=>(x.postCount||0)>=25,      prog:(s,x)=>[(x.postCount||0),25]      },
+  { id:"cmp50", cat:"community", icon:"📣", name:"Community Pillar", desc:"Share 50 posts with the community",                    check:(s,x)=>(x.postCount||0)>=50,      prog:(s,x)=>[(x.postCount||0),50]      },
+  // Community — comments
+  { id:"cmc1",  cat:"community", icon:"💬", name:"First Comment",    desc:"Leave your first comment",                             check:(s,x)=>(x.commentCount||0)>=1,    prog:(s,x)=>[(x.commentCount||0),1]    },
+  { id:"cmc10", cat:"community", icon:"💬", name:"Conversationalist",desc:"Leave 10 comments",                                    check:(s,x)=>(x.commentCount||0)>=10,   prog:(s,x)=>[(x.commentCount||0),10]   },
+  { id:"cmc50", cat:"community", icon:"💬", name:"Engaged",          desc:"Leave 50 comments",                                    check:(s,x)=>(x.commentCount||0)>=50,   prog:(s,x)=>[(x.commentCount||0),50]   },
+  { id:"cmc100",cat:"community", icon:"💬", name:"Always Chatting",  desc:"Leave 100 comments",                                   check:(s,x)=>(x.commentCount||0)>=100,  prog:(s,x)=>[(x.commentCount||0),100]  },
+  // Community — reactions given
+  { id:"cmr1",  cat:"community", icon:"❤️", name:"Show Some Love",   desc:"Give your first reaction",                             check:(s,x)=>(x.reactionCount||0)>=1,   prog:(s,x)=>[(x.reactionCount||0),1]   },
+  { id:"cmr25", cat:"community", icon:"❤️", name:"Supportive",       desc:"Give 25 reactions",                                    check:(s,x)=>(x.reactionCount||0)>=25,  prog:(s,x)=>[(x.reactionCount||0),25]  },
+  { id:"cmr100",cat:"community", icon:"❤️", name:"Hype Squad",       desc:"Give 100 reactions",                                   check:(s,x)=>(x.reactionCount||0)>=100, prog:(s,x)=>[(x.reactionCount||0),100] },
+  // Community — receiving engagement / profile
+  { id:"cmcs",  cat:"community", icon:"🗣️", name:"Conversation Starter", desc:"Have one of your posts attract 5 or more comments",  check:(s,x)=>(x.maxPostComments||0)>=5, prog:(s,x)=>[(x.maxPostComments||0),5] },
+  { id:"cmav",  cat:"community", icon:"📸", name:"Say Cheese",        desc:"Add a profile photo",                                  check:(s,x)=>!!x.hasAvatar },
+  // Live streams — attended live
+  { id:"lv1",   cat:"live",      icon:"📺", name:"Tuned In Live",    desc:"Join your first live stream",                          check:(s,x)=>(x.liveAttended||0)>=1,    prog:(s,x)=>[(x.liveAttended||0),1]    },
+  { id:"lv5",   cat:"live",      icon:"📺", name:"Front Row",        desc:"Join 5 live streams",                                  check:(s,x)=>(x.liveAttended||0)>=5,    prog:(s,x)=>[(x.liveAttended||0),5]    },
+  { id:"lv10",  cat:"live",      icon:"📺", name:"Devoted Viewer",   desc:"Join 10 live streams",                                 check:(s,x)=>(x.liveAttended||0)>=10,   prog:(s,x)=>[(x.liveAttended||0),10]   },
 ];
 
 // Extra achievement data (reading list, collection, passage games)
@@ -11333,14 +11452,17 @@ let _achExtras = {
   savedCount:0, readCount:0,
   colTotal:0, colCompleted:0, colLearning:0, colAspire:0,
   gamesTotal:0, gamesCleared:0, gamesPerfect:0, maxGameLevel:0, uniquePassages:0,
-  nrGamesPlayed:0, nrBestScore:0, nrBestBass:0, nrBestMixed:0, nrBestAcc:0,
+  nrGamesPlayed:0, nrBestScore:0, nrBestTreble:0, nrBestBass:0, nrBestMixed:0, nrBestAcc:0, nrBestKey:0, nrKeysPlayed:0,
+  crGamesPlayed:0, crBestScore:0, crBestTreble:0, crBestBass:0, crBestKey:0,
+  postCount:0, commentCount:0, reactionCount:0, liveAttended:0,
+  maxPostComments:0, hasAvatar:false,
 };
 
 async function loadAchievementExtras() {
   const email = viewingEmail || myEmail;
   const isOwn = email === myEmail;
 
-  const [readResult, gamesResult, colResult, nrResult] = await Promise.all([
+  const [readResult, gamesResult, colResult, nrResult, crResult] = await Promise.all([
     isOwn
       ? db.from("reading_list").select("status").eq("email", email)
       : db.rpc("get_user_reading_list", { p_email: email }),
@@ -11350,13 +11472,16 @@ async function loadAchievementExtras() {
     isOwn
       ? db.from("user_collections").select("piece_id, status").eq("email", email)
       : db.rpc("get_user_collection", { p_email: email }),
-    db.from("note_game_scores").select("score,clef,accidentals").eq("email", email)
+    db.from("note_game_scores").select("score,clef,accidentals,key_signature").eq("email", email),
+    // Chord game scores are stored with a lowercased email and are world-readable.
+    db.from("chord_game_scores").select("score,clef,mode").eq("email", (email || "").toLowerCase())
   ]);
 
   const readRows  = readResult.data  || [];
   const gameRows  = gamesResult.data || [];
   const colRows   = colResult.data   || [];
   const nrRows    = nrResult.data    || [];
+  const crRows    = crResult.data    || [];
 
   _achExtras.savedCount     = readRows.length;
   _achExtras.readCount      = readRows.filter(r => r.status === "read").length;
@@ -11374,9 +11499,84 @@ async function loadAchievementExtras() {
 
   _achExtras.nrGamesPlayed  = nrRows.length;
   _achExtras.nrBestScore    = nrRows.reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.nrBestTreble   = nrRows.filter(r => r.clef === "treble" && !r.accidentals).reduce((m, r) => Math.max(m, r.score || 0), 0);
   _achExtras.nrBestBass     = nrRows.filter(r => r.clef === "bass"  && !r.accidentals).reduce((m, r) => Math.max(m, r.score || 0), 0);
   _achExtras.nrBestMixed    = nrRows.filter(r => r.clef === "mixed").reduce((m, r) => Math.max(m, r.score || 0), 0);
   _achExtras.nrBestAcc      = nrRows.filter(r => r.accidentals).reduce((m, r) => Math.max(m, r.score || 0), 0);
+  // Key-signature mode (note game's new key selector): best score in key mode + how many distinct keys played
+  _achExtras.nrBestKey      = nrRows.filter(r => r.key_signature).reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.nrKeysPlayed   = new Set(nrRows.filter(r => r.key_signature).map(r => r.key_signature)).size;
+
+  // Chord recognition game
+  _achExtras.crGamesPlayed  = crRows.length;
+  _achExtras.crBestScore    = crRows.reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.crBestTreble   = crRows.filter(r => r.clef === "treble").reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.crBestBass     = crRows.filter(r => r.clef === "bass").reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.crBestKey      = crRows.filter(r => r.mode === "key").reduce((m, r) => Math.max(m, r.score || 0), 0);
+
+  // Community engagement + live attendance. These span several tables, so we
+  // sum cheap head-only count queries. Each is wrapped so a missing table or a
+  // tighter RLS policy degrades to 0 rather than breaking the whole page.
+  // Email casing is inconsistent across legacy rows, so match case-insensitively.
+  const _cnt = async (table, col, val) => {
+    try {
+      const { count } = await db.from(table)
+        .select("*", { count: "exact", head: true }).ilike(col, val);
+      return count || 0;
+    } catch { return 0; }
+  };
+  const _eventIds = async (table) => {
+    try {
+      const { data } = await db.from(table).select("event_id").ilike("email", email);
+      return (data || []).map(r => r.event_id);
+    } catch { return []; }
+  };
+  const [postCount, commentCounts, reactionCounts, chatEvents, qaEvents] = await Promise.all([
+    _cnt("community_posts", "email", email),
+    Promise.all([
+      _cnt("community_post_comments",       "email", email),
+      _cnt("activity_comments",             "email", email),
+      _cnt("content_feed_comments",         "email", email),
+      _cnt("practice_room_update_comments", "email", email),
+    ]),
+    Promise.all([
+      _cnt("community_post_likes",          "email", email),
+      _cnt("activity_reactions",            "email", email),
+      _cnt("content_feed_likes",            "email", email),
+      _cnt("practice_room_update_likes",    "email", email),
+      _cnt("community_chat_reactions",      "email", email),
+    ]),
+    _eventIds("event_chat"),
+    _eventIds("event_qa"),
+  ]);
+  _achExtras.postCount     = postCount;
+  _achExtras.commentCount  = commentCounts.reduce((a, b) => a + b, 0);
+  _achExtras.reactionCount = reactionCounts.reduce((a, b) => a + b, 0);
+  // "Attended live" = participated (chat or Q&A) in a distinct live event.
+  _achExtras.liveAttended  = new Set([...chatEvents, ...qaEvents].filter(Boolean)).size;
+
+  // Profile photo set? (Say Cheese)
+  try {
+    const { data: ae } = await db.from("allowed_emails")
+      .select("avatar_url").ilike("email", email).maybeSingle();
+    _achExtras.hasAvatar = !!(ae && ae.avatar_url);
+  } catch { _achExtras.hasAvatar = false; }
+
+  // Most comments on any single one of the user's own posts (Conversation Starter)
+  try {
+    const { data: myPosts } = await db.from("community_posts")
+      .select("id").ilike("email", email);
+    const postIds = (myPosts || []).map(p => p.id);
+    if (postIds.length) {
+      const { data: cmts } = await db.from("community_post_comments")
+        .select("post_id").in("post_id", postIds);
+      const tally = {};
+      (cmts || []).forEach(c => { tally[c.post_id] = (tally[c.post_id] || 0) + 1; });
+      _achExtras.maxPostComments = Object.values(tally).reduce((m, v) => Math.max(m, v), 0);
+    } else {
+      _achExtras.maxPostComments = 0;
+    }
+  } catch { _achExtras.maxPostComments = 0; }
 
   // Streak saves — "used" = total ever earned minus what's still in the bank.
   // Using saved_dates.length was wrong: the cron could populate saved_dates for
@@ -11446,7 +11646,8 @@ async function renderAchievements() {
     { key: "practice", label: "Practice",           colour: ACH_COLOURS.time,    cats: ["sessions","time","streak","pieces","depth","scales","sightread","improv","theorycat","eartraining","books","variety","saves"] },
     { key: "reading",  label: "Piano Practice Daily",colour: ACH_COLOURS.reading, cats: ["reading"] },
     { key: "library",  label: "Pieces Library",      colour: ACH_COLOURS.library, cats: ["library"] },
-    { key: "game",     label: "Practice Tools",      colour: ACH_COLOURS.game,    cats: ["game", "noterec"] },
+    { key: "game",     label: "Practice Tools",      colour: ACH_COLOURS.game,    cats: ["game", "noterec", "chordrec"] },
+    { key: "community",label: "Community",           colour: ACH_COLOURS.community,cats: ["community", "live"] },
   ];
 
 
@@ -11925,6 +12126,29 @@ async function checkNewAchievements() {
     newOnes = newOnes.filter(id => !dbKnown.has(id));
   }
 
+  // ── Silent introduction of the achievements expansion ──────────────────────
+  // These IDs were added in a batch. Existing members who already qualify would
+  // otherwise get a burst of toasts + bell + push notifications and flood the
+  // shared activity feed the moment this ships. So the FIRST time we detect any
+  // of them for a member, we grant them silently: the badge already shows as
+  // earned on the grid via its check() function, so we simply skip recording an
+  // achievement_events row (keeps them out of the feed) and skip all
+  // notifications. localStorage already marks them "known" (above), so they
+  // never re-trigger. Any of these earned AFTER this one-time intro notify
+  // normally like every other badge.
+  const SILENT_INTRO_IDS = new Set([
+    "crg1","crg10","crg50","crs10","crs20","crs30","crtreb","crbass","crkey",
+    "cmp1","cmp10","cmp25","cmp50","cmc1","cmc10","cmc50","cmc100",
+    "cmr1","cmr25","cmr100","cmcs","cmav",
+    "lv1","lv5","lv10","nrtreb","nrkey","nrkey3",
+    "tmo25","pweek","wkwarr","renais",
+  ]);
+  const _introKey = "ach_silentintro_v1_" + myEmail;
+  if (!localStorage.getItem(_introKey)) {
+    newOnes = newOnes.filter(id => !SILENT_INTRO_IDS.has(id));
+    localStorage.setItem(_introKey, "1");
+  }
+
   // Only write achievements that are genuinely newly earned (not already in DB).
   // This prevents re-inserting manually revoked achievements on next login.
   if (newOnes.length > 0) {
@@ -12258,6 +12482,7 @@ async function nrSaveScore() {
   // Update in-memory extras so achievement checks fire immediately
   _achExtras.nrGamesPlayed++;
   _achExtras.nrBestScore = Math.max(_achExtras.nrBestScore, nrGameScore);
+  if (nrClef === "treble"&& !nrAccidentals) _achExtras.nrBestTreble= Math.max(_achExtras.nrBestTreble,nrGameScore);
   if (nrClef === "bass"  && !nrAccidentals) _achExtras.nrBestBass  = Math.max(_achExtras.nrBestBass,  nrGameScore);
   if (nrClef === "mixed")                   _achExtras.nrBestMixed = Math.max(_achExtras.nrBestMixed, nrGameScore);
   if (nrAccidentals)                        _achExtras.nrBestAcc   = Math.max(_achExtras.nrBestAcc,   nrGameScore);
