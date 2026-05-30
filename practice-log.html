@@ -17055,11 +17055,37 @@ async function bootApp() {
   myEmail = session.email;
   viewingEmail = myEmail;
 
-  // Fetch display name + avatar for shared header
+  // Fetch display name + avatar for shared header, AND gate on membership.
+  // A cancelled subscription deletes the row from allowed_emails (Stripe
+  // webhook). If the row is gone, this account no longer has access even if
+  // the auth session is still technically valid — sign them out and show the
+  // "subscription ended" screen so they can't keep using the app.
   let _avatarUrl = null;
-  { const { data: _nr } = await db.from("allowed_emails").select("name, avatar_url").eq("email", myEmail).maybeSingle();
+  {
+    const { data: _nr, error: _gateErr } = await db.from("allowed_emails")
+      .select("name, avatar_url").eq("email", myEmail).maybeSingle();
+    // Only lock out on a definitive "no row" result — never on a transient
+    // network error (which would return _gateErr) so we don't kick out
+    // legitimate members during a blip.
+    if (!_gateErr && !_nr) {
+      await db.auth.signOut().catch(() => {});
+      clearSession();
+      document.getElementById("loading-screen").style.display = "none";
+      document.getElementById("app-main").style.display = "none";
+      const ls = document.getElementById("login-screen");
+      if (ls) {
+        ls.style.display = "block";
+        const errEl = document.getElementById("login-error");
+        if (errEl) {
+          errEl.style.display = "block";
+          errEl.textContent = "Your membership has ended. Resubscribe to regain access.";
+        }
+      }
+      return;
+    }
     myName = _nr?.name || null;
-    _avatarUrl = _nr?.avatar_url || null; }
+    _avatarUrl = _nr?.avatar_url || null;
+  }
 
   document.getElementById("loading-screen").style.display = "none";
   document.getElementById("login-screen").style.display = "none";
