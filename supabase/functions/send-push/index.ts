@@ -103,6 +103,7 @@ interface PushInput {
   body: string;
   linkUrl: string | null;
   data: Record<string, string>;
+  badge: number;
 }
 
 async function sendOnePush(input: PushInput, accessToken: string): Promise<{ ok: boolean; error?: string; invalid?: boolean }> {
@@ -119,7 +120,7 @@ async function sendOnePush(input: PushInput, accessToken: string): Promise<{ ok:
       },
       apns: {
         payload: {
-          aps: { sound: "default", badge: 1 },
+          aps: { sound: "default", badge: input.badge },
         },
       },
     },
@@ -182,6 +183,42 @@ Deno.serve(async (req) => {
     body = { notification_id: body.record.id };
   }
 
+  // ── Badge clear path ────────────────────────────────────────────────────────
+  // Called from the web app when the user marks notifications read. Sends a
+  // silent (content-available, no alert) push with badge:0 to every device for
+  // that email, which resets the iOS app-icon badge.
+  if (body.clear_badge && body.email) {
+    const devices = await supaSelect(
+      `device_tokens?email=eq.${encodeURIComponent(String(body.email).toLowerCase())}&select=token`,
+    );
+    if (!devices.length) return json({ cleared: 0, reason: "no devices" });
+    const accessToken = await getFirebaseAccessToken();
+    let cleared = 0;
+    const invalid: string[] = [];
+    await Promise.all(devices.map(async (d: any) => {
+      const msg = {
+        message: {
+          token: d.token,
+          apns: {
+            headers: { "apns-priority": "5" },
+            payload: { aps: { "content-available": 1, badge: 0 } },
+          },
+        },
+      };
+      const res = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${FB_PROJECT_ID}/messages:send`,
+        { method: "POST", headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify(msg) },
+      );
+      if (res.ok) cleared++;
+      else {
+        const errBody = await res.text();
+        if (/UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND/i.test(errBody)) invalid.push(d.token);
+      }
+    }));
+    if (invalid.length) await supaDeleteTokens(invalid);
+    return json({ cleared, total: devices.length });
+  }
+
   // Either resolve notification by id (DB webhook path) or take an explicit
   // payload (manual broadcast / future custom callers).
   let email: string, title: string, content: string, linkUrl: string | null, metadata: any;
@@ -213,6 +250,19 @@ Deno.serve(async (req) => {
 
   const accessToken = await getFirebaseAccessToken();
 
+  // Badge = the recipient's current unread notification count so the iOS app
+  // icon badge is accurate rather than always "1".
+  let badge = 1;
+  try {
+    const cnt = await fetch(
+      `${SUPA_URL}/rest/v1/notifications?email=eq.${encodeURIComponent(email.toLowerCase())}&read=eq.false&select=id`,
+      { headers: { "apikey": SUPA_SERVICE, "Authorization": `Bearer ${SUPA_SERVICE}`, "Prefer": "count=exact", "Range": "0-0" } },
+    );
+    const cr = cnt.headers.get("content-range"); // e.g. "0-0/5"
+    const total = cr && cr.includes("/") ? parseInt(cr.split("/")[1], 10) : NaN;
+    if (!isNaN(total)) badge = Math.max(1, total);
+  } catch { /* fall back to 1 */ }
+
   // Coerce all metadata values to strings — FCM data payloads are string-only.
   const data: Record<string, string> = {};
   for (const [k, v] of Object.entries(metadata || {})) {
@@ -223,7 +273,7 @@ Deno.serve(async (req) => {
   let sent = 0, failed = 0;
   const invalidTokens: string[] = [];
   await Promise.all(devices.map(async (d: any) => {
-    const r = await sendOnePush({ token: d.token, title, body: content, linkUrl, data }, accessToken);
+    const r = await sendOnePush({ token: d.token, title, body: content, linkUrl, data, badge }, accessToken);
     if (r.ok) { sent++; }
     else      { failed++; if (r.invalid) invalidTokens.push(d.token); }
   }));
