@@ -6359,7 +6359,10 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
 });
 
 // Silently refresh the auth token — called before any write operation
-// and whenever the tab becomes visible again after being hidden
+// and whenever the tab becomes visible again after being hidden.
+// Retries the refresh a few times because a single transient failure
+// (e.g. network reconnecting as the device wakes) should NOT log the user
+// out — the refresh token is still valid, the request just needs another go.
 async function ensureFreshToken() {
   try {
     const { data: { session } } = await db.auth.getSession();
@@ -6367,8 +6370,16 @@ async function ensureFreshToken() {
     // Refresh if token expires within the next 5 minutes
     const expiresAt = session.expires_at * 1000;
     if (Date.now() > expiresAt - 5 * 60 * 1000) {
-      const { error } = await db.auth.refreshSession();
-      if (error) return false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await db.auth.refreshSession();
+        if (!error && data?.session) return true;
+        // Wait a moment and retry — covers transient network errors on wake.
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+      }
+      // All retries failed. Only treat as logged-out if we genuinely have no
+      // valid session left; otherwise keep the existing one.
+      const { data: { session: still } } = await db.auth.getSession();
+      return !!still;
     }
     return true;
   } catch(e) { return false; }
@@ -6396,6 +6407,16 @@ document.addEventListener("visibilitychange", async () => {
     redirectToRoot();
   }
 });
+
+// Belt-and-braces: proactively refresh the token every 10 minutes while the
+// tab is open and visible. Supabase's built-in auto-refresh can get throttled
+// by the browser when a tab is focused-but-idle, which was causing silent
+// logouts. This keeps the session alive without ever waiting for a write.
+setInterval(() => {
+  if (document.visibilityState === "visible") {
+    ensureFreshToken().catch(() => {});
+  }
+}, 10 * 60 * 1000);
 
 // ── Practice levels (10 levels each) ─────────────────────────────
 // Pieces: thresholds in minutes
@@ -17034,11 +17055,37 @@ async function bootApp() {
   myEmail = session.email;
   viewingEmail = myEmail;
 
-  // Fetch display name + avatar for shared header
+  // Fetch display name + avatar for shared header, AND gate on membership.
+  // A cancelled subscription deletes the row from allowed_emails (Stripe
+  // webhook). If the row is gone, this account no longer has access even if
+  // the auth session is still technically valid — sign them out and show the
+  // "subscription ended" screen so they can't keep using the app.
   let _avatarUrl = null;
-  { const { data: _nr } = await db.from("allowed_emails").select("name, avatar_url").eq("email", myEmail).maybeSingle();
+  {
+    const { data: _nr, error: _gateErr } = await db.from("allowed_emails")
+      .select("name, avatar_url").eq("email", myEmail).maybeSingle();
+    // Only lock out on a definitive "no row" result — never on a transient
+    // network error (which would return _gateErr) so we don't kick out
+    // legitimate members during a blip.
+    if (!_gateErr && !_nr) {
+      await db.auth.signOut().catch(() => {});
+      clearSession();
+      document.getElementById("loading-screen").style.display = "none";
+      document.getElementById("app-main").style.display = "none";
+      const ls = document.getElementById("login-screen");
+      if (ls) {
+        ls.style.display = "block";
+        const errEl = document.getElementById("login-error");
+        if (errEl) {
+          errEl.style.display = "block";
+          errEl.textContent = "Your membership has ended. Resubscribe to regain access.";
+        }
+      }
+      return;
+    }
     myName = _nr?.name || null;
-    _avatarUrl = _nr?.avatar_url || null; }
+    _avatarUrl = _nr?.avatar_url || null;
+  }
 
   document.getElementById("loading-screen").style.display = "none";
   document.getElementById("login-screen").style.display = "none";
