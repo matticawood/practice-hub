@@ -183,6 +183,45 @@ Deno.serve(async (req) => {
     body = { notification_id: body.record.id };
   }
 
+  // ── Chat / DM push path ──────────────────────────────────────────────────────
+  // Direct push for a new chat message. Deliberately does NOT insert a
+  // notifications row (so it never shows in the bell) and omits the badge key
+  // (so the app-icon badge — which tracks bell notifications — is left
+  // untouched; chat unread is handled by the in-app chat badge).
+  if (body.chat_push && body.email) {
+    const devices = await supaSelect(
+      `device_tokens?email=eq.${encodeURIComponent(String(body.email).toLowerCase())}&select=token`,
+    );
+    if (!devices.length) return json({ sent: 0, reason: "no devices" });
+    const accessToken = await getFirebaseAccessToken();
+    const sender  = String(body.sender || "Someone");
+    const preview = String(body.preview || "Sent a message");
+    const chatId  = body.chat_id ? String(body.chat_id) : "";
+    let sent = 0;
+    const invalid: string[] = [];
+    await Promise.all(devices.map(async (d: any) => {
+      const msg = {
+        message: {
+          token: d.token,
+          notification: { title: "New message", body: `${sender}: ${preview}` },
+          data: chatId ? { link_url: `/chat.html?chat=${chatId}` } : {},
+          apns: { payload: { aps: { sound: "default" } } }, // no badge key
+        },
+      };
+      const res = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${FB_PROJECT_ID}/messages:send`,
+        { method: "POST", headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify(msg) },
+      );
+      if (res.ok) sent++;
+      else {
+        const errBody = await res.text();
+        if (/UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND/i.test(errBody)) invalid.push(d.token);
+      }
+    }));
+    if (invalid.length) await supaDeleteTokens(invalid);
+    return json({ sent, total: devices.length });
+  }
+
   // ── Badge sync path ─────────────────────────────────────────────────────────
   // Called from the web app whenever the user reads notification(s). Sends a
   // silent (content-available, no alert) push to every device for that email
@@ -239,10 +278,10 @@ Deno.serve(async (req) => {
 
   // Either resolve notification by id (DB webhook path) or take an explicit
   // payload (manual broadcast / future custom callers).
-  let email: string, title: string, content: string, linkUrl: string | null, metadata: any;
+  let email: string, title: string, content: string, linkUrl: string | null, metadata: any, ntype = "";
   if (body.notification_id) {
     const rows = await supaSelect(
-      `notifications?id=eq.${encodeURIComponent(body.notification_id)}&select=email,title,body,link_url,metadata`,
+      `notifications?id=eq.${encodeURIComponent(body.notification_id)}&select=email,title,body,link_url,metadata,type`,
     );
     if (!rows.length) return json({ error: "notification not found" }, 404);
     email    = rows[0].email;
@@ -250,15 +289,45 @@ Deno.serve(async (req) => {
     content  = rows[0].body || "";
     linkUrl  = rows[0].link_url || null;
     metadata = rows[0].metadata || {};
+    ntype    = rows[0].type || "";
   } else if (body.email && body.title) {
     email    = body.email;
     title    = body.title;
     content  = body.body || "";
     linkUrl  = body.link_url || null;
     metadata = body.metadata || {};
+    ntype    = body.type || "";
   } else {
     return json({ error: "either notification_id or {email,title} required" }, 400);
   }
+
+  // ── Reformat for push: short headline as title, full detail as body ─────────
+  // The DB title is a full sentence (good for the in-app bell) but makes an
+  // ugly truncated push title. Map the notification type to a concise headline
+  // and move the original sentence (+ any detail) into the push body.
+  const PUSH_HEADLINE: Record<string, string> = {
+    reaction:             "New reaction",
+    comment_reply:        "New reply",
+    new_comment:          "New comment",
+    member_milestone:     "Member milestone",
+    achievement:          "Achievement unlocked",
+    event_rsvp:           "Event RSVP",
+    event_reminder:       "Event reminder",
+    goal_reminder:        "Goal reminder",
+    weekly_focus:         "New weekly focus",
+    practice_room_update: "Practice Room update",
+    content_feed:         "New content",
+    app_update:           "The Practice Room",
+  };
+  const pushTitle = PUSH_HEADLINE[ntype] || "The Practice Room";
+  // Join the sentence + detail with natural punctuation rather than an em dash
+  // (which reads a bit "auto-generated"). If the title already ends in
+  // sentence punctuation, just add a space; otherwise a full stop.
+  const pushBody = (() => {
+    if (!content) return title;
+    const t = title.trim();
+    return /[.!?…:]$/.test(t) ? `${t} ${content}` : `${t}. ${content}`;
+  })();
 
   // Look up devices for this email.
   const devices = await supaSelect(
@@ -291,7 +360,7 @@ Deno.serve(async (req) => {
   let sent = 0, failed = 0;
   const invalidTokens: string[] = [];
   await Promise.all(devices.map(async (d: any) => {
-    const r = await sendOnePush({ token: d.token, title, body: content, linkUrl, data, badge }, accessToken);
+    const r = await sendOnePush({ token: d.token, title: pushTitle, body: pushBody, linkUrl, data, badge }, accessToken);
     if (r.ok) { sent++; }
     else      { failed++; if (r.invalid) invalidTokens.push(d.token); }
   }));
