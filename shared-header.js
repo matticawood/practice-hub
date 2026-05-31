@@ -1239,8 +1239,14 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     const n = _notifs.find(n => n.id === id);
     if (n && !n.read) {
       n.read = true; _badge(); window._shRenderNotifs();
+      // Update the app-icon badge immediately via the Badging API (installed PWA)
+      // so it doesn't wait on the silent-push round-trip.
+      try {
+        const unread = _notifs.filter(x => !x.read).length;
+        if (unread > 0) navigator.setAppBadge?.(unread); else navigator.clearAppBadge?.();
+      } catch {}
       await db.from("notifications").update({ read: true }).eq("id", id).eq("email", myEmail);
-      _shSyncAppBadge();
+      _shSyncAppBadge(); // keepalive fetch — survives the navigation below
     }
     // Navigate to the linked content
     // Derive a destination: prefer stored link_url, fall back to community page for comment notifications
@@ -1319,6 +1325,11 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
         method: "POST",
         headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        // keepalive lets this request finish even if the page navigates away
+        // immediately afterwards — e.g. tapping a bell notification marks it read
+        // then navigates to the linked content. Without it the browser aborts the
+        // in-flight request on unload and the badge never updates.
+        keepalive: true,
       });
     } catch (e) { /* silent — badge sync is best-effort */ }
   }
