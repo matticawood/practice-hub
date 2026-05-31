@@ -2548,7 +2548,7 @@ async function renderDetailView(ev) {
           ${rsvpBtn}
         </div>
 
-        ${ev.description ? `<div class="event-detail-desc">${esc(ev.description)}</div>` : ""}
+        ${ev.description ? `<div class="event-detail-desc">${(window.renderUserContent?renderUserContent(ev.description):esc(ev.description))}</div>` : ""}
       </div><!-- /event-detail-top -->
 
       <!-- Bottom: admin controls, countdown, join, recording (omit if nothing to show) -->
@@ -2572,7 +2572,7 @@ async function renderDetailView(ev) {
         <div class="comment-form" style="flex-direction:column;align-items:stretch;gap:0">
           <div style="display:flex;gap:10px;align-items:flex-end">
             ${avatarHtml(myName, myEmail, 28, myAvatarUrl)}
-            <textarea class="comment-input" id="comment-input" placeholder="Write a comment…" rows="1"
+            <textarea class="comment-input" id="comment-input" data-mention placeholder="Write a comment…" rows="1"
               oninput="autoResize(this)"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();postComment('${ev.id}');}"></textarea>
             <button class="btn btn-sm" id="ev-comment-send-btn" onclick="postComment('${ev.id}')" style="flex-shrink:0;border-radius:20px;padding:0 18px;align-self:stretch">Send</button>
@@ -3117,7 +3117,7 @@ async function loadComments(eventId) {
               ${canDel ? `<button class="delete-btn" style="margin-left:0" onclick="deleteComment('${c.id}','${eventId}')" title="Delete">Delete</button>` : ""}
             </span>
           </div>
-          ${c.content ? `<div class="comment-text">${replyPrefix}${esc(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
+          ${c.content ? `<div class="comment-text">${replyPrefix}${(window.renderUserContent?renderUserContent(c.content):esc(c.content))}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderAttHtml(c)}
           ${poll ? _renderPollHtml(poll, c.id, c.email) : ""}
           <div class="comment-action-row">
@@ -3134,7 +3134,7 @@ async function loadComments(eventId) {
       <div id="ev-reply-composer-${c.id}" class="comment-item is-reply" style="display:none">
         ${avatarHtml(myName, myEmail, 28)}
         <div class="comment-body" style="flex:1;min-width:0">
-          <textarea class="comment-input" placeholder="Write a reply…" rows="1"
+          <textarea class="comment-input" data-mention placeholder="Write a reply…" rows="1"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();evSubmitReply('${c.id}',this)}"
             style="width:100%;box-sizing:border-box;margin-bottom:4px;border-color:var(--accent)"
@@ -3216,6 +3216,14 @@ async function evSubmitReply(parentCommentId, textarea) {
       metadata: { event_id: _currentEventId, comment_id: parentCommentId },
     });
   }
+
+  // Notify anyone @-mentioned in the reply (skips author + reply target).
+  if (!error) window.Mentions?.notify(content, {
+    fromName: myName || "Someone",
+    body:     content,
+    linkUrl:  `/events.html?event=${_currentEventId}`,
+    exclude:  [parent?.email].filter(Boolean),
+  });
 
   _evClearState(parentCommentId);
   await loadComments(_currentEventId);
@@ -4143,6 +4151,14 @@ async function postComment(eventId) {
       metadata: { event_id: eventId },
     }).catch(() => {});
   }
+
+  // Notify anyone @-mentioned in the comment (skips author + event owner).
+  window.Mentions?.notify(content, {
+    fromName: myName || "Someone",
+    body:     content,
+    linkUrl:  `/events.html?event=${eventId}`,
+    exclude:  [OWNER_EMAIL].filter(Boolean),
+  });
 
   input.value = ""; input.style.height = "";
   _evClearState("main");

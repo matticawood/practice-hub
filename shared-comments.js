@@ -683,7 +683,7 @@
               ${canDel?`<button onclick="Comments.deleteComment('${c.id}','${parentId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
             </span>
           </div>
-          ${c.content?`<div class="tc-comment-text">${replyPrefix}${_escHtml(c.content)}</div>`:(replyPrefix?`<div class="tc-comment-text">${replyPrefix}</div>`:"")}
+          ${c.content?`<div class="tc-comment-text">${replyPrefix}${(window.renderUserContent?window.renderUserContent(c.content):_escHtml(c.content))}</div>`:(replyPrefix?`<div class="tc-comment-text">${replyPrefix}</div>`:"")}
           ${media?`<div class="tc-comment-media">${media}</div>`:""}
           ${pollHtml}
           <div class="tc-comment-action-row">
@@ -910,7 +910,7 @@
           ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl)}
           <div class="tc-comment-form-body">
             <div class="tc-comment-form-top">
-              <textarea id="tc-cmt-input-${parentId}" rows="1"
+              <textarea id="tc-cmt-input-${parentId}" rows="1" data-mention
                 placeholder="Write a comment…"
                 oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();Comments.submitComment('${parentId}')}"></textarea>
@@ -981,7 +981,7 @@
             <div class="tc-reply-composer-inner">
             ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl)}
             <div class="tc-reply-composer-body">
-              <textarea placeholder="Write a reply…" rows="1"
+              <textarea placeholder="Write a reply…" rows="1" data-mention
                 oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();Comments.submitReply('${parentId}','${c.id}',this.closest('.tc-reply-composer'))}"></textarea>
               ${_toolbarHtml(key)}
@@ -1040,6 +1040,14 @@
           metadata: {},
         }).catch(() => {});
       }
+      // Notify anyone @-mentioned in the comment (skips author + the owner who
+      // already got a new_comment ping above).
+      window.Mentions?.notify(content, {
+        fromName: auth.name || "Someone",
+        body:     content,
+        linkUrl:  _notifyLink(parentId),
+        exclude:  [_cfg?.ownerEmail].filter(Boolean),
+      });
       if(ta){ta.value="";ta.style.height="";}
       _clearState(key);
       await Comments.load(parentId);
@@ -1073,6 +1081,14 @@
       if(replyToEmail&&replyToEmail!==auth.email){
         await _db().from("notifications").insert({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
       }
+      // Notify anyone @-mentioned in the reply (skips author + the reply target
+      // who already got a comment_reply ping above).
+      window.Mentions?.notify(content, {
+        fromName: auth.name || "Someone",
+        body:     content,
+        linkUrl:  _notifyLink(parentId),
+        exclude:  [replyToEmail].filter(Boolean),
+      });
       Comments.cancelReply(commentId);
       await Comments.load(parentId);
       _cfg?.onCommentChange?.(parentId);

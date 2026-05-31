@@ -396,9 +396,262 @@ const SH_SUBNAV = {
     }
     .sh-user-menu-item:last-child { border-bottom: none; }
     .sh-user-menu-item:hover { background: #1e1e1e; }
+
+    /* ── Auto-linkified URLs inside user content (posts / comments / replies) ── */
+    a.linkified {
+      color: var(--accent, #2563eb);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    a.linkified:hover { opacity: .82; }
+
+    /* ── @mention tag (rendered inside posts / comments / replies) ── */
+    a.mention-tag {
+      color: var(--accent, #2563eb);
+      font-weight: 600;
+      text-decoration: none;
+      background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
+      border-radius: 5px;
+      padding: 0 3px;
+    }
+    a.mention-tag:hover { text-decoration: underline; }
+
+    /* ── @mention autocomplete dropdown (shared across all composers) ── */
+    #mention-drop {
+      position: fixed; z-index: 99999; min-width: 200px; max-width: 280px;
+      max-height: 248px; overflow-y: auto;
+      background: var(--surface, #1a1410); border: 1px solid var(--border, #333);
+      border-radius: 12px; padding: 5px; box-shadow: 0 10px 30px rgba(0,0,0,.28);
+    }
+    #mention-drop .mention-opt {
+      display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+      border-radius: 8px; cursor: pointer; font-size: .85rem; color: var(--text, #eee);
+    }
+    #mention-drop .mention-opt.is-active,
+    #mention-drop .mention-opt:hover { background: var(--surface-2, rgba(255,255,255,.07)); }
+    #mention-drop .mention-opt-av {
+      width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; object-fit: cover;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .66rem; font-weight: 700; color: #fff; background: #6b6253;
+    }
+    #mention-drop .mention-opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   `;
   document.head.appendChild(s);
 })();
+
+// ── Auto-linkify URLs in user-generated text ────────────────────────────────
+// Single source of truth for turning raw post/comment/reply text into safe HTML
+// with clickable links. ALWAYS HTML-escapes first (XSS-safe), then converts bare
+// http(s):// and www. URLs into anchors that open in a new tab / the system
+// browser on the app. Links call stopPropagation so tapping one inside a
+// clickable post card doesn't also open the card.
+window.linkifyText = function(raw) {
+  const s = String(raw == null ? "" : raw);
+  const esc = s
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  return esc.replace(/(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi, (match) => {
+    let url = match, trail = "";
+    // Peel trailing sentence punctuation, but keep a ')' that balances a '(' in
+    // the URL itself (e.g. /wiki/Sonata_(music)).
+    while (url.length) {
+      const last = url[url.length - 1];
+      if (".,!?]".indexOf(last) !== -1) { trail = last + trail; url = url.slice(0, -1); }
+      else if (last === ")") {
+        const opens  = (url.match(/\(/g) || []).length;
+        const closes = (url.match(/\)/g) || []).length;
+        if (closes > opens) { trail = last + trail; url = url.slice(0, -1); }
+        else break;
+      } else break;
+    }
+    if (!url) return match;
+    const href = /^https?:\/\//i.test(url) ? url : "https://" + url;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="linkified" onclick="event.stopPropagation()">${url}</a>${trail}`;
+  });
+};
+
+// ── @mention engine ─────────────────────────────────────────────────────────
+// One shared module powering @-autocomplete in every composer, plus mention
+// extraction (for notifications) and rendering (clickable tags). Pages opt a
+// textarea in by giving it the attribute `data-mention`. Members are loaded
+// once from allowed_emails. initSharedHeader() wires in the db + current user.
+window.Mentions = (function() {
+  const NAME_FRAG = /@([\w\sÀ-ÿ\-.']{0,40})$/;      // the @word being typed before the caret
+  // System / burner / reviewer accounts — never surfaced as taggable people.
+  const HIDDEN = new Set([
+    "reviewer@matthewcawood.com",
+    "enquiries@matthewcawood.com",
+    "mcawoodcanada@gmail.com",
+  ]);
+  let _db = null, _me = "", _members = [], _loaded = false;
+  let _rawMap = {};      // raw name  → member (for extract)
+  let _escMap = {};      // escaped name → member (for render)
+  let _ta = null, _idx = -1, _matches = [], _open = false;
+
+  function _esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function _reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  async function _ensure() {
+    if (_loaded || !_db) return;
+    _loaded = true;
+    try {
+      const { data } = await _db.from("allowed_emails").select("email,name,avatar_url");
+      _members = (data || []).filter(m =>
+        m.name && m.name.trim() && !HIDDEN.has((m.email || "").toLowerCase()));
+      _rawMap = {}; _escMap = {};
+      _members.forEach(m => { _rawMap[m.name] = m; _escMap[_esc(m.name)] = m; });
+    } catch (e) { _members = []; }
+  }
+
+  function _drop() {
+    let d = document.getElementById("mention-drop");
+    if (!d) { d = document.createElement("div"); d.id = "mention-drop"; d.style.display = "none"; document.body.appendChild(d); }
+    return d;
+  }
+  function _close() { const d = document.getElementById("mention-drop"); if (d) d.style.display = "none"; _open = false; _idx = -1; _matches = []; _ta = null; }
+
+  function _position(ta) {
+    const d = _drop(), r = ta.getBoundingClientRect();
+    d.style.visibility = "hidden"; d.style.display = "block";
+    const dh = d.offsetHeight, dw = d.offsetWidth;
+    let top = r.bottom + 4;
+    if (top + dh > window.innerHeight - 8) top = Math.max(8, r.top - dh - 4); // flip above
+    let left = Math.min(r.left, window.innerWidth - dw - 8);
+    d.style.top = top + "px"; d.style.left = Math.max(8, left) + "px";
+    d.style.visibility = "visible";
+  }
+
+  function _render() {
+    const d = _drop();
+    d.innerHTML = _matches.map((m, i) => {
+      const ini = (m.name || "?").split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+      const av = m.avatar_url
+        ? `<img class="mention-opt-av" src="${_esc(m.avatar_url)}" alt="">`
+        : `<span class="mention-opt-av">${ini}</span>`;
+      return `<div class="mention-opt${i === _idx ? " is-active" : ""}" data-i="${i}">${av}<span class="mention-opt-name">${_esc(m.name)}</span></div>`;
+    }).join("");
+    d.querySelectorAll(".mention-opt").forEach(el => {
+      el.addEventListener("mousedown", ev => { ev.preventDefault(); _pick(+el.dataset.i); });
+    });
+    d.style.display = "block";
+  }
+
+  function _onInput(ta) {
+    _ensure();
+    const pos = ta.selectionStart;
+    const before = (ta.value || "").slice(0, pos);
+    const m = before.match(NAME_FRAG);
+    if (!m) { _close(); return; }
+    const q = m[1].toLowerCase().trim();
+    _matches = _members.filter(mem => mem.name.toLowerCase().includes(q)).slice(0, 8);
+    if (!_matches.length) { _close(); return; }
+    _ta = ta; _idx = 0; _open = true;
+    _render(); _position(ta);
+  }
+
+  function _move(delta) {
+    if (!_matches.length) return;
+    _idx = (_idx + delta + _matches.length) % _matches.length;
+    const d = _drop();
+    d.querySelectorAll(".mention-opt").forEach((el, i) => el.classList.toggle("is-active", i === _idx));
+  }
+
+  function _pick(i) {
+    const mem = _matches[i]; const ta = _ta;
+    if (!mem || !ta) { _close(); return; }
+    const pos = ta.selectionStart;
+    const before = (ta.value || "").slice(0, pos);
+    const after = (ta.value || "").slice(pos);
+    const replaced = before.replace(NAME_FRAG, "@" + mem.name + " ");
+    ta.value = replaced + after;
+    const np = replaced.length;
+    ta.setSelectionRange(np, np);
+    ta.focus();
+    try { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; } catch (e) {}
+    _close();
+  }
+
+  function _onKeydown(e) {
+    if (!_open) return;
+    if (e.key === "ArrowDown")      { e.preventDefault(); e.stopPropagation(); _move(1); }
+    else if (e.key === "ArrowUp")   { e.preventDefault(); e.stopPropagation(); _move(-1); }
+    else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); _pick(_idx); }
+    else if (e.key === "Escape")    { e.preventDefault(); e.stopPropagation(); _close(); }
+  }
+
+  // Global delegation — works for composers rendered after page load.
+  document.addEventListener("input", e => {
+    const t = e.target;
+    if (t && t.matches && t.matches("textarea[data-mention]")) _onInput(t);
+  });
+  document.addEventListener("keydown", _onKeydown, true); // capture: beat inline Enter-to-send
+  document.addEventListener("click", e => {
+    if (!e.target.closest("#mention-drop") && !(e.target.matches && e.target.matches("textarea[data-mention]"))) _close();
+  });
+
+  return {
+    _init(db, myEmail) { _db = db; _me = (myEmail || "").toLowerCase(); _ensure(); },
+    members() { return _members; },
+
+    // Members explicitly @-named in the text → array of {email,name,avatar_url}.
+    extract(text) {
+      if (!text || !_members.length) return [];
+      const names = _members.map(m => m.name).sort((a, b) => b.length - a.length);
+      const re = new RegExp("@(" + names.map(_reEsc).join("|") + ")(?![\\w])", "g");
+      const found = new Map(); let m;
+      while ((m = re.exec(text))) { const mem = _rawMap[m[1]]; if (mem) found.set(mem.email, mem); }
+      return [...found.values()];
+    },
+
+    // Wrap @Name occurrences in clickable profile links. Input must already be
+    // HTML-escaped (we match on escaped names). Single pass — no nested tags.
+    render(escapedHtml) {
+      if (!escapedHtml || !_members.length) return escapedHtml;
+      const names = Object.keys(_escMap).sort((a, b) => b.length - a.length);
+      if (!names.length) return escapedHtml;
+      const re = new RegExp("@(" + names.map(_reEsc).join("|") + ")(?![\\w])", "g");
+      return escapedHtml.replace(re, (mm, p1) => {
+        const mem = _escMap[p1];
+        if (!mem) return mm;
+        return `<a href="/profile.html?u=${encodeURIComponent(mem.email)}" class="mention-tag" onclick="event.stopPropagation()">@${p1}</a>`;
+      });
+    },
+
+    // Extract mentions from `text` and insert "mention" notifications (skips the
+    // author and any emails in `exclude`). Best-effort, never throws.
+    async notify(text, { fromName, body, linkUrl, exclude } = {}) {
+      try {
+        if (!_db) return;
+        const mems = this.extract(text);
+        if (!mems.length) return;
+        const ex = new Set([_me, ...((exclude || []).map(e => (e || "").toLowerCase()))]);
+        const rows = mems
+          .filter(m => m.email && !ex.has(m.email.toLowerCase()))
+          .map(m => ({
+            email: m.email, type: "mention",
+            title: `${fromName || "Someone"} mentioned you`,
+            body: (body || "").slice(0, 120),
+            link_url: linkUrl || "",
+            metadata: {},
+          }));
+        if (rows.length) await _db.from("notifications").insert(rows);
+      } catch (e) { /* best-effort */ }
+    },
+  };
+})();
+
+// Full user-content renderer: escape + linkify URLs + clickable @mentions.
+// Use this for any post / comment / reply body.
+window.renderUserContent = function(raw) {
+  const linked = window.linkifyText ? window.linkifyText(raw) : String(raw == null ? "" : raw);
+  return window.Mentions ? window.Mentions.render(linked) : linked;
+};
 
 // ── Apple Smart App Banner ───────────────────────────────────────────────────
 // Drops Apple's native "Get the App" banner at the top of Safari iOS pages.
@@ -1016,6 +1269,8 @@ window._shInitIOSPush = function(db, email) {
 // ── Main init ─────────────────────────────────────────────────────────────────
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
   window._shIsAdmin = isAdmin;
+  // Wire the shared @mention engine (autocomplete + notifications) on every page.
+  try { window.Mentions && window.Mentions._init(db, myEmail); } catch (e) {}
 
   // basePage is what the page declared; _resolveSection re-detects for pages
   // where multiple sections share the same URL (practice-log.html).
