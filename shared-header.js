@@ -437,6 +437,27 @@ const SH_SUBNAV = {
       font-size: .66rem; font-weight: 700; color: #fff; background: #6b6253;
     }
     #mention-drop .mention-opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── Save / bookmark button on standalone post pages ── */
+    .sp-save-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: 1px solid var(--border, #333); border-radius: 8px;
+      color: var(--text-muted, #888); font-family: inherit; font-size: .8rem; font-weight: 600;
+      padding: 6px 12px; cursor: pointer; transition: color .15s, border-color .15s, background .15s;
+    }
+    .sp-save-btn:hover { color: var(--text, #eee); border-color: var(--accent, #f5c518); }
+    .sp-save-btn.is-saved { color: var(--accent, #f5c518); border-color: var(--accent, #f5c518); }
+    .sp-save-btn svg { flex-shrink: 0; }
+    /* Ghost variant for feed-card footers (icon only, matches sibling buttons) */
+    .sp-save-ghost {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: none; border: none; cursor: pointer; font-family: inherit;
+      font-size: .8rem; font-weight: 600; color: var(--text-muted, #888);
+      padding: 4px 6px; border-radius: 6px; transition: color .15s, background .15s;
+    }
+    .sp-save-ghost:hover { color: var(--text, #eee); background: rgba(0,0,0,.05); }
+    .sp-save-ghost.is-saved { color: var(--accent, #f5c518); }
+    .sp-save-ghost svg { flex-shrink: 0; }
   `;
   document.head.appendChild(s);
 })();
@@ -652,6 +673,77 @@ window.renderUserContent = function(raw) {
   const linked = window.linkifyText ? window.linkifyText(raw) : String(raw == null ? "" : raw);
   return window.Mentions ? window.Mentions.render(linked) : linked;
 };
+
+// ── Saved / bookmarked posts (shared across standalone post pages) ───────────
+// Mirrors community.html's save logic against the same `saved_posts` table, so a
+// post saved on content-feed/updates/focus shows up in the community Saved tab
+// and vice-versa. initSharedHeader() wires in the db + current user.
+window.SavedPosts = (function() {
+  let _db = null, _me = "", _set = new Set(), _loaded = false;
+
+  function _icon(saved) {
+    return `<svg viewBox="0 0 24 24" width="16" height="16" fill="${saved ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>`;
+  }
+  function _apply(btn, saved) {
+    btn.classList.toggle("is-saved", saved);
+    btn.title = saved ? "Saved — tap to remove" : "Save post";
+    const labelled = btn.hasAttribute("data-save-labelled");
+    btn.innerHTML = _icon(saved) + (labelled ? `<span>${saved ? "Saved" : "Save"}</span>` : "");
+  }
+  function _sync(key, saved) {
+    document.querySelectorAll(`[data-save-key="${key}"]`).forEach(b => _apply(b, saved));
+  }
+  function _resyncAll() {
+    document.querySelectorAll("[data-save-key]").forEach(b => _apply(b, _set.has(b.getAttribute("data-save-key"))));
+  }
+  async function _load() {
+    if (!_db || !_me) return;
+    try {
+      const { data } = await _db.from("saved_posts").select("post_type,post_id").eq("email", _me);
+      _set = new Set((data || []).map(r => r.post_type + ":" + r.post_id));
+      _loaded = true;
+      _resyncAll();
+    } catch (e) { /* table missing / offline — degrade */ }
+  }
+
+  return {
+    _init(db, myEmail) { _db = db; _me = myEmail || ""; _load(); },
+    isSaved(type, id) { return _set.has(type + ":" + id); },
+
+    // Markup for a save button. Options:
+    //   className: "sp-save-btn" (bordered pill, default) | "sp-save-ghost" (icon)
+    //   labelled:  show "Save"/"Saved" text (defaults true for the pill)
+    // State auto-syncs once the saved set loads, even if rendered beforehand.
+    buttonHTML(type, id, opts) {
+      opts = opts || {};
+      const cls = opts.className || "sp-save-btn";
+      const labelled = opts.labelled !== undefined ? opts.labelled : (cls === "sp-save-btn");
+      const saved = _set.has(type + ":" + id);
+      return `<button class="${cls}${saved ? " is-saved" : ""}" data-save-key="${type}:${id}"${labelled ? " data-save-labelled" : ""} title="${saved ? "Saved — tap to remove" : "Save post"}" onclick="SavedPosts.toggle(event,'${type}','${id}',this)">${_icon(saved)}${labelled ? `<span>${saved ? "Saved" : "Save"}</span>` : ""}</button>`;
+    },
+
+    async toggle(event, type, id, btn) {
+      if (event) event.stopPropagation();
+      if (!_db || !_me) return;
+      const key = type + ":" + id;
+      const saving = !_set.has(key);
+      if (saving) _set.add(key); else _set.delete(key);
+      _sync(key, saving);
+      try {
+        if (saving) {
+          await _db.from("saved_posts").upsert(
+            { email: _me, post_type: type, post_id: id }, { onConflict: "email,post_type,post_id" });
+        } else {
+          await _db.from("saved_posts").delete()
+            .eq("email", _me).eq("post_type", type).eq("post_id", id);
+        }
+      } catch (e) {
+        if (saving) _set.delete(key); else _set.add(key);
+        _sync(key, !saving);
+      }
+    },
+  };
+})();
 
 // ── Apple Smart App Banner ───────────────────────────────────────────────────
 // Drops Apple's native "Get the App" banner at the top of Safari iOS pages.
@@ -1271,6 +1363,8 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   window._shIsAdmin = isAdmin;
   // Wire the shared @mention engine (autocomplete + notifications) on every page.
   try { window.Mentions && window.Mentions._init(db, myEmail); } catch (e) {}
+  // Wire the shared saved/bookmark store (used by standalone post pages).
+  try { window.SavedPosts && window.SavedPosts._init(db, myEmail); } catch (e) {}
 
   // basePage is what the page declared; _resolveSection re-detects for pages
   // where multiple sections share the same URL (practice-log.html).

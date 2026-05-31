@@ -5984,9 +5984,14 @@ async function loadSavedPosts() {
 // Bookmark button markup, shared by every feed card type.
 function _bookmarkBtnHTML(type, id) {
   const saved = _savedSet.has(type + ":" + id);
-  return `<button class="post-footer-btn save-btn${saved ? " is-saved" : ""}" title="${saved ? "Saved — tap to remove" : "Save post"}" onclick="toggleSavePost(event,'${type}','${id}',this)">
+  return `<button class="post-footer-btn save-btn${saved ? " is-saved" : ""}" data-save-key="${type}:${id}" title="${saved ? "Saved — tap to remove" : "Save post"}" onclick="toggleSavePost(event,'${type}','${id}',this)">
     <svg viewBox="0 0 24 24" width="15" height="15" fill="${saved ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
   </button>`;
+}
+
+// Sync every bookmark button for a given post (feed card + open detail view).
+function _syncBookmarkButtons(key, saved) {
+  document.querySelectorAll(`[data-save-key="${key}"]`).forEach(b => _updateBookmarkBtn(b, saved));
 }
 
 function _updateBookmarkBtn(btn, saved) {
@@ -6003,7 +6008,7 @@ async function toggleSavePost(event, type, id, btn) {
   const key = type + ":" + id;
   const saving = !_savedSet.has(key);
   if (saving) _savedSet.add(key); else _savedSet.delete(key);
-  _updateBookmarkBtn(btn, saving);                       // optimistic
+  _syncBookmarkButtons(key, saving);                     // optimistic (feed + detail)
   try {
     if (saving) {
       await db.from("saved_posts").upsert(
@@ -6017,7 +6022,7 @@ async function toggleSavePost(event, type, id, btn) {
     console.error("[save toggle] failed:", e);
     // roll back optimistic state
     if (saving) _savedSet.delete(key); else _savedSet.add(key);
-    _updateBookmarkBtn(btn, !saving);
+    _syncBookmarkButtons(key, !saving);
   }
   // If we're viewing the Saved space, drop/re-add the card immediately.
   if (_postFilter === "saved") _renderFilteredPosts();
@@ -6128,6 +6133,7 @@ function renderDetail(postId) {
             }).join("")}
           </div>
         </div>
+        ${_bookmarkBtnHTML('community', p.id)}
         <div class="post-footer-right">
           ${(() => {
             const _detailChips = _commLikerChipsInner(p.id);
