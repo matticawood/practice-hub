@@ -895,7 +895,9 @@
     }
     .focus-feed-footer {
       padding: 8px 18px 14px;
+      display: flex; align-items: center; gap: 8px;
     }
+    .focus-feed-footer .focus-feed-cta { margin-left: auto; }
     .focus-feed-cta {
       font-size: 0.82rem;
       font-weight: 700;
@@ -1024,6 +1026,7 @@
     }
     .post-footer-btn:hover { color: var(--text); background: rgba(0,0,0,.05); }
     .post-footer-btn.liked { color: #e879a0; }
+    .post-footer-btn.save-btn.is-saved { color: var(--accent); }
     .post-footer-btn svg { flex-shrink: 0; }
     .post-footer-right {
       margin-left: auto; display: flex; align-items: center; gap: 8px;
@@ -2182,6 +2185,9 @@
               <span class="space-card-label">Practice Logs</span>
               <span class="space-card-badge" id="badge-practice_log" style="display:none"></span>
             </button>
+            <button class="space-card" data-filter="saved" onclick="setPostFilter('saved', this)">
+              <span class="space-card-label">Saved</span>
+            </button>
           </div>
 
           <!-- Search bar -->
@@ -3236,6 +3242,13 @@ function _renderFilteredPosts() {
   } else if (_postFilter === "practice_log") {
     items = filtered.map(p => ({ html: practiceLogCardHTML(p), ts: new Date(p.created_at).getTime() }));
     items.sort((a, b) => b.ts - a.ts);
+  } else if (_postFilter === "saved") {
+    // Saved space: pull saved items across every feed source, newest first.
+    _posts.forEach(p => { if (_savedSet.has("community:" + p.id)) items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime() }); });
+    _contentFeedItems.forEach(f => { if (_savedSet.has("content_feed:" + f.id)) items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
+    _focusFeedItems.forEach(f => { if (_savedSet.has("weekly_focus:" + f.id)) items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
+    _updateItems.forEach(f => { if (_savedSet.has("practice_room_update:" + f.id)) items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
+    items.sort((a, b) => b.ts - a.ts);
   } else {
     items = filtered.map(p => ({ html: postCardHTML(p), ts: 0 }));
   }
@@ -3243,7 +3256,9 @@ function _renderFilteredPosts() {
   if (!items.length) {
     const label = q
       ? `No posts found for "${q}".`
-      : _postFilter === "practice_log"
+      : _postFilter === "saved"
+        ? "No saved posts yet — tap the bookmark on any post to save it for later."
+        : _postFilter === "practice_log"
         ? "No practice logs shared yet — save a session in the Practice Hub and share it here!"
         : _postFilter ? `No ${_postFilter} posts yet.`
         : "No posts yet — be the first to share something! 👆";
@@ -4739,6 +4754,7 @@ function focusFeedCardHTML(f) {
       <div class="focus-feed-headline">${escHtml(f.headline)}</div>
       ${teaser ? `<div class="focus-feed-teaser">${teaser}</div>` : ""}
       <div class="focus-feed-footer">
+        ${_bookmarkBtnHTML('weekly_focus', f.id)}
         <span class="focus-feed-cta">Read this week's focus →</span>
       </div>
     </div>`;
@@ -4907,6 +4923,7 @@ function contentFeedCardHTML(p) {
         <button class="post-footer-btn" onclick="location.href='/content-feed.html?post=${p.id}'">
           ${cmtSvg}${commentCount > 0 ? ` ${commentCount}` : ""}
         </button>
+        ${_bookmarkBtnHTML('content_feed', p.id)}
         <div class="post-footer-right">${ctaHtml}</div>
       </div>`;
   }
@@ -5046,6 +5063,7 @@ function updateFeedCardHTML(p) {
       <button class="post-footer-btn" onclick="location.href='/updates.html?post=${p.id}'">
         ${cmtSvg}${commentCount > 0 ? ` ${commentCount}` : ""}
       </button>
+      ${_bookmarkBtnHTML('practice_room_update', p.id)}
       <div class="post-footer-right"><a href="/updates.html?post=${p.id}" class="cf-comm-cta" style="text-decoration:none;color:#0d6461" onclick="event.stopPropagation()">View update →</a></div>
     </div>`;
 
@@ -5134,6 +5152,7 @@ async function loadPosts() {
     db.from("content_feed_posts").select("*").order("published_at", { ascending: false }).limit(50),
     db.from("practice_room_updates").select("*").order("published_at", { ascending: false }).limit(50),
     _loadFocusFeedItems(),
+    loadSavedPosts(),
   ]);
   const { data: posts, error } = postsResult;
 
@@ -5604,6 +5623,7 @@ function postCardHTML(p) {
         <button class="post-footer-btn" onclick="showDetail('${p.id}')">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         </button>
+        ${_bookmarkBtnHTML('community', p.id)}
         <div class="post-footer-right">
           <div class="post-footer-avatars comm-likers-${p.id}" onclick="event.stopPropagation();showReactorsPopover('${p.id}',event)"
             style="cursor:pointer;${_combinedTotal === 0 ? "display:none" : ""}" title="See who reacted">
@@ -5931,6 +5951,7 @@ function practiceLogCardHTML(p) {
       <button class="post-footer-btn" onclick="showDetail('${escHtml(p.id)}')">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       </button>
+      ${_bookmarkBtnHTML('community', p.id)}
       <div class="post-footer-right">
         <div class="post-footer-avatars comm-likers-${escHtml(p.id)}" onclick="event.stopPropagation();showReactorsPopover('${escHtml(p.id)}',event)"
           style="cursor:pointer;${_combinedTotal === 0 ? "display:none" : ""}" title="See who reacted">
@@ -5945,6 +5966,61 @@ function practiceLogCardHTML(p) {
       </div>
     </div>
   </div>`;
+}
+
+// ── Saved / bookmarked posts ──────────────────────────────────────────────────
+// _savedSet holds "type:id" keys for everything the current user has saved.
+let _savedSet = new Set();
+
+async function loadSavedPosts() {
+  _savedSet = new Set();
+  if (!myEmail) return;
+  try {
+    const { data } = await db.from("saved_posts").select("post_type,post_id").eq("email", myEmail);
+    (data || []).forEach(r => _savedSet.add(r.post_type + ":" + r.post_id));
+  } catch (e) { /* table may not exist yet — degrade gracefully */ }
+}
+
+// Bookmark button markup, shared by every feed card type.
+function _bookmarkBtnHTML(type, id) {
+  const saved = _savedSet.has(type + ":" + id);
+  return `<button class="post-footer-btn save-btn${saved ? " is-saved" : ""}" title="${saved ? "Saved — tap to remove" : "Save post"}" onclick="toggleSavePost(event,'${type}','${id}',this)">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="${saved ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+  </button>`;
+}
+
+function _updateBookmarkBtn(btn, saved) {
+  if (!btn) return;
+  btn.classList.toggle("is-saved", saved);
+  btn.title = saved ? "Saved — tap to remove" : "Save post";
+  const svg = btn.querySelector("svg");
+  if (svg) svg.setAttribute("fill", saved ? "currentColor" : "none");
+}
+
+async function toggleSavePost(event, type, id, btn) {
+  event.stopPropagation();
+  if (!myEmail) return;
+  const key = type + ":" + id;
+  const saving = !_savedSet.has(key);
+  if (saving) _savedSet.add(key); else _savedSet.delete(key);
+  _updateBookmarkBtn(btn, saving);                       // optimistic
+  try {
+    if (saving) {
+      await db.from("saved_posts").upsert(
+        { email: myEmail, post_type: type, post_id: id },
+        { onConflict: "email,post_type,post_id" });
+    } else {
+      await db.from("saved_posts").delete()
+        .eq("email", myEmail).eq("post_type", type).eq("post_id", id);
+    }
+  } catch (e) {
+    console.error("[save toggle] failed:", e);
+    // roll back optimistic state
+    if (saving) _savedSet.delete(key); else _savedSet.add(key);
+    _updateBookmarkBtn(btn, !saving);
+  }
+  // If we're viewing the Saved space, drop/re-add the card immediately.
+  if (_postFilter === "saved") _renderFilteredPosts();
 }
 
 // ── Detail view ───────────────────────────────────────────────────────────────
