@@ -1,5 +1,5 @@
 // The Practice Room — Service Worker
-const CACHE = 'practice-room-v7';
+const CACHE = 'practice-room-v8';
 const PRECACHE = [
   '/',
   '/practice-log.html',
@@ -50,6 +50,25 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(event.request, { cache: 'no-store' })
         .catch(() => caches.match(event.request) || caches.match('/'))
+    );
+    return;
+  }
+
+  // Critical shared app scripts: NETWORK-FIRST. These are loaded by every page
+  // and change often; cache-first served them a deploy behind (the classic
+  // "I shipped the fix but the button does nothing" bug). They revalidate
+  // cheaply via ETag, so always go to network and only fall back to cache when
+  // genuinely offline.
+  const NETWORK_FIRST = ['/shared-header.js', '/shared-comments.js', '/data.js'];
+  if (NETWORK_FIRST.includes(url.pathname)) {
+    event.respondWith(
+      fetch(event.request).then(response => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE).then(c => c.put(event.request, clone));
+        }
+        return response;
+      }).catch(() => caches.match(event.request))
     );
     return;
   }

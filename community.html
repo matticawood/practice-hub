@@ -2736,6 +2736,7 @@ let _rxMap = {};
 let _postRxMap = {};
 let _commRxLikersMap    = {}; // postId → [{email, emoji}, ...] from activity_reactions
 let _commLikerAvatarMap = {}; // email → { url, name }
+let _cmtReactorsMap     = {}; // `${eventType}:${commentId}` → [{email, emoji}, ...]
 let _activityRxPersonMap = {}; // key → [{email,emoji}]
 let _activityAvatarMap   = {}; // email → {url,name}
 // _cmtMap[`${event_type}:${item_id}`] = count
@@ -5393,6 +5394,32 @@ document.addEventListener("click", _dismissReactorsPopover);
   }
 })();
 
+// Who reacted to a comment/reply — same popover as posts, fed by _cmtReactorsMap.
+function showCommentReactorsPopover(event, eventType, commentId) {
+  event.stopPropagation();
+  _dismissReactorsPopover();
+  const likers = _cmtReactorsMap[_commentReactKey(eventType, commentId)] || [];
+  if (!likers.length) return;
+  const rows = likers.map(({ email, emoji }) => {
+    const info = _commLikerAvatarMap[email];
+    const name = info?.name || email.split("@")[0];
+    const col  = avatarColour(email);
+    const av   = info?.url
+      ? `<div class="likers-popover-avatar"><img src="${escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
+      : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
+    return `<div class="likers-popover-row">${av}<span class="likers-popover-name">${escHtml(name)}</span><span style="margin-left:auto;font-size:1rem">${emoji}</span></div>`;
+  }).join("");
+  const pop = document.createElement("div");
+  pop.className = "likers-popover";
+  pop.innerHTML = `<div class="likers-popover-title">Reacted</div>${rows}`;
+  document.body.appendChild(pop);
+  _reactorsPopover = pop;
+  const { clientX: x, clientY: y } = event;
+  const pw = 220, ph = 48 + likers.length * 38;
+  pop.style.left = Math.min(x, window.innerWidth  - pw - 12) + "px";
+  pop.style.top  = Math.min(y + 8, window.innerHeight - ph - 12) + "px";
+}
+
 function showReactorsPopover(postId, event) {
   event.stopPropagation();
   _dismissReactorsPopover();
@@ -6319,7 +6346,11 @@ async function loadComments(postId) {
           <div class="comment-meta">
             <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
             <span class="comment-time">${relativeTime(c.created_at)}</span>
-            ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
+            ${c.edited_at ? `<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>` : ""}
+            <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
+              ${c.email === myEmail ? `<button onclick="editCommunityComment('${c.id}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>` : ""}
+              ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
+            </span>
           </div>
           ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderCommentMedia(c)}
@@ -6513,6 +6544,20 @@ async function deleteComment(commentId, postId) {
   if (!confirm("Delete this comment?")) return;
   await db.from("community_post_comments").delete().eq("id", commentId);
   await loadComments(postId);
+}
+
+// Inline-edit a community post comment (author-only; RLS-enforced).
+async function editCommunityComment(commentId) {
+  const textEl = document.querySelector(`#comment-${commentId} .comment-text`);
+  if (!textEl) return;
+  const { data } = await db.from("community_post_comments").select("content").eq("id", commentId).single();
+  window.shInlineEdit(textEl, data?.content || "", async (val) => {
+    const { data: upd, error } = await db.from("community_post_comments")
+      .update({ content: val, edited_at: new Date().toISOString() }).eq("id", commentId).select("id");
+    if (error) throw error;
+    if (!upd || !upd.length) throw new Error("Edit not permitted.");
+    await loadComments(_currentPostId);
+  });
 }
 
 function autoResize(el) {
@@ -6908,20 +6953,35 @@ function _commentReactBarHTML(eventType, commentId) {
   const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
   const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
   const countLabel = total > 0 ? ` ${total}` : "";
+  // Tappable reactor avatars → "who reacted" popover (mirrors posts).
+  const reactors = _cmtReactorsMap[key] || [];
+  const chips = reactors.length ? `<span class="cmt-reactors" onclick="showCommentReactorsPopover(event,'${eventType}','${String(commentId)}')" style="display:inline-flex;align-items:center;cursor:pointer;padding-left:6px" title="See who reacted">${
+    reactors.slice(0, 3).map(r => {
+      const info = _commLikerAvatarMap[r.email];
+      const nm   = info?.name || r.email.split("@")[0];
+      const col  = avatarColour(r.email);
+      return info?.url
+        ? `<img src="${escHtml(info.url)}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;margin-left:-4px;border:1.5px solid var(--surface);display:block">`
+        : `<span style="width:18px;height:18px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.6rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-left:-4px;border:1.5px solid var(--surface)">${escHtml(nm[0].toUpperCase())}</span>`;
+    }).join("")
+  }</span>` : "";
   return `
-    <div style="position:relative;display:inline-flex">
-      <button class="comment-react-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
-        onclick="toggleReactPicker('${safeKey}','${eventType}','${String(commentId)}')">
-        ${heartSvg}${emojiLabel}${countLabel}
-      </button>
-      <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
-        ${COMMENT_REACT_EMOJIS.map(e => {
-          const d = rxData[e] || { count: 0, mine: false };
-          return `<button class="${d.mine ? "picked" : ""}"
-            onclick="pickReaction(event,'${safeKey}','${eventType}','${String(commentId)}','${e}')"
-          >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
-        }).join("")}
+    <div style="display:inline-flex;align-items:center">
+      <div style="position:relative;display:inline-flex">
+        <button class="comment-react-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
+          onclick="toggleReactPicker('${safeKey}','${eventType}','${String(commentId)}')">
+          ${heartSvg}${emojiLabel}${countLabel}
+        </button>
+        <div class="activity-react-picker" id="picker-${safeKey}" style="display:none">
+          ${COMMENT_REACT_EMOJIS.map(e => {
+            const d = rxData[e] || { count: 0, mine: false };
+            return `<button class="${d.mine ? "picked" : ""}"
+              onclick="pickReaction(event,'${safeKey}','${eventType}','${String(commentId)}','${e}')"
+            >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+          }).join("")}
+        </div>
       </div>
+      ${chips}
     </div>`;
 }
 
@@ -6936,14 +6996,27 @@ async function _loadCommentReactions(eventType, commentIds) {
     .eq("event_type", eventType)
     .in("item_id", ids);
   // Clear any stale entries for these comments first.
-  ids.forEach(id => { delete _rxMap[_commentReactKey(eventType, id)]; });
+  ids.forEach(id => {
+    delete _rxMap[_commentReactKey(eventType, id)];
+    delete _cmtReactorsMap[_commentReactKey(eventType, id)];
+  });
+  const reactorEmails = new Set();
   (rows || []).forEach(r => {
     const k = _commentReactKey(eventType, r.item_id);
     if (!_rxMap[k]) _rxMap[k] = {};
     if (!_rxMap[k][r.emoji]) _rxMap[k][r.emoji] = { count: 0, mine: false };
     _rxMap[k][r.emoji].count++;
     if (r.email === myEmail) _rxMap[k][r.emoji].mine = true;
+    (_cmtReactorsMap[k] = _cmtReactorsMap[k] || []).push({ email: r.email, emoji: r.emoji });
+    reactorEmails.add(r.email);
   });
+  // Pull names/avatars for any reactors we don't already know, so the
+  // "who reacted" popover can show them.
+  const need = [...reactorEmails].filter(e => !_commLikerAvatarMap[e]);
+  if (need.length) {
+    const { data: av } = await db.from("allowed_emails").select("email,name,avatar_url").in("email", need);
+    (av || []).forEach(r => { _commLikerAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] }; });
+  }
 }
 
 async function pickReaction(event, safeKey, eventType, itemId, emoji) {
@@ -7017,25 +7090,52 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: eventType, item_id: String(itemId), emoji });
 
-  // Comment reactions notify the comment author rather than an activity row.
+  // Comment/reply reactions notify the comment author rather than an activity row.
+  // Resolve the author straight from the DB so this never depends on client-side
+  // meta being registered (which it isn't, e.g. when reacting to a reply from the
+  // activity feed) — that silent dependency was dropping reply-reaction notifs.
   if (eventType.endsWith("_comment")) {
     const _meta = _getCommentMeta(eventType, itemId);
-    if (_meta?.email && _meta.email.toLowerCase() !== myEmail.toLowerCase()) {
+    let _authorEmail = _meta?.email;
+    let _linkUrl     = _meta?.link_url || "/community.html";
+    let _isReply     = false;
+    {
+      const _tbl = { community_comment: "community_post_comments", activity_comment: "activity_comments" }[eventType];
+      if (_tbl) {
+        const { data: _crow } = await db.from(_tbl).select("email,parent_comment_id").eq("id", itemId).maybeSingle();
+        if (_crow) {
+          if (!_authorEmail) _authorEmail = _crow.email;
+          _isReply = !!_crow.parent_comment_id;
+        }
+      }
+    }
+    if (_authorEmail && _authorEmail.toLowerCase() !== myEmail.toLowerCase()) {
       await db.from("notifications").insert({
-        email:    _meta.email,
+        email:    _authorEmail,
         type:     "reaction",
-        title:    `${myName || "Someone"} reacted ${emoji} to your comment`,
+        title:    `${myName || "Someone"} reacted ${emoji} to your ${_isReply ? "reply" : "comment"}`,
         body:     "",
-        link_url: _meta.link_url || "/community.html",
+        link_url: _linkUrl,
         metadata: { event_type: eventType, item_id: String(itemId), emoji },
-      }).catch(() => {});
+      });
     }
     return;
   }
 
   // Notify the activity item's owner (skip self).
   const _row = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId));
-  if (_row?.email && _row.email.toLowerCase() !== myEmail.toLowerCase()) {
+  let _ownerEmail = _row?.email;
+  let _postId     = _row?.post_id;
+  // For comment/reply reactions the item lives in community_post_comments even
+  // when it isn't in the loaded feed window — resolve the author from the DB so
+  // the notification still fires (this was the gap that dropped reply notifs).
+  if (!_ownerEmail && (eventType === "comment" || eventType === "reply")) {
+    const { data: _crow } = await db.from("community_post_comments")
+      .select("email,post_id").eq("id", itemId).maybeSingle();
+    _ownerEmail = _crow?.email;
+    _postId     = _postId || _crow?.post_id;
+  }
+  if (_ownerEmail && _ownerEmail.toLowerCase() !== myEmail.toLowerCase()) {
     const _kind = ({
       session:         "practice session",
       achievement:     "achievement",
@@ -7047,19 +7147,17 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
       comment:         "comment",
       reply:           "reply",
     })[eventType] || "activity";
-    // Deep link to the underlying post when the reaction is on a post/
-    // comment/reply, otherwise just to the community feed.
-    const _link = (eventType === "post" || eventType === "comment" || eventType === "reply") && _row.post_id
-      ? `/community.html?post=${_row.post_id}`
+    const _link = (eventType === "post" || eventType === "comment" || eventType === "reply") && _postId
+      ? `/community.html?post=${_postId}`
       : `/community.html`;
     await db.from("notifications").insert({
-      email:    _row.email,
+      email:    _ownerEmail,
       type:     "reaction",
       title:    `${myName || "Someone"} reacted ${emoji} to your ${_kind}`,
       body:     "",
       link_url: _link,
       metadata: { event_type: eventType, item_id: String(itemId), emoji },
-    }).catch(() => {});
+    });
   }
 }
 
@@ -7327,7 +7425,7 @@ async function loadActivityDetailComments(eventType, itemId) {
   listEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:.82rem">Loading…</div>`;
 
   const { data: comments, error } = await db.from("activity_comments")
-    .select("id,email,name,content,created_at,parent_comment_id,reply_to_name,media")
+    .select("id,email,name,content,created_at,parent_comment_id,reply_to_name,media,edited_at")
     .eq("event_type", eventType).eq("item_id", String(itemId))
     .order("created_at", { ascending: true });
 
@@ -7378,7 +7476,11 @@ async function loadActivityDetailComments(eventType, itemId) {
         <div class="comment-meta">
           <span class="comment-name">${dispName}</span>
           <span class="comment-time">${relativeTime(c.created_at)}</span>
-          ${canDel?`<button onclick="deleteActivityDetailComment('${c.id}','${eventType}','${String(itemId)}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
+          ${c.edited_at?`<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
+          <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
+            ${c.email===myEmail?`<button onclick="editActivityComment('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>`:""}
+            ${canDel?`<button onclick="deleteActivityDetailComment('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
+          </span>
         </div>
         ${c.content ? `<div class="comment-text">${replyPrefix}${escHtml(c.content)}</div>` : (replyPrefix?`<div class="comment-text">${replyPrefix}</div>`:"")}
         ${mediaHtml}
@@ -7489,6 +7591,19 @@ async function submitActivityDetailReply(parentId, eventType, itemId) {
   composer.style.display = "none";
   _clearInlineState(parentId);
   await loadActivityDetailComments(eventType, itemId);
+}
+
+async function editActivityComment(commentId, eventType, itemId) {
+  const textEl = document.querySelector(`#activity-comment-${commentId} .comment-text`);
+  if (!textEl) return;
+  const { data } = await db.from("activity_comments").select("content").eq("id", commentId).single();
+  window.shInlineEdit(textEl, data?.content || "", async (val) => {
+    const { data: upd, error } = await db.from("activity_comments")
+      .update({ content: val, edited_at: new Date().toISOString() }).eq("id", commentId).select("id");
+    if (error) throw error;
+    if (!upd || !upd.length) throw new Error("Edit not permitted.");
+    await loadActivityDetailComments(eventType, itemId);
+  });
 }
 
 async function deleteActivityDetailComment(commentId, eventType, itemId) {
