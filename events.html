@@ -2989,17 +2989,28 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
   await db.from("activity_reactions")
     .insert({ email: myEmail, event_type: "event_comment", item_id: idStr, emoji });
 
-  // Notify the comment author (skip self).
+  // Notify the comment author (skip self). Resolve from the DB so a missing
+  // client meta entry can't silently drop the notification (esp. for replies).
   const meta = _evCmtMetaMap[idStr];
-  if (meta?.email && meta.email.toLowerCase() !== myEmail.toLowerCase()) {
+  let authorEmail = meta?.email;
+  let isReply = false;
+  {
+    const { data: crow } = await db.from("event_comments")
+      .select("email,parent_comment_id").eq("id", idStr).maybeSingle();
+    if (crow) {
+      if (!authorEmail) authorEmail = crow.email;
+      isReply = !!crow.parent_comment_id;
+    }
+  }
+  if (authorEmail && authorEmail.toLowerCase() !== myEmail.toLowerCase()) {
     await db.from("notifications").insert({
-      email:    meta.email,
+      email:    authorEmail,
       type:     "reaction",
-      title:    `${myName || "Someone"} reacted ${emoji} to your comment`,
+      title:    `${myName || "Someone"} reacted ${emoji} to your ${isReply ? "reply" : "comment"}`,
       body:     "",
       link_url: `/events.html?event=${_currentEventId}`,
       metadata: { event_type: "event_comment", item_id: idStr, emoji },
-    }).catch(() => {});
+    });
   }
 }
 window._evPickCmtReaction = _evPickCmtReaction;
@@ -3100,7 +3111,11 @@ async function loadComments(eventId) {
           <div class="comment-meta">
             <span class="comment-name">${dispName}</span>
             <span class="comment-time">${timeAgo(c.created_at)}</span>
-            ${canDel ? `<button class="delete-btn" onclick="deleteComment('${c.id}','${eventId}')" title="Delete">Delete</button>` : ""}
+            ${c.edited_at ? `<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>` : ""}
+            <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
+              ${c.email === myEmail ? `<button class="delete-btn" style="margin-left:0" onclick="editEvComment('${c.id}','${eventId}')" title="Edit" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>` : ""}
+              ${canDel ? `<button class="delete-btn" style="margin-left:0" onclick="deleteComment('${c.id}','${eventId}')" title="Delete">Delete</button>` : ""}
+            </span>
           </div>
           ${c.content ? `<div class="comment-text">${replyPrefix}${esc(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderAttHtml(c)}
@@ -4047,6 +4062,20 @@ async function deleteComment(commentId, eventId) {
   if (!confirm("Delete this message?")) return;
   await db.from("event_comments").delete().eq("id", commentId);
   loadComments(eventId);
+}
+
+// Inline-edit an event comment (author-only; RLS-enforced).
+async function editEvComment(commentId, eventId) {
+  const textEl = document.querySelector(`#comment-${commentId} .comment-text`);
+  if (!textEl) return;
+  const { data } = await db.from("event_comments").select("content").eq("id", commentId).single();
+  window.shInlineEdit(textEl, data?.content || "", async (val) => {
+    const { data: upd, error } = await db.from("event_comments")
+      .update({ content: val, edited_at: new Date().toISOString() }).eq("id", commentId).select("id");
+    if (error) throw error;
+    if (!upd || !upd.length) throw new Error("Edit not permitted.");
+    loadComments(eventId);
+  });
 }
 
 async function loadAttendees(eventId) {

@@ -1325,6 +1325,52 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   window._shSyncAppBadge = _shSyncAppBadge;
   window._shClearAppBadge = _shSyncAppBadge; // back-compat alias
 
+  // ── Generic inline comment editor ───────────────────────────────────────────
+  // Swaps a comment's text element for a textarea + Save/Cancel. Used by every
+  // comment system (community, activity, content feed, updates, focus, events)
+  // so the edit UX is identical everywhere. `currentText` is the raw (unescaped)
+  // comment body; `onSave(newText)` must persist it and resolve — the caller
+  // typically reloads its list afterwards, which replaces this DOM.
+  window.shInlineEdit = function(textEl, currentText, onSave) {
+    if (!textEl || textEl.dataset.shEditing === "1") return;
+    textEl.dataset.shEditing = "1";
+    const original = textEl.innerHTML;
+    const wrap = document.createElement("div");
+    wrap.innerHTML =
+      '<textarea class="sh-edit-ta" rows="2" style="width:100%;box-sizing:border-box;resize:none;border:1.5px solid var(--accent);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:.87rem;line-height:1.45;background:var(--surface);color:var(--text);outline:none"></textarea>' +
+      '<div style="display:flex;justify-content:flex-end;gap:14px;margin-top:6px">' +
+      '<button type="button" class="sh-edit-cancel" style="background:none;border:none;font-family:inherit;font-size:.8rem;cursor:pointer;color:var(--text-muted);padding:0">Cancel</button>' +
+      '<button type="button" class="sh-edit-save" style="background:none;border:none;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--accent);padding:0">Save</button>' +
+      '</div>';
+    textEl.innerHTML = "";
+    textEl.appendChild(wrap);
+    const ta = wrap.querySelector(".sh-edit-ta");
+    ta.value = currentText || "";
+    const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 200) + "px"; };
+    ta.oninput = grow; grow();
+    ta.focus();
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch {}
+    const restore = () => { textEl.innerHTML = original; textEl.dataset.shEditing = ""; };
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); restore(); }
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); wrap.querySelector(".sh-edit-save").click(); }
+    });
+    wrap.querySelector(".sh-edit-cancel").onclick = restore;
+    wrap.querySelector(".sh-edit-save").onclick = async () => {
+      const val = ta.value.trim();
+      if (!val) return;
+      const btn = wrap.querySelector(".sh-edit-save");
+      btn.disabled = true; btn.textContent = "Saving…";
+      try { await onSave(val); }
+      catch (err) {
+        alert("Couldn't save the edit: " + (err?.message || err));
+        btn.disabled = false; btn.textContent = "Save";
+        return;
+      }
+      textEl.dataset.shEditing = ""; // caller reloads & replaces the DOM
+    };
+  };
+
   window._shSendUpdate = async function(broadcast) {
     const title    = document.getElementById("notif-admin-title")?.value.trim();
     const body     = document.getElementById("notif-admin-body")?.value.trim();

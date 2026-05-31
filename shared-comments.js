@@ -76,6 +76,9 @@
   let   _cmtOpenPicker = null;
   const _CMT_RX_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
   let _openPicker = null;
+  const _cmtReactorsList = {}; // commentId → [{email, emoji}] (for "who reacted")
+  const _cmtReactorInfo  = {}; // email → { name, url }
+  let _cmtReactorsPopover = null;
 
   // Likers popover
   let _likersPopover = null;
@@ -674,7 +677,11 @@
           <div class="tc-comment-meta">
             <a href="${profileLink}" style="text-decoration:none"><span class="tc-comment-name" style="cursor:pointer">${dispName}</span></a>
             <span class="tc-comment-time">${_relativeTime(c.created_at)}</span>
-            ${canDel?`<button onclick="Comments.deleteComment('${c.id}','${parentId}')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0 4px;font-family:inherit" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
+            ${c.edited_at?`<span class="tc-comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
+            <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
+              ${c.email===auth.email?`<button onclick="Comments.editComment('${c.id}','${parentId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>`:""}
+              ${canDel?`<button onclick="Comments.deleteComment('${c.id}','${parentId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
+            </span>
           </div>
           ${c.content?`<div class="tc-comment-text">${replyPrefix}${_escHtml(c.content)}</div>`:(replyPrefix?`<div class="tc-comment-text">${replyPrefix}</div>`:"")}
           ${media?`<div class="tc-comment-media">${media}</div>`:""}
@@ -701,13 +708,21 @@
       .select("item_id,email,emoji")
       .eq("event_type", eventType)
       .in("item_id", ids);
-    ids.forEach(id => { delete _cmtRxState[id]; });
+    ids.forEach(id => { delete _cmtRxState[id]; delete _cmtReactorsList[id]; });
+    const reactorEmails = new Set();
     (data || []).forEach(r => {
       if (!_cmtRxState[r.item_id]) _cmtRxState[r.item_id] = {};
       if (!_cmtRxState[r.item_id][r.emoji]) _cmtRxState[r.item_id][r.emoji] = { count: 0, mine: false };
       _cmtRxState[r.item_id][r.emoji].count++;
       if (r.email === auth.email) _cmtRxState[r.item_id][r.emoji].mine = true;
+      (_cmtReactorsList[r.item_id] = _cmtReactorsList[r.item_id] || []).push({ email: r.email, emoji: r.emoji });
+      reactorEmails.add(r.email);
     });
+    const need = [...reactorEmails].filter(e => !_cmtReactorInfo[e]);
+    if (need.length) {
+      const { data: av } = await _db().from("allowed_emails").select("email,name,avatar_url").in("email", need);
+      (av || []).forEach(r => { _cmtReactorInfo[r.email] = { name: r.name || r.email.split("@")[0], url: r.avatar_url || null }; });
+    }
   }
 
   function _cmtReactBarHTML(commentId) {
@@ -722,22 +737,43 @@
     const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
     const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
     const countLabel = total > 0 ? ` ${total}` : "";
+    const reactors = _cmtReactorsList[String(commentId)] || [];
+    const chips = reactors.length ? `<span onclick="Comments.showCmtReactors(event,'${String(commentId)}')" style="display:inline-flex;align-items:center;cursor:pointer;padding-left:6px" title="See who reacted">${
+      reactors.slice(0, 3).map(r => {
+        const info = _cmtReactorInfo[r.email];
+        const nm   = info?.name || r.email.split("@")[0];
+        const col  = _avatarColour(r.email);
+        return info?.url
+          ? `<img src="${_escHtml(info.url)}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;margin-left:-4px;border:1.5px solid var(--surface);display:block">`
+          : `<span style="width:18px;height:18px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.6rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-left:-4px;border:1.5px solid var(--surface)">${_escHtml(nm[0].toUpperCase())}</span>`;
+      }).join("")
+    }</span>` : "";
     return `
-      <div style="position:relative;display:inline-flex">
-        <button class="tc-cmt-react-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
-          onclick="Comments.toggleCmtPicker('${safeKey}','${String(commentId)}')">
-          ${heartSvg}${emojiLabel}${countLabel}
-        </button>
-        <div class="tc-react-picker" id="picker-${safeKey}" style="display:none">
-          ${_CMT_RX_EMOJIS.map(e => {
-            const d = data[e] || { count: 0, mine: false };
-            return `<button class="${d.mine ? "picked" : ""}"
-              onclick="Comments.pickCmtReact(event,'${safeKey}','${String(commentId)}','${e}')"
-            >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
-          }).join("")}
+      <div style="display:inline-flex;align-items:center">
+        <div style="position:relative;display:inline-flex">
+          <button class="tc-cmt-react-btn${myEmoji ? " liked" : ""}" id="like-btn-${safeKey}"
+            onclick="Comments.toggleCmtPicker('${safeKey}','${String(commentId)}')">
+            ${heartSvg}${emojiLabel}${countLabel}
+          </button>
+          <div class="tc-react-picker" id="picker-${safeKey}" style="display:none">
+            ${_CMT_RX_EMOJIS.map(e => {
+              const d = data[e] || { count: 0, mine: false };
+              return `<button class="${d.mine ? "picked" : ""}"
+                onclick="Comments.pickCmtReact(event,'${safeKey}','${String(commentId)}','${e}')"
+              >${e}${d.count > 0 ? `<span class="picker-count">${d.count}</span>` : ""}</button>`;
+            }).join("")}
+          </div>
         </div>
+        ${chips}
       </div>`;
   }
+
+  // "Who reacted" popover for a comment — self-contained inline styles so it
+  // works on every page that uses this component (content feed, updates, focus).
+  function _dismissCmtReactorsPopover() {
+    if (_cmtReactorsPopover) { _cmtReactorsPopover.remove(); _cmtReactorsPopover = null; }
+  }
+  document.addEventListener("click", _dismissCmtReactorsPopover);
 
   function _cmtRefreshBtn(safeKey, commentId) {
     const data = _cmtRxState[commentId] || {};
@@ -1050,6 +1086,46 @@
       _cfg?.onCommentChange?.(parentId);
     },
 
+    // Inline-edit a comment's text (author-only; enforced by RLS too).
+    async editComment(commentId, parentId) {
+      const textEl = document.querySelector(`#tc-cmt-${commentId} .tc-comment-text`);
+      if (!textEl) return;
+      const { data } = await _db().from(_cTable()).select("content").eq("id", commentId).single();
+      window.shInlineEdit(textEl, data?.content || "", async (val) => {
+        const { data: upd, error } = await _db().from(_cTable())
+          .update({ content: val, edited_at: new Date().toISOString() }).eq("id", commentId).select("id");
+        if (error) throw error;
+        if (!upd || !upd.length) throw new Error("Edit not permitted.");
+        await Comments.load(parentId);
+      });
+    },
+
+    // Show who reacted to a comment/reply.
+    showCmtReactors(event, commentId) {
+      event.stopPropagation();
+      _dismissCmtReactorsPopover();
+      const likers = _cmtReactorsList[String(commentId)] || [];
+      if (!likers.length) return;
+      const rows = likers.map(({ email, emoji }) => {
+        const info = _cmtReactorInfo[email];
+        const name = info?.name || email.split("@")[0];
+        const col  = _avatarColour(email);
+        const av   = info?.url
+          ? `<img src="${_escHtml(info.url)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;display:block">`
+          : `<span style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.8rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center">${_escHtml(name[0].toUpperCase())}</span>`;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><div style="width:28px;height:28px;flex-shrink:0">${av}</div><span style="font-size:.85rem;color:var(--text)">${_escHtml(name)}</span><span style="margin-left:auto;font-size:1rem">${emoji}</span></div>`;
+      }).join("");
+      const pop = document.createElement("div");
+      pop.style.cssText = "position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:10px 14px;min-width:200px;max-width:260px";
+      pop.innerHTML = `<div style="font-size:.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Reacted</div>${rows}`;
+      document.body.appendChild(pop);
+      _cmtReactorsPopover = pop;
+      const x = event.clientX, y = event.clientY;
+      const pw = 230, ph = 44 + likers.length * 40;
+      pop.style.left = Math.min(x, window.innerWidth  - pw - 12) + "px";
+      pop.style.top  = Math.min(y + 8, window.innerHeight - ph - 12) + "px";
+    },
+
     // ── Per-comment reaction picker (open/close) ──────────────────────────────
     toggleCmtPicker(safeKey, commentId) {
       const picker = document.getElementById(`picker-${safeKey}`);
@@ -1101,16 +1177,23 @@
       await _db().from("activity_reactions")
         .insert({ email: auth.email, event_type: eventType, item_id: idStr, emoji });
 
-      // Notify the comment author (skip self). The link target is derived from
-      // the page's reply-notification link function so the destination matches
-      // existing comment-reply notifications for each surface.
+      // Notify the comment author (skip self). Resolve the author straight from
+      // the DB so a missing client-side meta entry (e.g. reacting to a reply
+      // that wasn't in the rendered thread) can't silently drop the notification.
       const meta = _cmtMetaMap[idStr];
-      if (meta?.email && meta.email.toLowerCase() !== auth.email.toLowerCase()) {
-        // Look up which parent post this comment belongs to so the link goes
-        // to the right page. The comment row in DB has the parent FK so we
-        // could query, but the simpler fix is to compute the link from the
-        // already-loaded comment if shared-comments retained the parentId.
-        // Here we fall back to a generic link based on the comments table name.
+      let authorEmail = meta?.email;
+      let isReply = false;
+      let parentId = meta?.parentId || null;
+      {
+        const { data: crow } = await _db().from(_cTable())
+          .select(`email,parent_comment_id,${_cParent()}`).eq("id", idStr).maybeSingle();
+        if (crow) {
+          if (!authorEmail) authorEmail = crow.email;
+          isReply = !!crow.parent_comment_id;
+          if (!parentId) parentId = crow[_cParent()];
+        }
+      }
+      if (authorEmail && authorEmail.toLowerCase() !== auth.email.toLowerCase()) {
         const fallbackLink = (() => {
           switch (eventType) {
             case "focus_comment":  return "/focus.html";
@@ -1119,17 +1202,17 @@
             default: return "/";
           }
         })();
-        const linkUrl = (typeof _cfg.replyNotificationLinkFn === "function" && meta.parentId)
-          ? _cfg.replyNotificationLinkFn(meta.parentId)
+        const linkUrl = (typeof _cfg.replyNotificationLinkFn === "function" && parentId)
+          ? _cfg.replyNotificationLinkFn(parentId)
           : fallbackLink;
         await _db().from("notifications").insert({
-          email:    meta.email,
+          email:    authorEmail,
           type:     "reaction",
-          title:    `${auth.name || "Someone"} reacted ${emoji} to your comment`,
+          title:    `${auth.name || "Someone"} reacted ${emoji} to your ${isReply ? "reply" : "comment"}`,
           body:     "",
           link_url: linkUrl,
           metadata: { event_type: eventType, item_id: idStr, emoji },
-        }).catch(() => {});
+        });
       }
     },
 
