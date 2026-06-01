@@ -270,6 +270,15 @@ const SH_SUBNAV = {
     .notif-item-body { flex: 1; min-width: 0; }
     .notif-item-badge { flex-shrink: 0; display: flex; align-items: center; }
     .notif-item-badge svg { display: block; }
+    /* Achievement badge → glowing medallion disc, tuned for the dark notification panel. */
+    .notif-ach-medal { position: relative; overflow: hidden; width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 34%, rgba(255,255,255,.14), var(--g0, rgba(245,158,11,.18)) 70%, rgba(0,0,0,.35));
+      box-shadow: 0 0 0 1.5px var(--g1, rgba(245,158,11,.45)), 0 0 16px -2px var(--g2, #f59e0b), inset 0 1px 1px rgba(255,255,255,.16); }
+    .notif-ach-medal > svg { width: 30px; height: 30px; display: block; }
+    .notif-ach-medal::after { content: ""; position: absolute; top: -40%; left: -60%; width: 45%; height: 180%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent); transform: rotate(20deg); pointer-events: none; animation: notifAchSheen 4.5s ease-in-out infinite; }
+    @keyframes notifAchSheen { 0% { left: -60%; } 18% { left: 130%; } 100% { left: 130%; } }
+    @media (prefers-reduced-motion: reduce) { .notif-ach-medal::after { display: none; } }
     .notif-item-title { font-size: 0.82rem; font-weight: 600; color: #e0e0e0; margin-bottom: 2px; line-height: 1.35; }
     .notif-item-desc { font-size: 0.75rem; color: #5a5a5a; line-height: 1.4; }
     .notif-item-time { font-size: 0.68rem; color: #3a3a3a; margin-top: 4px; }
@@ -1567,8 +1576,19 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       const badgeSvg = (n.type === "achievement" && n.metadata?.badge_svg) ? n.metadata.badge_svg : null;
       // Monthly Champions notifications get the same gold trophy as the card.
       const isChamp = (n.type === "monthly_champions" || n.type === "champion_placed");
+      // Achievement badges render in the same glowing medallion disc as Stats / the feed.
+      // The glow is derived from the badge's OWN gradient colour (not any stored
+      // metadata) so it always matches the exact medallion being displayed.
+      let g0 = "rgba(245,158,11,.15)", g1 = "rgba(245,158,11,.45)", g2 = "#f59e0b";
+      if (badgeSvg) {
+        const stops = badgeSvg.match(/stop-color="(#[0-9a-fA-F]{6})"/g);
+        if (stops && stops.length) {
+          const c = stops[stops.length - 1].match(/#[0-9a-fA-F]{6}/)[0];
+          g0 = c + "26"; g1 = c + "73"; g2 = c;
+        }
+      }
       const iconHTML = badgeSvg
-        ? `<div class="notif-item-badge">${badgeSvg}</div>`
+        ? `<div class="notif-item-badge"><span class="notif-ach-medal" style="--g0:${g0};--g1:${g1};--g2:${g2}">${badgeSvg}</span></div>`
         : (isChamp ? _NOTIF_CHAMP_ICON : "");
       return `
       <div class="notif-item ${n.read ? "" : "unread"}" data-id="${n.id}" onclick="window._shNotifClick(this)">
