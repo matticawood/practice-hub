@@ -4303,6 +4303,41 @@
       font-size: 0.85rem;
       padding: 40px 0;
     }
+    /* ── Top-3 podium ── */
+    .lb-podium { display: flex; align-items: flex-end; justify-content: center; gap: 10px; margin: 6px 0 20px; }
+    .lb-podium-place { flex: 1; max-width: 132px; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+    .lb-podium-av { display: inline-flex; border-radius: 50%; }
+    .lb-pod-gold   .lb-podium-av { box-shadow: 0 0 0 3px #FFD700, 0 4px 16px rgba(255,215,0,.35); }
+    .lb-pod-silver .lb-podium-av { box-shadow: 0 0 0 3px #c7c7cc, 0 4px 12px rgba(150,150,160,.25); }
+    .lb-pod-bronze .lb-podium-av { box-shadow: 0 0 0 3px #cd7f32, 0 4px 12px rgba(205,127,50,.25); }
+    .lb-podium-name {
+      font-size: .78rem; font-weight: 700; color: var(--text); margin-top: 9px;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
+    }
+    body.hub-mode .lb-podium-name { color: #1a1410; }
+    .lb-podium-name.is-me { color: var(--lb-active-color, var(--accent)); }
+    .lb-podium-val { font-size: .72rem; font-weight: 700; color: var(--text-muted); margin-top: 2px; }
+    .lb-podium-plinth {
+      width: 100%; margin-top: 10px; border-radius: 8px 8px 0 0;
+      display: flex; align-items: flex-start; justify-content: center; padding-top: 6px;
+    }
+    .lb-podium-rank { font-size: 1.05rem; font-weight: 900; color: rgba(0,0,0,.45); }
+    .lb-pod-gold   .lb-podium-plinth { height: 56px; background: linear-gradient(180deg, #FFE680, #F5C518); }
+    .lb-pod-silver .lb-podium-plinth { height: 40px; background: linear-gradient(180deg, #edeef0, #c0c0c0); }
+    .lb-pod-bronze .lb-podium-plinth { height: 30px; background: linear-gradient(180deg, #f0d3ad, #cd7f32); }
+    /* ── "Your position" pinned row ── */
+    .lb-you-pin { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+    body.hub-mode .lb-you-pin { border-top-color: #e3e1e6; }
+    .lb-you-pin-label { font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 6px; }
+    /* ── Last-month champion medals ── */
+    .lb-lm-medal {
+      width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: .68rem; font-weight: 800;
+    }
+    .lb-lm-medal.gold   { background: linear-gradient(135deg, #fde68a, #f0a500); color: #5b3a00; }
+    .lb-lm-medal.silver { background: linear-gradient(135deg, #eef0f2, #aab2bd); color: #3a4150; }
+    .lb-lm-medal.bronze { background: linear-gradient(135deg, #f4d3b0, #c0824a); color: #4d2600; }
     /* Monthly champions card in community feed */
     .monthly-champs-card {
       background: linear-gradient(135deg, rgba(245,158,11,.12), rgba(236,72,153,.08));
@@ -6295,7 +6330,7 @@
         <button id="lb-legend-btn" class="lb-legend-btn"
           onmouseenter="showLbLegend(event)"
           onmouseleave="hideLevelPopup()"
-          onclick="showLbLegend(event)">ⓘ Levels</button>
+          onclick="showLbLegend(event)"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>Levels</button>
       </div>
       <div id="leaderboard-list" style="margin-top:12px">
         <div class="page-loading"><div class="loading-spinner"></div></div>
@@ -8316,6 +8351,23 @@ function lbDisplayName(row) {
   return row.name || (row.email ? row.email.split("@")[0] : "Member");
 }
 
+// Load every member avatar once into the shared map so leaderboard rows can show
+// faces (cached after the first call).
+let _lbAvatarsLoaded = false;
+async function _lbLoadAllAvatars() {
+  if (_lbAvatarsLoaded) return;
+  try {
+    const { data } = await db.from("allowed_emails").select("email,avatar_url");
+    (data || []).forEach(r => { if (!(r.email in _feedAvatarMap)) _feedAvatarMap[r.email] = r.avatar_url || null; });
+    _lbAvatarsLoaded = true;
+  } catch (e) { /* avatars are best-effort */ }
+}
+
+// Avatar for a leaderboard row (reuses the feed avatar renderer + colour map).
+function _lbAvatar(row, size) {
+  return _feedAvatarHTML(row.email, lbDisplayName(row), size || 30);
+}
+
 function lbRankClass(rank) {
   if (rank === 1) return "rank-gold";
   if (rank === 2) return "rank-silver";
@@ -8334,6 +8386,26 @@ function lbRankHTML(rank) {
   return `<div class="lb-rank">${rank}</div>`;
 }
 
+// Top-3 podium (2nd · 1st · 3rd) shown above the ranked list. valueFn(row, rank)
+// returns the display value string. Only renders with 3+ entries.
+function lbPodiumHTML(top, valueFn) {
+  if (!top || top.length < 3) return "";
+  const order = [1, 0, 2];        // visual order left→right
+  const cls   = ["gold", "silver", "bronze"];
+  const place = idx => {
+    const row  = top[idx], rank = idx + 1;
+    const isMe = row.email && row.email.toLowerCase() === myEmail.toLowerCase();
+    const name = lbDisplayName(row);
+    return `<div class="lb-podium-place lb-pod-${cls[idx]}${rank === 1 ? " is-first" : ""}">
+      <div class="lb-podium-av">${_lbAvatar(row, rank === 1 ? 58 : 46)}</div>
+      <div class="lb-podium-name${isMe ? " is-me" : ""}" title="${escHtml(name)}">${escHtml(name)}${isMe ? " (you)" : ""}</div>
+      <div class="lb-podium-val">${valueFn(row, rank)}</div>
+      <div class="lb-podium-plinth"><span class="lb-podium-rank">${rank}</span></div>
+    </div>`;
+  };
+  return `<div class="lb-podium">${order.map(place).join("")}</div>`;
+}
+
 // Format a minute threshold as a readable string for legends / tooltips
 function fmtThresh(mins, unit) {
   if (unit === "sessions") return `${mins} session${mins !== 1 ? "s" : ""}`;
@@ -8347,13 +8419,23 @@ const LB_PAGE = 20;
 let _lbAllRows = [];
 let _lbRowFn   = null;
 let _lbShown   = 0;
+let _lbIdxOffset = 0; // absolute-index offset (e.g. 3 when the podium owns the top 3)
 
-function lbPaginatedHTML(allRows, rowFn) {
-  _lbAllRows = allRows;
-  _lbRowFn   = rowFn;
-  _lbShown   = Math.min(LB_PAGE, allRows.length);
-  const html = allRows.slice(0, _lbShown).map((row, i) => rowFn(row, i)).join("");
-  return html + lbMoreBtn();
+function lbPaginatedHTML(allRows, rowFn, idxOffset) {
+  _lbAllRows   = allRows;
+  _lbRowFn     = rowFn;
+  _lbIdxOffset = idxOffset || 0;
+  _lbShown     = Math.min(LB_PAGE, allRows.length);
+  const html = allRows.slice(0, _lbShown).map((row, i) => rowFn(row, _lbIdxOffset + i)).join("");
+  return html + lbMoreBtn() + _lbYourPin();
+}
+
+// A pinned "Your position" row when the viewer ranks below the visible page.
+function _lbYourPin() {
+  if (!myEmail) return "";
+  const idx = _lbAllRows.findIndex(r => r.email && r.email.toLowerCase() === myEmail.toLowerCase());
+  if (idx < 0 || idx < _lbShown) return "";
+  return `<div class="lb-you-pin"><div class="lb-you-pin-label">Your position</div>${_lbRowFn(_lbAllRows[idx], _lbIdxOffset + idx)}</div>`;
 }
 
 function lbMoreBtn() {
@@ -8370,10 +8452,13 @@ function lbShowMore() {
   if (!btn) return;
   const from   = _lbShown;
   const to     = Math.min(_lbShown + LB_PAGE, _lbAllRows.length);
-  const newHTML = _lbAllRows.slice(from, to).map((row, i) => _lbRowFn(row, from + i)).join("");
+  const newHTML = _lbAllRows.slice(from, to).map((row, i) => _lbRowFn(row, _lbIdxOffset + from + i)).join("");
   _lbShown = to;
   btn.insertAdjacentHTML("beforebegin", newHTML);
   btn.outerHTML = lbMoreBtn();
+  // If the viewer is now visible, drop the pinned "your position" row.
+  const meIdx = _lbAllRows.findIndex(r => r.email && r.email.toLowerCase() === myEmail.toLowerCase());
+  if (meIdx >= 0 && meIdx < _lbShown) { const pin = el.querySelector(".lb-you-pin"); if (pin) pin.remove(); }
 }
 
 // Store current legend data so the hover button can show it
@@ -8592,6 +8677,7 @@ async function renderLeaderboard(tab) {
   el.style.setProperty("--lb-active-color", LB_TAB_COLOR[_currentLbTab] || "#f5c518");
   el.setAttribute("data-lb-active", _currentLbTab);
   el.innerHTML = `<div class="page-loading"><div class="loading-spinner"></div></div>`;
+  await _lbLoadAllAvatars();
   if (_currentLbTab === "overall")           await renderLbOverall(el);
   else if (_currentLbTab === "pieces")       await renderLbPieces(el);
   else if (_currentLbTab === "scales")       await renderLbScales(el);
@@ -8628,7 +8714,8 @@ async function renderLbOverall(el) {
       !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0
     );
     if (!filtered.length) { el.innerHTML = lbModeToggleHTML() + `<div class="lb-empty">No practice data yet.</div>`; return; }
-    el.innerHTML = lbModeToggleHTML() + lbPaginatedHTML(filtered, (row, i) => {
+    const _pod = lbPodiumHTML(filtered.slice(0, 3), r => formatMinutes(Number(r.total_minutes) || 0));
+    el.innerHTML = lbModeToggleHTML() + _pod + lbPaginatedHTML(_pod ? filtered.slice(3) : filtered, (row, i) => {
       const rank = i + 1;
       const mins = Number(row.total_minutes) || 0;
       const lvl  = getLevel(mins, PLAYER_LEVELS);
@@ -8636,11 +8723,12 @@ async function renderLbOverall(el) {
       return `
         <div class="lb-row ${lbRankClass(rank)}">
           ${lbRankHTML(rank)}
+          ${_lbAvatar(row, 30)}
           <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
           ${levelBadgeHTML(lvl)}
           <div class="lb-time">${formatMinutes(mins)}</div>
         </div>`;
-    });
+    }, _pod ? 3 : 0);
     return;
   }
 
@@ -8663,13 +8751,14 @@ async function renderLbOverall(el) {
   const lastTop = (lastResult.data || [])
     .filter(row => !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0)
     .slice(0, 3);
-  const MEDALS = ['1','2','3'];
+  const MEDAL_CLASS = ['gold','silver','bronze'];
   const lastMonthHTML = lastTop.length ? `
     <div class="lb-last-month">
       <div class="lb-last-month-heading">Last Month's Champions</div>
       ${lastTop.map((row, i) => `
         <div class="lb-last-month-row">
-          <span>${MEDALS[i]}</span>
+          <span class="lb-lm-medal ${MEDAL_CLASS[i]}">${i + 1}</span>
+          ${_lbAvatar(row, 24)}
           <span class="lb-last-month-name">${escHtml(lbDisplayName(row))}</span>
           <span class="lb-last-month-time">${formatMinutes(Number(row.total_minutes) || 0)}</span>
         </div>`).join('')}
@@ -8680,17 +8769,19 @@ async function renderLbOverall(el) {
     return;
   }
 
-  el.innerHTML = lbModeToggleHTML() + lbPaginatedHTML(filtered, (row, i) => {
+  const _pod = lbPodiumHTML(filtered.slice(0, 3), r => formatMinutes(Number(r.total_minutes) || 0));
+  el.innerHTML = lbModeToggleHTML() + _pod + lbPaginatedHTML(_pod ? filtered.slice(3) : filtered, (row, i) => {
     const rank = i + 1;
     const mins = Number(row.total_minutes) || 0;
     const isMe = row.email?.toLowerCase() === myEmail.toLowerCase();
     return `
       <div class="lb-row ${lbRankClass(rank)}">
         ${lbRankHTML(rank)}
+        ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
         <div class="lb-time">${formatMinutes(mins)}</div>
       </div>`;
-  }) + lastMonthHTML;
+  }, _pod ? 3 : 0) + lastMonthHTML;
 }
 
 let _lbPiecesMode  = 'month'; // 'month' | 'alltime'
@@ -8729,7 +8820,8 @@ async function renderLbPieces(el) {
     !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0
   );
   if (!filtered.length) { el.innerHTML = toggle + `<div class="lb-empty">No piece practice data yet${_lbPiecesMode === 'month' ? ' this month' : ''}.</div>`; return; }
-  el.innerHTML = toggle + lbPaginatedHTML(filtered, (row, i) => {
+  const _pod = lbPodiumHTML(filtered.slice(0, 3), r => formatMinutes(Number(r.total_minutes) || 0));
+  el.innerHTML = toggle + _pod + lbPaginatedHTML(_pod ? filtered.slice(3) : filtered, (row, i) => {
     const rank = i + 1;
     const mins = Number(row.total_minutes) || 0;
     const lvl  = getLevel(mins, PIECE_LEVELS);
@@ -8737,6 +8829,7 @@ async function renderLbPieces(el) {
     return `
       <div class="lb-row ${lbRankClass(rank)}">
         ${lbRankHTML(rank)}
+        ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">
           ${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}
           <span class="lb-sub">${escHtml(row.piece_name || "Unknown piece")}</span>
@@ -8744,7 +8837,7 @@ async function renderLbPieces(el) {
         ${lvl ? levelBadgeHTML(lvl) : ""}
         <div class="lb-time">${formatMinutes(mins)}</div>
       </div>`;
-  });
+  }, _pod ? 3 : 0);
 }
 
 async function renderLbStreak(el) {
@@ -8758,17 +8851,19 @@ async function renderLbStreak(el) {
     !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.best_streak) || 0) > 0
   );
   if (!filtered.length) { el.innerHTML = `<div class="lb-empty">No streaks recorded yet.</div>`; return; }
-  el.innerHTML = lbPaginatedHTML(filtered, (row, i) => {
+  const _pod = lbPodiumHTML(filtered.slice(0, 3), r => `${Number(r.best_streak) || 0}d`);
+  el.innerHTML = _pod + lbPaginatedHTML(_pod ? filtered.slice(3) : filtered, (row, i) => {
     const rank  = i + 1;
     const days  = Number(row.best_streak) || 0;
     const isMe  = row.email?.toLowerCase() === myEmail.toLowerCase();
     return `
       <div class="lb-row ${lbRankClass(rank)}">
         ${lbRankHTML(rank)}
+        ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
         <div class="lb-time"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px;margin-right:3px;color:var(--accent)"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>${days} day${days !== 1 ? "s" : ""}</div>
       </div>`;
-  });
+  }, _pod ? 3 : 0);
 }
 
 async function renderLbScales(el) {
@@ -8791,7 +8886,8 @@ async function renderLbScales(el) {
   }
   rows.sort((a, b) => b.cnt - a.cnt);
   if (!rows.length) { el.innerHTML = toggle + `<div class="lb-empty">No scale data yet${_lbScalesMode === 'month' ? ' this month' : ''}.</div>`; return; }
-  el.innerHTML = toggle + lbPaginatedHTML(rows, (row, i) => {
+  const _pod = lbPodiumHTML(rows.slice(0, 3), r => `${r.cnt}×`);
+  el.innerHTML = toggle + _pod + lbPaginatedHTML(_pod ? rows.slice(3) : rows, (row, i) => {
     const rank = i + 1;
     const cnt  = row.cnt;
     const lvl  = getLevel(cnt, SCALE_LEVELS);
@@ -8799,6 +8895,7 @@ async function renderLbScales(el) {
     return `
       <div class="lb-row ${lbRankClass(rank)}">
         ${lbRankHTML(rank)}
+        ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">
           ${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}
           <span class="lb-sub">${escHtml(row.technique_name)}</span>
@@ -8806,7 +8903,7 @@ async function renderLbScales(el) {
         ${lvl ? levelBadgeHTML(lvl) : ""}
         <div class="lb-time">${cnt} session${cnt !== 1 ? "s" : ""}</div>
       </div>`;
-  });
+  }, _pod ? 3 : 0);
 }
 
 async function renderLbAchievements(el) {
@@ -8820,7 +8917,8 @@ async function renderLbAchievements(el) {
     !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.achievement_count) || 0) > 0
   );
   if (!filtered.length) { el.innerHTML = `<div class="lb-empty">No achievements earned yet.</div>`; return; }
-  el.innerHTML = lbPaginatedHTML(filtered, (row, i) => {
+  const _pod = lbPodiumHTML(filtered.slice(0, 3), r => `${Number(r.achievement_count) || 0}<span style="opacity:.55;font-weight:600">/${TOTAL_ACH}</span>`);
+  el.innerHTML = _pod + lbPaginatedHTML(_pod ? filtered.slice(3) : filtered, (row, i) => {
     const rank  = i + 1;
     const count = Number(row.achievement_count) || 0;
     const pct   = Math.round((count / TOTAL_ACH) * 100);
@@ -8828,13 +8926,14 @@ async function renderLbAchievements(el) {
     return `
       <div class="lb-row ${lbRankClass(rank)}">
         ${lbRankHTML(rank)}
+        ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
         <div class="lb-ach-bar" title="${count} / ${TOTAL_ACH} badges">
           <div class="lb-ach-bar-fill" style="width:${pct}%"></div>
         </div>
         <div class="lb-time">${count}<span style="font-size:.7rem;opacity:.55"> / ${TOTAL_ACH}</span></div>
       </div>`;
-  });
+  }, _pod ? 3 : 0);
 }
 
 function lbSetupNote(fn) {
