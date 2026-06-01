@@ -725,6 +725,13 @@
     }
   }
 
+  // Label of *all* non-❤️ reaction emojis anyone used (heart icon stands in for ❤️),
+  // so you can see which reactions were given on a comment/reply — not just yours.
+  function _usedEmojiLabel(data) {
+    const u = Object.keys(data || {}).filter(e => data[e] && data[e].count > 0 && e !== "❤️");
+    return u.length ? ` ${u.join("")}` : "";
+  }
+
   function _cmtReactBarHTML(commentId) {
     if (!_cfg?.commentReactionEventType) return "";
     const safeKey = _cmtSafeKey(commentId);
@@ -735,7 +742,7 @@
       ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"`
       : `fill="none" stroke="currentColor" stroke-width="2"`;
     const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
-    const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+    const emojiLabel = _usedEmojiLabel(data);
     const countLabel = total > 0 ? ` ${total}` : "";
     const reactors = _cmtReactorsList[String(commentId)] || [];
     const chips = reactors.length ? `<span onclick="Comments.showCmtReactors(event,'${String(commentId)}')" style="display:inline-flex;align-items:center;cursor:pointer;padding-left:6px" title="See who reacted">${
@@ -783,7 +790,7 @@
       ? `fill="currentColor" stroke="currentColor" stroke-width="1.5"`
       : `fill="none" stroke="currentColor" stroke-width="2"`;
     const heartSvg = `<svg viewBox="0 0 24 24" width="13" height="13" ${heartFill} stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
-    const emojiLabel = myEmoji && myEmoji !== "❤️" ? ` ${myEmoji}` : "";
+    const emojiLabel = _usedEmojiLabel(data);
     const countLabel = total > 0 ? ` ${total}` : "";
     const btn = document.getElementById(`like-btn-${safeKey}`);
     if (btn) { btn.classList.toggle("liked", !!myEmoji); btn.innerHTML = heartSvg + emojiLabel + countLabel; }
@@ -912,8 +919,7 @@
             <div class="tc-comment-form-top">
               <textarea id="tc-cmt-input-${parentId}" rows="1" data-mention
                 placeholder="Write a comment…"
-                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
-                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();Comments.submitComment('${parentId}')}"></textarea>
+                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
               <button class="tc-send-btn" id="send-btn-${key}" onclick="Comments.submitComment('${parentId}')">Send</button>
             </div>
             ${_toolbarHtml(key)}
@@ -982,8 +988,7 @@
             ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl)}
             <div class="tc-reply-composer-body">
               <textarea placeholder="Write a reply…" rows="1" data-mention
-                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
-                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();Comments.submitReply('${parentId}','${c.id}',this.closest('.tc-reply-composer'))}"></textarea>
+                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
               ${_toolbarHtml(key)}
               <div class="tc-irc-actions">
                 <button class="tc-irc-cancel" onclick="Comments.cancelReply('${c.id}')">Cancel</button>
