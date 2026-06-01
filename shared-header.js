@@ -1532,6 +1532,9 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // ── Notifications ──────────────────────────────────────────────────────────
   let _notifs = [];
 
+  // Gold trophy icon for Monthly Champions notifications (matches the feed card badge).
+  const _NOTIF_CHAMP_ICON = `<div class="notif-item-badge"><span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#ffe27a,#f0a500);color:#fff;box-shadow:0 2px 6px rgba(240,165,0,.35)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></span></div>`;
+
   function _esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function _ago(ts) {
     const m = Math.floor((Date.now() - new Date(ts)) / 60000);
@@ -1562,10 +1565,15 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       // so the bell panel can show the same coloured badge as the activity
       // feed / toast (no need to duplicate the SVG generator in this file).
       const badgeSvg = (n.type === "achievement" && n.metadata?.badge_svg) ? n.metadata.badge_svg : null;
+      // Monthly Champions notifications get the same gold trophy as the card.
+      const isChamp = (n.type === "monthly_champions" || n.type === "champion_placed");
+      const iconHTML = badgeSvg
+        ? `<div class="notif-item-badge">${badgeSvg}</div>`
+        : (isChamp ? _NOTIF_CHAMP_ICON : "");
       return `
       <div class="notif-item ${n.read ? "" : "unread"}" data-id="${n.id}" onclick="window._shNotifClick(this)">
         <div class="notif-dot ${n.read ? "read" : ""}"></div>
-        ${badgeSvg ? `<div class="notif-item-badge">${badgeSvg}</div>` : ""}
+        ${iconHTML}
         <div class="notif-item-body">
           <div class="notif-item-title">${_esc(n.title)}</div>
           ${n.body ? `<div class="notif-item-desc">${_esc(n.body)}</div>` : ""}
