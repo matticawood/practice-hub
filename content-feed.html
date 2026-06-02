@@ -371,6 +371,35 @@
     }
     .cf-edit-btn:hover { background: var(--surface-2); border-color: #bbb; }
 
+    /* Admin ⋮ menu (Edit / Delete) — mirrors community */
+    .post-menu-wrap { position: relative; flex-shrink: 0; align-self: center; margin-left: 4px; }
+    .post-menu-btn {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: none; border: none; cursor: pointer; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .post-menu-btn:hover { background: rgba(0,0,0,.05); color: var(--text); }
+    .post-menu {
+      position: absolute; top: calc(100% + 4px); right: 0;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; box-shadow: 0 8px 24px rgba(60,40,20,.16);
+      padding: 5px; min-width: 150px; z-index: 50;
+      animation: postMenuIn .14s ease;
+    }
+    @keyframes postMenuIn { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+    .post-menu-item {
+      display: flex; align-items: center; gap: 9px; width: 100%;
+      background: none; border: none; cursor: pointer;
+      padding: 8px 10px; border-radius: 7px;
+      font-size: 0.85rem; font-weight: 600; color: var(--text);
+      font-family: inherit; text-align: left; transition: background .12s;
+    }
+    .post-menu-item:hover { background: rgba(0,0,0,.05); }
+    .post-menu-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: .85; }
+    .post-menu-item-danger { color: #ef4444; }
+    .post-menu-item-danger:hover { background: rgba(239,68,68,.1); }
+
     /* Card body */
     .cf-card-body { padding: 14px 18px 10px; }
 
@@ -495,13 +524,18 @@
     /* Detail view */
     #cf-detail { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
     .cf-detail-back {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: none; border: 1.5px solid var(--border); border-radius: 8px;
-      padding: 6px 14px; font-size: 0.85rem; font-weight: 600;
-      cursor: pointer; font-family: inherit; color: var(--text-muted);
-      margin-bottom: 20px; transition: border-color .15s, color .15s;
+      display: inline-flex; align-items: center; gap: 5px;
+      color: var(--text); font-size: 0.86rem; font-weight: 600;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: var(--radius); padding: 8px 15px 8px 11px; cursor: pointer;
+      box-shadow: 0 1px 2px rgba(60,40,20,.05);
+      transition: border-color .15s, color .15s, box-shadow .15s, transform .12s ease;
+      font-family: inherit; margin: 16px 0;
     }
-    .cf-detail-back:hover { border-color: var(--text-muted); color: var(--text); }
+    .cf-detail-back svg { transition: transform .15s ease; }
+    .cf-detail-back:hover { border-color: rgba(245,197,24,.55); box-shadow: 0 4px 14px rgba(60,40,20,.09); }
+    .cf-detail-back:hover svg { transform: translateX(-2px); }
+    .cf-detail-back:active { transform: scale(.96); }
     .cf-detail-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
     .cf-detail-card.type-youtube { border-left: 3.5px solid var(--yt-clr); }
     .cf-detail-card.type-blog    { border-left: 3.5px solid var(--blog-clr); }
@@ -816,9 +850,9 @@ function _updateLikerChips(postId) {
 }
 
 function _setMeta(parentId, totalRx, cc) {
-  const rxPart  = totalRx ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : "";
+  // Reactions live on the heart + liker avatars; meta shows comments only.
   const cmtPart = cc      ? `<span onclick="event.stopPropagation();showCfDetail('${parentId}')" style="cursor:pointer">${cc} comment${cc!==1?"s":""}</span>` : "";
-  const html = [rxPart, cmtPart].filter(Boolean).join(" · ");
+  const html = cmtPart;
   document.querySelectorAll(`.cf-meta-${parentId}`).forEach(el => el.innerHTML = html);
 }
 
@@ -891,7 +925,7 @@ async function loadFeed(deepId = null) {
   renderFeed();
 
   if (deepId) {
-    showCfDetail(deepId);
+    showCfDetail(deepId, false);
   }
 }
 
@@ -913,10 +947,7 @@ function renderFeed() {
 
 function cfCardHTML(p) {
   const dateStr  = formatDate(p.published_at);
-  const editBtn  = isAdmin
-    ? `<button class="cf-edit-btn" onclick="event.stopPropagation();openEditCfForm('${p.id}')">${SVG_EDIT}Edit</button>
-       <button class="cf-edit-btn" style="color:var(--danger,#e53e3e)" onclick="event.stopPropagation();deleteCfPost('${p.id}')">Delete</button>`
-    : "";
+  const editBtn  = _adminMenuHTML(p.id);
 
   const rxData = Comments.getReactionState(p.id);
   let totalRx = 0;
@@ -939,9 +970,8 @@ function cfCardHTML(p) {
     ? `<span class="tc-like-avatars" onclick="event.stopPropagation();Comments.showLikers('${p.id}',event)" style="cursor:pointer;margin-left:4px" title="See who reacted">${likerChips}${totalRx > 3 ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:6px">+${totalRx - 3}</span>` : ""}</span>`
     : "";
 
-  const rxPart   = totalRx        ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : "";
   const cmtPart  = p.commentCount ? `<span onclick="event.stopPropagation();showCfDetail('${p.id}')" style="cursor:pointer">${p.commentCount} comment${p.commentCount!==1?"s":""}</span>` : "";
-  const metaTxt  = [rxPart, cmtPart].filter(Boolean).join(" · ");
+  const metaTxt  = cmtPart;
 
   const cmtOpen   = _commentsOpen.has(p.id);
   const cmtBtnTxt = cmtOpen ? "Hide comments ↑" : `${SVG_CMT}Comments${p.commentCount ? ` (${p.commentCount})` : ""}`;
@@ -1023,14 +1053,18 @@ function _typeBadge(type) {
 
 /* ── Embed YouTube inline ────────────────────────────────────────────────── */
 /* ── Post detail view ────────────────────────────────────────────────────── */
-function showCfDetail(postId) {
+let _openedInPage = false; // true when a post was opened by tapping a card on the list
+
+function showCfDetail(postId, push = true) {
   const p = _posts.find(x => x.id === postId);
   if (!p) return;
 
   document.getElementById("cf-main").style.display = "none";
   document.getElementById("cf-detail").style.display = "";
   window.scrollTo(0, 0);
-  history.pushState({ post: postId }, "", "?post=" + postId);
+  // Only add a history entry for in-page navigation. On a deep-link (push=false)
+  // the current entry IS this post, so Back returns to the referring page.
+  if (push) { _openedInPage = true; history.pushState({ post: postId }, "", "?post=" + postId); }
 
   const rxData = Comments.getReactionState(p.id);
   let totalRx = 0;
@@ -1048,6 +1082,7 @@ function showCfDetail(postId) {
       <div class="cf-card-hdr type-${_esc(p.type)}">
         <span class="cf-type-badge">${_typeBadge(p.type)}</span>
         <span class="cf-card-date">${dateStr}</span>
+        ${_adminMenuHTML(p.id)}
       </div>
       <div class="cf-card-body">${_cardBody(p)}</div>
       <div class="cf-card-footer" onclick="event.stopPropagation()">
@@ -1055,7 +1090,7 @@ function showCfDetail(postId) {
         <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
           <span class="tc-like-avatars cf-likers-${p.id}" onclick="event.stopPropagation();Comments.showLikers('${p.id}',event)"
             style="cursor:pointer;${totalRx===0?"display:none":""}" title="See who reacted">${_likerChipsInner(p.id)}</span>
-          <span class="cf-meta-counts cf-meta-${p.id}">${[totalRx ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : "", p.commentCount ? `<span>${p.commentCount} comment${p.commentCount!==1?"s":""}</span>` : ""].filter(Boolean).join(" · ")}</span>
+          <span class="cf-meta-counts cf-meta-${p.id}">${p.commentCount ? `<span>${p.commentCount} comment${p.commentCount!==1?"s":""}</span>` : ""}</span>
         </div>
       </div>
     </div>`;
@@ -1082,15 +1117,24 @@ function showCfDetail(postId) {
 }
 
 function closeCfDetail() {
+  // Take the user back to where they came from: the in-page list (if they tapped a
+  // card) or the referring page like community (if they arrived via a deep-link).
+  // Fall back to the list when there's no real back target (direct visit/bookmark).
+  let sameOriginRef = false;
+  try {
+    const u = document.referrer ? new URL(document.referrer) : null;
+    sameOriginRef = !!u && u.origin === location.origin && u.pathname !== location.pathname;
+  } catch {}
+  if (_openedInPage || sameOriginRef) { history.back(); return; }
   document.getElementById("cf-detail").style.display = "none";
   document.getElementById("cf-main").style.display = "";
   window.scrollTo(0, 0);
-  history.pushState({}, "", "/content-feed.html");
+  history.replaceState({}, "", "/content-feed.html");
 }
 
 window.addEventListener("popstate", (e) => {
   if (e.state?.post) {
-    showCfDetail(e.state.post);
+    showCfDetail(e.state.post, false);
   } else {
     document.getElementById("cf-detail").style.display = "none";
     document.getElementById("cf-main").style.display = "";
@@ -1167,7 +1211,34 @@ function openCfForm() {
   document.getElementById("cf-form-wrap").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
+// ── Admin ⋮ menu (Edit / Delete) ─────────────────────────────────────────────
+function _adminMenuHTML(id) {
+  if (!isAdmin) return "";
+  return `<div class="post-menu-wrap" onclick="event.stopPropagation()">
+    <button class="post-menu-btn" onclick="togglePostMenu('${id}',event)" aria-label="Options"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+    <div class="post-menu" id="post-menu-${id}" style="display:none">
+      <button class="post-menu-item" onclick="openEditCfForm('${id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>Edit</button>
+      <button class="post-menu-item post-menu-item-danger" onclick="deleteCfPost('${id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Delete</button>
+    </div>
+  </div>`;
+}
+function _closePostMenus() {
+  document.querySelectorAll(".post-menu").forEach(m => m.style.display = "none");
+}
+function togglePostMenu(id, e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById(`post-menu-${id}`);
+  if (!menu) return;
+  const open = menu.style.display !== "none";
+  _closePostMenus();
+  if (!open) {
+    menu.style.display = "block";
+    setTimeout(() => document.addEventListener("click", _closePostMenus, { once: true }), 0);
+  }
+}
+
 async function deleteCfPost(postId) {
+  _closePostMenus();
   if (!confirm("Delete this post permanently? This cannot be undone.")) return;
   const { error } = await db.from("content_feed_posts").delete().eq("id", postId);
   if (error) { alert("Delete failed: " + error.message); return; }

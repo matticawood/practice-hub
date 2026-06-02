@@ -1010,16 +1010,16 @@
       const poll=_inlinePollOpen[key]?_readInlinePoll(key):null;
       if(!content&&!media.length&&!poll)return;
       const btn=document.getElementById(`send-btn-${key}`);
-      if(btn)btn.disabled=true;
+      if(btn&&btn.disabled)return; // already submitting — ignore repeat presses (prevents duplicate comments)
+      if(btn){btn.disabled=true;btn.textContent="Sending…";}
       if(ta)ta.disabled=true;
+      const _reset=()=>{ if(ta)ta.disabled=false; if(btn){btn.disabled=false;btn.textContent="Send";} };
       let uploaded=[];
       try { uploaded=await _uploadMedia(key); }
-      catch(e){ alert("Failed to upload media: "+e.message); if(btn)btn.disabled=false; if(ta)ta.disabled=false; return; }
+      catch(e){ alert("Failed to upload media: "+e.message); _reset(); return; }
       const auth=_auth();
       const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,media:uploaded.length?uploaded:[]}).select().single();
-      if(btn)btn.disabled=false;
-      if(ta)ta.disabled=false;
-      if(error){alert("Couldn't post: "+error.message);return;}
+      if(error){_reset();alert("Couldn't post: "+error.message);return;}
       // Insert poll into relational tables — mirrors community.html submitComment()
       if(poll&&row){
         const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
@@ -1055,6 +1055,7 @@
       });
       if(ta){ta.value="";ta.style.height="";}
       _clearState(key);
+      _reset();
       await Comments.load(parentId);
       _cfg?.onCommentChange?.(parentId);
     },
@@ -1062,6 +1063,8 @@
     // Submit a reply
     async submitReply(parentId, commentId, composerEl) {
       const ta=composerEl?.querySelector("textarea");
+      const btn=composerEl?.querySelector(".tc-irc-send");
+      if(btn&&btn.disabled)return; // already submitting — ignore repeat presses (prevents duplicate replies)
       const content=ta?.value.trim()||"";
       const media=_inlineMedia[commentId]||[];
       const poll=_inlinePollOpen[commentId]?_readInlinePoll(commentId):null;
@@ -1069,13 +1072,14 @@
       const replyToName =composerEl?.dataset.replyToName||null;
       const replyToEmail=composerEl?.dataset.replyToEmail||null;
       if(ta)ta.disabled=true;
+      if(btn){btn.disabled=true;btn.textContent="Sending…";}
+      const _resetReply=()=>{ if(ta)ta.disabled=false; if(btn){btn.disabled=false;btn.textContent="Send";} };
       let uploaded=[];
       try { uploaded=await _uploadMedia(commentId); }
-      catch(e){ alert("Failed to upload media: "+e.message); if(ta)ta.disabled=false; return; }
+      catch(e){ alert("Failed to upload media: "+e.message); _resetReply(); return; }
       const auth=_auth();
       const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,parent_comment_id:commentId,reply_to_name:replyToName,media:uploaded.length?uploaded:[]}).select().single();
-      if(ta)ta.disabled=false;
-      if(error){alert("Couldn't post reply: "+error.message);return;}
+      if(error){_resetReply();alert("Couldn't post reply: "+error.message);return;}
       // Insert poll into relational tables — mirrors community.html submitReply()
       if(poll&&row){
         const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
