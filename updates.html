@@ -212,6 +212,35 @@
     }
     .up-edit-btn:hover { background: var(--surface-2); border-color: #bbb; }
 
+    /* Admin ⋮ menu (Edit / Delete) — mirrors community */
+    .post-menu-wrap { position: relative; flex-shrink: 0; align-self: center; margin-left: 4px; }
+    .post-menu-btn {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: none; border: none; cursor: pointer; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .post-menu-btn:hover { background: rgba(0,0,0,.05); color: var(--text); }
+    .post-menu {
+      position: absolute; top: calc(100% + 4px); right: 0;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 10px; box-shadow: 0 8px 24px rgba(60,40,20,.16);
+      padding: 5px; min-width: 150px; z-index: 50;
+      animation: postMenuIn .14s ease;
+    }
+    @keyframes postMenuIn { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+    .post-menu-item {
+      display: flex; align-items: center; gap: 9px; width: 100%;
+      background: none; border: none; cursor: pointer;
+      padding: 8px 10px; border-radius: 7px;
+      font-size: 0.85rem; font-weight: 600; color: var(--text);
+      font-family: inherit; text-align: left; transition: background .12s;
+    }
+    .post-menu-item:hover { background: rgba(0,0,0,.05); }
+    .post-menu-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: .85; }
+    .post-menu-item-danger { color: #ef4444; }
+    .post-menu-item-danger:hover { background: rgba(239,68,68,.1); }
+
     /* Card body */
     .up-card-body { padding: 14px 18px 10px; }
 
@@ -259,13 +288,18 @@
     /* Detail view */
     #up-detail { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
     .up-detail-back {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: none; border: 1.5px solid var(--border); border-radius: 8px;
-      padding: 6px 14px; font-size: 0.85rem; font-weight: 600;
-      cursor: pointer; font-family: inherit; color: var(--text-muted);
-      margin-bottom: 20px; transition: border-color .15s, color .15s;
+      display: inline-flex; align-items: center; gap: 5px;
+      color: var(--text); font-size: 0.86rem; font-weight: 600;
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: var(--radius); padding: 8px 15px 8px 11px; cursor: pointer;
+      box-shadow: 0 1px 2px rgba(60,40,20,.05);
+      transition: border-color .15s, color .15s, box-shadow .15s, transform .12s ease;
+      font-family: inherit; margin: 16px 0;
     }
-    .up-detail-back:hover { border-color: var(--text-muted); color: var(--text); }
+    .up-detail-back svg { transition: transform .15s ease; }
+    .up-detail-back:hover { border-color: rgba(245,197,24,.55); box-shadow: 0 4px 14px rgba(60,40,20,.09); }
+    .up-detail-back:hover svg { transform: translateX(-2px); }
+    .up-detail-back:active { transform: scale(.96); }
     .up-detail-card {
       background: var(--surface);
       border: 1.5px solid var(--border);
@@ -494,9 +528,9 @@ function _updateLikerChips(updateId) {
 }
 
 function _setMeta(parentId, totalRx, cc) {
-  const rxPart  = totalRx ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : "";
+  // Reactions live on the heart + liker avatars; meta shows comments only.
   const cmtPart = cc      ? `<span onclick="event.stopPropagation();showDetail('${parentId}')" style="cursor:pointer">${cc} comment${cc!==1?"s":""}</span>` : "";
-  const html = [rxPart, cmtPart].filter(Boolean).join(" · ");
+  const html = cmtPart;
   document.querySelectorAll(`.up-meta-${parentId}`).forEach(el => el.innerHTML = html);
 }
 
@@ -554,7 +588,7 @@ async function loadFeed(deepId = null) {
   renderFeed();
 
   if (deepId) {
-    showDetail(deepId);
+    showDetail(deepId, false);
   }
 }
 
@@ -570,9 +604,7 @@ function renderFeed() {
 
 function upCardHTML(u) {
   const dateStr  = formatDate(u.published_at);
-  const editBtn  = isAdmin
-    ? `<button class="up-edit-btn" onclick="event.stopPropagation();openEditUpForm('${u.id}')">${SVG_EDIT}Edit</button>`
-    : "";
+  const editBtn  = _adminMenuHTML(u.id);
 
   const rxData = Comments.getReactionState(u.id);
   let totalRx = 0;
@@ -591,9 +623,8 @@ function upCardHTML(u) {
     return `<div class="tc-like-chip">${inner}</div>`;
   }).join("");
 
-  const rxPart  = totalRx        ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : "";
   const cmtPart = u.commentCount ? `<span onclick="event.stopPropagation();showDetail('${u.id}')" style="cursor:pointer">${u.commentCount} comment${u.commentCount!==1?"s":""}</span>` : "";
-  const metaTxt = [rxPart, cmtPart].filter(Boolean).join(" · ");
+  const metaTxt = cmtPart;
 
   return `
     <div class="up-card" id="up-${u.id}" onclick="showDetail('${u.id}')">
@@ -628,14 +659,18 @@ function _upBody(u) {
 }
 
 /* ── Detail view ─────────────────────────────────────────────────────────── */
-function showDetail(updateId) {
+let _openedInPage = false; // true when an update was opened by tapping a card on the list
+
+function showDetail(updateId, push = true) {
   const u = _updates.find(x => x.id === updateId);
   if (!u) return;
 
   document.getElementById("up-main").style.display = "none";
   document.getElementById("up-detail").style.display = "";
   window.scrollTo(0, 0);
-  history.pushState({ post: updateId }, "", "?post=" + updateId);
+  // Only add a history entry for in-page navigation. On a deep-link (push=false)
+  // the current entry IS this update, so Back returns to the referring page.
+  if (push) { _openedInPage = true; history.pushState({ post: updateId }, "", "?post=" + updateId); }
 
   const rxData = Comments.getReactionState(u.id);
   let totalRx = 0;
@@ -653,6 +688,7 @@ function showDetail(updateId) {
       <div class="up-card-hdr">
         <span class="up-type-badge">${SVG_UPDATE}Practice Room Update</span>
         <span class="up-card-date">${dateStr}</span>
+        ${_adminMenuHTML(u.id)}
       </div>
       <div class="up-card-body">${_upBody(u)}</div>
       <div class="up-card-footer" onclick="event.stopPropagation()">
@@ -660,7 +696,7 @@ function showDetail(updateId) {
         <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
           <span class="tc-like-avatars up-likers-${u.id}" onclick="event.stopPropagation();Comments.showLikers('${u.id}',event)"
             style="cursor:pointer;${totalRx===0?"display:none":""}" title="See who reacted">${_likerChipsInner(u.id)}</span>
-          <span class="up-meta-counts up-meta-${u.id}">${[totalRx ? `<span>${totalRx} reaction${totalRx!==1?"s":""}</span>` : "", u.commentCount ? `<span>${u.commentCount} comment${u.commentCount!==1?"s":""}</span>` : ""].filter(Boolean).join(" · ")}</span>
+          <span class="up-meta-counts up-meta-${u.id}">${u.commentCount ? `<span>${u.commentCount} comment${u.commentCount!==1?"s":""}</span>` : ""}</span>
         </div>
       </div>
     </div>`;
@@ -687,15 +723,59 @@ function showDetail(updateId) {
 }
 
 function closeUpDetail() {
+  // Take the user back to where they came from: the in-page list (if they tapped a
+  // card) or the referring page like community (if they arrived via a deep-link).
+  // Fall back to the list when there's no real back target (direct visit/bookmark).
+  let sameOriginRef = false;
+  try {
+    const u = document.referrer ? new URL(document.referrer) : null;
+    sameOriginRef = !!u && u.origin === location.origin && u.pathname !== location.pathname;
+  } catch {}
+  if (_openedInPage || sameOriginRef) { history.back(); return; }
   document.getElementById("up-detail").style.display = "none";
   document.getElementById("up-main").style.display = "";
   window.scrollTo(0, 0);
-  history.pushState({}, "", "/updates.html");
+  history.replaceState({}, "", "/updates.html");
+}
+
+// ── Admin ⋮ menu (Edit / Delete) ─────────────────────────────────────────────
+function _adminMenuHTML(id) {
+  if (!isAdmin) return "";
+  return `<div class="post-menu-wrap" onclick="event.stopPropagation()">
+    <button class="post-menu-btn" onclick="togglePostMenu('${id}',event)" aria-label="Options"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+    <div class="post-menu" id="post-menu-${id}" style="display:none">
+      <button class="post-menu-item" onclick="openEditUpForm('${id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>Edit</button>
+      <button class="post-menu-item post-menu-item-danger" onclick="deleteUpdate('${id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Delete</button>
+    </div>
+  </div>`;
+}
+function _closePostMenus() {
+  document.querySelectorAll(".post-menu").forEach(m => m.style.display = "none");
+}
+function togglePostMenu(id, e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById(`post-menu-${id}`);
+  if (!menu) return;
+  const open = menu.style.display !== "none";
+  _closePostMenus();
+  if (!open) {
+    menu.style.display = "block";
+    setTimeout(() => document.addEventListener("click", _closePostMenus, { once: true }), 0);
+  }
+}
+async function deleteUpdate(updateId) {
+  _closePostMenus();
+  if (!confirm("Delete this update permanently? This cannot be undone.")) return;
+  const { error } = await db.from("practice_room_updates").delete().eq("id", updateId);
+  if (error) { alert("Delete failed: " + error.message); return; }
+  _updates = _updates.filter(u => u.id !== updateId);
+  document.getElementById(`up-${updateId}`)?.remove();
+  if (document.getElementById("up-detail").style.display !== "none") closeUpDetail();
 }
 
 window.addEventListener("popstate", (e) => {
   if (e.state?.post) {
-    showDetail(e.state.post);
+    showDetail(e.state.post, false);
   } else {
     document.getElementById("up-detail").style.display = "none";
     document.getElementById("up-main").style.display = "";
