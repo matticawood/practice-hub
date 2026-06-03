@@ -662,7 +662,7 @@
   }
 
   // ── Comment HTML ─────────────────────────────────────────────────────────────
-  function _commentHtml(c, isReply, avatarMap, parentId) {
+  function _commentHtml(c, isReply, avatarMap, parentId, rootId) {
     const auth=_auth();
     const dispName=_escHtml(c.name||c.email.split("@")[0]);
     const canDel=auth.isAdmin||c.email===auth.email;
@@ -691,7 +691,7 @@
           ${pollHtml}
           <div class="tc-comment-action-row">
             ${_cmtReactBarHTML(c.id)}
-            ${!isReply?`<button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>`:""}
+            <button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${rootId||c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
           </div>
         </div>
       </div>`;
@@ -978,12 +978,18 @@
       const {data:avRows}=await _db().from("allowed_emails").select("email,avatar_url").in("email",emails);
       const avatarMap={};
       (avRows||[]).forEach(r=>{if(r.avatar_url)avatarMap[r.email]=r.avatar_url;});
+      const byId={}; comments.forEach(c=>byId[c.id]=c);
+      // Resolve each comment's top-level ancestor so a reply-to-a-reply stays in
+      // the same thread (flat, YouTube-style with an @mention) rather than being
+      // orphaned under a parent that isn't rendered as a thread root.
+      const _rootOf=(c)=>{ let cur=c,g=0; while(cur&&cur.parent_comment_id&&byId[cur.parent_comment_id]&&g++<30){cur=byId[cur.parent_comment_id];} return cur.id; };
       const topLevel=comments.filter(c=>!c.parent_comment_id);
       const replyMap={};
-      comments.filter(c=>c.parent_comment_id).forEach(c=>{(replyMap[c.parent_comment_id]=replyMap[c.parent_comment_id]||[]).push(c);});
+      comments.filter(c=>c.parent_comment_id).forEach(c=>{ const root=_rootOf(c); (replyMap[root]=replyMap[root]||[]).push(c); });
+      Object.values(replyMap).forEach(a=>a.sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       const auth=_auth();
       listEl.innerHTML=topLevel.map(c=>{
-        const replies=(replyMap[c.id]||[]).map(r=>_commentHtml(r,true,avatarMap,parentId)).join("");
+        const replies=(replyMap[c.id]||[]).map(r=>_commentHtml(r,true,avatarMap,parentId,c.id)).join("");
         const key=c.id;
         const replyComposer=`
           <div id="tc-reply-composer-${c.id}" class="tc-reply-composer" style="display:none">
@@ -1000,7 +1006,7 @@
             </div>
             </div>
           </div>`;
-        return _commentHtml(c,false,avatarMap,parentId)+`<div class="tc-comment-replies">${replies}${replyComposer}</div>`;
+        return _commentHtml(c,false,avatarMap,parentId,c.id)+`<div class="tc-comment-replies">${replies}${replyComposer}</div>`;
       }).join("");
     },
 
@@ -1023,43 +1029,46 @@
       const auth=_auth();
       const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,media:uploaded.length?uploaded:[]}).select().single();
       if(error){_reset();alert("Couldn't post: "+error.message);return;}
-      // Insert poll into relational tables — mirrors community.html submitComment()
-      if(poll&&row){
-        const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
-        if(pollRow){
-          await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
+      // Best-effort side effects (poll, owner + @mention notifications). These MUST
+      // NOT block clearing the input + reloading — a throw here was leaving the
+      // button stuck on "Sending…" even though the comment had been inserted.
+      try {
+        if(poll&&row){
+          const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
+          if(pollRow){
+            await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
+          }
         }
-      }
-      // Notify the content owner (e.g. Matthew for weekly focus / updates /
-      // content-feed posts) about new top-level comments. Skipped when the
-      // commenter IS the owner. Config: ownerEmail + ownerNotifyTitleFn(name).
-      if (_cfg?.ownerEmail
-          && auth.email
-          && auth.email.toLowerCase() !== _cfg.ownerEmail.toLowerCase()) {
-        const title = (typeof _cfg.ownerNotifyTitleFn === "function")
-          ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
-          : `${auth.name || "Someone"} left a new comment`;
-        await _db().from("notifications").insert({
-          email:    _cfg.ownerEmail,
-          type:     "new_comment",
-          title,
-          body:     (content || "Sent an attachment").slice(0, 120),
-          link_url: _notifyLink(parentId),
-          metadata: {},
-        }).catch(() => {});
-      }
-      // Notify anyone @-mentioned in the comment (skips author + the owner who
-      // already got a new_comment ping above).
-      window.Mentions?.notify(content, {
-        fromName: auth.name || "Someone",
-        body:     content,
-        linkUrl:  _notifyLink(parentId),
-        exclude:  [_cfg?.ownerEmail].filter(Boolean),
-      });
+        // Notify the content owner (e.g. Matthew for weekly focus / updates /
+        // content-feed posts) about new top-level comments. Skipped when the
+        // commenter IS the owner. Config: ownerEmail + ownerNotifyTitleFn(name).
+        if (_cfg?.ownerEmail
+            && auth.email
+            && auth.email.toLowerCase() !== _cfg.ownerEmail.toLowerCase()) {
+          const title = (typeof _cfg.ownerNotifyTitleFn === "function")
+            ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
+            : `${auth.name || "Someone"} left a new comment`;
+          await _db().from("notifications").insert({
+            email:    _cfg.ownerEmail,
+            type:     "new_comment",
+            title,
+            body:     (content || "Sent an attachment").slice(0, 120),
+            link_url: _notifyLink(parentId),
+            metadata: {},
+          }).catch(() => {});
+        }
+        window.Mentions?.notify(content, {
+          fromName: auth.name || "Someone",
+          body:     content,
+          linkUrl:  _notifyLink(parentId),
+          exclude:  [_cfg?.ownerEmail].filter(Boolean),
+        });
+      } catch(e){ console.warn("comment side-effects failed:", e); }
       if(ta){ta.value="";ta.style.height="";}
       _clearState(key);
       _reset();
-      await Comments.load(parentId);
+      try { await Comments.load(parentId); }
+      catch(e){ console.warn("comment reload failed:", e); }
       _cfg?.onCommentChange?.(parentId);
     },
 
@@ -1083,26 +1092,30 @@
       const auth=_auth();
       const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,parent_comment_id:commentId,reply_to_name:replyToName,media:uploaded.length?uploaded:[]}).select().single();
       if(error){_resetReply();alert("Couldn't post reply: "+error.message);return;}
-      // Insert poll into relational tables — mirrors community.html submitReply()
-      if(poll&&row){
-        const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
-        if(pollRow){
-          await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
+      // Best-effort side effects (poll, notifications, @mentions). These MUST NOT
+      // block closing the composer + reloading the thread — a throw here (e.g. in
+      // Mentions.notify) was the cause of the button getting stuck on "Sending…"
+      // even though the reply had already been inserted.
+      try {
+        if(poll&&row){
+          const {data:pollRow}=await _db().from("tc_comment_polls").insert({comment_id:row.id,question:poll.question}).select().single();
+          if(pollRow){
+            await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
+          }
         }
-      }
-      if(replyToEmail&&replyToEmail!==auth.email){
-        await _db().from("notifications").insert({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
-      }
-      // Notify anyone @-mentioned in the reply (skips author + the reply target
-      // who already got a comment_reply ping above).
-      window.Mentions?.notify(content, {
-        fromName: auth.name || "Someone",
-        body:     content,
-        linkUrl:  _notifyLink(parentId),
-        exclude:  [replyToEmail].filter(Boolean),
-      });
+        if(replyToEmail&&replyToEmail!==auth.email){
+          await _db().from("notifications").insert({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
+        }
+        window.Mentions?.notify(content, {
+          fromName: auth.name || "Someone",
+          body:     content,
+          linkUrl:  _notifyLink(parentId),
+          exclude:  [replyToEmail].filter(Boolean),
+        });
+      } catch(e){ console.warn("reply side-effects failed:", e); }
       Comments.cancelReply(commentId);
-      await Comments.load(parentId);
+      try { await Comments.load(parentId); }
+      catch(e){ console.warn("comment reload failed:", e); _resetReply(); }
       _cfg?.onCommentChange?.(parentId);
     },
 
