@@ -117,8 +117,11 @@
     const col = _avatarColour(email||"");
     const ini = _initials(name || (email||"").split("@")[0]);
     const r   = Math.round(size/2);
-    if (url) return `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex-shrink:0"><img src="${_escHtml(url)}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>`;
-    return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:${Math.round(size*0.3)}px;font-weight:800;flex-shrink:0;font-family:inherit">${ini}</div>`;
+    // Clicking a commenter's avatar opens the shared member-profile modal
+    // (handled by shared-member-modal.js via the [data-member-email] hook).
+    const hook = email ? ` data-member-email="${_escHtml(email)}" style="cursor:pointer;` : ` style="`;
+    if (url) return `<div${hook}width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex-shrink:0"><img src="${_escHtml(url)}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>`;
+    return `<div${hook}width:${size}px;height:${size}px;border-radius:50%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:${Math.round(size*0.3)}px;font-weight:800;flex-shrink:0;font-family:inherit">${ini}</div>`;
   }
   function _relativeTime(ts) {
     if (!ts) return "";
