@@ -678,7 +678,7 @@
         </a>
         <div class="tc-comment-body">
           <div class="tc-comment-meta">
-            <a href="${profileLink}" style="text-decoration:none"><span class="tc-comment-name" style="cursor:pointer">${dispName}</span></a>
+            <a href="${profileLink}" data-member-email="${_escHtml(c.email||"")}" style="text-decoration:none"><span class="tc-comment-name" style="cursor:pointer">${dispName}</span></a>
             <span class="tc-comment-time">${_relativeTime(c.created_at)}</span>
             ${c.edited_at?`<span class="tc-comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
             <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
