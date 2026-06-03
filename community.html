@@ -7099,12 +7099,15 @@ async function loadComments(postId) {
     });
   }
 
-  // Build threaded structure: top-level comments + their replies
+  // Build threaded structure: top-level comments + their replies. Replies are
+  // flattened to their top-level ancestor so a reply-to-a-reply stays in-thread.
+  const _byId = {}; comments.forEach(c => _byId[c.id] = c);
+  const _rootOf = (c) => { let cur = c, g = 0; while (cur && cur.parent_comment_id && _byId[cur.parent_comment_id] && g++ < 30) { cur = _byId[cur.parent_comment_id]; } return cur.id; };
   const topLevel = comments.filter(c => !c.parent_comment_id);
   const repliesMap = {};
   comments.filter(c => c.parent_comment_id).forEach(c => {
-    if (!repliesMap[c.parent_comment_id]) repliesMap[c.parent_comment_id] = [];
-    repliesMap[c.parent_comment_id].push(c);
+    const root = _rootOf(c);
+    (repliesMap[root] = repliesMap[root] || []).push(c);
   });
 
   function commentPollHtml(commentId, authorEmail) {
@@ -7202,6 +7205,9 @@ async function submitReply(parentCommentId, textarea) {
   const replyPoll  = _inlinePollOpen[parentCommentId] ? _readInlinePoll(parentCommentId) : null;
   if (!content && !replyMedia.length && !replyPoll) return;
 
+  const btn = document.getElementById(`reply-send-btn-${parentCommentId}`);
+  if (btn && btn.disabled) return; // already submitting — guard against duplicates
+
   // Strip any @Name prefix the user may have typed (we store it separately)
   const composer    = document.getElementById(`reply-composer-${parentCommentId}`);
   const replyToName = composer?.dataset.replyToName || null;
@@ -7211,13 +7217,15 @@ async function submitReply(parentCommentId, textarea) {
   const replyToEmail = composer?.dataset.replyToEmail || null;
 
   textarea.disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+  const _reset = () => { textarea.disabled = false; if (btn) { btn.disabled = false; btn.textContent = "Send"; } };
 
   // Upload inline media blobs
   let mediaJson = [];
   try {
     mediaJson = await _uploadInlineMedia(parentCommentId);
   } catch (e) {
-    textarea.disabled = false;
+    _reset();
     alert("Failed to upload media: " + e.message); return;
   }
 
@@ -7230,44 +7238,42 @@ async function submitReply(parentCommentId, textarea) {
     reply_to_name:     replyToName,
     media:             mediaJson.length ? mediaJson : null,
   }).select().single();
+  if (error) { _reset(); alert("Couldn't post reply: " + error.message); return; }
 
-  // Insert poll if provided
-  if (!error && replyPoll && row) {
-    const { data: pollRow } = await db.from("community_post_polls").insert({
-      post_id: _currentPostId, comment_id: row.id, question: replyPoll.question
-    }).select().single();
-    if (pollRow) {
-      await db.from("community_post_poll_options").insert(
-        replyPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
-      );
+  // Best-effort side effects (poll, notifications, @mentions). These MUST NOT
+  // block the reload — a throw here was leaving the button stuck on "Sending…".
+  try {
+    if (replyPoll && row) {
+      const { data: pollRow } = await db.from("community_post_polls").insert({
+        post_id: _currentPostId, comment_id: row.id, question: replyPoll.question
+      }).select().single();
+      if (pollRow) {
+        await db.from("community_post_poll_options").insert(
+          replyPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
+        );
+      }
     }
-  }
-
-  // Notify the person being replied to
-  if (!error && replyToEmail && replyToEmail !== myEmail) {
-    const { error: notifErr } = await db.from("notifications").insert({
-      email:    replyToEmail,
-      type:     "comment_reply",
-      title:    `${myName || "Someone"} replied to your comment`,
-      body:     (content || "Sent an attachment").slice(0, 120),
-      link_url: `/community.html?post=${_currentPostId}`,
-      metadata: {},
+    if (replyToEmail && replyToEmail !== myEmail) {
+      await db.from("notifications").insert({
+        email:    replyToEmail,
+        type:     "comment_reply",
+        title:    `${myName || "Someone"} replied to your comment`,
+        body:     (content || "Sent an attachment").slice(0, 120),
+        link_url: `/community.html?post=${_currentPostId}`,
+        metadata: {},
+      });
+    }
+    window.Mentions?.notify(content, {
+      fromName: myName || "Someone",
+      body:     content,
+      linkUrl:  `/community.html?post=${_currentPostId}`,
+      exclude:  [replyToEmail].filter(Boolean),
     });
-    if (notifErr) console.error("[reply notif] insert failed:", notifErr);
-  }
+  } catch (e) { console.warn("reply side-effects failed:", e); }
 
-  // Notify anyone @-mentioned in the reply (skips author + reply target).
-  if (!error) window.Mentions?.notify(content, {
-    fromName: myName || "Someone",
-    body:     content,
-    linkUrl:  `/community.html?post=${_currentPostId}`,
-    exclude:  [replyToEmail].filter(Boolean),
-  });
-
-  textarea.disabled = false;
-  if (error) { alert("Couldn't post reply: " + error.message); return; }
   _clearInlineState(parentCommentId);
-  await loadComments(_currentPostId);
+  try { await loadComments(_currentPostId); }
+  catch (e) { console.warn("comment reload failed:", e); _reset(); }
 }
 
 async function submitComment() {
@@ -7277,15 +7283,19 @@ async function submitComment() {
   const cmtPoll  = _inlinePollOpen["main"] ? _readInlinePoll("main") : null;
   if (!content && !cmtMedia.length && !cmtPoll) return;
   if (!_currentPostId) return;
+  const btn = document.getElementById("comment-send-btn");
+  if (btn && btn.disabled) return; // already submitting — guard against duplicates
 
   input.disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+  const _reset = () => { input.disabled = false; if (btn) { btn.disabled = false; btn.textContent = "Send"; } };
 
   // Upload inline media blobs
   let mediaJson = [];
   try {
     mediaJson = await _uploadInlineMedia("main");
   } catch (e) {
-    input.disabled = false;
+    _reset();
     alert("Failed to upload media: " + e.message); return;
   }
 
@@ -7294,48 +7304,47 @@ async function submitComment() {
     content: content || "",
     media: mediaJson.length ? mediaJson : null,
   }).select().single();
-  input.disabled = false;
+  if (error) { _reset(); alert("Couldn't post comment: " + error.message); return; }
 
-  if (error) { alert("Couldn't post comment: " + error.message); return; }
-
-  // Insert poll if provided
-  if (cmtPoll && row) {
-    const { data: pollRow } = await db.from("community_post_polls").insert({
-      post_id: _currentPostId, comment_id: row.id, question: cmtPoll.question
-    }).select().single();
-    if (pollRow) {
-      await db.from("community_post_poll_options").insert(
-        cmtPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
-      );
+  // Best-effort side effects (poll, notifications, @mentions). These MUST NOT
+  // block clearing the input + reloading — a throw here was leaving the button
+  // stuck on "Sending…" even though the comment had been inserted.
+  try {
+    if (cmtPoll && row) {
+      const { data: pollRow } = await db.from("community_post_polls").insert({
+        post_id: _currentPostId, comment_id: row.id, question: cmtPoll.question
+      }).select().single();
+      if (pollRow) {
+        await db.from("community_post_poll_options").insert(
+          cmtPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
+        );
+      }
     }
-  }
-
-  // Notify the post owner if it's not their own comment
-  const post = _posts.find(p => p.id === _currentPostId);
-  if (post && post.email && post.email !== myEmail) {
-    const { error: notifErr } = await db.from("notifications").insert({
-      email:    post.email,
-      type:     "new_comment",
-      title:    `${myName || "Someone"} commented on your post`,
-      body:     (content || "Sent an attachment").slice(0, 120),
-      link_url: `/community.html?post=${_currentPostId}`,
-      metadata: {},
+    const post = _posts.find(p => p.id === _currentPostId);
+    if (post && post.email && post.email !== myEmail) {
+      await db.from("notifications").insert({
+        email:    post.email,
+        type:     "new_comment",
+        title:    `${myName || "Someone"} commented on your post`,
+        body:     (content || "Sent an attachment").slice(0, 120),
+        link_url: `/community.html?post=${_currentPostId}`,
+        metadata: {},
+      });
+    }
+    window.Mentions?.notify(content, {
+      fromName: myName || "Someone",
+      body:     content,
+      linkUrl:  `/community.html?post=${_currentPostId}`,
+      exclude:  [post?.email].filter(Boolean),
     });
-    if (notifErr) console.error("Notification insert failed:", notifErr);
-  }
-
-  // Notify anyone @-mentioned in the comment (skips author + post owner).
-  window.Mentions?.notify(content, {
-    fromName: myName || "Someone",
-    body:     content,
-    linkUrl:  `/community.html?post=${_currentPostId}`,
-    exclude:  [post?.email].filter(Boolean),
-  });
+  } catch (e) { console.warn("comment side-effects failed:", e); }
 
   input.value = "";
   input.style.height = "";
+  _reset();
   _clearInlineState("main");
-  await loadComments(_currentPostId);
+  try { await loadComments(_currentPostId); }
+  catch (e) { console.warn("comment reload failed:", e); }
 }
 
 async function deleteComment(commentId, postId) {
@@ -8295,10 +8304,13 @@ async function loadActivityDetailComments(eventType, itemId) {
 
   if (!count) { listEl.innerHTML=`<div style="text-align:center;padding:24px 0;color:var(--text-muted);font-size:.85rem">No comments yet — be the first!</div>`; return; }
 
+  const _byId = {}; comments.forEach(c => _byId[c.id] = c);
+  const _rootOf = (c) => { let cur = c, g = 0; while (cur && cur.parent_comment_id && _byId[cur.parent_comment_id] && g++ < 30) { cur = _byId[cur.parent_comment_id]; } return cur.id; };
   const topLevel = comments.filter(c=>!c.parent_comment_id);
   const repliesMap = {};
   comments.filter(c=>c.parent_comment_id).forEach(c=>{
-    (repliesMap[c.parent_comment_id]=repliesMap[c.parent_comment_id]||[]).push(c);
+    const root = _rootOf(c);
+    (repliesMap[root]=repliesMap[root]||[]).push(c);
   });
 
   function acDetailCmtHTML(c, isReply=false, rootId=null) {
@@ -8313,7 +8325,7 @@ async function loadActivityDetailComments(eventType, itemId) {
       ${avatarHtml(c.email, c.name, 28, cmtAvatarMap[c.email]||null)}
       <div class="comment-body">
         <div class="comment-meta">
-          <span class="comment-name">${dispName}</span>
+          <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
           <span class="comment-time">${relativeTime(c.created_at)}</span>
           ${c.edited_at?`<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
           <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
@@ -8360,23 +8372,51 @@ async function submitActivityDetailComment() {
   const cmtMedia = _inlineMedia["activity_main"] || [];
   const cmtPoll  = _inlinePollOpen["activity_main"] ? _readInlinePoll("activity_main") : null;
   if (!content && !cmtMedia.length && !cmtPoll) return;
+  const btn = document.getElementById("activity-comment-send-btn");
+  if (btn && btn.disabled) return; // already submitting — guard against duplicates
 
   if (ta) ta.disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+  const _reset = () => { if (ta) ta.disabled = false; if (btn) { btn.disabled = false; btn.textContent = "Send"; } };
+
   let mediaJson = [];
   try { mediaJson = await _uploadInlineMedia("activity_main"); }
-  catch (e) { if (ta) ta.disabled = false; alert("Upload failed: " + e.message); return; }
+  catch (e) { _reset(); alert("Upload failed: " + e.message); return; }
 
   const payload = { event_type: eventType, item_id: String(itemId), email: myEmail, name: myName, content: content || "" };
   if (mediaJson.length) payload.media = mediaJson;
   const { error } = await db.from("activity_comments").insert(payload);
-  if (ta) ta.disabled = false;
-  if (error) { console.error("Activity comment insert error:", error); alert("Couldn't post comment: " + error.message); return; }
+  if (error) { _reset(); console.error("Activity comment insert error:", error); alert("Couldn't post comment: " + error.message); return; }
+
+  // Best-effort notifications — the owner of the activity item + anyone @-mentioned.
+  try {
+    const owner = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId))?.email;
+    if (owner && owner !== myEmail) {
+      await db.from("notifications").insert({
+        email:    owner,
+        type:     "new_comment",
+        title:    `${myName || "Someone"} commented on your activity`,
+        body:     (content || "Sent an attachment").slice(0, 120),
+        link_url: `/community.html`,
+        metadata: {},
+      });
+    }
+    window.Mentions?.notify(content, {
+      fromName: myName || "Someone",
+      body:     content,
+      linkUrl:  `/community.html`,
+      exclude:  [_feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId))?.email].filter(Boolean),
+    });
+  } catch (e) { console.warn("activity comment side-effects failed:", e); }
+
   if (ta) { ta.value = ""; ta.style.height = ""; }
+  _reset();
   _clearInlineState("activity_main");
   // Re-inject toolbar after clearing
   const toolbarContainer = document.getElementById("activity-main-toolbar-container");
   if (toolbarContainer) toolbarContainer.innerHTML = _inlineToolbarHtml("activity_main");
-  await loadActivityDetailComments(eventType, itemId);
+  try { await loadActivityDetailComments(eventType, itemId); }
+  catch (e) { console.warn("activity comment reload failed:", e); }
 }
 
 function startActivityDetailReply(commentId, authorName, authorEmail, eventType, itemId) {
@@ -8413,22 +8453,50 @@ async function submitActivityDetailReply(parentId, eventType, itemId) {
   const replyMedia = _inlineMedia[parentId] || [];
   const replyPoll  = _inlinePollOpen[parentId] ? _readInlinePoll(parentId) : null;
   if (!content && !replyMedia.length && !replyPoll) return;
-  const replyToName = composer.dataset.replyTo || "";
+  const btn = document.getElementById(`activity-reply-send-btn-${parentId}`);
+  if (btn && btn.disabled) return; // already submitting — guard against duplicates
+  const replyToName  = composer.dataset.replyTo || "";
+  const replyToEmail = composer.dataset.replyToEmail || null;
 
   if (ta) ta.disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+  const _reset = () => { if (ta) ta.disabled = false; if (btn) { btn.disabled = false; btn.textContent = "Send"; } };
+
   let mediaJson = [];
   try { mediaJson = await _uploadInlineMedia(parentId); }
-  catch (e) { if (ta) ta.disabled = false; alert("Upload failed: " + e.message); return; }
+  catch (e) { _reset(); alert("Upload failed: " + e.message); return; }
 
   const replyPayload = { event_type: eventType, item_id: String(itemId), email: myEmail, name: myName, content: content || "", parent_comment_id: parentId, reply_to_name: replyToName };
   if (mediaJson.length) replyPayload.media = mediaJson;
   const { error } = await db.from("activity_comments").insert(replyPayload);
-  if (ta) ta.disabled = false;
-  if (error) { alert("Couldn't post reply"); return; }
+  if (error) { _reset(); alert("Couldn't post reply"); return; }
+
+  // Best-effort notifications — the person replied to + anyone @-mentioned.
+  try {
+    if (replyToEmail && replyToEmail !== myEmail) {
+      await db.from("notifications").insert({
+        email:    replyToEmail,
+        type:     "comment_reply",
+        title:    `${myName || "Someone"} replied to your comment`,
+        body:     (content || "Sent an attachment").slice(0, 120),
+        link_url: `/community.html`,
+        metadata: {},
+      });
+    }
+    window.Mentions?.notify(content, {
+      fromName: myName || "Someone",
+      body:     content,
+      linkUrl:  `/community.html`,
+      exclude:  [replyToEmail].filter(Boolean),
+    });
+  } catch (e) { console.warn("activity reply side-effects failed:", e); }
+
   if (ta) { ta.value = ""; ta.style.height = ""; }
   composer.style.display = "none";
+  _reset();
   _clearInlineState(parentId);
-  await loadActivityDetailComments(eventType, itemId);
+  try { await loadActivityDetailComments(eventType, itemId); }
+  catch (e) { console.warn("activity reply reload failed:", e); }
 }
 
 async function editActivityComment(commentId, eventType, itemId) {
