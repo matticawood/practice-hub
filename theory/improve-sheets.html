@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Improve All Sheets</title>
+  <title>Regenerate Articles</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; }
@@ -12,19 +12,19 @@
     p.sub { font-size: 0.85rem; color: #888; margin-bottom: 20px; line-height: 1.6; }
     .card { background: #222; border: 1px solid #333; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
     label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
-    input[type=password] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.85rem; font-family: monospace; outline: none; margin-bottom: 12px; }
+    input[type=password], input[type=text] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.85rem; font-family: monospace; outline: none; margin-bottom: 12px; }
     button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
     .btn-primary { background: #2d5a8a; color: #7ab4ff; }
     .btn-primary:hover { background: #3a6a9a; }
     .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-apply { background: #2d6a2d; color: #9de89d; }
-    .btn-apply:hover { background: #3a8a3a; }
-    .btn-apply:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-backup { background: #3a2f1a; color: #f5c518; border: 1px solid #5a4a1a; }
+    .btn-backup:hover { background: #4a3f2a; }
     .btn-retry { background: #3a2a1a; color: #f59e0b; border: 1px solid #5a3a1a; }
     .btn-retry:hover { background: #4a3a2a; }
     .status { font-size: 0.85rem; color: #888; margin-top: 10px; }
     .status.ok  { color: #4ade80; }
     .status.err { color: #f87171; }
+    .hint { font-size: 0.75rem; color: #666; margin: -6px 0 12px; }
 
     .progress-wrap { margin: 12px 0 4px; }
     .progress-bar { height: 6px; background: #2a2a2a; border-radius: 3px; }
@@ -46,12 +46,6 @@
     .sheet-status.err { color: #f87171; }
     .sheet-status.processing { color: #7ab4ff; }
     .sheet-status.pending { color: #555; }
-    input[type=checkbox] { width: 15px; height: 15px; accent-color: #7ab4ff; cursor: pointer; flex-shrink: 0; }
-
-    .apply-bar { display: flex; align-items: center; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #333; flex-wrap: wrap; }
-    .apply-status { font-size: 0.85rem; }
-    .apply-status.ok  { color: #4ade80; }
-    .apply-status.err { color: #f87171; }
 
     .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #333; border-top-color: #7ab4ff; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 4px; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -59,14 +53,20 @@
 </head>
 <body>
 
-<h1>⚡ Improve All Sheets</h1>
-<p class="sub">Sends all sheets to Claude in small batches to improve content quality and fill out thin sections. Processes 3 at a time with pauses between batches to avoid rate limits. Review and apply when done.</p>
+<h1>📝 Regenerate Articles</h1>
+<p class="sub">Rewrites each theory article into the new multi-page format (overview → paged body with subheadings &amp; bullets → Practice This takeaways). The AI decides how many pages a topic needs. Back up first, then test one article before running them all.</p>
 
 <div class="card">
   <label>Anthropic API Key</label>
   <input type="password" id="api-key" placeholder="sk-ant-…" />
+
+  <label>Test one article only (optional — enter a slug)</label>
+  <input type="text" id="only-slug" placeholder="e.g. rubato  (leave blank to process all)" />
+  <p class="hint">Tip: regenerate one, open it in the reader to check it looks right, then clear this field and run all.</p>
+
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <button class="btn-primary" id="run-btn" onclick="startImproving()">⚡ Improve All Sheets</button>
+    <button class="btn-backup" id="backup-btn" onclick="downloadBackup()">⬇ Back up all (JSON)</button>
+    <button class="btn-primary" id="run-btn" onclick="startImproving()">📝 Regenerate</button>
     <button class="btn-retry" id="retry-btn" style="display:none" onclick="retryFailed()">↺ Retry Failed</button>
     <span class="status" id="run-status"></span>
   </div>
@@ -79,11 +79,33 @@
 <div id="results-wrap">
   <div class="results-header">
     <span id="count-label"></span>
-    <span class="apply-status" id="apply-status"></span>
     <a onclick="clearDone();location.reload()" style="font-size:0.8rem;color:#555;cursor:pointer;text-decoration:underline;margin-left:auto">Clear history &amp; redo all</a>
   </div>
   <div id="results-list"></div>
 </div>
+
+<!-- off-screen A4 measuring layout (mirrors theory/sheets/view.html .ho-page) -->
+<style>
+  .mho-page{ --cc:#b0529a; width:820px; background:#fff; color:#1a1410; position:fixed; left:-99999px; top:0; visibility:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; display:flex; flex-direction:column; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+  .mho-head{padding:34px 46px 30px}
+  .mho-head.slim{padding:22px 46px}
+  .mho-eyebrow{font-size:12px;font-weight:800;letter-spacing:.22em}
+  .mho-title{font-size:33px;font-weight:800;line-height:1.12;margin-top:11px}
+  .mho-head-meta{margin-top:14px;font-size:13.5px}
+  .mho-slim-title{font-size:18px;font-weight:700;margin-top:5px}
+  .mho-body{padding:36px 46px 26px}
+  .mho-overview{font-size:16.5px;line-height:1.6;padding-left:18px;margin-bottom:4px}
+  .mho-section{margin-top:24px}
+  .mho-h2{font-size:18px;font-weight:750;line-height:1.25;margin-bottom:11px}
+  .mho-p{font-size:14.5px;line-height:1.68;margin-bottom:12px}
+  .mho-ul{margin-bottom:14px;padding-left:26px}
+  .mho-ul li{font-size:14.5px;line-height:1.55;padding-bottom:9px}
+  .mho-take{margin-top:26px;padding:20px 24px;border:1px solid #ecdcae;border-radius:12px}
+  .mho-take-hd{font-size:12.5px;font-weight:800;margin-bottom:13px}
+  .mho-take li{font-size:14.5px;line-height:1.5;padding-bottom:11px;list-style:none}
+  .mho-foot{padding:13px 46px;font-size:12px}
+</style>
 
 <script>
   const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
@@ -94,31 +116,60 @@
   if (stored) document.getElementById("api-key").value = stored;
 
   const BATCH_SIZE  = 3;
-  const BATCH_DELAY = 4000; // ms between batches
+  const BATCH_DELAY = 4000;
   const MAX_RETRIES = 3;
+  const A4_PX = 1160;          // .ho-page height (820 wide A4 portrait)
+  const OVERFLOW_LIMIT = 24;   // px tolerance over A4 before we ask to trim
+  const UNDERFILL_LIMIT = 240; // px of empty space on a non-last page before we ask to rebalance
 
   let sheets = [];
-  let results = []; // { id, title, status, improved, error }
+  let results = [];
+
+  // ── Backup ───────────────────────────────────────────────
+  async function downloadBackup() {
+    const btn = document.getElementById("backup-btn");
+    btn.disabled = true; const prev = btn.textContent; btn.textContent = "Fetching…";
+    try {
+      const { data, error } = await db.from("theory_sheets").select("id, slug, title, category, content").order("title");
+      if (error) throw error;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "theory_sheets_backup_" + stamp + ".json";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      btn.textContent = "✓ Backed up " + data.length;
+      setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 2500);
+    } catch (e) {
+      alert("Backup failed: " + (e.message || e));
+      btn.textContent = prev; btn.disabled = false;
+    }
+  }
 
   async function startImproving() {
     const apiKey = document.getElementById("api-key").value.trim();
     if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
     localStorage.setItem("anthropic_key", apiKey);
+    const onlySlug = document.getElementById("only-slug").value.trim().toLowerCase();
 
     const btn = document.getElementById("run-btn");
     btn.disabled = true;
-    setStatus("Fetching sheets…", "");
+    setStatus("Fetching articles…", "");
 
-    const { data, error } = await db.from("theory_sheets").select("id, title, slug, content").order("title");
+    const { data, error } = await db.from("theory_sheets").select("id, title, slug, category, content").order("title");
     if (error || !data?.length) {
       setStatus("Failed to load: " + (error?.message || "no data"), "err");
       btn.disabled = false; return;
     }
 
-    sheets = data;
-    const savedDone = getSavedDone();
+    sheets = onlySlug ? data.filter(s => (s.slug || "").toLowerCase() === onlySlug) : data;
+    if (!sheets.length) { setStatus("No article matches slug '" + onlySlug + "'.", "err"); btn.disabled = false; return; }
+
+    const savedDone = onlySlug ? new Set() : getSavedDone();
     results = sheets.map(s => ({
-      id: s.id, title: s.title || s.slug, content: s.content,
+      id: s.id, slug: s.slug, title: s.title || s.slug, category: s.category || (s.content && s.content.category) || "General",
+      content: s.content,
       status: savedDone.has(s.id) ? "success" : "pending",
       improved: null, error: null
     }));
@@ -130,7 +181,7 @@
 
     const pending = results.filter(r => r.status === "pending");
     if (!pending.length) {
-      setStatus("✓ All sheets already improved — click 'Clear history & redo all' to reprocess.", "ok");
+      setStatus("✓ All already regenerated — use 'Clear history & redo all' to reprocess.", "ok");
       btn.disabled = false; return;
     }
 
@@ -151,39 +202,29 @@
   async function processBatches(apiKey, items) {
     document.getElementById("retry-btn").style.display = "none";
     const pending = items.filter(r => r.status === "pending");
-
     for (let i = 0; i < pending.length; i += BATCH_SIZE) {
       const batch = pending.slice(i, i + BATCH_SIZE);
       batch.forEach(r => { r.status = "processing"; });
-      renderResults();
-      updateProgress();
-
+      renderResults(); updateProgress();
       await Promise.all(batch.map(r => improveSheet(apiKey, r)));
-
-      renderResults();
-      updateProgress();
-
-      // Pause between batches (not after the last one)
+      renderResults(); updateProgress();
       if (i + BATCH_SIZE < pending.length) {
-        setStatus(`Batch ${Math.floor(i/BATCH_SIZE)+1} done — pausing before next batch…`, "");
+        setStatus(`Batch ${Math.floor(i/BATCH_SIZE)+1} done — pausing…`, "");
         await sleep(BATCH_DELAY);
       }
     }
-
     const failed = results.filter(r => r.status === "failed");
     const ok     = results.filter(r => r.status === "success");
-
     if (failed.length) {
-      setStatus(`Done — ${ok.length} saved to database, ${failed.length} failed`, "err");
+      setStatus(`Done — ${ok.length} saved, ${failed.length} failed`, "err");
       document.getElementById("retry-btn").style.display = "";
     } else {
-      setStatus(`✓ All ${ok.length} sheets improved and saved to database`, "ok");
+      setStatus(`✓ All ${ok.length} articles regenerated and saved`, "ok");
     }
-
     renderResults();
   }
 
-  const DONE_KEY = "improve_sheets_done";
+  const DONE_KEY = "regen_articles_done";
   function getSavedDone() { try { return new Set(JSON.parse(localStorage.getItem(DONE_KEY)||"[]")); } catch { return new Set(); } }
   function markDone(id) { const s = getSavedDone(); s.add(id); localStorage.setItem(DONE_KEY, JSON.stringify([...s])); }
   function clearDone() { localStorage.removeItem(DONE_KEY); }
@@ -194,99 +235,35 @@
       const ch = str[i];
       if (escaped) { result += ch; escaped = false; continue; }
       if (ch === "\\") { result += ch; escaped = true; continue; }
-      if (!inString) {
-        if (ch === '"') inString = true;
-        result += ch;
-      } else {
-        if (ch === '"' && /^[\s]*[,:\}\]]/.test(str.slice(i + 1))) {
-          inString = false; result += ch;
-        } else if (ch === '"') {
-          result += "'";
-        } else {
-          result += ch;
-        }
+      if (!inString) { if (ch === '"') inString = true; result += ch; }
+      else {
+        if (ch === '"' && /^[\s]*[,:\}\]]/.test(str.slice(i + 1))) { inString = false; result += ch; }
+        else if (ch === '"') { result += "'"; }
+        else if (ch === '\n') { result += '\\n'; }
+        else if (ch === '\r') { result += '\\r'; }
+        else if (ch === '\t') { result += '\\t'; }
+        else if (ch.charCodeAt(0) < 0x20) { /* drop other control chars */ }
+        else { result += ch; }
       }
     }
     return result;
   }
 
-  // Inject measurement styles — no height/overflow constraints so natural height is measurable
-  (function() {
-    const style = document.createElement("style");
-    style.textContent = `
-      .m-page { box-sizing:border-box; width:210mm; padding:10mm 14mm 8mm;
-        display:flex; flex-direction:column; font-family:Georgia,'Times New Roman',serif; color:#111;
-        position:fixed; left:-9999px; top:0; visibility:hidden; }
-      .m-brand { font-size:32pt; font-weight:900; line-height:1; padding-bottom:3.5mm;
-        border-bottom:3px solid #111; margin-bottom:4.5mm; }
-      .m-title { font-size:14pt; font-weight:900; line-height:1.15; padding-bottom:2mm;
-        border-bottom:0.75px solid #999; margin-bottom:2.5mm; }
-      .m-intro { font-size:9.5pt; font-style:italic; line-height:1.42; margin-bottom:3mm; }
-      .m-divider { border:none; border-top:1.5px solid #111; margin-bottom:3mm; }
-      .m-columns { display:grid; grid-template-columns:1fr 1fr;
-        column-gap:7mm; row-gap:3mm; padding-bottom:2mm; }
-      .m-section h2 { font-size:10.5pt; font-weight:700; line-height:1.2; margin-bottom:1.5mm; }
-      .m-section p  { font-size:8.8pt; line-height:1.38; margin-bottom:1.5mm; }
-      .m-section ul { list-style:none; padding:0; font-size:8.8pt; line-height:1.38; }
-      .m-section li { padding-left:0.9em; text-indent:-0.9em; margin-bottom:0.8mm; }
-      .m-section li::before { content:'• '; }
-      .m-cheat { grid-column:1/-1; border:2px solid #111; padding:3mm 3.5mm; }
-      .m-cheat h3 { font-size:10.5pt; font-weight:700; margin-bottom:2mm; }
-      .m-cheat ul { list-style:none; padding:0; font-size:8.8pt; line-height:1.4; columns:2; column-gap:7mm; }
-      .m-cheat li { padding-left:0.9em; text-indent:-0.9em; margin-bottom:0.8mm; }
-      .m-cheat li::before { content:'• '; }
-      .m-footer { display:flex; border-top:1px solid #111; padding-top:2mm; margin-top:2.5mm;
-        font-size:7.5pt; font-style:italic; }
-    `;
-    document.head.appendChild(style);
-  })();
-
-  // Measure fit: render page with no height constraint, compare natural height to 297mm
-  function measureFit(content) {
-    const MM = 3.7795;
-    const PAGE_PX = 297 * MM;
-    const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-
-    const sectionHTML = (s) => s ? `<div class="m-section">
-      <h2>${esc(s.heading)}</h2>
-      ${s.paragraph ? `<p>${esc(s.paragraph)}</p>` : ""}
-      ${(s.bullets||[]).length ? `<ul>${(s.bullets||[]).map(b=>`<li>${esc(b)}</li>`).join("")}</ul>` : ""}
-    </div>` : `<div></div>`;
-
-    const left  = (content.leftSections  || []).slice(0, 4);
-    const right = (content.rightSections || []).slice(0, 4);
-    const maxLen = Math.max(left.length, right.length);
-    let sectionsHTML = "";
-    for (let i = 0; i < maxLen; i++) {
-      sectionsHTML += sectionHTML(left[i]);
-      sectionsHTML += sectionHTML(right[i]);
-    }
-
-    const cheatHTML = `<div class="m-cheat">
-      <h3>${esc(content.cheatTitle || "CHEAT SHEET")}</h3>
-      <ul>${(content.cheatBullets||[]).map(b=>`<li>${esc(b)}</li>`).join("")}</ul>
-    </div>`;
-
-    const page = document.createElement("div");
-    page.className = "m-page";
-    page.innerHTML = `
-      <div class="m-brand">PIANO PRACTICE DAILY</div>
-      <div class="m-title">Title placeholder</div>
-      <div class="m-intro">${esc(content.intro||"")}</div>
-      <div class="m-divider"></div>
-      <div class="m-columns">${sectionsHTML}${cheatHTML}</div>
-      <div class="m-footer"><span>a</span><span>b</span></div>
-    `;
-
-    document.body.appendChild(page);
-    const naturalHeight = page.getBoundingClientRect().height;
-    document.body.removeChild(page);
-
-    // positive = overflows A4, negative = spare space
-    return naturalHeight - PAGE_PX;
-  }
-
+  // ── Source summary (handles both old and new schema) ──────
   function contentSummary(c) {
+    if (!c || typeof c !== "object") return "(no existing content)";
+    if (Array.isArray(c.pages)) {
+      let out = "Overview: " + (c.overview || "") + "\n";
+      c.pages.forEach((p, pi) => {
+        out += "\nPage " + (pi+1) + ":\n";
+        (p.sections||[]).forEach(s => {
+          out += "  • " + (s.heading||"") + "\n";
+          (s.blocks||[]).forEach(b => { out += "    " + (b.type==="ul" ? (b.items||[]).join("; ") : (b.text||"")) + "\n"; });
+        });
+      });
+      out += "\nTakeaways:\n" + (c.takeaways||[]).map(t => "  - " + t).join("\n");
+      return out;
+    }
     return `Intro: ${c.intro || ""}
 
 Left sections:
@@ -299,52 +276,88 @@ Cheat sheet: ${c.cheatTitle||""}
 ${(c.cheatBullets||[]).join("\n")}`;
   }
 
-  function buildPrompt(topic, summary, extraNote = "") {
-    return `You are rewriting a "Piano Practice Daily" music theory reference sheet for piano students of all levels.
+  function buildPrompt(title, category, summary) {
+    return `You are rewriting a "Piano Practice Daily" piano-theory article for piano students of all levels. Produce a polished, genuinely interesting multi-page article.
 
-Sheet topic: "${topic}"
+Article title (fixed, do not change): "${title}"
+Category: "${category}"
 
-Current content:
+Source material to draw on, improve, expand and restructure:
 ${summary}
-${extraNote}
 
-Rewrite this sheet:
-1. ACCESSIBLE: Explain technical terms briefly in plain English when first used.
-2. LAYERED: Include detail useful to intermediate/advanced players too.
-3. PRACTICAL: Ground concepts in what you can hear or do at the piano.
-4. INTRO: 2-3 sentences — introduce the topic, why it matters at the piano, and who will benefit. Aim for 40-60 words. Italic, full-width standfirst style.
-5. SECTIONS: EXACTLY 4 in leftSections, EXACTLY 4 in rightSections. Keep same headings.
-   - Paragraph only: MAX 3 sentences, each under 20 words.
-   - Bullets only: EXACTLY 3 bullets, each under 10 words.
-   - Both paragraph + bullets: MAX 2 sentences + EXACTLY 2 bullets.
-6. CHEAT SHEET: EXACTLY 4 bullets, each under 10 words.
+ACCURACY (most important) — you have a web_search tool, use it
+- For anything about a real person, group, place, event, piece or dated fact (especially a composer or pianist), USE web search to verify the specifics before you write them: dates, birthplaces, teachers, competition results and placings, prizes, premieres, recordings, and any biographical claim. Do not rely on memory for these.
+- Be especially careful with competition results and awards. Do NOT state that someone won a competition, prize or title unless web search confirms it. Reaching a final or placing is NOT the same as winning. If you cannot confirm it, describe their involvement in general terms or leave it out.
+- If web search cannot confirm a specific detail, do not state it. Generalise or omit it. Never guess a date, result or fact to fill space.
+- Do not invent quotations, anecdotes, opus numbers, or statistics. Better to be general and certainly correct than specific and wrong.
+
+AUDIENCE AND CLARITY
+- Write so a complete beginner can follow, while still giving real depth for intermediate and advanced players. These two goals do not conflict.
+- Every musical term or concept must be briefly explained in plain language the first time it appears (for example rubato, voicing, counterpoint, a cadence, an etude, an arpeggio). Never assume prior knowledge: a beginner should never meet a word they cannot understand from the text.
+- Do NOT water the content down to do this. Explain the term, then go as deep as the topic deserves.
+- Warm, knowledgeable, plain English. Connect ideas to what a player can hear or do at the piano.
+
+LENGTH AND SUBSTANCE
+- Write only what genuinely serves the reader. Do NOT pad, repeat, or add filler to hit a length. Every sentence must earn its place. A one or two page article is good if that fully covers the topic; a five page article is good if the topic needs it. Never stretch to fill space.
+
+STRUCTURE
+- overview: ONE inviting paragraph of about 40 to 70 words saying what the topic is, why it matters at the piano, and who benefits. This is the standfirst that draws the reader in.
+- pages: an array of pages. YOU decide how many based purely on how much is worth saying, not on filling pages.
+  * A page must not overflow an A4 sheet, so when real content runs long, split it onto another page. There is NO minimum per page: a short final page is fine.
+  * Each page has 1 to 4 sections. Each section has a heading and an array of blocks.
+  * A block is either {"type":"p","text":"..."} for a paragraph or {"type":"ul","items":["...", "..."]} for a bullet list.
+  * Mix paragraphs and bullet lists where each genuinely helps.
+- glossary: a list of the musical terms used in the article, each with a one sentence plain-language definition, as {"term":"...","definition":"..."}. Include every notable term a beginner might not know (alphabetical order is fine). If the article genuinely uses no specialist terms, use an empty list.
+- takeaways: 3 to 5 short closing points, AND a "takeawaysKind" that decides the heading:
+  * "practice" when the topic is something the reader can work on at the instrument (a technique, a theory concept, a skill). The points are concrete things to practise, and the section is titled "Practice This".
+  * "takeaways" when the topic is biographical, historical, or appreciation based (a composer, a pianist, a style or an era) where there is nothing to literally practise. The points are the key things worth remembering, and the section is titled "Key Takeaways".
+  Choose whichever genuinely fits the topic. For a composer or pianist article, use "takeaways".
+
+HARD RULES
+- NEVER use an em dash or an en dash. Use commas, periods, parentheses, or the word "to" for ranges. This is critical: dashes make the writing look machine-generated.
+- For emphasis you may wrap a few key words in <b>...</b>. Use no other HTML.
+- Do not invent or change the title.
+- JSON SAFETY: never use a double quote (") inside any string value. For piece names, nicknames, or quoted words use single quotes, e.g. write the 'Moonlight' Sonata, not the "Moonlight" Sonata. Never put a raw line break inside a string. These rules keep the JSON valid.
 
 Return JSON only, no markdown fences:
 {
-  "intro": "text",
-  "leftSections": [{ "heading": "heading", "paragraph": "text or empty", "bullets": ["bullet"] }],
-  "rightSections": [{ "heading": "heading", "paragraph": "text or empty", "bullets": ["bullet"] }],
-  "cheatTitle": "CHEAT SHEET: Topic",
-  "cheatBullets": ["bullet 1", "bullet 2"]
-}
-
-CRITICAL: Use single quotes (') not double quotes (") inside string values.`;
+  "overview": "text",
+  "pages": [
+    { "sections": [
+      { "heading": "Section heading", "blocks": [ {"type":"p","text":"a paragraph"}, {"type":"ul","items":["a point","another point"]} ] }
+    ] }
+  ],
+  "glossary": [ {"term":"Rubato","definition":"A flexible stretching and relaxing of tempo for expressive effect."} ],
+  "takeawaysKind": "practice",
+  "takeaways": ["point", "point", "point"]
+}`;
   }
 
-  async function callClaude(apiKey, prompt) {
+  function buildRebalancePrompt(title, category, prevJson, notes) {
+    return `Revise this "Piano Practice Daily" article. Keep the same JSON schema (overview, pages[].sections[].blocks[], takeaways) and keep essentially all the content, but fix the page balance described below.
+
+Title (fixed): "${title}"
+Category: "${category}"
+
+PAGE BALANCE NOTES:
+${notes}
+
+Rules unchanged: keep every fact accurate (do not introduce new dates, names, or claims while rebalancing, and do not alter correct ones), do not add filler to fill space, no page may overflow an A4 sheet so split long pages onto another page (a short page is fine), keep the glossary, no em or en dashes anywhere, <b> only for emphasis, single quotes inside strings, return JSON only.
+
+Previous version to rebalance:
+${prevJson}`;
+  }
+
+  async function callClaude(apiKey, prompt, useTools) {
+    const body = { model: "claude-sonnet-4-6", max_tokens: 8000, messages: [{ role: "user", content: prompt }] };
+    if (useTools) body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }];
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-        "anthropic-dangerous-direct-browser-access": "true"
+        "x-api-key": apiKey, "anthropic-version": "2023-06-01",
+        "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true"
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }]
-      })
+      body: JSON.stringify(body)
     });
     if (res.status === 429) {
       const wait = parseInt(res.headers.get("retry-after") || "15") * 1000;
@@ -355,82 +368,126 @@ CRITICAL: Use single quotes (') not double quotes (") inside string values.`;
       throw new Error(err.error?.message || `API ${res.status}`);
     }
     const data = await res.json();
-    const raw  = data.content?.[0]?.text || "";
+    // concatenate all text blocks (web-search responses interleave tool blocks)
+    const raw = (data.content || []).filter(b => b && b.type === "text").map(b => b.text).join("");
     const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
     if (start === -1) throw new Error("No JSON in response");
     const cleaned = raw.slice(start, end + 1);
-    try { return JSON.parse(cleaned); }
-    catch(_) { return JSON.parse(repairJson(cleaned)); }
+    return await parseLoose(apiKey, cleaned);
+  }
+
+  // Try local parse, then regex repair, then ask the model to fix its own JSON.
+  async function parseLoose(apiKey, cleaned) {
+    try { return JSON.parse(cleaned); } catch(_) {}
+    try { return JSON.parse(repairJson(cleaned)); } catch(_) {}
+    // last resort: model-based repair
+    const fixPrompt = `The text below should be a single valid JSON object but has syntax errors (often an unescaped double quote inside a string, or a raw line break). Return ONLY the corrected JSON object, no explanation and no markdown fences. Replace any double quotes that appear inside string values with single quotes, and remove raw line breaks inside strings.
+
+${cleaned}`;
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 8000, messages: [{ role: "user", content: fixPrompt }] })
+    });
+    if (!res.ok) throw new Error("Invalid JSON and repair failed (" + res.status + ")");
+    const data = await res.json();
+    const raw = (data.content || []).filter(b => b && b.type === "text").map(b => b.text).join("");
+    const s = raw.indexOf("{"), e = raw.lastIndexOf("}");
+    if (s === -1) throw new Error("Invalid JSON returned");
+    const c2 = raw.slice(s, e + 1);
+    try { return JSON.parse(c2); } catch(_) { return JSON.parse(repairJson(c2)); }
+  }
+
+  // strip em/en dashes as a safety net (prompt forbids them, but be sure)
+  function sanitizeDashes(v) {
+    if (typeof v === "string") {
+      return v
+        .replace(/(\d)\s*[–—]\s*(\d)/g, "$1 to $2")  // numeric ranges
+        .replace(/\s*[—–]\s*/g, ", ")                // dash as punctuation
+        .replace(/,\s*,/g, ",");
+    }
+    if (Array.isArray(v)) return v.map(sanitizeDashes);
+    if (v && typeof v === "object") { const o = {}; for (const k in v) o[k] = sanitizeDashes(v[k]); return o; }
+    return v;
+  }
+
+  // ── A4 fit measurement (mirrors the export .ho-page) ──────
+  function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function rich(s){ let t = esc(s); return t.replace(/&lt;(\/?)(b|i|em|strong)&gt;/g, "<$1$2>"); }
+
+  function measurePage(content, idx, title) {
+    const c = content, n = c.pages.length, last = idx === n-1;
+    const el = document.createElement("div");
+    el.className = "mho-page";
+    let head;
+    if (idx === 0) {
+      head = `<div class="mho-head"><div class="mho-eyebrow">PIANO PRACTICE DAILY</div><div class="mho-title">${rich(title)}</div><div class="mho-head-meta">${esc(c.category||"")} | read</div></div>`;
+    } else {
+      head = `<div class="mho-head slim"><div class="mho-eyebrow">PIANO PRACTICE DAILY</div><div class="mho-slim-title">${rich(title)}</div></div>`;
+    }
+    let body = '<div class="mho-body">';
+    if (idx === 0 && c.overview) body += `<div class="mho-overview">${rich(c.overview)}</div>`;
+    body += (c.pages[idx].sections||[]).map(s =>
+      `<div class="mho-section"><div class="mho-h2">${rich(s.heading)}</div>` +
+      (s.blocks||[]).map(b => b.type==="ul"
+        ? `<ul class="mho-ul">${(b.items||[]).map(i=>`<li>${rich(i)}</li>`).join("")}</ul>`
+        : `<p class="mho-p">${rich(b.text)}</p>`).join("") + `</div>`
+    ).join("");
+    if (last && (c.takeaways||[]).length) {
+      body += `<div class="mho-take"><div class="mho-take-hd">PRACTICE THIS</div><ul>${(c.takeaways||[]).map(t=>`<li>${rich(t)}</li>`).join("")}</ul></div>`;
+    }
+    body += "</div>";
+    const foot = `<div class="mho-foot">matthewcawood.com</div>`;
+    el.innerHTML = head + body + foot;
+    document.body.appendChild(el);
+    const h = el.getBoundingClientRect().height;
+    document.body.removeChild(el);
+    return h; // natural height in px
+  }
+
+  // returns notes string if rebalance needed, else ""
+  function fitNotes(content, title) {
+    const n = content.pages.length;
+    const problems = [];
+    for (let i = 0; i < n; i++) {
+      const h = measurePage(content, i, title);
+      const over = h - A4_PX;
+      if (over > OVERFLOW_LIMIT) {
+        problems.push(`Page ${i+1} overflows the A4 sheet by about ${Math.round(over)}px. Move some content to another page or trim it.`);
+      }
+      // NOTE: we deliberately do not flag under-filled pages. A short page is fine;
+      // we never want the model to pad with filler to fill space.
+    }
+    return problems.join("\n");
   }
 
   async function improveSheet(apiKey, result) {
     const c = result.content || {};
-    const topic = c.title || result.title;
-    const leftCount  = (c.leftSections||[]).length;
-    const rightCount = (c.rightSections||[]).length;
-
-    let extraNote = "";
-    if (leftCount > 4 || rightCount > 4) {
-      extraNote = `\nIMPORTANT: Currently has ${leftCount} left and ${rightCount} right sections. Consolidate to EXACTLY 4 each — merge extra content into related sections, nothing lost.`;
-    }
+    const title = result.title;
+    const category = result.category;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 1) await sleep([0, 3000, 8000, 15000][attempt - 1]);
-
       try {
-        // Generate initial version
-        let improved = await callClaude(apiKey, buildPrompt(topic, contentSummary(c), extraNote));
+        let improved = sanitizeDashes(await callClaude(apiKey, buildPrompt(title, category, contentSummary(c)), true));
+        if (!improved || !Array.isArray(improved.pages) || !improved.pages.length) throw new Error("Bad shape (no pages)");
 
-        // Measure fit and adjust up to 4 times
-        for (let pass = 0; pass < 4; pass++) {
-          const overflow = measureFit(improved);
-          const MM = 3.7795;
-          const OVERFLOW_THRESHOLD =  0;          // any overflow = too long
-          const SPARE_THRESHOLD    = -(30 * MM);  // >30mm spare = expand
-
-          if (overflow > OVERFLOW_THRESHOLD) {
-            const overflowMM = Math.round(overflow / MM);
-            const urgency = overflowMM > 15 ? "SIGNIFICANTLY shorten" : "shorten";
-            const adjustNote = `\nCRITICAL: The previous version overflows the page by ${overflowMM}mm. You MUST ${urgency} the content. Cut sentences, reduce paragraphs, remove a bullet from sections that have 3+. Do NOT add anything new.`;
-            improved = await callClaude(apiKey, buildPrompt(topic, contentSummary(improved), adjustNote));
-            await sleep(1500);
-          } else if (overflow < SPARE_THRESHOLD) {
-            const spareMM = Math.round(-overflow / MM);
-            const adjustNote = `\nThe previous version left ${spareMM}mm of empty space. Please expand — add a sentence to thin paragraphs, or add a bullet to sections that only have 1-2. Stay within the MAX limits per section.`;
-            improved = await callClaude(apiKey, buildPrompt(topic, contentSummary(improved), adjustNote));
-            await sleep(1500);
-          } else {
-            break; // fits well — done
-          }
+        // Up to 2 rebalance passes for A4 page fit (no web search needed here)
+        for (let pass = 0; pass < 2; pass++) {
+          const notes = fitNotes(improved, title);
+          if (!notes) break;
+          const next = sanitizeDashes(await callClaude(apiKey, buildRebalancePrompt(title, category, JSON.stringify(improved), notes), false));
+          if (next && Array.isArray(next.pages) && next.pages.length) improved = next;
+          await sleep(1200);
         }
 
         result.improved = improved;
-
-        // Save to Supabase
-        const updatedContent = {
-          ...result.content,
-          intro:         improved.intro,
-          leftSections:  improved.leftSections,
-          rightSections: improved.rightSections,
-          cheatTitle:    improved.cheatTitle,
-          cheatBullets:  improved.cheatBullets,
-        };
-        const { error: saveError } = await db
-          .from("theory_sheets")
-          .update({ content: updatedContent })
-          .eq("id", result.id);
-
-        if (saveError) {
-          result.status = "failed";
-          result.error  = "Save failed: " + saveError.message;
-        } else {
-          result.status  = "success";
-          result.error   = null;
-          result.content = updatedContent;
-          markDone(result.id);
-        }
+        const kind = improved.takeawaysKind === "takeaways" ? "takeaways" : "practice";
+        const newContent = { title, category, overview: improved.overview || "", pages: improved.pages, glossary: Array.isArray(improved.glossary) ? improved.glossary : [], takeawaysKind: kind, takeaways: improved.takeaways || [] };
+        const { error: saveError } = await db.from("theory_sheets").update({ content: newContent }).eq("id", result.id);
+        if (saveError) { result.status = "failed"; result.error = "Save failed: " + saveError.message; }
+        else { result.status = "success"; result.error = null; result.content = newContent; markDone(result.id); }
         return;
-
       } catch(err) {
         if (err.message === "rate_limit") {
           await sleep(err.wait || 8000);
@@ -448,7 +505,6 @@ CRITICAL: Use single quotes (') not double quotes (") inside string values.`;
     if (!apiKey) { alert("Please enter your Anthropic API key."); return; }
     const r = results[i];
     if (!r) return;
-    // Un-mark from done so it gets reprocessed
     const done = getSavedDone(); done.delete(r.id); localStorage.setItem(DONE_KEY, JSON.stringify([...done]));
     r.status = "pending"; r.improved = null; r.error = null;
     renderResults();
@@ -460,27 +516,20 @@ CRITICAL: Use single quotes (') not double quotes (") inside string values.`;
     list.innerHTML = results.map((r, i) => {
       const statusText = {
         pending:    '<span class="sheet-status pending">⏳ Pending</span>',
-        processing: '<span class="sheet-status processing"><span class="spinner"></span>Processing…</span>',
-        success:    r.improved ? '<span class="sheet-status ok">✓ Improved &amp; saved</span>' : '<span class="sheet-status" style="color:#4ade80">✓ Previously saved</span>',
-        failed:     `<span class="sheet-status err">✗ Failed: ${escHtml(r.error||"")}</span>`,
+        processing: '<span class="sheet-status processing"><span class="spinner"></span>Writing…</span>',
+        success:    r.improved ? `<span class="sheet-status ok">✓ ${r.improved.pages.length} pp · saved</span>` : '<span class="sheet-status" style="color:#4ade80">✓ Previously saved</span>',
+        failed:     `<span class="sheet-status err">✗ ${escHtml(r.error||"")}</span>`,
       }[r.status] || "";
-
       const retryBtn = (r.status === "success" || r.status === "failed")
         ? `<button onclick="retrySingle(${i})" style="padding:2px 8px;font-size:0.72rem;background:#2a2a2a;border:1px solid #444;color:#888;border-radius:4px;cursor:pointer">↺</button>`
         : '';
-
-      return `<div class="sheet-row ${r.status}">
-        <span class="sheet-name">${escHtml(r.title)}</span>
-        ${statusText}
-        ${retryBtn}
-      </div>`;
+      return `<div class="sheet-row ${r.status}"><span class="sheet-name">${escHtml(r.title)}</span>${statusText}${retryBtn}</div>`;
     }).join("");
-
     const successCount = results.filter(r => r.status === "success").length;
     const failCount    = results.filter(r => r.status === "failed").length;
     const pendingCount = results.filter(r => r.status === "pending" || r.status === "processing").length;
     let parts = [];
-    if (successCount) parts.push(`${successCount} improved`);
+    if (successCount) parts.push(`${successCount} done`);
     if (failCount)    parts.push(`${failCount} failed`);
     if (pendingCount) parts.push(`${pendingCount} remaining`);
     document.getElementById("count-label").textContent = parts.join(" · ");
@@ -495,15 +544,10 @@ CRITICAL: Use single quotes (') not double quotes (") inside string values.`;
 
   function setStatus(msg, cls) {
     const el = document.getElementById("run-status");
-    el.textContent = msg;
-    el.className = "status" + (cls ? " " + cls : "");
+    el.textContent = msg; el.className = "status" + (cls ? " " + cls : "");
   }
-
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-  function escHtml(s) {
-    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
+  function escHtml(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 </script>
 </body>
 </html>

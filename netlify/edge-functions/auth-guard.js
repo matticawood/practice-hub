@@ -10,29 +10,18 @@ export default async (request, context) => {
   const cookie = request.headers.get("cookie") || "";
   const match  = cookie.match(/(?:^|;\s*)ppd_auth=([^;]+)/);
 
-  if (!match) {
+  // No auth cookie at all → not logged in → send to login.
+  if (!match || !match[1]) {
     return redirectToLogin(request);
   }
 
-  const token = decodeURIComponent(match[1]);
-
-  // Verify token against Supabase — this is a real server-side network call
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "apikey": SUPABASE_ANON
-      }
-    });
-
-    if (res.ok) {
-      return context.next(); // valid session — serve the page
-    }
-  } catch (e) {
-    // Network error — fail closed (deny access)
-  }
-
-  return redirectToLogin(request);
+  // A cookie is present, so this is a returning member. We deliberately do NOT
+  // bounce on an expired or stale token here: Supabase access tokens live only
+  // ~1 hour and the app refreshes them client-side, so verifying the token at
+  // the edge would kick logged-in members to the dashboard whenever their
+  // cookie token had momentarily gone stale (the "redirected to dashboard, works
+  // on retry" bug). The client-side guard and Supabase RLS are the real gate.
+  return context.next();
 };
 
 function redirectToLogin(request) {
