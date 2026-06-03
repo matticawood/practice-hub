@@ -6875,19 +6875,20 @@ function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, tota
 }
 
 // Returns poll HTML string — used for comment/reply polls and shared by _renderPollUI
-function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail) {
+function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail, voteFn) {
+  voteFn = voteFn || "castCommentVote"; // activity-feed comments pass "castActivityCommentVote"
   const hasVoted = !!myOptId || (!!authorEmail && authorEmail === myEmail);
   let html = `<div class="poll-card"><div class="poll-card-question">${escHtml(question)}</div>`;
   if (!hasVoted) {
     html += opts.map(o =>
-      `<button class="poll-option-vote-btn" onclick="castCommentVote('${escHtml(pollId)}','${escHtml(o.id)}')">${escHtml(o.label)}</button>`
+      `<button class="poll-option-vote-btn" onclick="${voteFn}('${escHtml(pollId)}','${escHtml(o.id)}')">${escHtml(o.label)}</button>`
     ).join("");
   } else {
     html += opts.map(o => {
       const count  = voteCountMap[o.id] || 0;
       const pct    = totalVotes > 0 ? Math.round(count / totalVotes * 100) : 0;
       const isMine = o.id === myOptId;
-      return `<div class="poll-bar-row" onclick="castCommentVote('${escHtml(pollId)}','${escHtml(o.id)}')">
+      return `<div class="poll-bar-row" onclick="${voteFn}('${escHtml(pollId)}','${escHtml(o.id)}')">
         <div class="poll-bar-label">
           <span>${escHtml(o.label)}${isMine ? ` <span style="color:#10b981;font-size:.7em">●</span>` : ""}</span>
           <span>${pct}%</span>
@@ -6907,6 +6908,17 @@ async function castCommentVote(pollId, optionId) {
   );
   if (error) { alert("Couldn't cast vote: " + error.message); return; }
   if (_currentPostId) await loadComments(_currentPostId);
+}
+
+// Vote on a poll inside an activity-feed comment (stored in the generic
+// tc_comment_polls tables, keyed by the activity comment id).
+async function castActivityCommentVote(pollId, optionId) {
+  const { error } = await db.from("tc_comment_poll_votes").upsert(
+    { poll_id: pollId, option_id: optionId, email: myEmail },
+    { onConflict: "poll_id,email" }
+  );
+  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  if (_currentActivityDetail) await loadActivityDetailComments(_currentActivityDetail.eventType, _currentActivityDetail.itemId);
 }
 
 // Temporarily show vote buttons so user can pick a different option
@@ -8304,6 +8316,28 @@ async function loadActivityDetailComments(eventType, itemId) {
 
   if (!count) { listEl.innerHTML=`<div style="text-align:center;padding:24px 0;color:var(--text-muted);font-size:.85rem">No comments yet — be the first!</div>`; return; }
 
+  // Load any polls attached to these activity comments (generic tc_comment_polls,
+  // keyed by the activity comment id — same structure as post-comment polls).
+  const acPollByComment = {};
+  const { data: _acPolls } = await db.from("tc_comment_polls")
+    .select("id,question,comment_id").in("comment_id", comments.map(c => c.id));
+  if (_acPolls && _acPolls.length) {
+    const _pollIds = _acPolls.map(p => p.id);
+    const [{ data: _opts }, { data: _allV }, { data: _myV }] = await Promise.all([
+      db.from("tc_comment_poll_options").select("id,poll_id,label,position").in("poll_id", _pollIds).order("position"),
+      db.from("tc_comment_poll_votes").select("poll_id,option_id").in("poll_id", _pollIds),
+      db.from("tc_comment_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", _pollIds),
+    ]);
+    _acPolls.forEach(p => {
+      const opts = (_opts || []).filter(o => o.poll_id === p.id);
+      const allV = (_allV || []).filter(v => v.poll_id === p.id);
+      const myV  = (_myV  || []).find(v => v.poll_id === p.id);
+      const voteCountMap = {};
+      allV.forEach(v => { voteCountMap[v.option_id] = (voteCountMap[v.option_id] || 0) + 1; });
+      acPollByComment[p.comment_id] = { pollId: p.id, question: p.question, opts, voteCountMap, myOptId: myV?.option_id || null, totalVotes: allV.length };
+    });
+  }
+
   const _byId = {}; comments.forEach(c => _byId[c.id] = c);
   const _rootOf = (c) => { let cur = c, g = 0; while (cur && cur.parent_comment_id && _byId[cur.parent_comment_id] && g++ < 30) { cur = _byId[cur.parent_comment_id]; } return cur.id; };
   const topLevel = comments.filter(c=>!c.parent_comment_id);
@@ -8335,6 +8369,7 @@ async function loadActivityDetailComments(eventType, itemId) {
         </div>
         ${c.content ? `<div class="comment-text">${replyPrefix}${renderUserContent(c.content)}</div>` : (replyPrefix?`<div class="comment-text">${replyPrefix}</div>`:"")}
         ${mediaHtml}
+        ${acPollByComment[c.id] ? _commentPollHtml(acPollByComment[c.id].pollId, acPollByComment[c.id].question, acPollByComment[c.id].opts, acPollByComment[c.id].voteCountMap, acPollByComment[c.id].myOptId, acPollByComment[c.id].totalVotes, c.email, "castActivityCommentVote") : ""}
         <div class="comment-action-row">
           ${_commentReactBarHTML("activity_comment", c.id)}
           <button class="comment-reply-btn" onclick="startActivityDetailReply('${threadId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}','${eventType}','${String(itemId)}')">Reply</button>
@@ -8385,11 +8420,19 @@ async function submitActivityDetailComment() {
 
   const payload = { event_type: eventType, item_id: String(itemId), email: myEmail, name: myName, content: content || "" };
   if (mediaJson.length) payload.media = mediaJson;
-  const { error } = await db.from("activity_comments").insert(payload);
+  const { data: row, error } = await db.from("activity_comments").insert(payload).select().single();
   if (error) { _reset(); console.error("Activity comment insert error:", error); alert("Couldn't post comment: " + error.message); return; }
 
-  // Best-effort notifications — the owner of the activity item + anyone @-mentioned.
+  // Best-effort side effects — poll storage + notifications (owner + @mentions).
   try {
+    if (cmtPoll && row) {
+      const { data: pollRow } = await db.from("tc_comment_polls").insert({ comment_id: row.id, question: cmtPoll.question }).select().single();
+      if (pollRow) {
+        await db.from("tc_comment_poll_options").insert(
+          cmtPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
+        );
+      }
+    }
     const owner = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId))?.email;
     if (owner && owner !== myEmail) {
       await db.from("notifications").insert({
@@ -8468,11 +8511,19 @@ async function submitActivityDetailReply(parentId, eventType, itemId) {
 
   const replyPayload = { event_type: eventType, item_id: String(itemId), email: myEmail, name: myName, content: content || "", parent_comment_id: parentId, reply_to_name: replyToName };
   if (mediaJson.length) replyPayload.media = mediaJson;
-  const { error } = await db.from("activity_comments").insert(replyPayload);
+  const { data: row, error } = await db.from("activity_comments").insert(replyPayload).select().single();
   if (error) { _reset(); alert("Couldn't post reply"); return; }
 
-  // Best-effort notifications — the person replied to + anyone @-mentioned.
+  // Best-effort side effects — poll storage + notifications (reply target + @mentions).
   try {
+    if (replyPoll && row) {
+      const { data: pollRow } = await db.from("tc_comment_polls").insert({ comment_id: row.id, question: replyPoll.question }).select().single();
+      if (pollRow) {
+        await db.from("tc_comment_poll_options").insert(
+          replyPoll.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i }))
+        );
+      }
+    }
     if (replyToEmail && replyToEmail !== myEmail) {
       await db.from("notifications").insert({
         email:    replyToEmail,
