@@ -115,6 +115,7 @@
         <option value="5">Expert</option>
       </select>
       <button class="btn btn-primary owner-only" id="add-btn" style="display:none">+ Add Piece</button>
+      <button class="btn btn-ghost owner-only" id="enrich-btn" style="display:none" onclick="openBulkRegen()">⚡ Enrich library</button>
       <button class="btn btn-ghost" id="request-btn" onclick="openPieceRequestModal()">💡 Request a piece</button>
     </div>
     <p class="results-meta" id="results-meta"></p>
@@ -256,6 +257,41 @@
     <div class="req-modal-footer">
       <button class="btn btn-ghost" onclick="closePieceRequestModal()">Cancel</button>
       <button class="btn btn-primary" id="req-submit-btn" onclick="submitPieceRequest()">Send Request</button>
+    </div>
+  </div>
+</div>
+
+<div class="req-overlay" id="bulk-regen-overlay" onclick="if(event.target===this)closeBulkRegen()">
+  <div class="req-modal-box" style="max-width:580px">
+    <h2>⚡ Enrich Library</h2>
+    <p>Re-generate every piece's data with web-searched, fact-checked content and accurate, honestly-rated difficulty. Sheet-music and YouTube links are left untouched.</p>
+    <div class="form-group">
+      <label for="bulk-api-key">Anthropic API Key</label>
+      <input type="password" id="bulk-api-key" placeholder="sk-ant-…" autocomplete="off" />
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-ghost" id="bulk-backup-btn" onclick="bulkDownloadBackup()">⬇ Download backup first</button>
+      <span id="bulk-backup-status" style="font-size:0.8rem;color:var(--text-muted)"></span>
+    </div>
+    <div class="form-group">
+      <label for="bulk-scope">How many to process</label>
+      <select id="bulk-scope">
+        <option value="3">Test — first 3</option>
+        <option value="10">First 10</option>
+        <option value="all">ALL pieces</option>
+      </select>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">Run a test batch and check the results before doing all 233.</div>
+    </div>
+    <div id="bulk-progress" style="display:none;margin:14px 0">
+      <div style="height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden;margin-bottom:8px"><div id="bulk-bar" style="height:100%;width:0;background:linear-gradient(90deg,#7ec87e,#4e9a5c);transition:width .3s"></div></div>
+      <div id="bulk-status" style="font-size:0.85rem;font-weight:600"></div>
+      <div id="bulk-log" style="max-height:190px;overflow-y:auto;margin-top:8px;font-size:0.74rem;color:var(--text-muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.6"></div>
+    </div>
+    <div class="req-error" id="bulk-error"></div>
+    <div class="req-modal-footer">
+      <button class="btn btn-ghost" onclick="closeBulkRegen()">Close</button>
+      <button class="btn btn-danger" id="bulk-stop-btn" style="display:none" onclick="bulkStop()">Stop</button>
+      <button class="btn btn-primary" id="bulk-start-btn" onclick="bulkStart()">Start</button>
     </div>
   </div>
 </div>
@@ -2338,6 +2374,163 @@ function initApiKeyField() {
   const saved = localStorage.getItem("anthropic_key");
   if (saved) document.getElementById("f-api-key").value = saved;
 }
+
+// ── Bulk library enrichment (owner-only) ──────────────────────
+let _bulkRunning = false, _bulkStop = false;
+function _sleep(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
+function _sanitizeDashes(v) {
+  if (typeof v === "string") return v.replace(/(\d)\s*[–—]\s*(\d)/g, "$1 to $2").replace(/\s*[—–]\s*/g, ", ").replace(/,\s*,/g, ",");
+  if (Array.isArray(v)) return v.map(_sanitizeDashes);
+  if (v && typeof v === "object") { const o = {}; for (const k in v) o[k] = _sanitizeDashes(v[k]); return o; }
+  return v;
+}
+async function _parseLoose(apiKey, cleaned) {
+  try { return JSON.parse(cleaned); } catch(_) {}
+  try { return JSON.parse(repairJson(cleaned)); } catch(_) {}
+  const fixPrompt = "The text below should be a single valid JSON object but has syntax errors (often an unescaped double quote inside a string, or a raw line break). Return ONLY the corrected JSON object, no explanation, no markdown. Replace double quotes inside string values with single quotes, and remove raw line breaks inside strings.\n\n" + cleaned;
+  const res = await fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","content-type":"application/json","anthropic-dangerous-direct-browser-access":"true"}, body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:4096, messages:[{role:"user",content:fixPrompt}] }) });
+  if (!res.ok) throw new Error("Invalid JSON and repair failed (" + res.status + ")");
+  const data = await res.json();
+  const raw = (data.content||[]).filter(function(b){return b&&b.type==="text";}).map(function(b){return b.text;}).join("");
+  const s = raw.indexOf("{"), e = raw.lastIndexOf("}");
+  if (s === -1) throw new Error("Invalid JSON returned");
+  const c2 = raw.slice(s, e+1);
+  try { return JSON.parse(c2); } catch(_) { return JSON.parse(repairJson(c2)); }
+}
+async function _callClaudeWeb(apiKey, prompt) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","content-type":"application/json","anthropic-dangerous-direct-browser-access":"true"}, body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:4096, tools:[{type:"web_search_20250305",name:"web_search",max_uses:4}], messages:[{role:"user",content:prompt}] }) });
+  if (!res.ok) { const e = await res.json().catch(function(){return {};}); throw new Error((e.error&&e.error.message) || ("API " + res.status)); }
+  const data = await res.json();
+  const raw = (data.content||[]).filter(function(b){return b&&b.type==="text";}).map(function(b){return b.text;}).join("");
+  const s = raw.indexOf("{"), e = raw.lastIndexOf("}");
+  if (s === -1) throw new Error("No JSON returned");
+  return await _parseLoose(apiKey, raw.slice(s, e+1));
+}
+function bulkPiecePrompt(p) {
+  const isBook = p.kind === "book";
+  const ident = 'Current title in the database: "' + p.title + '"' + (p.composer ? '\nCurrent composer/author: "' + p.composer + '"' : "") + (p.year ? "\nCurrent year: " + p.year : "");
+  if (isBook) {
+    return 'You are an expert piano pedagogue compiling an accurate reference entry for "The Practice Room", a piano repertoire database for adult learners. Use British English.\n\n'
+      + 'You are updating this existing BOOK/METHOD entry. USE WEB SEARCH to verify every fact before writing: confirm the exact published title, the author(s)/publisher, and especially the level it is pitched at (publisher description and standard grade equivalences). Do not rely on memory; verify.\n\n'
+      + ident + '\n\n'
+      + 'Return ONLY valid JSON (no markdown):\n'
+      + '{\n'
+      + '  "title": "The exact, correctly and uniformly formatted published title",\n'
+      + '  "composer": "The author(s) or publisher, full and correctly formatted",\n'
+      + '  "background": "One concise but insightful paragraph: what this book is, who publishes it, where it sits in the learning landscape, and who it is for.",\n'
+      + '  "pianist_notes": "One to two paragraphs on how the book is structured and best used in practice, and what a student gains from working through it.",\n'
+      + '  "challenges": "One paragraph on the technical and musical content it covers and, accurately, the grade standard it corresponds to (ABRSM as reference). Then a paragraph that begins with the exact heading Before You Begin: stating what a learner should already be able to do before starting it.",\n'
+      + '  "difficulty": 1,\n'
+      + '  "tags": ["...", "..."]\n'
+      + '}\n\n'
+      + 'DIFFICULTY (integer 0-5, accurate, DO NOT OVERRATE, verify against the actual level): 0 = Absolute Beginner (pre-Grade 1); 1 = Beginner (~ABRSM 1-2); 2 = Lower Intermediate (~ABRSM 3-5); 3 = Upper Intermediate (~ABRSM 6-7); 4 = Advanced (ABRSM 8+); 5 = Expert.\n'
+      + '- tags: 2 to 5 type tags (e.g. Method book, Exam prep, ABRSM, Children).\n'
+      + '- Never use em dashes or en dashes; use commas or full stops. Never put a double quote inside a string value (use single quotes). No raw line breaks inside strings.';
+  }
+  return 'You are an expert piano pedagogue compiling an accurate reference entry for "The Practice Room", a piano repertoire database for adult learners. Use British English.\n\n'
+    + 'You are updating an existing PIECE entry. USE WEB SEARCH to verify every fact before writing: confirm the correct composer, the original composition date, and ESPECIALLY the difficulty by cross-checking how the piece is graded in recognised syllabi and difficulty indexes (ABRSM, Trinity, RCM, Henle). Accuracy matters above all. Do NOT overrate difficulty: many pieces are commonly mis-rated as harder than they are, so anchor your rating to where the piece actually sits in standard grade lists.\n\n'
+    + ident + '\n\n'
+    + 'Return ONLY valid JSON (no markdown):\n'
+    + '{\n'
+    + '  "title": "The canonical, uniformly formatted title of the original composition, including opus/catalogue number in parentheses where applicable, for example Nocturne in E-flat major (Op. 9, No. 2). Refer to the piece itself, not a specific arrangement or edition.",\n'
+    + '  "composer": "Full name with correct diacritics, uniformly formatted, for example Frederic Chopin, Ludwig van Beethoven, or J.S. Bach.",\n'
+    + '  "year": 1830,\n'
+    + '  "background": "ONE concise but insightful paragraph: the period/style, a relevant insight about the composer, and the context of THIS piece (why/when it was written and its place in the repertoire).",\n'
+    + '  "pianist_notes": "One to two paragraphs from the perspective of a pianist: the principal musical themes, the structure/form, and the character and context as it relates to playing THIS piece.",\n'
+    + '  "challenges": "ONE paragraph (Challenges and Level Rationale): accurately outline the specific technical and musical demands, and anything else, that place this piece at its level, referring to the level by name. THEN a separate paragraph that begins with the exact heading Before You Begin: stating precisely what a pianist should already be able to do, and which techniques/topics they should be familiar with, before approaching this piece.",\n'
+    + '  "difficulty": 3,\n'
+    + '  "tags": ["...", "...", "..."]\n'
+    + '}\n\n'
+    + 'DIFFICULTY (integer 0-5, VERIFY via web search, accurate, DO NOT OVERRATE): 0 = Absolute Beginner (pre-Grade 1, five-finger positions); 1 = Beginner (~ABRSM 1-2); 2 = Lower Intermediate (~ABRSM 3-5); 3 = Upper Intermediate (~ABRSM 6-7); 4 = Advanced (ABRSM 8 to diploma); 5 = Expert (concert/virtuosic).\n'
+    + '- Justify the rating honestly against real grade listings; if a piece commonly sits at, say, Grade 4, rate it 2, not higher.\n'
+    + '- year: integer four-digit year of the original composition only.\n'
+    + '- tags: 4 to 8 specific piano technique/musicality concepts (e.g. Pedalling, Voicing, Rubato, Hand independence).\n'
+    + '- Never use em dashes or en dashes; use commas or full stops. Never put a double quote inside a string value (use single quotes). No raw line breaks inside strings.';
+}
+function openBulkRegen() {
+  if (!isOwner()) return;
+  const k = localStorage.getItem("anthropic_key");
+  if (k) document.getElementById("bulk-api-key").value = k;
+  document.getElementById("bulk-error").style.display = "none";
+  document.getElementById("bulk-regen-overlay").classList.add("open");
+}
+function closeBulkRegen() {
+  if (_bulkRunning && !confirm("A run is in progress. Stop it and close?")) return;
+  _bulkStop = true;
+  document.getElementById("bulk-regen-overlay").classList.remove("open");
+}
+async function bulkDownloadBackup() {
+  const st = document.getElementById("bulk-backup-status");
+  st.textContent = "Preparing backup…";
+  const { data, error } = await db.from("pieces").select("*");
+  if (error) { st.textContent = "Backup failed: " + error.message; return; }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "pieces-backup-" + (data ? data.length : 0) + ".json"; a.click();
+  URL.revokeObjectURL(url);
+  st.textContent = "✓ Backed up " + (data ? data.length : 0) + " pieces.";
+}
+function bulkStop() { _bulkStop = true; }
+async function bulkStart() {
+  if (_bulkRunning || !isOwner()) return;
+  const apiKey = document.getElementById("bulk-api-key").value.trim();
+  const errEl = document.getElementById("bulk-error"); errEl.style.display = "none";
+  if (!apiKey) { errEl.textContent = "Enter your Anthropic API key."; errEl.style.display = "block"; return; }
+  localStorage.setItem("anthropic_key", apiKey);
+  const scope = document.getElementById("bulk-scope").value;
+  if (scope === "all" && !confirm("This will re-generate and overwrite ALL pieces. Have you downloaded a backup? Continue?")) return;
+  const { data: pieces, error } = await db.from("pieces").select("id,title,composer,year,kind,difficulty").order("title");
+  if (error) { errEl.textContent = "Could not load pieces: " + error.message; errEl.style.display = "block"; return; }
+  let list = pieces || [];
+  if (scope !== "all") list = list.slice(0, parseInt(scope, 10));
+  _bulkRunning = true; _bulkStop = false;
+  document.getElementById("bulk-start-btn").style.display = "none";
+  document.getElementById("bulk-stop-btn").style.display = "";
+  document.getElementById("bulk-progress").style.display = "";
+  const bar = document.getElementById("bulk-bar"), statusEl = document.getElementById("bulk-status"), logEl = document.getElementById("bulk-log");
+  logEl.innerHTML = "";
+  function log(msg) { const d = document.createElement("div"); d.textContent = msg; logEl.prepend(d); }
+  let done = 0, failed = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (_bulkStop) { log("■ Stopped."); break; }
+    const p = list[i];
+    statusEl.textContent = "Processing " + (i+1) + "/" + list.length + ": " + p.title;
+    try {
+      const out = _sanitizeDashes(await _callClaudeWeb(apiKey, bulkPiecePrompt(p)));
+      const payload = {
+        title: (out.title || p.title).toString().trim(),
+        composer: out.composer ? out.composer.toString().trim() : p.composer,
+        background: out.background || null,
+        pianist_notes: out.pianist_notes || null,
+        challenges: out.challenges || null,
+        difficulty: (out.difficulty != null) ? out.difficulty : p.difficulty,
+        tags: (Array.isArray(out.tags) && out.tags.length) ? out.tags : null,
+      };
+      if (p.kind !== "book" && out.year) payload.year = parseInt(out.year, 10) || null;
+      const { error: upErr } = await db.from("pieces").update(payload).eq("id", p.id);
+      if (upErr) throw new Error(upErr.message);
+      done++;
+      log("✓ " + payload.title + " — level " + payload.difficulty);
+    } catch (err) {
+      const msg = (err && err.message) || "error";
+      if (/429|rate|overload/i.test(msg)) { statusEl.textContent = "Rate limited, waiting 30s…"; await _sleep(30000); i--; continue; }
+      failed++;
+      log("✗ " + p.title + " — " + msg);
+    }
+    bar.style.width = Math.round(((i+1)/list.length)*100) + "%";
+    await _sleep(1500);
+  }
+  statusEl.textContent = "Done. " + done + " updated, " + failed + " failed.";
+  _bulkRunning = false;
+  document.getElementById("bulk-stop-btn").style.display = "none";
+  document.getElementById("bulk-start-btn").style.display = "";
+}
+window.openBulkRegen = openBulkRegen;
+window.closeBulkRegen = closeBulkRegen;
+window.bulkDownloadBackup = bulkDownloadBackup;
+window.bulkStart = bulkStart;
+window.bulkStop = bulkStop;
 
 async function generatePieceInfo() {
   const apiKey = document.getElementById("f-api-key").value.trim();
