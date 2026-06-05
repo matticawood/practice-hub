@@ -592,6 +592,28 @@
       .cf-detail-back { margin: 16px 0 14px; }
       .cf-cmt-wrap { margin-top: 8px; }
     }
+
+    /* ── Inline poll on content-feed posts ──────────────────────────────────── */
+    .cf-poll { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .cf-poll-q { font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+    .cf-poll-btn {
+      display: block; width: 100%; text-align: left;
+      background: rgba(0,0,0,.03); border: 1.5px solid var(--border);
+      border-radius: 9px; padding: 9px 13px; font-size: 0.85rem;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      margin-bottom: 7px; transition: border-color .15s, background .15s;
+    }
+    .cf-poll-btn:hover { border-color: var(--accent, #f5c518); background: rgba(245,197,24,.08); }
+    .cf-poll-bar-row { margin-bottom: 8px; cursor: pointer; }
+    .cf-poll-bar-row:hover .cf-poll-bar-fill { filter: brightness(1.08); }
+    .cf-poll-bar-track { background: rgba(0,0,0,.06); border-radius: 4px; height: 7px; margin-bottom: 4px; }
+    .cf-poll-bar-fill { height: 100%; border-radius: 4px; background: rgba(0,0,0,.16); transition: width .4s ease; }
+    .cf-poll-bar-fill.mine { background: #10b981; }
+    .cf-poll-bar-meta { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); }
+    .cf-poll-mine { color: #10b981; }
+    .cf-poll-pct { font-weight: 600; }
+    .cf-poll-footer { margin-top: 8px; }
+    .cf-poll-total { font-size: 0.74rem; color: var(--text-muted); }
   </style>
 </head>
 <body>
@@ -914,11 +936,39 @@ async function loadFeed(deepId = null) {
     (likerRows || []).forEach(r => { _likerAvatarMap[r.email] = { url: r.avatar_url, name: r.name }; });
   }
 
+  // Polls attached to posts (content_feed_post_polls). Mirror community's shape:
+  // poll = { id, question, options:[{id,label}], voteCounts:{optId:n}, totalVotes, myVote }
+  const pollMap = {};
+  const { data: pollRows } = await db.from("content_feed_post_polls").select("id,post_id,question").in("post_id", ids);
+  (pollRows || []).forEach(pr => { pollMap[pr.post_id] = { id: pr.id, question: pr.question }; });
+  const pollIds = (pollRows || []).map(pr => pr.id);
+  if (pollIds.length) {
+    const [{ data: optRows }, { data: voteRows }, { data: myVoteRows }] = await Promise.all([
+      db.from("content_feed_post_poll_options").select("id,poll_id,label,position").in("poll_id", pollIds).order("position"),
+      db.from("content_feed_post_poll_votes").select("poll_id,option_id").in("poll_id", pollIds),
+      db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", pollIds),
+    ]);
+    const optsByPoll = {}, vcByPoll = {}, totByPoll = {}, myByPoll = {};
+    (optRows || []).forEach(o => { (optsByPoll[o.poll_id] = optsByPoll[o.poll_id] || []).push(o); });
+    (voteRows || []).forEach(v => {
+      if (!vcByPoll[v.poll_id]) vcByPoll[v.poll_id] = {};
+      vcByPoll[v.poll_id][v.option_id] = (vcByPoll[v.poll_id][v.option_id] || 0) + 1;
+      totByPoll[v.poll_id] = (totByPoll[v.poll_id] || 0) + 1;
+    });
+    (myVoteRows || []).forEach(v => { myByPoll[v.poll_id] = v.option_id; });
+    Object.values(pollMap).forEach(pm => {
+      pm.options    = optsByPoll[pm.id]  || [];
+      pm.voteCounts = vcByPoll[pm.id]    || {};
+      pm.totalVotes = totByPoll[pm.id]   || 0;
+      pm.myVote     = myByPoll[pm.id]    || null;
+    });
+  }
+
   _posts = rows.map(r => {
     const rxData = Comments.getReactionState(r.id);
     let totalRx = 0;
     for (const d of Object.values(rxData)) totalRx += d.count;
-    return { ...r, likeCount: totalRx, commentCount: cmtCountMap[r.id] || 0, likers: likersMap[r.id] || [] };
+    return { ...r, likeCount: totalRx, commentCount: cmtCountMap[r.id] || 0, likers: likersMap[r.id] || [], poll: pollMap[r.id] || null };
   });
 
   renderFeed();
@@ -999,9 +1049,55 @@ function cfCardHTML(p) {
 }
 
 function _cardBody(p) {
-  if (p.type === "youtube") return _ytBody(p);
-  if (p.type === "blog")    return _blogBody(p);
-  return _postBody(p);
+  let body;
+  if (p.type === "youtube") body = _ytBody(p);
+  else if (p.type === "blog") body = _blogBody(p);
+  else body = _postBody(p);
+  return body + _cfPollHtml(p);
+}
+
+/* Inline poll on a content-feed post (mirrors community's card poll). */
+function _cfPollHtml(p) {
+  const poll = p.poll;
+  if (!poll || !poll.options?.length) return "";
+  const hasVoted = !!poll.myVote || p.email === myEmail; // author always sees results
+  let html = `<div class="cf-poll" onclick="event.stopPropagation()"><div class="cf-poll-q">${_esc(poll.question)}</div>`;
+  if (!hasVoted) {
+    html += poll.options.map(o =>
+      `<button class="cf-poll-btn" onclick="castCfVote('${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">${_esc(o.label)}</button>`
+    ).join("");
+  } else {
+    html += poll.options.map(o => {
+      const count  = poll.voteCounts[o.id] || 0;
+      const pct    = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
+      const isMine = o.id === poll.myVote;
+      return `<div class="cf-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfVote('${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">
+        <div class="cf-poll-bar-track"><div class="cf-poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
+        <div class="cf-poll-bar-meta"><span>${_esc(o.label)}${isMine ? " <span class='cf-poll-mine'>●</span>" : ""}</span><span class="cf-poll-pct">${pct}%</span></div>
+      </div>`;
+    }).join("");
+    html += `<div class="cf-poll-footer"><span class="cf-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
+  }
+  return html + `</div>`;
+}
+
+async function castCfVote(pollId, optionId, postId) {
+  const { error } = await db.from("content_feed_post_poll_votes").upsert(
+    { poll_id: pollId, option_id: optionId, email: myEmail },
+    { onConflict: "poll_id,email" }
+  );
+  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  const post = _posts.find(p => p.id === postId);
+  if (post?.poll) {
+    const { data: votes } = await db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pollId);
+    const voteCounts = {};
+    (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
+    post.poll.voteCounts = voteCounts;
+    post.poll.totalVotes = (votes || []).length;
+    post.poll.myVote     = optionId;
+    const bodyEl = document.getElementById("cf-body-" + postId);
+    if (bodyEl) bodyEl.innerHTML = _cardBody(post);
+  }
 }
 
 function _ytBody(p) {
@@ -1387,6 +1483,22 @@ async function publishCfPost() {
     btn.textContent = "Publishing…";
     const { data: post, error } = await db.from("content_feed_posts").insert(payload).select().single();
     if (error) { alert("Failed to publish: " + error.message); btn.disabled = false; btn.textContent = origText; return; }
+
+    // Save a poll only if the poll builder is actually open with valid data.
+    // (Mirrors shared-comments' _inlinePollOpen gate — the panel is hidden after
+    // each publish via _clearInlineState, so stale inputs aren't re-saved to the
+    // next post that didn't intend a poll.)
+    const _pollPanel = document.getElementById("inline-poll-cfp");
+    const _pollOpen  = _pollPanel && _pollPanel.style.display !== "none";
+    const pollData = (_pollOpen && typeof Comments.readPoll === "function") ? Comments.readPoll("cfp") : null;
+    if (pollData && pollData.question && pollData.options?.length >= 2 && post) {
+      const { data: pollRow, error: pollErr } = await db.from("content_feed_post_polls")
+        .insert({ post_id: post.id, question: pollData.question }).select().single();
+      if (!pollErr && pollRow) {
+        await db.from("content_feed_post_poll_options")
+          .insert(pollData.options.map((label, i) => ({ poll_id: pollRow.id, label, position: i })));
+      }
+    }
 
     // Notify members
     btn.textContent = "Notifying members…";
