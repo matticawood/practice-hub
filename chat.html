@@ -3539,7 +3539,8 @@ function _showTyping(email, name) {
 
 async function castChatVote(messageId, optionIdx) {
   if (!myEmail) return;
-  const prev = _chatPollVotes[messageId] || { myVote: null, counts: {} };
+  // Tapping your current choice removes it (un-vote); otherwise (re)cast.
+  const removing = (_chatPollVotes[messageId] || {}).myVote === optionIdx;
 
   // Optimistic update
   if (!_chatPollVotes[messageId]) _chatPollVotes[messageId] = { myVote: null, counts: {} };
@@ -3548,8 +3549,12 @@ async function castChatVote(messageId, optionIdx) {
   if (vdata.myVote !== null && vdata.myVote !== undefined) {
     vdata.counts[vdata.myVote] = Math.max(0, (vdata.counts[vdata.myVote] || 1) - 1);
   }
-  vdata.myVote = optionIdx;
-  vdata.counts[optionIdx] = (vdata.counts[optionIdx] || 0) + 1;
+  if (removing) {
+    vdata.myVote = null;
+  } else {
+    vdata.myVote = optionIdx;
+    vdata.counts[optionIdx] = (vdata.counts[optionIdx] || 0) + 1;
+  }
 
   // Re-render just this message's poll
   const el = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
@@ -3567,11 +3572,16 @@ async function castChatVote(messageId, optionIdx) {
   }
 
   // Persist
-  const { error } = await db.from("community_chat_poll_votes").upsert(
-    { message_id: messageId, email: myEmail, option_idx: optionIdx },
-    { onConflict: "message_id,email" }
-  );
-  if (error) { console.error("Poll vote error", error); return; }
+  let perr;
+  if (removing) {
+    ({ error: perr } = await db.from("community_chat_poll_votes").delete().eq("message_id", messageId).eq("email", myEmail));
+  } else {
+    ({ error: perr } = await db.from("community_chat_poll_votes").upsert(
+      { message_id: messageId, email: myEmail, option_idx: optionIdx },
+      { onConflict: "message_id,email" }
+    ));
+  }
+  if (perr) { console.error("Poll vote error", perr); return; }
 
   // Notify other clients so they can refresh this poll's results
   _chatRealtimeSub?.send({
@@ -3790,7 +3800,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     return `<div style="margin-top:6px;min-width:240px;max-width:320px">
       <div style="font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:10px">${escHtml(pollItem.question || "Poll")}</div>
       ${rows}
-      ${voted ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">${total} vote${total !== 1 ? "s" : ""}</div>` : ""}
+      ${voted ? `<div style="display:flex;align-items:center;gap:10px;font-size:.75rem;color:var(--text-muted);margin-top:4px">${(vdata.myVote !== null && vdata.myVote !== undefined) ? `<button onclick="castChatVote('${escHtml(msg.id)}',${vdata.myVote})" style="background:none;border:none;padding:0;margin-right:auto;font-family:inherit;font-size:.72rem;color:var(--text-muted);cursor:pointer;text-decoration:underline">Clear my vote</button>` : ""}<span>${total} vote${total !== 1 ? "s" : ""}</span></div>` : ""}
     </div>`;
   })() : "";
 

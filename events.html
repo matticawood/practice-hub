@@ -629,7 +629,9 @@
     .poll-bar-label span:last-child { color:var(--text-muted); font-size:.78rem; }
     .poll-bar-track { background:rgba(0,0,0,.06); border-radius:4px; height:6px; }
     .poll-bar-fill { height:100%; border-radius:4px; background:#8b5cf6; transition:width .4s ease; }
-    .poll-footer { display:flex; align-items:center; margin-top:10px; }
+    .poll-footer { display:flex; align-items:center; gap:10px; margin-top:10px; }
+    .poll-clear { background:none; border:none; padding:0; margin-right:auto; font-family:inherit; font-size:.74rem; color:var(--text-muted); cursor:pointer; text-decoration:underline; }
+    .poll-clear:hover { color:#8b5cf6; }
     .poll-total { font-size:.75rem; color:var(--text-muted); }
     /* ── Rendered attachment inside comment ──────────────────────────────────── */
     .comment-att { margin-top:10px; }
@@ -4044,7 +4046,8 @@ function _renderPollHtml(poll, commentId, authorEmail) {
         <div class="poll-bar-track"><div class="poll-bar-fill" style="width:${pct}%;background:${c}"></div></div>
       </div>`;
     }).join("");
-    html += `<div class="poll-footer"><span class="poll-total">${total} vote${total !== 1 ? "s" : ""}</span></div>`;
+    const clr = myVoteIdx !== null ? `<button class="poll-clear" onclick="castVote('${poll.id}',${myVoteIdx},'${commentId}')">Clear my vote</button>` : "";
+    html += `<div class="poll-footer">${clr}<span class="poll-total">${total} vote${total !== 1 ? "s" : ""}</span></div>`;
   }
 
   html += `</div>`;
@@ -4052,12 +4055,16 @@ function _renderPollHtml(poll, commentId, authorEmail) {
 }
 
 async function castVote(pollId, optionIndex, commentId) {
-  // Delete existing vote first (upsert needs UPDATE RLS which we don't have),
-  // then insert the new choice.
+  // Tap your current choice (or "Clear my vote") to remove it; otherwise (re)cast.
+  const { data: ex } = await db.from("event_comment_poll_votes")
+    .select("option_index").eq("poll_id", pollId).eq("email", myEmail).maybeSingle();
+  const removing = ex && ex.option_index === optionIndex;
   await db.from("event_comment_poll_votes")
     .delete().eq("poll_id", pollId).eq("email", myEmail);
-  await db.from("event_comment_poll_votes")
-    .insert({ poll_id: pollId, email: myEmail, option_index: optionIndex });
+  if (!removing) {
+    await db.from("event_comment_poll_votes")
+      .insert({ poll_id: pollId, email: myEmail, option_index: optionIndex });
+  }
 
   // Patch just the poll card in-place — no full discussion reload needed
   const { data: poll } = await db
