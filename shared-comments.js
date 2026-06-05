@@ -577,7 +577,7 @@
     const auth=_auth();
     const hasVoted=!!myOptId||(!!authorEmail&&authorEmail===auth.email);
     const pid=_escHtml(parentId||"");
-    const COLORS=["#8b5cf6","#14b8a6","#3b82f6","#f59e0b","#10b981","#ec4899","#f97316","#94a3b8"]; // site category palette
+    const COLORS=["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"]; // site category palette
     let html=`<div class="poll-card"><div class="poll-card-question">${_escHtml(question)}</div>`;
     if(!hasVoted){
       html+=opts.map((o,i)=>
