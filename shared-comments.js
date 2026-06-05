@@ -248,17 +248,17 @@
 @keyframes tc-stripe { 0%{background-position:0 0} 100%{background-position:40px 0} }
 @keyframes tc-mux-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 /* Poll display (comment media) — mirrors community.html exactly */
-.poll-card { background:transparent; border:none; border-radius:10px; padding:0; margin-top:10px; margin-bottom:8px; }
+.poll-card { background:transparent; border:none; border-radius:0; padding:0; margin-top:10px; margin-bottom:8px; }
 .poll-card-question { font-size:0.97rem; font-weight:700; color:var(--text,#1a1410); margin-bottom:12px; }
-.poll-option-vote-btn { width:100%; text-align:left; background:rgba(0,0,0,.04); border:1.5px solid var(--border,#e0d5c8); border-radius:8px; padding:9px 14px; font-size:0.87rem; color:var(--text,#1a1410); font-family:inherit; cursor:pointer; margin-bottom:8px; transition:border-color .15s, background .15s; display:block; box-sizing:border-box; }
-.poll-option-vote-btn:hover { border-color:var(--accent,#f5c518); background:rgba(245,197,24,.07); }
-.poll-bar-row { margin-bottom:8px; cursor:pointer; border-radius:6px; padding:2px 4px; }
-.poll-bar-row:hover .poll-bar-fill { filter:brightness(1.15); }
-.poll-bar-label { display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; color:var(--text,#1a1410); margin-bottom:4px; }
+/* Each option = white row with a coloured left edge (colour set inline per option). */
+.poll-option-vote-btn { width:100%; text-align:left; background:#fff; border:1px solid var(--border,#e0d5c8); border-left:4px solid #8b5cf6; border-radius:8px; padding:9px 14px; font-size:0.87rem; color:var(--text,#1a1410); font-family:inherit; cursor:pointer; margin-bottom:8px; transition:background .15s; display:block; box-sizing:border-box; }
+.poll-option-vote-btn:hover { background:rgba(139,92,246,.07); }
+.poll-bar-row { margin-bottom:8px; cursor:pointer; background:#fff; border:1px solid var(--border,#e0d5c8); border-left:4px solid #8b5cf6; border-radius:8px; padding:8px 12px; }
+.poll-bar-row:hover .poll-bar-fill { filter:brightness(1.08); }
+.poll-bar-label { display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; color:var(--text,#1a1410); margin-bottom:5px; }
 .poll-bar-label span:last-child { color:var(--text-muted,#8a7868); font-size:0.78rem; }
 .poll-bar-track { background:rgba(0,0,0,.06); border-radius:4px; height:6px; }
-.poll-bar-fill { height:100%; border-radius:4px; background:var(--accent,#f5c518); transition:width .4s ease; }
-.poll-bar-fill.mine { background:#10b981; }
+.poll-bar-fill { height:100%; border-radius:4px; background:#8b5cf6; transition:width .4s ease; }
 .poll-footer { display:flex; align-items:center; margin-top:10px; }
 .poll-total { font-size:0.75rem; color:var(--text-muted,#8a7868); }
 /* Poll builder */
@@ -575,22 +575,24 @@
     const auth=_auth();
     const hasVoted=!!myOptId||(!!authorEmail&&authorEmail===auth.email);
     const pid=_escHtml(parentId||"");
+    const COLORS=["#8b5cf6","#14b8a6","#3b82f6","#f59e0b","#10b981","#ec4899","#f97316","#94a3b8"]; // site category palette
     let html=`<div class="poll-card"><div class="poll-card-question">${_escHtml(question)}</div>`;
     if(!hasVoted){
-      html+=opts.map(o=>
-        `<button class="poll-option-vote-btn" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}','${pid}')">${_escHtml(o.label)}</button>`
+      html+=opts.map((o,i)=>
+        `<button class="poll-option-vote-btn" style="border-left-color:${COLORS[i%COLORS.length]}" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}','${pid}')">${_escHtml(o.label)}</button>`
       ).join("");
     } else {
-      html+=opts.map(o=>{
+      html+=opts.map((o,i)=>{
+        const c=COLORS[i%COLORS.length];
         const count=voteCountMap[o.id]||0;
         const pct=totalVotes>0?Math.round(count/totalVotes*100):0;
         const isMine=o.id===myOptId;
-        return`<div class="poll-bar-row" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}','${pid}')">
+        return`<div class="poll-bar-row" style="border-left-color:${c}" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(o.id)}','${pid}')">
           <div class="poll-bar-label">
-            <span>${_escHtml(o.label)}${isMine?` <span style="color:#10b981;font-size:.7em">●</span>`:""}</span>
+            <span>${_escHtml(o.label)}${isMine?` <span style="color:#10b981;font-size:.72em;font-weight:700">● you</span>`:""}</span>
             <span>${pct}%</span>
           </div>
-          <div class="poll-bar-track"><div class="poll-bar-fill${isMine?" mine":""}" style="width:${pct}%"></div></div>
+          <div class="poll-bar-track"><div class="poll-bar-fill" style="width:${pct}%;background:${c}"></div></div>
         </div>`;
       }).join("");
       html+=`<div class="poll-footer"><span class="poll-total">${totalVotes} vote${totalVotes!==1?"s":""}</span></div>`;
