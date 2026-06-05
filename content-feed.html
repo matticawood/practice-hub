@@ -594,8 +594,16 @@
     }
 
     /* ── Inline poll on content-feed posts ──────────────────────────────────── */
-    .cf-poll { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    /* White card with a coloured left edge (consistent poll look across the site). */
+    .cf-poll {
+      margin-top: 14px; padding: 13px 15px 11px;
+      background: #fff; border: 1px solid var(--border);
+      border-left: 4px solid #8b5cf6; border-radius: 10px;
+      box-shadow: 0 1px 2px rgba(60,40,20,.05);
+    }
     .cf-poll-q { font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+    .cf-poll-clear { background:none; border:none; padding:0; margin-right:auto; font-family:inherit; font-size:.74rem; color:var(--text-muted); cursor:pointer; text-decoration:underline; }
+    .cf-poll-clear:hover { color:#8b5cf6; }
     .cf-poll-btn {
       display: block; width: 100%; text-align: left;
       background: rgba(0,0,0,.03); border: 1.5px solid var(--border);
@@ -612,7 +620,7 @@
     .cf-poll-bar-meta { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); }
     .cf-poll-mine { color: #10b981; }
     .cf-poll-pct { font-weight: 600; }
-    .cf-poll-footer { margin-top: 8px; }
+    .cf-poll-footer { display:flex; align-items:center; gap:10px; margin-top: 8px; }
     .cf-poll-total { font-size: 0.74rem; color: var(--text-muted); }
   </style>
 </head>
@@ -1060,43 +1068,56 @@ function _cardBody(p) {
 function _cfPollHtml(p) {
   const poll = p.poll;
   if (!poll || !poll.options?.length) return "";
-  const hasVoted = !!poll.myVote || p.email === myEmail; // author always sees results
+  const hasVoted = !!poll.myVote || isAdmin; // the owner (author) always sees results
   let html = `<div class="cf-poll" onclick="event.stopPropagation()"><div class="cf-poll-q">${_esc(poll.question)}</div>`;
   if (!hasVoted) {
     html += poll.options.map(o =>
-      `<button class="cf-poll-btn" onclick="castCfVote('${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">${_esc(o.label)}</button>`
+      `<button class="cf-poll-btn" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">${_esc(o.label)}</button>`
     ).join("");
   } else {
     html += poll.options.map(o => {
       const count  = poll.voteCounts[o.id] || 0;
       const pct    = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
       const isMine = o.id === poll.myVote;
-      return `<div class="cf-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfVote('${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">
+      return `<div class="cf-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">
         <div class="cf-poll-bar-track"><div class="cf-poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
         <div class="cf-poll-bar-meta"><span>${_esc(o.label)}${isMine ? " <span class='cf-poll-mine'>●</span>" : ""}</span><span class="cf-poll-pct">${pct}%</span></div>
       </div>`;
     }).join("");
-    html += `<div class="cf-poll-footer"><span class="cf-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
+    const clearBtn = poll.myVote
+      ? `<button class="cf-poll-clear" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(poll.myVote)}','${p.id}')">Clear my vote</button>`
+      : "";
+    html += `<div class="cf-poll-footer">${clearBtn}<span class="cf-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
   }
   return html + `</div>`;
 }
 
-async function castCfVote(pollId, optionId, postId) {
-  const { error } = await db.from("content_feed_post_poll_votes").upsert(
-    { poll_id: pollId, option_id: optionId, email: myEmail },
-    { onConflict: "poll_id,email" }
-  );
-  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+async function castCfVote(ev, pollId, optionId, postId) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
   const post = _posts.find(p => p.id === postId);
+  // Tapping your current choice (or "Clear my vote") removes the vote; otherwise (re)cast it.
+  const removing = post?.poll?.myVote === optionId;
+  if (removing) {
+    const { error } = await db.from("content_feed_post_poll_votes").delete().eq("poll_id", pollId).eq("email", myEmail);
+    if (error) { alert("Couldn't update vote: " + error.message); return; }
+  } else {
+    const { error } = await db.from("content_feed_post_poll_votes").upsert(
+      { poll_id: pollId, option_id: optionId, email: myEmail }, { onConflict: "poll_id,email" });
+    if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  }
   if (post?.poll) {
-    const { data: votes } = await db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pollId);
+    const { data: votes } = await db.from("content_feed_post_poll_votes").select("option_id,email").eq("poll_id", pollId);
     const voteCounts = {};
     (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
     post.poll.voteCounts = voteCounts;
     post.poll.totalVotes = (votes || []).length;
-    post.poll.myVote     = optionId;
-    const bodyEl = document.getElementById("cf-body-" + postId);
-    if (bodyEl) bodyEl.innerHTML = _cardBody(post);
+    post.poll.myVote     = (votes || []).find(v => v.email === myEmail)?.option_id || null;
+    // Re-render the exact card body the click came from — works in the feed list
+    // (#cf-body-id) AND the detail/post view (where the body has no id).
+    const container = (ev && ev.currentTarget && ev.currentTarget.closest)
+      ? ev.currentTarget.closest(".cf-card-body")
+      : document.getElementById("cf-body-" + postId);
+    if (container) container.innerHTML = _cardBody(post);
   }
 }
 

@@ -1043,13 +1043,18 @@
     .poll-total { font-size: 0.75rem; color: var(--text-muted); }
 
     /* ── Inline poll in post cards ───────────────────────────────────────────── */
+    /* White card with a coloured left edge — consistent poll look across the site. */
     .card-poll {
-      margin: 0 -20px; padding: 14px 20px 10px;
-      border-top: 1px solid var(--border);
+      margin: 13px 0 4px; padding: 13px 15px 11px;
+      background: #fff; border: 1px solid var(--border);
+      border-left: 4px solid #8b5cf6; border-radius: 10px;
+      box-shadow: 0 1px 2px rgba(60,40,20,.05);
     }
     .card-poll-question {
       font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 10px;
     }
+    .card-poll-clear { background:none; border:none; padding:0; margin-right:auto; font-family:inherit; font-size:.72rem; color:var(--text-muted); cursor:pointer; text-decoration:underline; }
+    .card-poll-clear:hover { color:#8b5cf6; }
     .card-poll-btn {
       display: block; width: 100%; text-align: left;
       background: rgba(0,0,0,.04); border: 1.5px solid var(--border);
@@ -5610,40 +5615,52 @@ function cfEmbedYt(postId, ytId) {
 function _cfCommPollHtml(p) {
   const poll = p.poll;
   if (!poll || !poll.options?.length) return "";
-  const hasVoted = !!poll.myVote || p.email === myEmail;
+  const hasVoted = !!poll.myVote || isAdmin; // the owner (author) always sees results
   let html = `<div class="card-poll" onclick="event.stopPropagation()"><div class="card-poll-question">${escHtml(poll.question)}</div>`;
   if (!hasVoted) {
     html += poll.options.map(o =>
-      `<button class="card-poll-btn" onclick="castCfCommVote('${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">${escHtml(o.label)}</button>`
+      `<button class="card-poll-btn" onclick="castCfCommVote(event,'${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">${escHtml(o.label)}</button>`
     ).join("");
   } else {
     html += poll.options.map(o => {
       const count  = poll.voteCounts[o.id] || 0;
       const pct    = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
       const isMine = o.id === poll.myVote;
-      return `<div class="card-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfCommVote('${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">
+      return `<div class="card-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfCommVote(event,'${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">
         <div class="card-poll-bar-track"><div class="card-poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
         <div class="card-poll-bar-meta"><span>${escHtml(o.label)}${isMine ? " <span class='card-poll-mine-dot'>●</span>" : ""}</span><span class="card-poll-pct">${pct}%</span></div>
       </div>`;
     }).join("");
-    html += `<div class="card-poll-footer"><span class="card-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
+    const clearBtn = poll.myVote
+      ? `<button class="card-poll-clear" onclick="castCfCommVote(event,'${escHtml(poll.id)}','${escHtml(poll.myVote)}','${p.id}')">Clear my vote</button>`
+      : "";
+    html += `<div class="card-poll-footer">${clearBtn}<span class="card-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
   }
   return html + `</div>`;
 }
 
-async function castCfCommVote(pollId, optionId, postId) {
-  const { error } = await db.from("content_feed_post_poll_votes").upsert(
-    { poll_id: pollId, option_id: optionId, email: myEmail }, { onConflict: "poll_id,email" });
-  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+async function castCfCommVote(ev, pollId, optionId, postId) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
   const post = (_contentFeedItems || []).find(p => p.id === postId);
+  const removing = post?.poll?.myVote === optionId; // tap your choice (or "Clear") to remove it
+  if (removing) {
+    const { error } = await db.from("content_feed_post_poll_votes").delete().eq("poll_id", pollId).eq("email", myEmail);
+    if (error) { alert("Couldn't update vote: " + error.message); return; }
+  } else {
+    const { error } = await db.from("content_feed_post_poll_votes").upsert(
+      { poll_id: pollId, option_id: optionId, email: myEmail }, { onConflict: "poll_id,email" });
+    if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  }
   if (post?.poll) {
-    const { data: votes } = await db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pollId);
+    const { data: votes } = await db.from("content_feed_post_poll_votes").select("option_id,email").eq("poll_id", pollId);
     const voteCounts = {};
     (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
     post.poll.voteCounts = voteCounts;
     post.poll.totalVotes = (votes || []).length;
-    post.poll.myVote     = optionId;
-    const cardEl = document.querySelector(`.post-card[onclick*="content-feed.html?post=${postId}"]`);
+    post.poll.myVote     = (votes || []).find(v => v.email === myEmail)?.option_id || null;
+    const cardEl = (ev && ev.currentTarget && ev.currentTarget.closest)
+      ? ev.currentTarget.closest(".post-card")
+      : document.querySelector(`.post-card[onclick*="content-feed.html?post=${postId}"]`);
     if (cardEl) cardEl.outerHTML = contentFeedCardHTML(post);
   }
 }
