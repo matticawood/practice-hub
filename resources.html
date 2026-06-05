@@ -275,11 +275,6 @@
       --text-muted: #8a7868; --accent-subtle: #fdf0d8;
       background: #faf7f3 !important; transition: background 0.2s;
     }
-    body.theory-mode #app-header { background: #1a1410 !important; border-bottom-color: var(--accent) !important; }
-    body.theory-mode #app-header h1 { color: #f5f0e8 !important; }
-    body.theory-mode #app-header p  { color: #a09080 !important; }
-    body.theory-mode #app-header .btn-ghost,
-    body.theory-mode #app-header #header-email { color: #c8b8a8 !important; border-color: #4a3828 !important; }
     body.theory-mode .theory-section-btn.active { color: #1a1410; }
     body.theory-mode .glossary-letter  { color: #8a7868; background: #f0ebe2; border-bottom-color: #e0d5c8; }
     body.theory-mode .glossary-term    { border-bottom-color: #ede5d8; }
@@ -1217,7 +1212,7 @@
 <div id="toast"></div>
 
 <header id="app-header" style="display:none"></header>
-<script src="/shared-header.js"></script>
+<script src="/shared-header.js?v=2026060502"></script>
 
 <main id="app-main" style="display:none">
 
@@ -4536,7 +4531,19 @@ function _revealLibraryAdmin() {
   // Handle ?section= query param to deep-link to a section
   const sp = new URLSearchParams(window.location.search);
   const section = sp.get("section") || "";
-  if ((location.hash || "").indexOf("#g-") === 0) {
+  const pieceParam = sp.get("piece") || "";
+  if (pieceParam) {
+    switchSection("library");                          // deep link straight to a piece (command palette)
+    // loadLibrary() is async; poll until the piece is available (or give up ~3s).
+    let _pTries = 0;
+    (function _openPieceWhenReady() {
+      if (findAnyLibPiece(pieceParam) || (myCollection && myCollection[pieceParam])) {
+        try { showPieceModal(pieceParam); } catch (e) {}
+      } else if (_pTries++ < 30) {
+        setTimeout(_openPieceWhenReady, 100);
+      }
+    })();
+  } else if ((location.hash || "").indexOf("#g-") === 0) {
     switchSection("glossary");                       // deep link to a glossary term
   } else if (section === "ppd" || section === "glossary" || section === "key") {
     switchSection(section);
@@ -4548,20 +4555,25 @@ function _revealLibraryAdmin() {
 // ── SPA subnav interception for resources.html ───────────────────────────────
 // Intercept clicks on shared-header nav/pill links that point to this page
 // so section-switches happen instantly without a full page reload.
-document.addEventListener('click', function(e) {
-  const link = e.target.closest('.sh-mob-pill, .sh-tab-drop a, .sh-item, .sh-tab');
-  if (!link) return;
-  const href = link.getAttribute('href') || '';
-  let path;
-  try { path = new URL(href, location.origin).pathname; } catch(e2) { return; }
-  if (path.replace(/\.html$/, '') !== '/resources') return;
-  e.preventDefault();
-  const sec = new URL(href, location.origin).searchParams.get('section') || '';
+function _resourcesRoute(href) {
+  let url;
+  try { url = new URL(href, location.origin); } catch(e2) { return false; }
+  if (url.pathname.replace(/\.html$/, '') !== '/resources') return false;
+  const sec = url.searchParams.get('section') || '';
   const canonical = sec ? '/resources.html?section=' + sec : '/resources.html';
   history.pushState(null, '', canonical);
   switchSection(sec || 'library');
   if (window._shUpdateNav) window._shUpdateNav('resources');
+  return true;
+}
+document.addEventListener('click', function(e) {
+  const link = e.target.closest('.sh-mob-pill, .sh-tab-drop a, .sh-item, .sh-tab, .sh-sb-subitem, a.sh-sb-item');
+  if (!link) return;
+  const href = link.getAttribute('href') || '';
+  if (_resourcesRoute(href)) e.preventDefault();
 });
+// Used by shared-header's same-page route interceptor
+window.__shSamePageRoute = function(target) { _resourcesRoute(target); };
 
 </script>
 </body>

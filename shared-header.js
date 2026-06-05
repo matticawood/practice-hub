@@ -48,7 +48,6 @@ const SH_SUBNAV = {
     { label: "Content Feed", href: "/content-feed.html" },
     { label: "Live Clinics", href: "/events.html" },
     { label: "One-to-One", href: "/clinic-booking.html" },
-    { label: "Updates", href: "/updates.html" },
   ],
 };
 
@@ -62,8 +61,19 @@ const SH_SUBNAV = {
     body.tools-mode              { --sh-hdr: #06080f; }
 
     /* ── Header ── */
-    #app-header { position: relative; z-index: 300; }
-    #app-header h1 { margin: 0; }
+    #app-header { position: relative; z-index: 300; background: #141414; border-bottom: 1px solid var(--accent, #f5c518); padding: 0 !important; }
+    /* Header content shares the same centered container width as page content,
+       so the logo lines up with the content's left edge and the account cluster
+       with its right edge. */
+    .sh-hdr-inner {
+      max-width: 1400px; width: 100%; margin: 0 auto; box-sizing: border-box;
+      display: flex; align-items: center; gap: 16px;
+      padding: 13px 20px;
+      padding-left: max(20px, env(safe-area-inset-left, 0px));
+      padding-right: max(20px, env(safe-area-inset-right, 0px));
+    }
+    #app-header h1 { margin: 0; color: #f5f0e8; white-space: nowrap; flex-shrink: 0; }
+    #app-header p { color: #8e8e8e; }
     /* Mobile: override style.css so user row has no border-top and stays auto-width
        (matches practice-log.html behaviour exactly) */
     @media (max-width: 640px) {
@@ -78,7 +88,7 @@ const SH_SUBNAV = {
     /* ── Bell / Chat button ── */
     .btn-bell { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
     /* Pin header ghost-buttons so page-level CSS variable overrides and browser a:link defaults don't bleed in */
-    #app-header .btn-ghost { border-color: #2e2e2e; color: #888; }
+    #app-header .btn-ghost, #app-header #header-email { border-color: rgba(255,255,255,.14); color: #9a9a9a; }
     #app-header .btn-ghost:hover { border-color: var(--accent, #f5c518); color: var(--accent, #f5c518); }
     /* Directly pin SVG stroke so neither element type nor inheritance differences affect icon colour */
     #header-chat-btn svg, #notif-bell-btn svg { stroke: #888; }
@@ -93,45 +103,88 @@ const SH_SUBNAV = {
       padding: 0 3px; line-height: 1; pointer-events: none;
     }
 
-    /* ── Desktop tab bar ── */
-    .sh-tab-bar {
-      display: flex; gap: 0;
-      background: var(--sh-hdr); border: 1px solid #2a2a2a; border-top: none;
-      border-radius: 0 0 10px 10px; padding: 3px; overflow: visible;
-      margin-bottom: 20px;
+    /* ── Primary nav (top-bar inline): used on mobile/tablet; replaced by the
+       sidebar on desktop. Account cluster pushed right. ── */
+    .sh-hdr-left { display: flex; align-items: center; flex: 0 0 auto; min-width: 0; }
+    .sh-primary-nav { display: flex; align-items: center; gap: 2px; margin-left: 6px; }
+    .header-user { margin-left: auto; }
+
+    /* ── Desktop left sidebar (professional dashboard layout) ── */
+    #sh-sidebar { display: none; }
+    @media (min-width: 769px) {
+      body { padding-left: 244px; }
+      #sh-sidebar {
+        display: flex; flex-direction: column;
+        position: fixed; top: 0; left: 0; bottom: 0; width: 244px; z-index: 320;
+        background: #141414; border-right: 1px solid rgba(255,255,255,.08);
+      }
+      .sh-sb-brand {
+        display: flex; align-items: center; height: 59px; flex-shrink: 0;
+        padding: 0 22px; border-bottom: 1px solid rgba(255,255,255,.06);
+      }
+      .sh-sb-brand h1 { margin: 0; color: #f5f0e8; font-size: 1.12rem; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
+      .sh-sb-nav { display: flex; flex-direction: column; gap: 3px; padding: 14px 12px; overflow-y: auto; }
+      .sh-sb-item {
+        display: flex; align-items: center; gap: 12px;
+        padding: 9px 13px; border-radius: 9px;
+        color: #9a948a; font-size: 0.9rem; font-weight: 600;
+        text-decoration: none; white-space: nowrap;
+        transition: background .15s, color .15s;
+      }
+      .sh-sb-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+      .sh-sb-item:hover:not(.active) { background: rgba(255,255,255,.06); color: #f2ede2; }
+      .sh-sb-item.active { background: rgba(245,197,24,.16); color: var(--accent, #f5c518); font-weight: 700; }
+      .sh-sb-item:focus-visible, .sh-sb-subitem:focus-visible { outline: 2px solid var(--accent, #f5c518); outline-offset: 2px; }
+      /* Accordion: the active section's sub-pages expand beneath it.
+         Sub-items use a vertical rail (lighter than the parent's filled pill);
+         the active item's rail segment + text turn gold, with no fill — so the
+         hierarchy reads clearly (section = pill, page = rail item). */
+      .sh-sb-group { display: flex; flex-direction: column; }
+      .sh-sb-sub { display: none; flex-direction: column; margin: 3px 0 7px 22px; }
+      .sh-sb-item.active + .sh-sb-sub { display: flex; }
+      .sh-sb-subitem {
+        display: block; padding: 6px 12px 6px 18px;
+        border-left: 2px solid rgba(255,255,255,.10);
+        color: #8a847a; font-size: 0.85rem; font-weight: 500;
+        text-decoration: none; white-space: nowrap;
+        transition: color .15s, border-color .15s;
+      }
+      .sh-sb-subitem:hover:not(.active) { color: #e9e4da; border-left-color: rgba(255,255,255,.28); }
+      .sh-sb-subitem.active { color: var(--accent, #f5c518); font-weight: 600; border-left-color: var(--accent, #f5c518); }
+      /* Sub-pages now live in the sidebar accordion; hide the horizontal sub-nav on desktop. */
+      #sh-mob-subnav { display: none !important; }
+      /* Top bar becomes a slim utility bar over the content area (sidebar holds nav). */
+      #app-header h1, .sh-primary-nav { display: none; }
+      /* Consistent 28px gutter from the sidebar across top bar, sub-nav and content. */
+      .sh-hdr-inner { padding-left: 28px; padding-right: 28px; }
+      main { padding-left: 28px; padding-right: 28px; }
     }
-    .sh-tab-wrap { position: relative; display: flex; flex: 1; }
+    @media (max-width: 768px) {
+      #sh-sidebar { display: none; }
+    }
     .sh-tab {
-      width: 100%; min-width: fit-content; background: transparent; border: none;
-      color: #888; font-size: 0.82rem; font-weight: 700;
-      padding: 8px 12px; border-radius: 8px; cursor: pointer;
+      flex: 0 0 auto; background: transparent; border: none;
+      color: #9a948a; font-size: 0.85rem; font-weight: 600; letter-spacing: .01em;
+      padding: 7px 12px; border-radius: 8px; cursor: pointer;
       transition: background .15s, color .15s; white-space: nowrap;
-      text-decoration: none; display: inline-flex; align-items: center;
-      justify-content: center; font-family: inherit;
+      text-decoration: none; display: inline-flex; align-items: center; font-family: inherit;
     }
-    .sh-tab.active { background: var(--accent, #f5c518); color: #1a1410; }
-    .sh-tab:hover:not(.active) { color: #e5e5e5; background: #111111; }
-    .sh-tab-drop {
-      display: none; position: absolute; top: 100%; left: 0;
-      background: var(--sh-hdr); border: 1.5px solid #2a2a2a;
-      border-top: none; border-radius: 0 0 10px 10px;
-      min-width: 190px; z-index: 300;
-      box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 4px 4px 6px;
-    }
-    .sh-tab-wrap:hover .sh-tab-drop { display: block; }
-    .sh-tab-drop a {
-      display: block; width: 100%; padding: 8px 14px; background: none;
-      border: none; border-radius: 6px; font-size: .84rem; font-weight: 600;
-      color: #888; cursor: pointer; text-align: left;
-      transition: background .12s, color .12s; white-space: nowrap;
-      text-decoration: none; font-family: inherit; box-sizing: border-box;
-    }
-    .sh-tab-drop a:hover { background: #111111; color: #e5e5e5; }
-    .sh-tab-drop a.active { background: rgba(245,197,24,.12); color: var(--accent, #f5c518); }
+    .sh-tab svg:first-child { width: 16px; height: 16px; margin-right: 6px; flex-shrink: 0; }
+    .sh-tab:hover:not(.active) { color: #f2ede2; background: rgba(255,255,255,.06); }
+    .sh-tab.active { background: rgba(245,197,24,.16); color: var(--accent, #f5c518); font-weight: 700; }
+    /* ── Keyboard-only focus rings (a11y) ── */
+    .sh-tab:focus-visible, .sh-mob-pill:focus-visible, .sh-mob-tab:focus-visible { outline: 2px solid var(--accent, #f5c518); outline-offset: 2px; }
     /* ── Hamburger: always hidden ── */
     #sh-hamburger-btn { display: none !important; }
+    /* Below the desktop breakpoint the bottom bar takes over: hide inline nav. */
     @media (max-width: 768px) {
-      .sh-tab-bar { display: none; }
+      .sh-primary-nav { display: none; }
+      .sh-hdr-left { flex: 1; gap: 0; }
+    }
+    /* Squeeze zone: hide the wordmark on smaller laptops so the nav always fits
+       (search label also collapses to an icon at <=1100px below). */
+    @media (min-width: 769px) and (max-width: 991px) {
+      #app-header h1 { display: none; }
     }
 
     /* ── Mobile bottom tab bar ── */
@@ -143,19 +196,21 @@ const SH_SUBNAV = {
         display: flex;
         position: fixed;
         bottom: 0; left: 0; right: 0;
-        background: #141414;
-        border-top: 1px solid #1e1e1e;
+        background: #141414;            /* solid neutral dark — uniform on every page */
+        border-top: 1px solid rgba(255,255,255,.08);
+        box-shadow: 0 -6px 20px -12px rgba(0,0,0,.5);
         padding-bottom: env(safe-area-inset-bottom, 0px);
         z-index: 500;
       }
       .sh-mob-tab {
+        position: relative;
         flex: 1;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 8px 2px 6px;
-        color: var(--text-muted, #666);
+        padding: 9px 2px 7px;
+        color: #8a8178;
         text-decoration: none;
         font-size: 0.58rem;
         font-weight: 700;
@@ -163,10 +218,21 @@ const SH_SUBNAV = {
         text-transform: uppercase;
         gap: 4px;
         -webkit-tap-highlight-color: transparent;
-        transition: color .15s;
+        transition: color .18s;
       }
-      .sh-mob-tab svg { flex-shrink: 0; stroke: currentColor; fill: none; }
+      .sh-mob-tab svg {
+        flex-shrink: 0; stroke: currentColor; fill: none; width: 23px; height: 23px;
+        transition: transform .2s cubic-bezier(.34,1.4,.64,1), filter .2s;
+      }
+      .sh-mob-tab:active svg { transform: scale(.9); }
       .sh-mob-tab.active { color: var(--accent, #f5c518); }
+      .sh-mob-tab.active svg { transform: translateY(-1px) scale(1.08); filter: drop-shadow(0 3px 7px rgba(245,197,24,.5)); }
+      /* selection indicator — soft gold bar at the top of the active tab */
+      .sh-mob-tab.active::before {
+        content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+        width: 24px; height: 3px; border-radius: 0 0 3px 3px;
+        background: var(--accent, #f5c518); box-shadow: 0 0 10px rgba(245,197,24,.6);
+      }
       /* push content above bottom bar */
       body { padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
     }
@@ -174,6 +240,37 @@ const SH_SUBNAV = {
     /* ── Mobile pill subnav — sticky at top of content, below header ── */
     #sh-mob-subnav {
       display: none;
+    }
+    /* ── Desktop: secondary nav as light underlined page tabs (GitHub/Stripe style).
+       Built from the page's own theme variables so it adapts to light AND dark pages. ── */
+    @media (min-width: 769px) {
+      #sh-mob-subnav {
+        display: block;
+        background: transparent;
+        margin: 0;
+      }
+      #sh-mob-subnav:empty { display: none; }
+      .sh-mob-subnav-scroll {
+        display: flex; flex-wrap: wrap; align-items: stretch;
+        gap: 26px;
+        max-width: 1400px; margin: 0 auto; padding: 0 28px;
+        border-bottom: 1px solid var(--border, #e3e1e6);
+      }
+      .sh-mob-pill {
+        display: inline-flex; align-items: center;
+        padding: 13px 1px; margin-bottom: -1px;
+        border-radius: 0; border: none;
+        border-bottom: 2px solid transparent;
+        font-size: 0.86rem; font-weight: 600; letter-spacing: 0;
+        color: var(--text-muted, #8a7868); background: transparent;
+        text-decoration: none; white-space: nowrap;
+        transition: color .15s, border-color .15s;
+      }
+      .sh-mob-pill:hover:not(.active) { color: var(--text, #1a1410); }
+      .sh-mob-pill.active {
+        color: var(--text, #1a1410); font-weight: 700;
+        border-bottom-color: var(--accent, #f5c518);
+      }
     }
     @media (max-width: 768px) {
       #sh-mob-subnav {
@@ -196,24 +293,28 @@ const SH_SUBNAV = {
         gap: 8px;
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
+        /* Fade the right edge to signal there are more pills to scroll to. */
+        -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
+        mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
       }
       .sh-mob-subnav-scroll::-webkit-scrollbar { display: none; }
       .sh-mob-pill {
         display: inline-flex;
         align-items: center;
         flex-shrink: 0;
-        padding: 8px 16px;
-        border-radius: 999px;
+        padding: 10px 15px;
+        border-radius: 10px;
         font-size: 0.78rem;
         font-weight: 600;
         color: #aaa;
         background: #252525;
         text-decoration: none;
         white-space: nowrap;
-        transition: background .15s, color .15s;
+        transition: background .15s, color .15s, transform .12s;
         -webkit-tap-highlight-color: transparent;
-        min-height: 34px;
+        min-height: 40px;
       }
+      .sh-mob-pill:active { transform: scale(.96); }
       .sh-mob-pill.active {
         background: #f5c518;
         color: #1a1410;
@@ -294,10 +395,10 @@ const SH_SUBNAV = {
     /* ── Admin presence indicator + panel ──────────────────────────────────── */
     #presence-btn {
       display: none; align-items: center; gap: 5px;
-      background: transparent; border: 1.5px solid rgba(255,255,255,.18);
+      background: transparent; border: 1.5px solid rgba(255,255,255,.14);
       color: rgba(255,255,255,.75);
-      padding: 5px 9px; border-radius: 8px;
-      font-family: inherit; font-size: 0.78rem; font-weight: 700;
+      padding: 6px 12px; border-radius: var(--radius); line-height: 20px;
+      font-family: inherit; font-size: 0.8rem; font-weight: 700;
       cursor: pointer; transition: border-color .12s, color .12s;
     }
     #presence-btn:hover { border-color: #22c55e; color: #22c55e; }
@@ -306,7 +407,7 @@ const SH_SUBNAV = {
       background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.7);
       flex-shrink: 0;
     }
-    #presence-btn .presence-count { line-height: 1; }
+    #presence-btn .presence-count { line-height: 20px; }
     .presence-panel {
       position: fixed; top: 72px; right: 10px;
       width: min(340px, calc(100vw - 20px));
@@ -392,10 +493,34 @@ const SH_SUBNAV = {
       background: #141414; border: 1px solid #2a2a2a; border-radius: 10px;
       min-width: 190px; z-index: 1100;
       box-shadow: 0 8px 28px rgba(0,0,0,.4);
-      display: none; flex-direction: column; overflow: hidden;
+      display: flex; flex-direction: column; overflow: hidden;
       text-align: left;
+      opacity: 0; visibility: hidden; transform: translateY(-6px) scale(.98);
+      transform-origin: top right;
+      transition: opacity .14s ease, transform .14s ease, visibility .14s;
     }
-    .sh-user-menu.open { display: flex; }
+    .sh-user-menu.open { opacity: 1; visibility: visible; transform: translateY(0) scale(1); }
+    /* Skip-to-content link: off-screen until keyboard-focused, then pinned top-left. */
+    .sh-skip {
+      position: absolute; left: 10px; top: 8px; z-index: 1200;
+      background: var(--accent, #f5c518); color: #1a1410;
+      font-weight: 800; font-size: 0.82rem; text-decoration: none;
+      padding: 9px 14px; border-radius: 9px;
+      box-shadow: 0 6px 18px -6px rgba(0,0,0,.5);
+      transform: translateY(-150%); opacity: 0; pointer-events: none;
+      transition: transform .16s ease, opacity .16s ease;
+    }
+    .sh-skip:focus, .sh-skip:focus-visible {
+      transform: translateY(0); opacity: 1; pointer-events: auto;
+      outline: 2px solid #1a1410; outline-offset: 2px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .sh-tab, .sh-tab-caret, .sh-tab-drop, .sh-mob-pill, .sh-mob-tab,
+      .sh-mob-tab svg, .sh-user-menu, #presence-btn {
+        transition: none !important; animation: none !important;
+      }
+      .sh-tab:active, .sh-mob-pill:active, .sh-mob-tab:active svg { transform: none !important; }
+    }
     .sh-user-menu-item {
       display: block; width: 100%; padding: 11px 16px;
       background: none; border: none; border-bottom: 1px solid #1e1e1e;
@@ -467,6 +592,95 @@ const SH_SUBNAV = {
     .sp-save-ghost:hover { color: var(--text, #eee); background: rgba(0,0,0,.05); }
     .sp-save-ghost.is-saved { color: var(--accent, #f5c518); }
     .sp-save-ghost svg { flex-shrink: 0; }
+
+    /* ── Header search button (opens command palette) ── */
+    #sh-search-btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: rgba(255,255,255,.05); border: 1.5px solid rgba(255,255,255,.12);
+      color: #9a9a9a; cursor: pointer; font-family: inherit;
+      padding: 6px 10px; border-radius: var(--radius, 9px); line-height: 20px;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    #sh-search-btn:hover { background: rgba(255,255,255,.09); color: #e8e3da; border-color: rgba(255,255,255,.2); }
+    #sh-search-btn svg { flex-shrink: 0; }
+    .sh-search-label { font-size: .82rem; font-weight: 600; }
+    .sh-search-kbd {
+      font-family: inherit; font-size: .68rem; font-weight: 700; color: #c9c4ba;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 5px; padding: 1px 5px; line-height: 1.4;
+    }
+    #sh-search-btn:focus-visible { outline: 2px solid var(--accent, #f5c518); outline-offset: 2px; }
+    @media (max-width: 1100px) {
+      .sh-search-label, .sh-search-kbd { display: none; }
+      #sh-search-btn { padding: 7px; }
+    }
+
+    /* ── Command palette ── */
+    #sh-palette-backdrop {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(8,8,8,.62); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+      opacity: 0; visibility: hidden; transition: opacity .16s ease, visibility .16s;
+      display: flex; align-items: flex-start; justify-content: center;
+      padding: clamp(40px, 12vh, 140px) 16px 16px;
+    }
+    #sh-palette-backdrop.open { opacity: 1; visibility: visible; }
+    #sh-palette {
+      width: min(620px, 100%); max-height: min(70vh, 560px);
+      background: #16161a; border: 1px solid #2c2c32; border-radius: 14px;
+      box-shadow: 0 24px 70px -18px rgba(0,0,0,.8);
+      display: flex; flex-direction: column; overflow: hidden;
+      transform: translateY(-10px) scale(.985); transition: transform .16s ease;
+    }
+    #sh-palette-backdrop.open #sh-palette { transform: translateY(0) scale(1); }
+    .sh-pal-inputrow { display: flex; align-items: center; gap: 11px; padding: 15px 18px; border-bottom: 1px solid #26262c; }
+    .sh-pal-inputrow svg { flex-shrink: 0; color: #6b6b73; }
+    #sh-palette-input {
+      flex: 1; background: none; border: none; outline: none;
+      color: #f3efe7; font-family: inherit; font-size: 1.02rem; font-weight: 500;
+    }
+    #sh-palette-input::placeholder { color: #6b6b73; }
+    .sh-pal-esc {
+      font-size: .66rem; font-weight: 700; color: #8a8a93;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 5px; padding: 2px 6px; flex-shrink: 0;
+    }
+    .sh-pal-results { overflow-y: auto; padding: 7px; flex: 1; }
+    .sh-pal-group-label {
+      font-size: .67rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+      color: #6b6b73; padding: 10px 11px 5px;
+    }
+    .sh-pal-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 9px 11px; border-radius: 9px; cursor: pointer;
+      text-decoration: none; color: #d7d2c8; scroll-margin: 8px;
+    }
+    .sh-pal-item:hover, .sh-pal-item.sh-pal-active { background: rgba(255,255,255,.06); }
+    .sh-pal-item.sh-pal-active { box-shadow: inset 0 0 0 1px rgba(245,197,24,.4); }
+    .sh-pal-ico {
+      flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,.06); color: #b6b0a4;
+    }
+    .sh-pal-ico svg { width: 16px; height: 16px; }
+    .sh-pal-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .sh-pal-title { display: block; font-size: .9rem; font-weight: 650; color: #ece7dd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sh-pal-sub { display: block; font-size: .76rem; color: #84808a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sh-pal-tag { flex-shrink: 0; font-size: .68rem; font-weight: 700; color: #8a8a93; }
+    .sh-pal-active .sh-pal-tag { color: var(--accent, #f5c518); }
+    .sh-pal-empty { padding: 34px 16px; text-align: center; color: #6b6b73; font-size: .88rem; }
+    .sh-pal-hint-row {
+      display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+      padding: 9px 14px; border-top: 1px solid #26262c; font-size: .72rem; color: #6b6b73;
+    }
+    .sh-pal-hint-row kbd {
+      font-family: inherit; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 4px; padding: 0 5px; font-size: .68rem; color: #a8a3aa; margin: 0 2px;
+    }
+    @media (max-width: 640px) { .sh-pal-hint-row { display: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      #sh-palette-backdrop, #sh-palette { transition: none !important; }
+      #sh-palette { transform: none !important; }
+    }
   `;
   document.head.appendChild(s);
 })();
@@ -833,9 +1047,25 @@ document.addEventListener("DOMContentLoaded", function() {
   const header = document.getElementById("app-header");
   if (header) {
     header.innerHTML = `
-      <div style="flex:1"><h1>The Practice Room</h1></div>
+      <a class="sh-skip" href="#" onclick="return window._shSkipToMain(event)">Skip to content</a>
+      <div class="sh-hdr-inner">
+      <div class="sh-hdr-left">
+        <h1>The Practice Room</h1>
+      </div>
+      <nav class="sh-primary-nav" aria-label="Primary">
+          <a class="sh-tab" data-page="hub" href="/practice-log.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Hub</a>
+          <a class="sh-tab" data-page="community" href="/community.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Community</a>
+          <a class="sh-tab" data-page="resources" href="/resources.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Resources</a>
+          <a class="sh-tab" data-page="tools" href="/tools.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>Tools</a>
+          <a class="sh-tab" data-page="studio" href="/focus.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>Studio</a>
+      </nav>
       <div class="header-user">
         <span id="header-email" style="display:none"></span>
+        <button id="sh-search-btn" onclick="window._shOpenPalette()" title="Search (⌘K / Ctrl-K)" aria-label="Search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span class="sh-search-label">Search</span>
+          <kbd class="sh-search-kbd">⌘K</kbd>
+        </button>
         <button id="presence-btn" onclick="window._shTogglePresence()" title="Online members" aria-label="Online members">
           <span class="presence-dot"></span>
           <span class="presence-count">0</span>
@@ -858,11 +1088,12 @@ document.addEventListener("DOMContentLoaded", function() {
           <span class="notif-badge" id="notif-badge" style="display:none"></span>
         </button>
         <div class="sh-avatar-wrap">
-          <button class="sh-avatar-btn" id="sh-avatar-btn" onclick="window._shToggleUserMenu()">
+          <button class="sh-avatar-btn" id="sh-avatar-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu" onclick="window._shToggleUserMenu()">
             <div class="sh-avatar" id="sh-avatar-el"></div>
           </button>
           <div class="sh-user-menu" id="sh-user-menu">
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
+            <a class="sh-user-menu-item" href="/updates.html">What's New</a>
             <a class="sh-user-menu-item" href="/billing.html">Billing</a>
             <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
             <a class="sh-user-menu-item" href="/privacy.html">Privacy Policy</a>
@@ -870,78 +1101,55 @@ document.addEventListener("DOMContentLoaded", function() {
           </div>
         </div>
       </div>
+      </div>
     `;
   }
 
-  // Inject desktop tab bar right after the header (before <main>)
-  const tabBar = document.createElement("div");
-  tabBar.className = "sh-tab-bar";
-  tabBar.id = "sh-tab-bar";
-  tabBar.innerHTML = `
-    <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="hub" href="/practice-log.html">Practice Hub</a>
-      <div class="sh-tab-drop">
-        <a href="/practice-log.html">Dashboard</a>
-        <a href="/practice-log.html?goto=stats">Stats</a>
-        <a href="/practice-log.html?goto=goals">Goals</a>
-        <a href="/practice-log.html?goto=history">History</a>
-        <a href="/practice-log.html?goto=leaderboard">Leaderboard</a>
-        <a href="/practice-log.html?goto=achievements">Achievements</a>
-      </div>
-    </div>
-    <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="community" href="/community.html">Community</a>
-      <div class="sh-tab-drop">
-        <a href="/community.html">Feed</a>
-        <a href="/community.html?filter=progress">Share Your Progress</a>
-        <a href="/community.html?filter=feedback">Get Feedback</a>
-        <a href="/community.html?filter=question">Ask a Question</a>
-        <a href="/community.html?filter=post">Just Post</a>
-        <a href="/community.html?tab=practice-log">Practice Logs</a>
-      </div>
-    </div>
-    <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="resources" href="/resources.html">Resources</a>
-      <div class="sh-tab-drop">
-        <a href="/resources.html">Pieces Library</a>
-        <a href="/resources.html?section=ppd">Piano Practice Daily</a>
-        <a href="/resources.html?section=glossary">Glossary</a>
-        <a href="/resources.html?section=key">Key Explorer</a>
-      </div>
-    </div>
-    <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="tools" href="/tools.html">Practice Tools</a>
-      <div class="sh-tab-drop">
-        <a href="/tools.html">Passage Fixer</a>
-        <a href="/tools.html?section=metro">Metronome</a>
-        <a href="/tools.html?section=note">Note Recognition</a>
-        <a href="/tools.html?section=chord">Chord Recognition</a>
-      </div>
-    </div>
-    <div class="sh-tab-wrap">
-      <a class="sh-tab" data-page="studio" href="/focus.html">Matt's Studio</a>
-      <div class="sh-tab-drop">
-        <a href="/focus.html">Weekly Practice Focus</a>
-        <a href="/content-feed.html">Content Feed</a>
-        <a href="/events.html">Live Practice Clinics</a>
-        <a href="/clinic-booking.html">One-to-One Clinics</a>
-        <a href="/updates.html">Practice Room Updates</a>
-      </div>
-    </div>
-  `;
-
-  // Mobile pill subnav
+  // Secondary nav: desktop = light underlined page tabs (themed via page CSS vars),
+  // mobile = sticky dark pill bar. Rendered into this one element by _updateNav.
   const subNav = document.createElement("div");
   subNav.id = "sh-mob-subnav";
 
-  // Insert desktop tab bar after the header
+  // Insert the secondary nav right after the header.
   if (header && header.parentNode) {
-    header.parentNode.insertBefore(tabBar, header.nextSibling);
-    // Insert mobile subnav right after the desktop tab bar (hidden on desktop, sticky on mobile)
-    header.parentNode.insertBefore(subNav, tabBar.nextSibling);
+    header.parentNode.insertBefore(subNav, header.nextSibling);
   } else {
     document.body.insertBefore(subNav, document.body.firstChild);
   }
+
+  // ── Desktop left sidebar (primary nav). Hidden <=768px (bottom bar takes over). ──
+  const sidebar = document.createElement("aside");
+  sidebar.id = "sh-sidebar";
+  sidebar.setAttribute("aria-label", "Primary");
+  const _sbIcons = {
+    hub: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+    community: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    resources: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+    tools: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
+    studio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
+  };
+  const _sbSections = [
+    { key: "hub", label: "Hub", href: "/practice-log.html" },
+    { key: "community", label: "Community", href: "/community.html" },
+    { key: "resources", label: "Resources", href: "/resources.html" },
+    { key: "tools", label: "Tools", href: "/tools.html" },
+    { key: "studio", label: "Studio", href: "/focus.html" },
+  ];
+  sidebar.innerHTML =
+    '<div class="sh-sb-brand"><h1>The Practice Room</h1></div>' +
+    '<nav class="sh-sb-nav">' +
+    _sbSections.map(function(s) {
+      const subs = (SH_SUBNAV[s.key] || []).map(function(p) {
+        return '<a class="sh-sb-subitem" href="' + p.href + '">' + p.label + "</a>";
+      }).join("");
+      return '<div class="sh-sb-group">' +
+        '<a class="sh-sb-item" data-page="' + s.key + '" href="' + s.href + '">' +
+          _sbIcons[s.key] + "<span>" + s.label + "</span></a>" +
+        (subs ? '<div class="sh-sb-sub">' + subs + "</div>" : "") +
+      "</div>";
+    }).join("") +
+    "</nav>";
+  document.body.insertBefore(sidebar, document.body.firstChild);
 
   // Mobile bottom tab bar
   const bottomBar = document.createElement("nav");
@@ -1051,14 +1259,55 @@ window.openMobSheet  = window._shOpenSheet;
 window.closeMobSheet = window._shCloseSheet;
 
 // ── User menu helpers ─────────────────────────────────────────────────────────
+// Skip-to-content: focus + scroll the page's main content region.
+window._shSkipToMain = function(e) {
+  if (e) e.preventDefault();
+  const main =
+    document.querySelector("main, #app-main, [role='main'], #main-content") ||
+    document.querySelector("h1, h2");
+  if (main) {
+    if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+    main.focus({ preventScroll: false });
+    main.scrollIntoView({ block: "start" });
+  }
+  return false;
+};
 window._shToggleUserMenu = function() {
   const menu = document.getElementById("sh-user-menu");
-  menu?.classList.toggle("open");
+  const open = menu?.classList.toggle("open");
+  document.getElementById("sh-avatar-btn")?.setAttribute("aria-expanded", open ? "true" : "false");
 };
+// Same-page nav: if a sidebar/sub-nav link points at the page we're already on
+// (e.g. Community → Progress is /community.html?filter=progress), let the page
+// handle it client-side instead of doing a full reload. Pages opt in by defining
+// window.__shSamePageRoute(pathAndSearch); pages that don't are unaffected.
+document.addEventListener("click", function(e) {
+  const a = e.target.closest("a.sh-sb-subitem, a.sh-item, .sh-tab-drop a");
+  if (!a || !a.getAttribute("href")) return;
+  if (typeof window.__shSamePageRoute !== "function") return;
+  let url;
+  try { url = new URL(a.href, location.origin); } catch (_) { return; }
+  if (url.pathname !== location.pathname) return; // different page → normal nav
+  e.preventDefault();
+  window.__shSamePageRoute(url.pathname + url.search);
+});
 // Close user menu on outside click
 document.addEventListener("click", function(e) {
   if (!e.target.closest(".sh-avatar-wrap")) {
     document.getElementById("sh-user-menu")?.classList.remove("open");
+    document.getElementById("sh-avatar-btn")?.setAttribute("aria-expanded", "false");
+  }
+});
+// Close user menu on Escape
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    const m = document.getElementById("sh-user-menu");
+    if (m?.classList.contains("open")) {
+      m.classList.remove("open");
+      const b = document.getElementById("sh-avatar-btn");
+      b?.setAttribute("aria-expanded", "false");
+      b?.focus();
+    }
   }
 });
 
@@ -1368,12 +1617,235 @@ window._shInitIOSPush = function(db, email) {
 };
 
 // ── Main init ─────────────────────────────────────────────────────────────────
+// ── Command palette (global Ctrl/⌘-K search) ─────────────────────────────────
+let _shPalDb = null, _shPalBuilt = false, _shPalItems = [], _shPalIdx = 0, _shPalTimer = null, _shPalSeq = 0;
+
+function _shGlossSlug(str) {
+  return String(str).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function _shPalEsc(str) {
+  return String(str == null ? "" : str).replace(/[&<>"]/g, function(c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+
+const _SH_SECTION_META = {
+  hub:       { label: "Practice Hub",   href: "/practice-log.html" },
+  community: { label: "Community",      href: "/community.html" },
+  resources: { label: "Resources",      href: "/resources.html" },
+  tools:     { label: "Practice Tools", href: "/tools.html" },
+  studio:    { label: "Matt's Studio",  href: "/focus.html" },
+};
+function _shNavTargets() {
+  const out = [];
+  Object.keys(_SH_SECTION_META).forEach(function(key) {
+    const sec = _SH_SECTION_META[key];
+    out.push({ title: sec.label, sub: "Section", href: sec.href, kind: "nav" });
+    (SH_SUBNAV[key] || []).forEach(function(p) {
+      out.push({ title: p.label, sub: sec.label, href: p.href, kind: "nav" });
+    });
+  });
+  out.push({ title: "What's New", sub: "Updates", href: "/updates.html", kind: "nav" });
+  out.push({ title: "Edit Profile", sub: "Account", href: "/profile.html", kind: "nav" });
+  out.push({ title: "Billing", sub: "Account", href: "/billing.html", kind: "nav" });
+  return out;
+}
+
+const _SH_PAL_ICONS = {
+  nav: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
+  piece: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  glossary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+  article: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>',
+  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
+};
+_SH_PAL_ICONS.content = _SH_PAL_ICONS.article;
+
+function _shInitPalette(db) {
+  _shPalDb = db || _shPalDb;
+  if (_shPalBuilt) return;
+  _shPalBuilt = true;
+  const bd = document.createElement("div");
+  bd.id = "sh-palette-backdrop";
+  bd.innerHTML =
+    '<div id="sh-palette" role="dialog" aria-modal="true" aria-label="Search">' +
+      '<div class="sh-pal-inputrow">' +
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+        '<input id="sh-palette-input" type="text" autocomplete="off" spellcheck="false" placeholder="Search pages, pieces, articles, glossary…" aria-label="Search">' +
+        '<span class="sh-pal-esc">ESC</span>' +
+      '</div>' +
+      '<div class="sh-pal-results" id="sh-pal-results"></div>' +
+      '<div class="sh-pal-hint-row"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></div>' +
+    '</div>';
+  document.body.appendChild(bd);
+  bd.addEventListener("click", function(e) { if (e.target === bd) window._shClosePalette(); });
+  const input = document.getElementById("sh-palette-input");
+  input.addEventListener("input", function() { _shPalScheduleSearch(input.value); });
+  input.addEventListener("keydown", _shPalKeydown);
+}
+
+window._shOpenPalette = function() {
+  if (!_shPalBuilt) { try { _shInitPalette(_shPalDb); } catch (e) { return; } }
+  const bd = document.getElementById("sh-palette-backdrop");
+  if (!bd) return;
+  bd.classList.add("open");
+  const input = document.getElementById("sh-palette-input");
+  if (input) { input.value = ""; setTimeout(function() { input.focus(); }, 30); }
+  _shPalRender(_shNavTargets());
+};
+window._shClosePalette = function() {
+  const bd = document.getElementById("sh-palette-backdrop");
+  if (bd) bd.classList.remove("open");
+};
+function _shPalIsOpen() {
+  const bd = document.getElementById("sh-palette-backdrop");
+  return !!(bd && bd.classList.contains("open"));
+}
+
+function _shPalScheduleSearch(q) {
+  clearTimeout(_shPalTimer);
+  const query = (q || "").trim();
+  if (!query) { _shPalRender(_shNavTargets()); return; }
+  const lower = query.toLowerCase();
+  const navHits = _shNavTargets().filter(function(t) {
+    return (t.title + " " + t.sub).toLowerCase().indexOf(lower) !== -1;
+  }).slice(0, 6);
+  _shPalRender(navHits, true);
+  _shPalTimer = setTimeout(function() { _shPalRemoteSearch(query, navHits); }, 180);
+}
+
+async function _shPalRemoteSearch(query, navHits) {
+  const seq = ++_shPalSeq;
+  const esc = query.replace(/[%,()]/g, " ").trim();
+  let pieces = [], ppd = [], content = [], gloss = [];
+  if (_shPalDb && esc) {
+    try {
+      const r = await _shPalDb.from("pieces").select("id,title,composer")
+        .or("title.ilike.%" + esc + "%,composer.ilike.%" + esc + "%").limit(6);
+      pieces = r.data || [];
+    } catch (e) {}
+    try {
+      const r = await _shPalDb.from("theory_sheets").select("title,slug,category")
+        .ilike("title", "%" + esc + "%").limit(6);
+      ppd = r.data || [];
+    } catch (e) {}
+    try {
+      const r = await _shPalDb.from("content_feed_posts").select("id,title,type")
+        .ilike("title", "%" + esc + "%").order("published_at", { ascending: false }).limit(6);
+      content = r.data || [];
+    } catch (e) {}
+    try {
+      const r = await _shPalDb.from("glossary").select("term").ilike("term", "%" + esc + "%").limit(6);
+      gloss = r.data || [];
+    } catch (e) {}
+  }
+  if (seq !== _shPalSeq) return; // superseded by a newer keystroke
+  const items = navHits.slice();
+  pieces.forEach(function(p) {
+    items.push({ title: p.title, sub: p.composer || "Piece", href: "/resources.html?piece=" + p.id, kind: "piece" });
+  });
+  ppd.forEach(function(a) {
+    items.push({
+      title: a.title || "Untitled",
+      sub: a.category || "Piano Practice Daily",
+      href: "/theory/sheets/view.html?slug=" + encodeURIComponent(a.slug || ""),
+      kind: "article",
+    });
+  });
+  const _CF_TYPE = { youtube: "Video", blog: "Article", post: "Post" };
+  content.forEach(function(a) {
+    const sub = _CF_TYPE[a.type] || (a.type ? a.type.charAt(0).toUpperCase() + a.type.slice(1) : "Content");
+    items.push({
+      title: a.title || "Untitled",
+      sub: sub,
+      href: "/content-feed.html?post=" + a.id,
+      kind: "content",
+      icon: a.type === "youtube" ? _SH_PAL_ICONS.video : _SH_PAL_ICONS.article,
+    });
+  });
+  gloss.forEach(function(g) {
+    items.push({ title: g.term, sub: "Glossary term", href: "/resources.html#g-" + _shGlossSlug(g.term), kind: "glossary" });
+  });
+  _shPalRender(items);
+}
+
+function _shPalRender(items, partial) {
+  _shPalItems = items || [];
+  _shPalIdx = 0;
+  const box = document.getElementById("sh-pal-results");
+  if (!box) return;
+  if (!_shPalItems.length) {
+    box.innerHTML = '<div class="sh-pal-empty">' + (partial ? "Searching…" : "No matches") + "</div>";
+    return;
+  }
+  const kindLabel = { nav: "Navigate", piece: "Pieces", article: "Articles", content: "Content", glossary: "Glossary" };
+  let html = "", lastKind = null;
+  _shPalItems.forEach(function(it, i) {
+    if (it.kind !== lastKind) {
+      html += '<div class="sh-pal-group-label">' + (kindLabel[it.kind] || "") + "</div>";
+      lastKind = it.kind;
+    }
+    html += '<a class="sh-pal-item' + (i === 0 ? " sh-pal-active" : "") + '" data-i="' + i + '" href="' + it.href + '">' +
+      '<span class="sh-pal-ico">' + (it.icon || _SH_PAL_ICONS[it.kind] || "") + "</span>" +
+      '<span class="sh-pal-txt"><span class="sh-pal-title">' + _shPalEsc(it.title) + "</span>" +
+      '<span class="sh-pal-sub">' + _shPalEsc(it.sub || "") + "</span></span>" +
+      '<span class="sh-pal-tag">↵</span></a>';
+  });
+  box.innerHTML = html;
+  box.querySelectorAll(".sh-pal-item").forEach(function(el) {
+    el.addEventListener("mousemove", function() { _shPalSetActive(parseInt(el.dataset.i, 10)); });
+    el.addEventListener("click", function(e) { e.preventDefault(); _shPalGo(parseInt(el.dataset.i, 10)); });
+  });
+}
+
+function _shPalSetActive(i) {
+  _shPalIdx = i;
+  const box = document.getElementById("sh-pal-results");
+  if (!box) return;
+  box.querySelectorAll(".sh-pal-item").forEach(function(el) {
+    el.classList.toggle("sh-pal-active", parseInt(el.dataset.i, 10) === i);
+  });
+}
+
+function _shPalKeydown(e) {
+  if (e.key === "ArrowDown") { e.preventDefault(); _shPalMove(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); _shPalMove(-1); }
+  else if (e.key === "Enter") { e.preventDefault(); _shPalGo(_shPalIdx); }
+  else if (e.key === "Escape") { e.preventDefault(); window._shClosePalette(); }
+}
+
+function _shPalMove(d) {
+  if (!_shPalItems.length) return;
+  let i = _shPalIdx + d;
+  if (i < 0) i = _shPalItems.length - 1;
+  if (i >= _shPalItems.length) i = 0;
+  _shPalSetActive(i);
+  const el = document.querySelector('.sh-pal-item[data-i="' + i + '"]');
+  if (el) el.scrollIntoView({ block: "nearest" });
+}
+
+function _shPalGo(i) {
+  const it = _shPalItems[i];
+  if (!it) return;
+  window._shClosePalette();
+  window.location.href = it.href;
+}
+
+document.addEventListener("keydown", function(e) {
+  if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    if (_shPalIsOpen()) window._shClosePalette(); else window._shOpenPalette();
+  }
+});
+
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
   window._shIsAdmin = isAdmin;
   // Wire the shared @mention engine (autocomplete + notifications) on every page.
   try { window.Mentions && window.Mentions._init(db, myEmail); } catch (e) {}
   // Wire the shared saved/bookmark store (used by standalone post pages).
   try { window.SavedPosts && window.SavedPosts._init(db, myEmail); } catch (e) {}
+  // Wire the command palette (global ⌘K / "/" search).
+  try { _shInitPalette(db); } catch (e) {}
 
   // basePage is what the page declared; _resolveSection re-detects for pages
   // where multiple sections share the same URL (practice-log.html).
@@ -1502,40 +1974,127 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // Update nav active states and pill row — called at init and on hashchange
   function _updateNav(section) {
     // Desktop tabs
-    document.querySelectorAll(".sh-tab[data-page]").forEach(t =>
-      t.classList.toggle("active", t.dataset.page === section)
-    );
+    document.querySelectorAll(".sh-tab[data-page]").forEach(t => {
+      const on = t.dataset.page === section;
+      t.classList.toggle("active", on);
+      if (on) t.setAttribute("aria-current", "page");
+      else t.removeAttribute("aria-current");
+    });
     // Mobile bottom tabs
-    document.querySelectorAll(".sh-mob-tab[data-page]").forEach(t =>
-      t.classList.toggle("active", t.dataset.page === section)
-    );
+    document.querySelectorAll(".sh-mob-tab[data-page]").forEach(t => {
+      const on = t.dataset.page === section;
+      t.classList.toggle("active", on);
+      if (on) t.setAttribute("aria-current", "page");
+      else t.removeAttribute("aria-current");
+    });
+    // Desktop sidebar primary items
+    document.querySelectorAll(".sh-sb-item[data-page]").forEach(t => {
+      const on = t.dataset.page === section;
+      t.classList.toggle("active", on);
+      if (on) t.setAttribute("aria-current", "page");
+      else t.removeAttribute("aria-current");
+    });
+    // Desktop sidebar accordion sub-items (mark active within the open section)
+    document.querySelectorAll(".sh-sb-subitem").forEach(a => {
+      a.classList.remove("active");
+      a.removeAttribute("aria-current");
+    });
+    const _activeGroup = document.querySelector(".sh-sb-item.active");
+    const _activeSub = _activeGroup && _activeGroup.nextElementSibling;
+    if (_activeSub && _activeSub.classList.contains("sh-sb-sub")) {
+      const links = Array.prototype.slice.call(_activeSub.querySelectorAll(".sh-sb-subitem"));
+      let matched = false;
+      links.forEach(a => {
+        if (_pillIsActive(a.getAttribute("href"))) { a.classList.add("active"); a.setAttribute("aria-current", "page"); matched = true; }
+      });
+      if (!matched && links[0]) { links[0].classList.add("active"); links[0].setAttribute("aria-current", "page"); }
+    }
     // Pill subnav
     const subNav = document.getElementById("sh-mob-subnav");
     if (!subNav) return;
     const pills = SH_SUBNAV[section] || [];
+    // Hide the sticky sub-nav bar entirely on sections with no sub-pages
+    // (profile, billing, etc.) so we never show an empty 54px strip.
+    subNav.style.display = pills.length ? "" : "none";
+    if (!pills.length) { subNav.innerHTML = ""; return; }
     const anyActive = pills.some(p => _pillIsActive(p.href));
     subNav.innerHTML = `<div class="sh-mob-subnav-scroll">${pills.map((p, i) => {
-      const active = (_pillIsActive(p.href) || (!anyActive && i === 0)) ? " active" : "";
-      return `<a class="sh-mob-pill${active}" href="${p.href}">${p.label}</a>`;
+      const isActive = _pillIsActive(p.href) || (!anyActive && i === 0);
+      const active = isActive ? " active" : "";
+      const cur = isActive ? ' aria-current="page"' : "";
+      return `<a class="sh-mob-pill${active}"${cur} href="${p.href}">${p.label}</a>`;
     }).join("")}</div>`;
+    // Re-attach any page-registered right-slot control (e.g. admin "Viewing as"),
+    // since innerHTML above wiped it. The node lives on across re-renders.
+    const scForExtra = subNav.querySelector(".sh-mob-subnav-scroll");
+    if (window._shSubnavRightNode && scForExtra) {
+      window._shSubnavRightNode.style.marginLeft = "auto";
+      window._shSubnavRightNode.style.alignSelf = "center";
+      scForExtra.appendChild(window._shSubnavRightNode);
+    }
+    // Auto-scroll the active pill into view within the horizontal scroller
+    // (manual scrollLeft, not scrollIntoView — that can scroll the whole page).
+    const act = subNav.querySelector(".sh-mob-pill.active");
+    const sc = subNav.querySelector(".sh-mob-subnav-scroll");
+    if (act && sc) sc.scrollLeft = act.offsetLeft - (sc.clientWidth / 2) + (act.offsetWidth / 2);
   }
 
   _updateNav(activePage);
+
+  // Wire the accordion toggle directly onto each sidebar section item so that
+  // clicking the section heading while already on that page collapses/expands
+  // its sub-menu without navigating. Done here (after _updateNav sets .active)
+  // and using onclick assignment so it can't be shadowed by event delegation.
+  document.querySelectorAll(".sh-sb-item[data-page]").forEach(function(item) {
+    var sub = item.nextElementSibling;
+    if (!sub || !sub.classList.contains("sh-sb-sub")) return;
+    item.addEventListener("click", function(e) {
+      // Only intercept when this is the current-page item (active).
+      if (!item.classList.contains("active")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var isOpen = getComputedStyle(sub).display !== "none";
+      sub.style.display = isOpen ? "none" : "flex";
+    });
+  });
 
   // Re-detect section when hash changes (e.g. tapping Resources from Hub)
   window.addEventListener("hashchange", () => _updateNav(_resolveSection()));
 
   // Mark active desktop dropdown links using same URL matching logic
-  document.querySelectorAll(".sh-tab-drop a").forEach(a => {
-    a.classList.toggle("active", _pillIsActive(a.getAttribute("href") || ""));
-  });
+  function _markDropActive() {
+    document.querySelectorAll(".sh-tab-drop a").forEach(a => {
+      const on = _pillIsActive(a.getAttribute("href") || "");
+      a.classList.toggle("active", on);
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+  }
+  _markDropActive();
 
   // Expose so individual pages can refresh nav after SPA pushState
   window._shUpdateNav = function(section) {
     _updateNav(section);
-    document.querySelectorAll(".sh-tab-drop a").forEach(a => {
-      a.classList.toggle("active", _pillIsActive(a.getAttribute("href") || ""));
-    });
+    _markDropActive();
+  };
+
+  // Let a page mount a small control (e.g. admin "Viewing as") on the right of
+  // the secondary nav row. Persists across sub-nav re-renders via _updateNav.
+  window._shMountSubnavRight = function(node) {
+    window._shSubnavRightNode = node || null;
+    const sc = document.querySelector("#sh-mob-subnav .sh-mob-subnav-scroll");
+    if (sc && node) {
+      node.style.marginLeft = "auto";
+      node.style.alignSelf = "center";
+      sc.appendChild(node);
+    }
+  };
+
+  // Mount a small control into the top bar's utility cluster (left of search).
+  // Used on desktop for the admin "Viewing as" dropdown.
+  window._shMountTopbarRight = function(node) {
+    const hu = document.querySelector("#app-header .header-user");
+    if (hu && node) { hu.insertBefore(node, hu.firstChild); }
   };
 
   // ── Notifications ──────────────────────────────────────────────────────────
