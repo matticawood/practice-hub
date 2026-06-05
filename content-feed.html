@@ -785,6 +785,7 @@ let _embeddedYt    = new Set();   // YT post IDs with inline embed active
 let _activeFilter  = "all";
 let _cfTab         = "youtube";
 let _editPostId    = null;
+let _editPoll      = null;          // existing poll on the post being edited (for reconcile on save)
 let _ytTimer       = null;
 let _likerAvatarMap = {};
 let _cfLikersMap   = {}; // postId → [email, ...] kept in sync on react/unreact
@@ -1424,12 +1425,35 @@ function openEditCfForm(postId) {
     _setDateFromTs("cfpost-date", p.published_at);
     _postImages = [];
     document.getElementById("cfpost-img-grid").innerHTML = "";
+    // Load any existing poll into the composer so it can be edited in place.
+    _editPoll = p.poll || null;
+    if (p.poll) _loadPollIntoComposer(p.poll);
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+// Populate the shared-comments poll builder (key "cfp") from an existing poll.
+function _loadPollIntoComposer(poll) {
+  // The toolbar is injected by switchCfTab("post"); open the poll panel if closed.
+  const panel = document.getElementById("inline-poll-cfp");
+  if (!panel) return;
+  if (panel.style.display === "none" && typeof window.toggleInlinePoll === "function") {
+    window.toggleInlinePoll("cfp");
+  }
+  const q = document.getElementById("inline-poll-q-cfp");
+  if (q) q.value = poll.question || "";
+  const list = document.getElementById("inline-poll-opts-cfp");
+  if (!list) return;
+  const labels = (poll.options || []).map(o => o.label);
+  while (list.querySelectorAll(".poll-option-input").length < Math.max(2, labels.length)) {
+    window.addInlinePollOption?.("cfp");
+  }
+  list.querySelectorAll(".poll-option-input").forEach((inp, i) => { inp.value = labels[i] || ""; });
+}
+
 function closeCfForm() {
   _editPostId = null;
+  _editPoll   = null;
   // Clean up object URLs
   _postImages.forEach(img => URL.revokeObjectURL(img.objectUrl));
   _postImages = [];
@@ -1525,6 +1549,42 @@ async function publishCfPost() {
     btn.textContent = "Saving…";
     const { error } = await db.from("content_feed_posts").update(payload).eq("id", _editPostId);
     if (error) { alert("Failed to save: " + error.message); btn.disabled = false; btn.textContent = origText; return; }
+
+    // Reconcile the poll (post type only — other tabs have no poll builder).
+    if (_cfTab === "post") {
+      const _pollPanel = document.getElementById("inline-poll-cfp");
+      const _pollOpen  = _pollPanel && _pollPanel.style.display !== "none";
+      const pollData = (_pollOpen && typeof Comments.readPoll === "function") ? Comments.readPoll("cfp") : null;
+      const wantPoll = !!(pollData && pollData.question && pollData.options?.length >= 2);
+      const existing = _editPoll;
+      try {
+        if (existing && !wantPoll) {
+          // Poll removed — delete it (cascades options + votes).
+          await db.from("content_feed_post_polls").delete().eq("id", existing.id);
+        } else if (!existing && wantPoll) {
+          // Poll added during edit.
+          const { data: pr } = await db.from("content_feed_post_polls")
+            .insert({ post_id: _editPostId, question: pollData.question }).select().single();
+          if (pr) await db.from("content_feed_post_poll_options")
+            .insert(pollData.options.map((label, i) => ({ poll_id: pr.id, label, position: i })));
+        } else if (existing && wantPoll) {
+          // Poll edited. Update the question; only rebuild options if they changed
+          // (rebuilding clears votes for that poll, so we avoid it when possible).
+          if (pollData.question !== existing.question) {
+            await db.from("content_feed_post_polls").update({ question: pollData.question }).eq("id", existing.id);
+          }
+          const oldLabels = (existing.options || []).map(o => o.label);
+          const newLabels = pollData.options;
+          const sameOpts = oldLabels.length === newLabels.length && oldLabels.every((l, i) => l === newLabels[i]);
+          if (!sameOpts) {
+            await db.from("content_feed_post_poll_options").delete().eq("poll_id", existing.id);
+            await db.from("content_feed_post_poll_options")
+              .insert(newLabels.map((label, i) => ({ poll_id: existing.id, label, position: i })));
+          }
+        }
+      } catch (e) { console.warn("poll reconcile failed", e); }
+    }
+
     closeCfForm();
     btn.disabled = false; btn.textContent = origText;
     _editPostId = null;
