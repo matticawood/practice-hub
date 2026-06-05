@@ -259,7 +259,9 @@
 .poll-bar-label span:last-child { color:var(--text-muted,#8a7868); font-size:0.78rem; }
 .poll-bar-track { background:rgba(0,0,0,.06); border-radius:4px; height:6px; }
 .poll-bar-fill { height:100%; border-radius:4px; background:#8b5cf6; transition:width .4s ease; }
-.poll-footer { display:flex; align-items:center; margin-top:10px; }
+.poll-footer { display:flex; align-items:center; gap:10px; margin-top:10px; }
+.poll-clear { background:none; border:none; padding:0; margin-right:auto; font-family:inherit; font-size:.74rem; color:var(--text-muted,#8a7868); cursor:pointer; text-decoration:underline; }
+.poll-clear:hover { color:#8b5cf6; }
 .poll-total { font-size:0.75rem; color:var(--text-muted,#8a7868); }
 /* Poll builder */
 .poll-builder { background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:14px; margin-top:10px; }
@@ -575,7 +577,7 @@
     const auth=_auth();
     const hasVoted=!!myOptId||(!!authorEmail&&authorEmail===auth.email);
     const pid=_escHtml(parentId||"");
-    const COLORS=["#8b5cf6","#14b8a6","#3b82f6","#f59e0b","#10b981","#ec4899","#f97316","#94a3b8"]; // site category palette
+    const COLORS=["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"]; // site category palette
     let html=`<div class="poll-card"><div class="poll-card-question">${_escHtml(question)}</div>`;
     if(!hasVoted){
       html+=opts.map((o,i)=>
@@ -595,7 +597,8 @@
           <div class="poll-bar-track"><div class="poll-bar-fill" style="width:${pct}%;background:${c}"></div></div>
         </div>`;
       }).join("");
-      html+=`<div class="poll-footer"><span class="poll-total">${totalVotes} vote${totalVotes!==1?"s":""}</span></div>`;
+      const clr=myOptId?`<button class="poll-clear" onclick="tcCastCommentPollVote('${_escHtml(pollId)}','${_escHtml(myOptId)}','${pid}')">Clear my vote</button>`:"";
+      html+=`<div class="poll-footer">${clr}<span class="poll-total">${totalVotes} vote${totalVotes!==1?"s":""}</span></div>`;
     }
     return html+`</div>`;
   }
@@ -1567,11 +1570,18 @@
   // ── Poll voting — mirrors community.html castCommentVote() exactly ───────────
   window.tcCastCommentPollVote = async function(pollId, optionId, parentId) {
     const auth=_auth();
-    const {error}=await _db().from("tc_comment_poll_votes").upsert(
-      {poll_id:pollId, option_id:optionId, email:auth.email},
-      {onConflict:"poll_id,email"}
-    );
-    if(error){alert("Couldn't cast vote: "+error.message);return;}
+    // Tap your current choice (or "Clear my vote") to remove it; otherwise (re)cast.
+    const {data:existing}=await _db().from("tc_comment_poll_votes").select("option_id").eq("poll_id",pollId).eq("email",auth.email).maybeSingle();
+    if(existing && existing.option_id===optionId){
+      const {error}=await _db().from("tc_comment_poll_votes").delete().eq("poll_id",pollId).eq("email",auth.email);
+      if(error){alert("Couldn't update vote: "+error.message);return;}
+    } else {
+      const {error}=await _db().from("tc_comment_poll_votes").upsert(
+        {poll_id:pollId, option_id:optionId, email:auth.email},
+        {onConflict:"poll_id,email"}
+      );
+      if(error){alert("Couldn't cast vote: "+error.message);return;}
+    }
     if(parentId) await Comments.load(parentId);
   };
 

@@ -5617,7 +5617,7 @@ function _cfCommPollHtml(p) {
   const poll = p.poll;
   if (!poll || !poll.options?.length) return "";
   const hasVoted = !!poll.myVote || isAdmin; // the owner (author) always sees results
-  const COLORS = ["#8b5cf6","#14b8a6","#3b82f6","#f59e0b","#10b981","#ec4899","#f97316","#94a3b8"]; // site category palette
+  const COLORS = ["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"]; // site category palette
   let html = `<div class="card-poll" onclick="event.stopPropagation()"><div class="card-poll-question">${escHtml(poll.question)}</div>`;
   if (!hasVoted) {
     html += poll.options.map((o, i) =>
@@ -6392,7 +6392,7 @@ function postCardHTML(p) {
   if (p.poll && p.poll.options?.length) {
     const poll = p.poll;
     const hasVoted = !!poll.myVote || p.email === myEmail;
-    const POLL_COLORS = ["#8b5cf6","#14b8a6","#3b82f6","#f59e0b","#10b981","#ec4899","#f97316","#94a3b8"]; // site category palette
+    const POLL_COLORS = ["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"]; // site category palette
     let pollHtml = `<div class="card-poll" onclick="event.stopPropagation()">
       <div class="card-poll-question">${escHtml(poll.question)}</div>`;
     if (!hasVoted) {
@@ -6416,7 +6416,8 @@ function postCardHTML(p) {
           </div>
         </div>`;
       }).join("");
-      pollHtml += `<div class="card-poll-footer">
+      const clr = poll.myVote ? `<button class="card-poll-clear" onclick="castCardVote('${escHtml(poll.id)}','${escHtml(poll.myVote)}','${p.id}')">Clear my vote</button>` : "";
+      pollHtml += `<div class="card-poll-footer">${clr}
         <span class="card-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span>
       </div>`;
     }
@@ -7352,19 +7353,25 @@ function clearCardVote(postId) {
 }
 
 async function castCardVote(pollId, optionId, postId) {
-  const { error } = await db.from("community_post_poll_votes").upsert({
-    poll_id: pollId, option_id: optionId, email: myEmail
-  }, { onConflict: "poll_id,email" });
-  if (error) { alert("Couldn't cast vote: " + error.message); return; }
-  // Refresh vote counts for this post's poll
   const post = _posts.find(p => p.id === postId);
+  // Tap your current choice (or "Clear my vote") to remove it; otherwise (re)cast.
+  const removing = post?.poll?.myVote === optionId;
+  if (removing) {
+    const { error } = await db.from("community_post_poll_votes").delete().eq("poll_id", pollId).eq("email", myEmail);
+    if (error) { alert("Couldn't update vote: " + error.message); return; }
+  } else {
+    const { error } = await db.from("community_post_poll_votes").upsert({
+      poll_id: pollId, option_id: optionId, email: myEmail
+    }, { onConflict: "poll_id,email" });
+    if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  }
   if (post?.poll) {
-    const { data: votes } = await db.from("community_post_poll_votes").select("poll_id,option_id").eq("poll_id", pollId);
+    const { data: votes } = await db.from("community_post_poll_votes").select("option_id,email").eq("poll_id", pollId);
     const voteCounts = {};
     (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
     post.poll.voteCounts  = voteCounts;
     post.poll.totalVotes  = (votes || []).length;
-    post.poll.myVote      = optionId;
+    post.poll.myVote      = (votes || []).find(v => v.email === myEmail)?.option_id || null;
     // Re-render just this card
     const cardEl = document.querySelector(`[onclick*="showDetail('${postId}')"]`);
     if (cardEl) cardEl.outerHTML = postCardHTML(post);
