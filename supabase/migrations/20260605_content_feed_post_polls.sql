@@ -32,3 +32,4 @@ ALTER TABLE content_feed_post_poll_votes ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "members read content_feed_post_poll_votes"   ON content_feed_post_poll_votes FOR SELECT USING (true);
 CREATE POLICY "members insert content_feed_post_poll_votes" ON content_feed_post_poll_votes FOR INSERT WITH CHECK (true);
 CREATE POLICY "members update content_feed_post_poll_votes" ON content_feed_post_poll_votes FOR UPDATE USING (true);
+CREATE POLICY "members delete content_feed_post_poll_votes" ON content_feed_post_poll_votes FOR DELETE USING (true);

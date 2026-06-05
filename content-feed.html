@@ -594,25 +594,35 @@
     }
 
     /* ── Inline poll on content-feed posts ──────────────────────────────────── */
-    .cf-poll { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    /* No outer card — each OPTION is a white row with a coloured left edge. */
+    .cf-poll { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
     .cf-poll-q { font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+    .cf-poll-clear { background:none; border:none; padding:0; margin-right:auto; font-family:inherit; font-size:.74rem; color:var(--text-muted); cursor:pointer; text-decoration:underline; }
+    .cf-poll-clear:hover { color:#8b5cf6; }
     .cf-poll-btn {
       display: block; width: 100%; text-align: left;
-      background: rgba(0,0,0,.03); border: 1.5px solid var(--border);
-      border-radius: 9px; padding: 9px 13px; font-size: 0.85rem;
+      background: #fff; border: 1px solid var(--border); border-left: 4px solid #8b5cf6;
+      border-radius: 8px; padding: 9px 13px; font-size: 0.85rem;
       color: var(--text); font-family: inherit; cursor: pointer;
-      margin-bottom: 7px; transition: border-color .15s, background .15s;
+      margin-bottom: 7px; transition: background .15s;
     }
-    .cf-poll-btn:hover { border-color: var(--accent, #f5c518); background: rgba(245,197,24,.08); }
-    .cf-poll-bar-row { margin-bottom: 8px; cursor: pointer; }
+    .cf-poll-btn:hover { background: rgba(139,92,246,.07); }
+    .cf-poll-bar-row {
+      margin-bottom: 7px; cursor: pointer; display: flex; flex-direction: column;
+      background: #fff; border: 1px solid var(--border); border-left: 4px solid #8b5cf6;
+      border-radius: 8px; padding: 8px 12px;
+    }
+    .cf-poll-bar-row.mine { border-left-color: #10b981; }
     .cf-poll-bar-row:hover .cf-poll-bar-fill { filter: brightness(1.08); }
-    .cf-poll-bar-track { background: rgba(0,0,0,.06); border-radius: 4px; height: 7px; margin-bottom: 4px; }
-    .cf-poll-bar-fill { height: 100%; border-radius: 4px; background: rgba(0,0,0,.16); transition: width .4s ease; }
+    .cf-poll-bar-track { background: rgba(0,0,0,.06); border-radius: 4px; height: 6px; margin-top: 6px; order: 2; }
+    .cf-poll-bar-fill { height: 100%; border-radius: 4px; background: rgba(139,92,246,.4); transition: width .4s ease; }
     .cf-poll-bar-fill.mine { background: #10b981; }
     .cf-poll-bar-meta { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); }
     .cf-poll-mine { color: #10b981; }
     .cf-poll-pct { font-weight: 600; }
-    .cf-poll-footer { margin-top: 8px; }
+    /* Admin-only: who voted for this option. */
+    .cf-poll-voters { order: 3; margin-top: 5px; font-size: .72rem; color: var(--text-muted); line-height: 1.45; }
+    .cf-poll-footer { display:flex; align-items:center; gap:10px; margin-top: 8px; }
     .cf-poll-total { font-size: 0.74rem; color: var(--text-muted); }
   </style>
 </head>
@@ -945,22 +955,38 @@ async function loadFeed(deepId = null) {
   if (pollIds.length) {
     const [{ data: optRows }, { data: voteRows }, { data: myVoteRows }] = await Promise.all([
       db.from("content_feed_post_poll_options").select("id,poll_id,label,position").in("poll_id", pollIds).order("position"),
-      db.from("content_feed_post_poll_votes").select("poll_id,option_id").in("poll_id", pollIds),
+      db.from("content_feed_post_poll_votes").select("poll_id,option_id,email").in("poll_id", pollIds),
       db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", pollIds),
     ]);
-    const optsByPoll = {}, vcByPoll = {}, totByPoll = {}, myByPoll = {};
+    const optsByPoll = {}, vcByPoll = {}, totByPoll = {}, myByPoll = {}, votersByPoll = {};
     (optRows || []).forEach(o => { (optsByPoll[o.poll_id] = optsByPoll[o.poll_id] || []).push(o); });
     (voteRows || []).forEach(v => {
       if (!vcByPoll[v.poll_id]) vcByPoll[v.poll_id] = {};
       vcByPoll[v.poll_id][v.option_id] = (vcByPoll[v.poll_id][v.option_id] || 0) + 1;
       totByPoll[v.poll_id] = (totByPoll[v.poll_id] || 0) + 1;
+      if (!votersByPoll[v.poll_id]) votersByPoll[v.poll_id] = {};
+      (votersByPoll[v.poll_id][v.option_id] = votersByPoll[v.poll_id][v.option_id] || []).push(v.email);
     });
     (myVoteRows || []).forEach(v => { myByPoll[v.poll_id] = v.option_id; });
+    // Admin only: resolve voter names so the owner can see who picked what.
+    const voterNameMap = {};
+    if (isAdmin) {
+      const voterEmails = [...new Set((voteRows || []).map(v => v.email))];
+      if (voterEmails.length) {
+        const { data: nameRows } = await db.from("allowed_emails").select("email,name").in("email", voterEmails);
+        (nameRows || []).forEach(r => { voterNameMap[r.email] = r.name || r.email.split("@")[0]; });
+      }
+    }
     Object.values(pollMap).forEach(pm => {
       pm.options    = optsByPoll[pm.id]  || [];
       pm.voteCounts = vcByPoll[pm.id]    || {};
       pm.totalVotes = totByPoll[pm.id]   || 0;
       pm.myVote     = myByPoll[pm.id]    || null;
+      if (isAdmin) {
+        pm.voters = {};
+        const vb = votersByPoll[pm.id] || {};
+        Object.keys(vb).forEach(optId => { pm.voters[optId] = vb[optId].map(e => voterNameMap[e] || e.split("@")[0]); });
+      }
     });
   }
 
@@ -1060,43 +1086,61 @@ function _cardBody(p) {
 function _cfPollHtml(p) {
   const poll = p.poll;
   if (!poll || !poll.options?.length) return "";
-  const hasVoted = !!poll.myVote || p.email === myEmail; // author always sees results
+  const hasVoted = !!poll.myVote || isAdmin; // the owner (author) always sees results
+  const COLORS = ["#8b5cf6","#14b8a6","#3b82f6","#f59e0b","#10b981","#ec4899","#f97316","#94a3b8"]; // site category palette
   let html = `<div class="cf-poll" onclick="event.stopPropagation()"><div class="cf-poll-q">${_esc(poll.question)}</div>`;
   if (!hasVoted) {
-    html += poll.options.map(o =>
-      `<button class="cf-poll-btn" onclick="castCfVote('${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">${_esc(o.label)}</button>`
+    html += poll.options.map((o, i) =>
+      `<button class="cf-poll-btn" style="border-left-color:${COLORS[i % COLORS.length]}" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">${_esc(o.label)}</button>`
     ).join("");
   } else {
-    html += poll.options.map(o => {
+    html += poll.options.map((o, i) => {
+      const c      = COLORS[i % COLORS.length];
       const count  = poll.voteCounts[o.id] || 0;
       const pct    = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
       const isMine = o.id === poll.myVote;
-      return `<div class="cf-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfVote('${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">
-        <div class="cf-poll-bar-track"><div class="cf-poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
-        <div class="cf-poll-bar-meta"><span>${_esc(o.label)}${isMine ? " <span class='cf-poll-mine'>●</span>" : ""}</span><span class="cf-poll-pct">${pct}%</span></div>
+      const voters = (isAdmin && poll.voters && poll.voters[o.id]) ? poll.voters[o.id] : null;
+      const votersHtml = (voters && voters.length) ? `<div class="cf-poll-voters">${voters.map(n => _esc(n)).join(", ")}</div>` : "";
+      return `<div class="cf-poll-bar-row${isMine ? " mine" : ""}" style="border-left-color:${c}" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">
+        <div class="cf-poll-bar-track"><div class="cf-poll-bar-fill" style="width:${pct}%;background:${c}"></div></div>
+        <div class="cf-poll-bar-meta"><span>${_esc(o.label)}${isMine ? " <span class='cf-poll-mine'>● you</span>" : ""}</span><span class="cf-poll-pct">${pct}%</span></div>
+        ${votersHtml}
       </div>`;
     }).join("");
-    html += `<div class="cf-poll-footer"><span class="cf-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
+    const clearBtn = poll.myVote
+      ? `<button class="cf-poll-clear" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(poll.myVote)}','${p.id}')">Clear my vote</button>`
+      : "";
+    html += `<div class="cf-poll-footer">${clearBtn}<span class="cf-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
   }
   return html + `</div>`;
 }
 
-async function castCfVote(pollId, optionId, postId) {
-  const { error } = await db.from("content_feed_post_poll_votes").upsert(
-    { poll_id: pollId, option_id: optionId, email: myEmail },
-    { onConflict: "poll_id,email" }
-  );
-  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+async function castCfVote(ev, pollId, optionId, postId) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
   const post = _posts.find(p => p.id === postId);
+  // Tapping your current choice (or "Clear my vote") removes the vote; otherwise (re)cast it.
+  const removing = post?.poll?.myVote === optionId;
+  if (removing) {
+    const { error } = await db.from("content_feed_post_poll_votes").delete().eq("poll_id", pollId).eq("email", myEmail);
+    if (error) { alert("Couldn't update vote: " + error.message); return; }
+  } else {
+    const { error } = await db.from("content_feed_post_poll_votes").upsert(
+      { poll_id: pollId, option_id: optionId, email: myEmail }, { onConflict: "poll_id,email" });
+    if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  }
   if (post?.poll) {
-    const { data: votes } = await db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pollId);
+    const { data: votes } = await db.from("content_feed_post_poll_votes").select("option_id,email").eq("poll_id", pollId);
     const voteCounts = {};
     (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
     post.poll.voteCounts = voteCounts;
     post.poll.totalVotes = (votes || []).length;
-    post.poll.myVote     = optionId;
-    const bodyEl = document.getElementById("cf-body-" + postId);
-    if (bodyEl) bodyEl.innerHTML = _cardBody(post);
+    post.poll.myVote     = (votes || []).find(v => v.email === myEmail)?.option_id || null;
+    // Re-render the exact card body the click came from — works in the feed list
+    // (#cf-body-id) AND the detail/post view (where the body has no id).
+    const container = (ev && ev.currentTarget && ev.currentTarget.closest)
+      ? ev.currentTarget.closest(".cf-card-body")
+      : document.getElementById("cf-body-" + postId);
+    if (container) container.innerHTML = _cardBody(post);
   }
 }
 
