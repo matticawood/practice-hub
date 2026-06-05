@@ -254,6 +254,8 @@
     /* Cards inherit pan-x so horizontal swipes scroll the strip,
        but still receive tap/click events normally */
     .space-cards-row .space-card { touch-action: pan-x; }
+    /* While swiping, kill pointer events on chips so :active never fires */
+    .space-cards-row.swiping .space-card { pointer-events: none; }
     @media (max-width: 640px) {
       /* Taller touch target on mobile so the strip is easy to grab and swipe */
       .space-cards-row { padding-top: 12px; padding-bottom: 8px; }
@@ -6117,10 +6119,31 @@ document.addEventListener("click", _dismissReactorsPopover);
     el.classList.toggle("at-end", atEnd);
   }
   const row = document.querySelector(".space-cards-row");
-  if (row) {
-    _updateSpaceCardsFade(row);
-    row.addEventListener("scroll", () => _updateSpaceCardsFade(row), { passive: true });
-  }
+  if (!row) return;
+
+  _updateSpaceCardsFade(row);
+  row.addEventListener("scroll", () => _updateSpaceCardsFade(row), { passive: true });
+
+  // Swipe detector: when the user is swiping horizontally, disable pointer-events
+  // on child buttons so they can't show :active states or fire clicks mid-scroll.
+  let _sx = 0, _swiping = false;
+  row.addEventListener("touchstart", function(e) {
+    _sx = e.touches[0].clientX;
+    _swiping = false;
+  }, { passive: true });
+  row.addEventListener("touchmove", function(e) {
+    if (_swiping) return;
+    if (Math.abs(e.touches[0].clientX - _sx) > 6) {
+      _swiping = true;
+      row.classList.add("swiping");
+    }
+  }, { passive: true });
+  row.addEventListener("touchend", function() {
+    if (_swiping) {
+      // Brief delay so the click that follows touchend is also suppressed.
+      setTimeout(function() { row.classList.remove("swiping"); _swiping = false; }, 80);
+    }
+  }, { passive: true });
 })();
 
 // Who reacted to a comment/reply — same popover as posts, fed by _cmtReactorsMap.
