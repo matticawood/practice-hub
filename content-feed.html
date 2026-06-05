@@ -1398,6 +1398,14 @@ async function deleteCfPost(postId) {
 function openEditCfForm(postId) {
   const p = _posts.find(x => x.id === postId);
   if (!p) return;
+  // The edit form lives inside #cf-main, which the detail view hides. If we're on
+  // the post detail page, swap back to the feed view so the form is visible.
+  // (Don't call closeCfDetail() — it may fire history.back() and navigate away.)
+  if (document.getElementById("cf-detail").style.display !== "none") {
+    document.getElementById("cf-detail").style.display = "none";
+    document.getElementById("cf-main").style.display = "";
+    if (location.search) history.replaceState({}, "", "/content-feed.html");
+  }
   _editPostId = postId;
   document.getElementById("cf-form-title").textContent = "Edit Post";
   document.getElementById("cf-submit-btn").textContent = "Save Changes";
@@ -1568,18 +1576,34 @@ async function publishCfPost() {
           if (pr) await db.from("content_feed_post_poll_options")
             .insert(pollData.options.map((label, i) => ({ poll_id: pr.id, label, position: i })));
         } else if (existing && wantPoll) {
-          // Poll edited. Update the question; only rebuild options if they changed
-          // (rebuilding clears votes for that poll, so we avoid it when possible).
+          // Poll edited. Update the question if changed (votes untouched).
           if (pollData.question !== existing.question) {
             await db.from("content_feed_post_polls").update({ question: pollData.question }).eq("id", existing.id);
           }
-          const oldLabels = (existing.options || []).map(o => o.label);
+          // Reconcile options BY POSITION so votes survive label edits (e.g. typo
+          // fixes). Each option keeps its id — and votes point at the id — so an
+          // in-place label UPDATE leaves existing votes intact. We only ever lose
+          // votes for an option that is actually removed.
+          const oldOpts   = (existing.options || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
           const newLabels = pollData.options;
-          const sameOpts = oldLabels.length === newLabels.length && oldLabels.every((l, i) => l === newLabels[i]);
-          if (!sameOpts) {
-            await db.from("content_feed_post_poll_options").delete().eq("poll_id", existing.id);
-            await db.from("content_feed_post_poll_options")
-              .insert(newLabels.map((label, i) => ({ poll_id: existing.id, label, position: i })));
+          const matched   = Math.min(oldOpts.length, newLabels.length);
+          // 1. Update changed labels in place (same id → votes preserved).
+          for (let i = 0; i < matched; i++) {
+            if (oldOpts[i].label !== newLabels[i] || (oldOpts[i].position || 0) !== i) {
+              await db.from("content_feed_post_poll_options")
+                .update({ label: newLabels[i], position: i }).eq("id", oldOpts[i].id);
+            }
+          }
+          // 2. Insert any added options (existing votes untouched).
+          if (newLabels.length > oldOpts.length) {
+            await db.from("content_feed_post_poll_options").insert(
+              newLabels.slice(oldOpts.length).map((label, k) => ({ poll_id: existing.id, label, position: oldOpts.length + k }))
+            );
+          }
+          // 3. Delete only the removed options (only those options' votes are lost).
+          if (oldOpts.length > newLabels.length) {
+            const removeIds = oldOpts.slice(newLabels.length).map(o => o.id);
+            await db.from("content_feed_post_poll_options").delete().in("id", removeIds);
           }
         }
       } catch (e) { console.warn("poll reconcile failed", e); }
