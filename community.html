@@ -5605,6 +5605,49 @@ function cfEmbedYt(postId, ytId) {
   if (el) el.innerHTML = `<div style="aspect-ratio:16/9;background:#000"><iframe src="https://www.youtube.com/embed/${ytId}?autoplay=1" style="width:100%;height:100%;border:none;display:block" allowfullscreen></iframe></div>`;
 }
 
+// Inline poll on a content-feed post shown in the community feed. Reuses the
+// existing .card-poll styles; voting goes to the content_feed poll tables.
+function _cfCommPollHtml(p) {
+  const poll = p.poll;
+  if (!poll || !poll.options?.length) return "";
+  const hasVoted = !!poll.myVote || p.email === myEmail;
+  let html = `<div class="card-poll" onclick="event.stopPropagation()"><div class="card-poll-question">${escHtml(poll.question)}</div>`;
+  if (!hasVoted) {
+    html += poll.options.map(o =>
+      `<button class="card-poll-btn" onclick="castCfCommVote('${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">${escHtml(o.label)}</button>`
+    ).join("");
+  } else {
+    html += poll.options.map(o => {
+      const count  = poll.voteCounts[o.id] || 0;
+      const pct    = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
+      const isMine = o.id === poll.myVote;
+      return `<div class="card-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfCommVote('${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">
+        <div class="card-poll-bar-track"><div class="card-poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
+        <div class="card-poll-bar-meta"><span>${escHtml(o.label)}${isMine ? " <span class='card-poll-mine-dot'>●</span>" : ""}</span><span class="card-poll-pct">${pct}%</span></div>
+      </div>`;
+    }).join("");
+    html += `<div class="card-poll-footer"><span class="card-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
+  }
+  return html + `</div>`;
+}
+
+async function castCfCommVote(pollId, optionId, postId) {
+  const { error } = await db.from("content_feed_post_poll_votes").upsert(
+    { poll_id: pollId, option_id: optionId, email: myEmail }, { onConflict: "poll_id,email" });
+  if (error) { alert("Couldn't cast vote: " + error.message); return; }
+  const post = (_contentFeedItems || []).find(p => p.id === postId);
+  if (post?.poll) {
+    const { data: votes } = await db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pollId);
+    const voteCounts = {};
+    (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
+    post.poll.voteCounts = voteCounts;
+    post.poll.totalVotes = (votes || []).length;
+    post.poll.myVote     = optionId;
+    const cardEl = document.querySelector(`.post-card[onclick*="content-feed.html?post=${postId}"]`);
+    if (cardEl) cardEl.outerHTML = contentFeedCardHTML(post);
+  }
+}
+
 function contentFeedCardHTML(p) {
   const timeAgo      = relativeTime(p.published_at || p.created_at);
   const safeKey      = p.id.replace(/-/g, "_");
@@ -5730,6 +5773,7 @@ function contentFeedCardHTML(p) {
         ${p.title  ? `<div class="cf-comm-title">${escHtml(p.title)}</div>` : ""}
         ${content  ? `<div class="cf-comm-preview">${preview}</div>` : ""}
         ${mediaHtml}
+        ${_cfCommPollHtml(p)}
       </div>
       ${footer(`<a href="/content-feed.html?post=${p.id}" class="cf-comm-cta" style="text-decoration:none" onclick="event.stopPropagation()">View post →</a>`)}
     </div>`;
@@ -6045,6 +6089,27 @@ async function loadPosts() {
   });
   (cfComments || []).forEach(c => { cfCommentCountMap[c.post_id] = (cfCommentCountMap[c.post_id] || 0) + 1; });
 
+  // Content-feed polls — so a poll posted on the content feed also renders here
+  // when that post is surfaced in the community feed.
+  const cfPollMap = {};
+  if (cfIds.length) {
+    const { data: cfPollRows } = await db.from("content_feed_post_polls").select("id,post_id,question").in("post_id", cfIds);
+    (cfPollRows || []).forEach(pr => { cfPollMap[pr.post_id] = { id: pr.id, question: pr.question }; });
+    const cfPollIds = (cfPollRows || []).map(pr => pr.id);
+    if (cfPollIds.length) {
+      const [{ data: cfo }, { data: cfv }, { data: cfmv }] = await Promise.all([
+        db.from("content_feed_post_poll_options").select("id,poll_id,label,position").in("poll_id", cfPollIds).order("position"),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id").in("poll_id", cfPollIds),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", cfPollIds),
+      ]);
+      const ob = {}, vc = {}, tot = {}, my = {};
+      (cfo  || []).forEach(x => { (ob[x.poll_id] = ob[x.poll_id] || []).push(x); });
+      (cfv  || []).forEach(x => { if (!vc[x.poll_id]) vc[x.poll_id] = {}; vc[x.poll_id][x.option_id] = (vc[x.poll_id][x.option_id] || 0) + 1; tot[x.poll_id] = (tot[x.poll_id] || 0) + 1; });
+      (cfmv || []).forEach(x => { my[x.poll_id] = x.option_id; });
+      Object.values(cfPollMap).forEach(pm => { pm.options = ob[pm.id] || []; pm.voteCounts = vc[pm.id] || {}; pm.totalVotes = tot[pm.id] || 0; pm.myVote = my[pm.id] || null; });
+    }
+  }
+
   const _matthewAvatar = avatarUrlMap['matthew@matthewcawood.com'] || null;
   const _matthewName   = nameFromDbMap['matthew@matthewcawood.com'] || 'Matthew Cawood';
   _contentFeedItems = cfPosts.map(p => {
@@ -6059,6 +6124,7 @@ async function loadPosts() {
       matthewName:    _matthewName,
       myEmoji,
       totalReactions,
+      poll:           cfPollMap[p.id] || null,
     };
   });
 
