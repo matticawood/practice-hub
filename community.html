@@ -1043,13 +1043,8 @@
     .poll-total { font-size: 0.75rem; color: var(--text-muted); }
 
     /* ── Inline poll in post cards ───────────────────────────────────────────── */
-    /* White card with a coloured left edge — consistent poll look across the site. */
-    .card-poll {
-      margin: 13px 0 4px; padding: 13px 15px 11px;
-      background: #fff; border: 1px solid var(--border);
-      border-left: 4px solid #8b5cf6; border-radius: 10px;
-      box-shadow: 0 1px 2px rgba(60,40,20,.05);
-    }
+    /* No outer card — each OPTION is a white row with a coloured left edge. */
+    .card-poll { margin: 13px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); }
     .card-poll-question {
       font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 10px;
     }
@@ -1057,21 +1052,26 @@
     .card-poll-clear:hover { color:#8b5cf6; }
     .card-poll-btn {
       display: block; width: 100%; text-align: left;
-      background: rgba(0,0,0,.04); border: 1.5px solid var(--border);
-      border-radius: 8px; padding: 8px 12px; font-size: 0.85rem;
+      background: #fff; border: 1px solid var(--border); border-left: 4px solid #8b5cf6;
+      border-radius: 8px; padding: 9px 13px; font-size: 0.85rem;
       color: var(--text); font-family: inherit; cursor: pointer;
-      margin-bottom: 6px; transition: border-color .15s, background .15s;
+      margin-bottom: 6px; transition: background .15s;
     }
-    .card-poll-btn:hover { border-color: var(--accent); background: rgba(245,197,24,.07); }
-    .card-poll-bar-row { margin-bottom: 7px; cursor: pointer; border-radius: 6px; padding: 2px 0; }
-    .card-poll-bar-row:hover .card-poll-bar-fill { filter: brightness(1.15); }
+    .card-poll-btn:hover { background: rgba(139,92,246,.07); }
+    .card-poll-bar-row {
+      margin-bottom: 7px; cursor: pointer; display: flex; flex-direction: column;
+      background: #fff; border: 1px solid var(--border); border-left: 4px solid #8b5cf6;
+      border-radius: 8px; padding: 8px 12px;
+    }
+    .card-poll-bar-row.mine { border-left-color: #10b981; }
+    .card-poll-bar-row:hover .card-poll-bar-fill { filter: brightness(1.08); }
     .card-poll-bar-track {
       position: relative; background: rgba(0,0,0,.06);
-      border-radius: 4px; height: 7px; margin-bottom: 3px;
+      border-radius: 4px; height: 6px; margin-top: 6px; order: 2;
     }
     .card-poll-bar-fill {
       height: 100%; border-radius: 4px;
-      background: rgba(0,0,0,.12); transition: width .4s ease;
+      background: rgba(139,92,246,.4); transition: width .4s ease;
     }
     .card-poll-bar-fill.mine { background: #10b981; }
     .card-poll-bar-meta {
@@ -1080,6 +1080,7 @@
     }
     .card-poll-mine-dot { color: #10b981; }
     .card-poll-pct { font-weight: 600; }
+    .card-poll-voters { order: 3; margin-top: 5px; font-size: .72rem; color: var(--text-muted); line-height: 1.45; }
     .card-poll-footer { display: flex; align-items: center; margin-top: 6px; }
     .card-poll-total { font-size: 0.72rem; color: var(--text-muted); }
 
@@ -5626,9 +5627,12 @@ function _cfCommPollHtml(p) {
       const count  = poll.voteCounts[o.id] || 0;
       const pct    = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
       const isMine = o.id === poll.myVote;
+      const voters = (isAdmin && poll.voters && poll.voters[o.id]) ? poll.voters[o.id] : null;
+      const votersHtml = (voters && voters.length) ? `<div class="card-poll-voters">${voters.map(n => escHtml(n)).join(", ")}</div>` : "";
       return `<div class="card-poll-bar-row${isMine ? " mine" : ""}" onclick="castCfCommVote(event,'${escHtml(poll.id)}','${escHtml(o.id)}','${p.id}')">
         <div class="card-poll-bar-track"><div class="card-poll-bar-fill${isMine ? " mine" : ""}" style="width:${pct}%"></div></div>
         <div class="card-poll-bar-meta"><span>${escHtml(o.label)}${isMine ? " <span class='card-poll-mine-dot'>●</span>" : ""}</span><span class="card-poll-pct">${pct}%</span></div>
+        ${votersHtml}
       </div>`;
     }).join("");
     const clearBtn = poll.myVote
@@ -6116,14 +6120,25 @@ async function loadPosts() {
     if (cfPollIds.length) {
       const [{ data: cfo }, { data: cfv }, { data: cfmv }] = await Promise.all([
         db.from("content_feed_post_poll_options").select("id,poll_id,label,position").in("poll_id", cfPollIds).order("position"),
-        db.from("content_feed_post_poll_votes").select("poll_id,option_id").in("poll_id", cfPollIds),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id,email").in("poll_id", cfPollIds),
         db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", cfPollIds),
       ]);
-      const ob = {}, vc = {}, tot = {}, my = {};
+      const ob = {}, vc = {}, tot = {}, my = {}, voters = {};
       (cfo  || []).forEach(x => { (ob[x.poll_id] = ob[x.poll_id] || []).push(x); });
-      (cfv  || []).forEach(x => { if (!vc[x.poll_id]) vc[x.poll_id] = {}; vc[x.poll_id][x.option_id] = (vc[x.poll_id][x.option_id] || 0) + 1; tot[x.poll_id] = (tot[x.poll_id] || 0) + 1; });
+      (cfv  || []).forEach(x => {
+        if (!vc[x.poll_id]) vc[x.poll_id] = {}; vc[x.poll_id][x.option_id] = (vc[x.poll_id][x.option_id] || 0) + 1; tot[x.poll_id] = (tot[x.poll_id] || 0) + 1;
+        if (!voters[x.poll_id]) voters[x.poll_id] = {}; (voters[x.poll_id][x.option_id] = voters[x.poll_id][x.option_id] || []).push(x.email);
+      });
       (cfmv || []).forEach(x => { my[x.poll_id] = x.option_id; });
-      Object.values(cfPollMap).forEach(pm => { pm.options = ob[pm.id] || []; pm.voteCounts = vc[pm.id] || {}; pm.totalVotes = tot[pm.id] || 0; pm.myVote = my[pm.id] || null; });
+      const cfVoterNames = {};
+      if (isAdmin) {
+        const ve = [...new Set((cfv || []).map(x => x.email))];
+        if (ve.length) { const { data: nr } = await db.from("allowed_emails").select("email,name").in("email", ve); (nr || []).forEach(r => { cfVoterNames[r.email] = r.name || r.email.split("@")[0]; }); }
+      }
+      Object.values(cfPollMap).forEach(pm => {
+        pm.options = ob[pm.id] || []; pm.voteCounts = vc[pm.id] || {}; pm.totalVotes = tot[pm.id] || 0; pm.myVote = my[pm.id] || null;
+        if (isAdmin) { pm.voters = {}; const vb = voters[pm.id] || {}; Object.keys(vb).forEach(oid => { pm.voters[oid] = vb[oid].map(e => cfVoterNames[e] || e.split("@")[0]); }); }
+      });
     }
   }
 
