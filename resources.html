@@ -968,7 +968,7 @@
     .ke-layout { display: block; }
     .ke-summary, .ke-detail { min-width: 0; }
     .cof-wrap  { display: flex; justify-content: center; margin: 0 auto 24px; max-width: 420px; }
-    .cof-wrap svg { width: 100%; cursor: pointer; }
+    .cof-wrap svg { width: 100%; cursor: pointer; filter: drop-shadow(0 8px 22px rgba(150,110,20,.13)); }
     /* Desktop: the circle of fifths + key summary sit side-by-side (no wasted
        space), with the wide detail (scale, keyboard, chords, signature) full
        width beneath — separated by a hairline like the rest of the app. */
@@ -986,9 +986,9 @@
         margin-top: 26px; padding-top: 26px; border-top: 1px solid #ece4d8;
       }
     }
-    .cof-segment { cursor: pointer; }
-    .cof-segment path { transition: opacity .12s; }
-    .cof-segment:hover path { opacity: .8; }
+    .cof-seg { cursor: pointer; }
+    .cof-seg path { transition: opacity .15s; }
+    .cof-seg:hover path { opacity: .82; }
     .key-title { font-size: 1.7rem; font-weight: 800; color: var(--text); line-height: 1; }
     .scale-notes-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 4px; }
     .scale-note {
@@ -3854,6 +3854,29 @@ function buildCOF() {
   const cx = 150, cy = 150, GAP = 1.8;
   const R_OUTER = 138, R_MID = 91, R_INNER = 54;
 
+  // Warm, light palette — coherent with the app's cream/gold theme.
+  const STROKE   = '#ffffff';   // crisp pie-slice separators
+  const OUTER_BG = '#fbf4e6';   // major ring (light cream)
+  const INNER_BG = '#f0e6d2';   // minor ring (a touch deeper, so the two rings read distinctly)
+  const RELATED  = '#fbe7ac';   // related-key glow (pale gold)
+  const SEL_BG   = '#f5c518';   // selected key (gold)
+  const TXT      = '#6b5740';   // key letters (warm dark)
+  const TXT_SEC  = '#b4a288';   // enharmonic secondary
+  const TXT_SEL  = '#3a2c00';   // text on the gold selected slice
+
+  // Spatial relationships: highlight the selected key's neighbours so the circle
+  // of fifths actually *teaches* — dominant/subdominant sit either side, the
+  // relative key sits across the ring.
+  const s = keSelection.idx;
+  const relOuter = new Set(), relInner = new Set();
+  if (keSelection.mode === 'major') {
+    relOuter.add((s + 1) % 12); relOuter.add((s + 11) % 12); // V (dominant), IV (subdominant)
+    relInner.add(s);                                         // relative minor
+  } else {
+    relInner.add((s + 1) % 12); relInner.add((s + 11) % 12);
+    relOuter.add(s);                                         // relative major
+  }
+
   let h = '';
   COF_KEYS.forEach(function(key, i) {
     const midAngle   = i * 30;
@@ -3863,16 +3886,16 @@ function buildCOF() {
     const minSel = keSelection.mode === 'minor' && keSelection.idx === i;
 
     const isEharmFlipped = majSel && keSelection.eharmFlipped;
-    const outerFill = majSel ? '#f0ebe2' : '#1c2a45';
+    const outerFill = majSel ? SEL_BG : (relOuter.has(i) ? RELATED : OUTER_BG);
     const outerPath = annularArcPath(cx, cy, R_MID, R_OUTER, startAngle, endAngle);
     const lx = +(cx + ((R_MID + R_OUTER) / 2) * Math.sin(midAngle * Math.PI/180)).toFixed(2);
     const ly = +(cy - ((R_MID + R_OUTER) / 2) * Math.cos(midAngle * Math.PI/180)).toFixed(2);
     const majPrimary  = isEharmFlipped ? key.eharm  : key.name;
     const majSecondary= isEharmFlipped ? key.name   : key.eharm;
-    const majPrimFill = majSel ? '#1a1410' : 'rgba(255,255,255,.9)';
-    const majSecFill  = majSel ? 'rgba(26,20,16,.5)' : 'rgba(255,255,255,.4)';
-    h += `<g onclick="selectMajorKey(${i})" style="cursor:pointer">
-      <path d="${outerPath}" fill="${outerFill}" stroke="#06080f" stroke-width="1.5"/>`;
+    const majPrimFill = majSel ? TXT_SEL : TXT;
+    const majSecFill  = majSel ? 'rgba(58,44,0,.5)' : TXT_SEC;
+    h += `<g class="cof-seg" onclick="selectMajorKey(${i})" style="cursor:pointer">
+      <path d="${outerPath}" fill="${outerFill}" stroke="${STROKE}" stroke-width="2"/>`;
     if (key.eharm) {
       h += `<text x="${lx}" y="${ly - 5.5}" text-anchor="middle" dominant-baseline="central"
           font-size="${majPrimary.length > 2 ? '9' : '11'}" font-weight="800"
@@ -3889,16 +3912,16 @@ function buildCOF() {
 
     const mKey = COF_MINOR_KEYS[i];
     const isMinEharmFlipped = minSel && keSelection.eharmFlipped;
-    const innerFill = minSel ? '#f0ebe2' : '#0d1120';
+    const innerFill = minSel ? SEL_BG : (relInner.has(i) ? RELATED : INNER_BG);
     const innerPath = annularArcPath(cx, cy, R_INNER, R_MID, startAngle, endAngle);
     const mx = +(cx + ((R_INNER + R_MID) / 2) * Math.sin(midAngle * Math.PI/180)).toFixed(2);
     const my = +(cy - ((R_INNER + R_MID) / 2) * Math.cos(midAngle * Math.PI/180)).toFixed(2);
     const mPrimary   = (isMinEharmFlipped ? mKey.eharm : mKey.name).replace(' min','m');
     const mSecondary = mKey.eharm ? (isMinEharmFlipped ? mKey.name : mKey.eharm).replace(' min','m') : null;
-    const mPrimFill  = minSel ? '#1a1410' : 'rgba(255,255,255,.78)';
-    const mSecFill   = minSel ? 'rgba(26,20,16,.45)' : 'rgba(255,255,255,.38)';
-    h += `<g onclick="selectMinorKey(${i})" style="cursor:pointer">
-      <path d="${innerPath}" fill="${innerFill}" stroke="#06080f" stroke-width="1.5"/>`;
+    const mPrimFill  = minSel ? TXT_SEL : 'rgba(107,87,64,.92)';
+    const mSecFill   = minSel ? 'rgba(58,44,0,.45)' : TXT_SEC;
+    h += `<g class="cof-seg" onclick="selectMinorKey(${i})" style="cursor:pointer">
+      <path d="${innerPath}" fill="${innerFill}" stroke="${STROKE}" stroke-width="2"/>`;
     if (mSecondary) {
       h += `<text x="${mx}" y="${my - 4.5}" text-anchor="middle" dominant-baseline="central"
           font-size="${mPrimary.length > 3 ? '6.5' : '7.5'}" font-weight="700"
@@ -3914,9 +3937,17 @@ function buildCOF() {
     h += `</g>`;
   });
 
-  h += `<circle cx="${cx}" cy="${cy}" r="44" fill="#07091a" stroke="rgba(255,255,255,.08)" stroke-width="1.5"/>`;
-  h += `<text x="${cx}" y="${cy - 7}" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(255,245,220,.6)" font-family="system-ui,sans-serif" letter-spacing="1">KEY</text>`;
-  h += `<text x="${cx}" y="${cy + 7}" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(255,245,220,.6)" font-family="system-ui,sans-serif" letter-spacing="1">EXPLORER</text>`;
+  // Center hub — shows the currently selected key, like a premium dial readout.
+  const selKeyObj = keSelection.mode === 'major' ? COF_KEYS[s] : COF_MINOR_KEYS[s];
+  const selFlip   = keSelection.eharmFlipped;
+  let hubName = (selFlip && selKeyObj.eharm) ? selKeyObj.eharm : selKeyObj.name;
+  if (keSelection.mode === 'minor') hubName = hubName.replace(' min', '');
+  const hubMode = keSelection.mode === 'major' ? 'MAJOR' : 'MINOR';
+  const hubFont = hubName.length > 2 ? 18 : (hubName.length > 1 ? 23 : 27);
+  h += `<circle cx="${cx}" cy="${cy}" r="44" fill="#ffffff" stroke="#f0e1b6" stroke-width="2"/>`;
+  h += `<circle cx="${cx}" cy="${cy}" r="41" fill="none" stroke="rgba(245,197,24,.30)" stroke-width="2"/>`;
+  h += `<text x="${cx}" y="${cy - 5}" text-anchor="middle" dominant-baseline="central" font-size="${hubFont}" font-weight="800" fill="#b8920a" font-family="system-ui,sans-serif" letter-spacing="-.5">${hubName}</text>`;
+  h += `<text x="${cx}" y="${cy + 16}" text-anchor="middle" dominant-baseline="central" font-size="8" font-weight="800" fill="#c4ad7a" font-family="system-ui,sans-serif" letter-spacing="2.5">${hubMode}</text>`;
 
   svg.innerHTML = h;
 }
