@@ -5498,6 +5498,29 @@ async function setupVodQaList(ev) {
   console.log("[VOD list] wrap:", !!wrap, "mux_playback_id:", ev.mux_playback_id, "ev.id:", ev.id);
   if (!wrap || !ev.mux_playback_id) return;
 
+  // Self-repair: if VOD t=0 was never captured live (e.g. a test/backstage
+  // rehearsal that never started Mux RTMP), Q&A timestamps can't be computed.
+  // The Daily cloud recording the VOD is built from has the real start time —
+  // ask the server to backfill it once (null-only, never overwrites a real
+  // stream). Admins/reviewers only; isAdmin covers any allowed member.
+  if (!ev.stream_started_at && isAdmin && authToken) {
+    try {
+      const r = await fetch("/api/daily", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` },
+        body: JSON.stringify({ action: "backfill-recording-start", eventId: ev.id })
+      });
+      const d = await r.json();
+      if (d?.stream_started_at) {
+        ev.stream_started_at = d.stream_started_at;
+        if (currentEvent && currentEvent.id === ev.id) currentEvent.stream_started_at = d.stream_started_at;
+        console.log("[VOD list] backfilled stream_started_at:", d.stream_started_at);
+      } else {
+        console.log("[VOD list] backfill returned no start:", d);
+      }
+    } catch (e) { console.warn("[VOD list] backfill-recording-start failed:", e); }
+  }
+
   // Primary source: event_qa_features — one row per feature window.
   // Fetch joined with event_qa so we get question text in one query.
   let featureWindows = null;
@@ -5610,7 +5633,9 @@ async function setupVodQaList(ev) {
         // Build one timestamp button per feature window for this question
         const windows = windowsByQa[q.id] || [];
         // The first featured moment — clicking anywhere on the row jumps here.
-        const firstSecs = windows.length
+        // Only when we have a real t=0 (streamStart); otherwise the offset would
+        // be raw epoch seconds and seek way past the video.
+        const firstSecs = (streamStart && windows.length)
           ? Math.max(0, Math.round((new Date(windows[0].featured_at).getTime() - streamStart) / 1000))
           : null;
         const tsBtns = windows.length
