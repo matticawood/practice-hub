@@ -3123,7 +3123,7 @@ function _postAuthorRowHTML(p, pt, timeAgo, extraHtml) {
         ${avatarHtml(p.email, p.name, 36, p.avatarUrl)}
         <span class="post-author-meta">
           <span class="post-author-name-line"><span class="post-author-name">${name}</span>${roleStar}</span>
-          <span class="post-author-time">${timeAgo}${p.edited_at ? ' · <span class="post-edited-marker">edited</span>' : ""}</span>
+          <span class="post-author-time">${p.pinned_at ? '<span class="post-pinned-marker" style="color:#e0a800;font-weight:600">📌 Pinned</span> · ' : ""}${timeAgo}${p.edited_at ? ' · <span class="post-edited-marker">edited</span>' : ""}</span>
         </span>
       </a>
       ${badge}
@@ -3571,6 +3571,9 @@ let _feedArrived = false;
 function _renderFilteredPosts() {
   const list = document.getElementById("posts-list");
   const q = _searchQuery.trim().toLowerCase();
+  // Pinned community posts float to the very top of the feed (most-recently
+  // pinned first). Non-pinnable items (focus/content/updates) get pin = 0.
+  const _pinTs = p => (p && p.pinned_at ? new Date(p.pinned_at).getTime() : 0);
 
   // Base filter by type
   let filtered = _postFilter
@@ -3601,25 +3604,26 @@ function _renderFilteredPosts() {
   // When a search query is active, only show matching community posts.
   let items = []; // { html, ts }
   if (!_postFilter) {
-    filtered.forEach(p => items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime() }));
+    filtered.forEach(p => items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime(), pin: _pinTs(p) }));
     if (!q) {
       _focusFeedItems.forEach(f => items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
       _contentFeedItems.forEach(f => items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
       _updateItems.forEach(f => items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
     }
-    items.sort((a, b) => b.ts - a.ts);
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0) || b.ts - a.ts);
   } else if (_postFilter === "practice_log") {
-    items = filtered.map(p => ({ html: practiceLogCardHTML(p), ts: new Date(p.created_at).getTime() }));
-    items.sort((a, b) => b.ts - a.ts);
+    items = filtered.map(p => ({ html: practiceLogCardHTML(p), ts: new Date(p.created_at).getTime(), pin: _pinTs(p) }));
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0) || b.ts - a.ts);
   } else if (_postFilter === "saved") {
     // Saved space: pull saved items across every feed source, newest first.
-    _posts.forEach(p => { if (_savedSet.has("community:" + p.id)) items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime() }); });
+    _posts.forEach(p => { if (_savedSet.has("community:" + p.id)) items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime(), pin: _pinTs(p) }); });
     _contentFeedItems.forEach(f => { if (_savedSet.has("content_feed:" + f.id)) items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
     _focusFeedItems.forEach(f => { if (_savedSet.has("weekly_focus:" + f.id)) items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
     _updateItems.forEach(f => { if (_savedSet.has("practice_room_update:" + f.id)) items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
-    items.sort((a, b) => b.ts - a.ts);
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0) || b.ts - a.ts);
   } else {
-    items = filtered.map(p => ({ html: postCardHTML(p), ts: 0 }));
+    items = filtered.map(p => ({ html: postCardHTML(p), ts: 0, pin: _pinTs(p) }));
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0));
   }
 
   if (!items.length) {
@@ -7125,6 +7129,7 @@ function renderDetail(postId) {
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="19" r="1.9"/></svg>
       </button>
       <div class="post-menu" id="post-menu-${p.id}" style="display:none">
+        ${isAdmin ? `<button class="post-menu-item" onclick="togglePinPost('${p.id}', ${p.pinned_at ? "false" : "true"})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5z"/></svg>${p.pinned_at ? "Unpin" : "Pin to top"}</button>` : ""}
         ${canEdit ? `<button class="post-menu-item" onclick="editPost('${p.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>Edit</button>` : ""}
         ${canDelete ? `<button class="post-menu-item post-menu-item-danger" onclick="deletePost('${p.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Delete</button>` : ""}
       </div>
@@ -7448,6 +7453,20 @@ async function deletePost(postId) {
   const { error } = await db.from("community_posts").delete().eq("id", postId);
   if (error) { alert("Couldn't delete: " + error.message); return; }
   showList();
+  await loadPosts();
+}
+
+// Pin / unpin a post to the top of the community feed (admin only — the
+// community_posts UPDATE policy already lets the owner update any post).
+async function togglePinPost(postId, pin) {
+  _closePostMenus();
+  const { error } = await db.from("community_posts")
+    .update({ pinned_at: pin ? new Date().toISOString() : null })
+    .eq("id", postId);
+  if (error) { alert("Couldn't update pin: " + error.message); return; }
+  // Keep the in-memory copy in sync so the re-render reflects it immediately.
+  const post = _posts.find(p => p.id === postId);
+  if (post) post.pinned_at = pin ? new Date().toISOString() : null;
   await loadPosts();
 }
 
