@@ -1553,10 +1553,15 @@ function _shPostBridge(name, payload) {
 async function _shSavePushToken(token) {
   if (!_shPushDb || !_shPushEmail || !token) return;
   try {
+    // Capture the device's IANA timezone so scheduled reminders (e.g. goal
+    // due/overdue) can be delivered at a sensible local hour rather than UTC.
+    let _tz = null;
+    try { _tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { /* keep null */ }
     await _shPushDb.from("device_tokens").upsert({
       email:    _shPushEmail.toLowerCase(),
       platform: "ios",
       token,
+      timezone: _tz,
       last_seen_at: new Date().toISOString(),
     }, { onConflict: "token" });
   } catch (e) { console.warn("[push] token upsert failed:", e); }
