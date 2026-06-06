@@ -18443,8 +18443,9 @@ async function saveSession() {
     // Reload data
     await loadData();
 
-    // Session is saved — drop the in-progress draft (no-ops if none).
+    // Session is saved — drop the in-progress draft + device mirror (no-ops if none).
     await _deleteCurrentDraft();
+    if (typeof _clearLocalMirror === "function") _clearLocalMirror();
 
     // Detect & notify any achievements earned by THIS session right away, rather
     // than waiting for the user to open the Stats tab (loadData has just
@@ -19270,6 +19271,10 @@ async function bootApp() {
   await loadData();
   loadMyUserPieces(); // non-blocking — populates _myUserPieces for piece search
   await checkFulfilledRequests();
+
+  // Recover any device-mirrored practice entry (e.g. work done while the session
+  // had silently expired) into the drafts list now that we're authenticated.
+  if (typeof _recoverLocalDraft === "function") _recoverLocalDraft();
 
   // Deep-link routing: support both #tab and ?goto=sub-section from shared nav
   const _dlHash  = window.location.hash.replace("#", "").trim();
@@ -21286,9 +21291,50 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   let _draftSaving    = false;
   let _draftLastJSON  = null;
   let _draftsCache    = [];
+  const _DRAFT_LS_KEY = "tc_practice_draft_v1";
 
   function _draftWizardOpen() {
     return !!document.getElementById("log-wizard-backdrop")?.classList.contains("open");
+  }
+
+  // ── localStorage safety net ───────────────────────────────────────────────
+  // Mirror the live entry to the device on every edit. This needs no auth and
+  // survives a logout / crash / tab-close, so even if the DB writes were failing
+  // (e.g. the session silently expired) the work is recovered into the drafts
+  // list on the next authenticated load.
+  function _writeLocalMirror() {
+    try {
+      if (editingSessionId || !myEmail) return;
+      const d = _serializeDraft();
+      if (!_draftHasContent(d)) { localStorage.removeItem(_DRAFT_LS_KEY); return; }
+      localStorage.setItem(_DRAFT_LS_KEY, JSON.stringify({ email: myEmail, draftId: _currentDraftId, ...d, ts: Date.now() }));
+    } catch (e) {}
+  }
+  function _clearLocalMirror() { try { localStorage.removeItem(_DRAFT_LS_KEY); } catch (e) {} }
+
+  // On load, push any device-mirrored entry to the server (de-duped against the
+  // existing draft; newer local edits win) so it shows up under "Open drafts".
+  async function _recoverLocalDraft() {
+    let raw; try { raw = localStorage.getItem(_DRAFT_LS_KEY); } catch (e) { return; }
+    if (!raw) return;
+    let m; try { m = JSON.parse(raw); } catch (e) { _clearLocalMirror(); return; }
+    if (!m || m.email !== myEmail || !_draftHasContent({ items: m.items, notes: m.notes })) { _clearLocalMirror(); return; }
+    try {
+      const drafts = await _fetchDrafts();
+      const existing = m.draftId ? drafts.find(d => d.id === m.draftId) : null;
+      if (existing) {
+        // The server copy might be older than local edits that never synced.
+        if (m.ts && new Date(m.ts) > new Date(existing.updated_at)) {
+          await db.from("practice_session_drafts")
+            .update({ session_date: m.session_date, notes: m.notes, items: m.items, updated_at: new Date().toISOString() })
+            .eq("id", m.draftId);
+        }
+      } else {
+        await db.from("practice_session_drafts")
+          .insert({ email: myEmail, session_date: m.session_date, notes: m.notes, items: m.items, updated_at: new Date().toISOString() });
+      }
+    } catch (e) { console.warn("Draft recovery failed:", e?.message || e); return; }  // keep mirror; retry next load
+    _clearLocalMirror();
   }
 
   // Serialize the current form WITHOUT mutating the DOM (don't pull the slotted
@@ -21325,6 +21371,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   async function _saveDraftNow(opts = {}) {
     if (_draftSaving || editingSessionId || !myEmail) return;
     const d = _serializeDraft();
+    _writeLocalMirror();        // keep the device copy current even if the DB write fails
     const json = JSON.stringify(d);
     if (!opts.force && json === _draftLastJSON) return;       // nothing changed
     if (!_draftHasContent(d)) {                                // emptied out
@@ -21357,6 +21404,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 
   function _scheduleDraftSave() {
     if (editingSessionId || !_draftWizardOpen()) return;
+    _writeLocalMirror();        // instant device copy (no auth, can't fail)
     if (_draftTimer) clearTimeout(_draftTimer);
     _draftTimer = setTimeout(() => { _saveDraftNow(); }, 1200);
   }
@@ -21415,6 +21463,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     await _saveDraftNow({ force: true });
     const parked = !!_currentDraftId;
     _currentDraftId = null; _draftLastJSON = null;   // park it → now shows in "Open drafts"
+    _clearLocalMirror();                              // it's safely in the DB now
     if (parked) showToast("Draft saved — find it under “Open drafts” any time.", 4500);
     _wizFinalize();
   }
