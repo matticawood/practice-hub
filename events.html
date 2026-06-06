@@ -5606,18 +5606,23 @@ async function setupVodQaList(ev) {
       ${questions.map(q => {
         // Build one timestamp button per feature window for this question
         const windows = windowsByQa[q.id] || [];
+        // The first featured moment — clicking anywhere on the row jumps here.
+        const firstSecs = windows.length
+          ? Math.max(0, Math.round((new Date(windows[0].featured_at).getTime() - streamStart) / 1000))
+          : null;
         const tsBtns = windows.length
           ? windows.map(w => {
               const offset = fmtOffset(w.featured_at);
               if (!offset) return '';
               const secs = Math.max(0, Math.round((new Date(w.featured_at).getTime() - streamStart) / 1000));
-              return `<button class="vod-qa-ts" onclick="vodSeekTo(${secs})" title="Jump to this moment">${offset}</button>`;
+              return `<button class="vod-qa-ts" onclick="event.stopPropagation();vodSeekTo(${secs})" title="Jump to this moment">${offset}</button>`;
             }).filter(Boolean).join("")
           : `<span class="vod-qa-ts no-ts">—</span>`;
         const askerName = q.name || q.email?.split("@")[0] || "Anonymous";
         const askerUrl  = q.email ? (_streamAvatarCache?.[q.email] ?? null) : null;
+        const rowSeek = firstSecs != null ? ` onclick="vodSeekTo(${firstSecs})" style="cursor:pointer"` : "";
         return `
-          <div class="vod-qa-row" data-qa-id="${q.id}">
+          <div class="vod-qa-row" data-qa-id="${q.id}"${rowSeek}>
             <div class="vod-qa-ts-group">${tsBtns}</div>
             <div class="vod-qa-row-body">
               <div class="vod-qa-row-q">${esc(q.question)}</div>
@@ -5689,8 +5694,13 @@ async function setupVodQaList(ev) {
 function vodSeekTo(seconds) {
   const player = document.getElementById("vod-mux-player");
   if (!player) return;
-  player.currentTime = seconds;
-  player.play?.();
+  // Start playback first so the media is loaded, then seek. mux-player can
+  // silently ignore a currentTime set before it's ready, so retry briefly.
+  try { player.play?.(); } catch(e) {}
+  const doSeek = () => { try { player.currentTime = seconds; } catch(e) {} };
+  doSeek();
+  setTimeout(doSeek, 150);
+  setTimeout(doSeek, 500);
   // Scroll the player into view smoothly
   document.getElementById("vod-player-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
