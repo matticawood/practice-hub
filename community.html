@@ -1098,6 +1098,17 @@
       overflow: hidden;
     }
     .post-card:hover { border-color: #dcdee3; box-shadow: 0 5px 18px rgba(60,40,20,.08); }
+    /* Admin "pin to top" control injected into cards that have no ⋮ menu. */
+    .post-card { position: relative; }
+    .feed-pin-btn { position: absolute; top: 10px; right: 10px; z-index: 4; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(60,40,20,.06); }
+    .feed-pin-btn:hover { color: #e0a800; border-color: #e0a800; }
+    .feed-pin-btn.is-pinned { color: #e0a800; border-color: #e0a800; background: rgba(224,168,0,.12); }
+    .feed-pin-ribbon { position: absolute; top: 0; left: 0; z-index: 3; background: #e0a800; color: #fff; font-size: .66rem; font-weight: 700; letter-spacing: .02em; padding: 2px 9px; border-bottom-right-radius: 9px; pointer-events: none; }
+    /* Inline pin control for community author rows (sits after the type badge). */
+    .pin-chip { font-size: .8rem; flex-shrink: 0; align-self: center; }
+    .pin-inline-btn { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; align-self: center; }
+    .pin-inline-btn:hover { color: #e0a800; border-color: #e0a800; }
+    .pin-inline-btn.is-pinned { color: #e0a800; border-color: #e0a800; background: rgba(224,168,0,.12); }
     /* ── Monthly Champions celebration card ── */
     .champ-card { padding: 0; border-color: #ece9ef; box-shadow: 0 6px 26px rgba(60,40,20,.10); }
     .champ-hero { position: relative; overflow: hidden; text-align: center; padding: 26px 18px 20px; background: radial-gradient(130% 110% at 50% -10%, #fff6dd 0%, #fffdf8 58%, #ffffff 100%); border-bottom: 1px solid #f2ede1; }
@@ -3127,6 +3138,7 @@ function _postAuthorRowHTML(p, pt, timeAgo, extraHtml) {
         </span>
       </a>
       ${badge}
+      ${_pinInline("community", p.id)}
       ${extraHtml || ""}
     </div>`;
 }
@@ -3568,10 +3580,67 @@ function _membersSkeletonHTML(n) {
 }
 let _feedArrived = false;
 
+// ── Pin any feed item to the top (admin only) ─────────────────────────────────
+// Source-agnostic: one community_feed_pins table covers community posts,
+// content-feed posts, weekly focus and practice-room updates.
+let _pinsMap = {}; // "source:id" -> pinned_at (ms)
+function _pinKey(source, id) { return source + ":" + id; }
+function _isPinned(source, id) { return _pinsMap[_pinKey(source, id)] != null; }
+function _pinVal(source, id)   { return _pinsMap[_pinKey(source, id)] || 0; }
+
+async function _loadPins() {
+  const { data } = await db.from("community_feed_pins").select("source,source_id,pinned_at");
+  _pinsMap = {};
+  (data || []).forEach(r => { _pinsMap[_pinKey(r.source, String(r.source_id))] = new Date(r.pinned_at).getTime(); });
+}
+
+async function togglePin(source, id, pin) {
+  _closePostMenus();
+  if (pin) {
+    const { error } = await db.from("community_feed_pins")
+      .upsert({ source, source_id: String(id) }, { onConflict: "source,source_id" });
+    if (error) { alert("Couldn't pin: " + error.message); return; }
+    _pinsMap[_pinKey(source, String(id))] = Date.now();
+  } else {
+    const { error } = await db.from("community_feed_pins")
+      .delete().eq("source", source).eq("source_id", String(id));
+    if (error) { alert("Couldn't unpin: " + error.message); return; }
+    delete _pinsMap[_pinKey(source, String(id))];
+  }
+  _renderFilteredPosts();
+}
+
+// Inject an admin pin button + 📌 ribbon into a feed card that has no ⋮ menu
+// (content-feed / weekly-focus / update cards). Community cards pin via their menu.
+function _feedPinBtn(source, id) {
+  const pinned = _isPinned(source, id);
+  const ribbon = pinned ? `<span class="feed-pin-ribbon">📌 Pinned</span>` : "";
+  const btn = isAdmin
+    ? `<button class="feed-pin-btn${pinned ? " is-pinned" : ""}" title="${pinned ? "Unpin" : "Pin to top"}" onclick="event.stopPropagation();togglePin('${source}','${id}',${pinned ? "false" : "true"})"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5z"/></svg></button>`
+    : "";
+  return ribbon + btn;
+}
+function _injectPin(html, source, id) {
+  const ctrl = _feedPinBtn(source, id);
+  if (!ctrl) return html;
+  return html.replace(/(<div class="post-card[^"]*"[^>]*>)/, `$1${ctrl}`);
+}
+
+// Inline pin control for cards that have an author row (community posts) — sits
+// after the type badge so it never overlaps it. A 📌 chip shows the pinned state
+// to everyone; the toggle button shows for admins only.
+function _pinInline(source, id) {
+  const pinned = _isPinned(source, id);
+  const chip = pinned ? `<span class="pin-chip" title="Pinned">📌</span>` : "";
+  const btn = isAdmin
+    ? `<button class="pin-inline-btn${pinned ? " is-pinned" : ""}" title="${pinned ? "Unpin" : "Pin to top"}" onclick="event.stopPropagation();togglePin('${source}','${id}',${pinned ? "false" : "true"})"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5z"/></svg></button>`
+    : "";
+  return chip + btn;
+}
+
 function _renderFilteredPosts() {
   const list = document.getElementById("posts-list");
   const q = _searchQuery.trim().toLowerCase();
-
   // Base filter by type
   let filtered = _postFilter
     ? _posts.filter(p => p.type === _postFilter)
@@ -3599,27 +3668,31 @@ function _renderFilteredPosts() {
   // When showing the unfiltered feed, weave focus cards into the post stream
   // by date so they appear naturally where they belong chronologically.
   // When a search query is active, only show matching community posts.
-  let items = []; // { html, ts }
+  // Pinned items (any source) float to the very top of the feed, most-recently
+  // pinned first, then normal date order. Pins come from community_feed_pins via
+  // _pinVal(); non-community cards get an injected admin pin button + 📌 ribbon.
+  let items = []; // { html, ts, pin }
   if (!_postFilter) {
-    filtered.forEach(p => items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime() }));
+    filtered.forEach(p => items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime(), pin: _pinVal("community", p.id) }));
     if (!q) {
-      _focusFeedItems.forEach(f => items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
-      _contentFeedItems.forEach(f => items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
-      _updateItems.forEach(f => items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }));
+      _focusFeedItems.forEach(f => items.push({ html: _injectPin(focusFeedCardHTML(f), "weekly_focus", f.id), ts: new Date(f.published_at).getTime(), pin: _pinVal("weekly_focus", f.id) }));
+      _contentFeedItems.forEach(f => items.push({ html: _injectPin(contentFeedCardHTML(f), "content_feed", f.id), ts: new Date(f.published_at).getTime(), pin: _pinVal("content_feed", f.id) }));
+      _updateItems.forEach(f => items.push({ html: _injectPin(updateFeedCardHTML(f), "practice_room_update", f.id), ts: new Date(f.published_at).getTime(), pin: _pinVal("practice_room_update", f.id) }));
     }
-    items.sort((a, b) => b.ts - a.ts);
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0) || b.ts - a.ts);
   } else if (_postFilter === "practice_log") {
-    items = filtered.map(p => ({ html: practiceLogCardHTML(p), ts: new Date(p.created_at).getTime() }));
-    items.sort((a, b) => b.ts - a.ts);
+    items = filtered.map(p => ({ html: practiceLogCardHTML(p), ts: new Date(p.created_at).getTime(), pin: _pinVal("community", p.id) }));
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0) || b.ts - a.ts);
   } else if (_postFilter === "saved") {
     // Saved space: pull saved items across every feed source, newest first.
-    _posts.forEach(p => { if (_savedSet.has("community:" + p.id)) items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime() }); });
-    _contentFeedItems.forEach(f => { if (_savedSet.has("content_feed:" + f.id)) items.push({ html: contentFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
-    _focusFeedItems.forEach(f => { if (_savedSet.has("weekly_focus:" + f.id)) items.push({ html: focusFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
-    _updateItems.forEach(f => { if (_savedSet.has("practice_room_update:" + f.id)) items.push({ html: updateFeedCardHTML(f), ts: new Date(f.published_at).getTime() }); });
-    items.sort((a, b) => b.ts - a.ts);
+    _posts.forEach(p => { if (_savedSet.has("community:" + p.id)) items.push({ html: p.type === "practice_log" ? practiceLogCardHTML(p) : postCardHTML(p), ts: new Date(p.created_at).getTime(), pin: _pinVal("community", p.id) }); });
+    _contentFeedItems.forEach(f => { if (_savedSet.has("content_feed:" + f.id)) items.push({ html: _injectPin(contentFeedCardHTML(f), "content_feed", f.id), ts: new Date(f.published_at).getTime(), pin: _pinVal("content_feed", f.id) }); });
+    _focusFeedItems.forEach(f => { if (_savedSet.has("weekly_focus:" + f.id)) items.push({ html: _injectPin(focusFeedCardHTML(f), "weekly_focus", f.id), ts: new Date(f.published_at).getTime(), pin: _pinVal("weekly_focus", f.id) }); });
+    _updateItems.forEach(f => { if (_savedSet.has("practice_room_update:" + f.id)) items.push({ html: _injectPin(updateFeedCardHTML(f), "practice_room_update", f.id), ts: new Date(f.published_at).getTime(), pin: _pinVal("practice_room_update", f.id) }); });
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0) || b.ts - a.ts);
   } else {
-    items = filtered.map(p => ({ html: postCardHTML(p), ts: 0 }));
+    items = filtered.map(p => ({ html: postCardHTML(p), ts: 0, pin: _pinVal("community", p.id) }));
+    items.sort((a, b) => (b.pin || 0) - (a.pin || 0));
   }
 
   if (!items.length) {
@@ -5947,6 +6020,7 @@ async function loadPosts() {
     db.from("practice_room_updates").select("*").order("published_at", { ascending: false }).limit(50),
     _loadFocusFeedItems(),
     loadSavedPosts(),
+    _loadPins(),
   ]);
   const { data: posts, error } = postsResult;
 
