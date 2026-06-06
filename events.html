@@ -4520,10 +4520,16 @@ async function joinStream(eventId, options = {}) {
         }
 
         // First join only ────────────────────────────────────────────────────
-        // Start Daily cloud recording
+        // Start Daily cloud recording (this is what becomes the VOD).
         try { await window._callFrame.startRecording(); } catch(e) {
           console.warn("startRecording failed:", e.message);
         }
+        // Stamp stream_started_at = recording start = VOD t=0 right away, so Q&A
+        // timestamp sync works even when Mux RTMP wasn't provisioned (e.g. test
+        // events with no stream key). RTMP, when present, starts at ~the same time.
+        const streamStartedAt = new Date().toISOString();
+        currentEvent.stream_started_at = streamStartedAt;
+        db.from("live_events").update({ stream_started_at: streamStartedAt }).eq("id", currentEvent.id).then();
         // Start RTMP live streaming to Mux (gallery layout by default)
         const streamKey = currentEvent._muxStreamKey;
         console.log("[Mux] stream key present:", !!streamKey, "| playback ID:", currentEvent.mux_live_playback_id || "none");
@@ -4534,10 +4540,6 @@ async function joinStream(eventId, options = {}) {
               layout:  { preset: "default" }
             });
             console.log("[Mux] live streaming started successfully");
-            // Record the moment RTMP begins — this is VOD t=0 for Q&A timestamp sync
-            const streamStartedAt = new Date().toISOString();
-            currentEvent.stream_started_at = streamStartedAt;
-            db.from("live_events").update({ stream_started_at: streamStartedAt }).eq("id", currentEvent.id).then();
             // Show layout controls now that streaming is confirmed active
             document.getElementById("stream-layout-controls")?.classList.add("visible");
           } catch(e) {
