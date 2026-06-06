@@ -650,7 +650,7 @@ let _achExtras = {
 };
 
 async function loadAchievementExtras() {
-  const email = viewingEmail || myEmail;
+  const email = (typeof viewingEmail !== "undefined" && viewingEmail) || myEmail;
   const isOwn = email === myEmail;
 
   const [readResult, gamesResult, colResult, nrResult, crResult] = await Promise.all([
@@ -796,7 +796,7 @@ function computeAchievements(sessions, dbEarned = new Set()) {
 async function checkNewAchievements() {
   // Only run for the logged-in user — when viewing another user's profile,
   // allSessions/_achExtras contain their data and would trigger false toasts.
-  if (viewingEmail && viewingEmail !== myEmail) return;
+  if (typeof viewingEmail !== "undefined" && viewingEmail && viewingEmail !== myEmail) return;
   const storageKey = `ach_earned_${myEmail}`;
   const known      = new Set(JSON.parse(localStorage.getItem(storageKey) || "[]"));
   const results    = computeAchievements(allSessions);
@@ -929,3 +929,33 @@ async function insertNotification(type, title, body, linkUrl, sourceId, metadata
   await window._shLoadNotifs?.();
 }
 
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Universal achievement check — call window.tcCheckAchievements() from ANY page
+ * after an action that could earn an achievement (mark a piece complete, post a
+ * comment, attend a live event, set an avatar, etc.). It loads the full data set
+ * the engine needs (sessions + streak + extras) so detection is accurate and
+ * never clobbers the "earned" set, then notifies any newly-earned achievements.
+ *
+ * Debounced: at most once per 15s (loadAchievementExtras runs ~15 queries), so
+ * rapid actions (e.g. several reactions) don't hammer the database.
+ * Pass { force: true } to bypass the debounce.
+ * ────────────────────────────────────────────────────────────────────────────── */
+let _tcAchCheckTs = 0;
+async function tcCheckAchievements(opts) {
+  try {
+    if (typeof db === "undefined" || !db) return;
+    if (typeof myEmail === "undefined" || !myEmail) return;
+    const force = opts && opts.force;
+    const now = Date.now();
+    if (!force && now - _tcAchCheckTs < 15000) return;
+    _tcAchCheckTs = now;
+    const s = await db.rpc("get_my_sessions", { p_email: myEmail });
+    if (!s.error) allSessions = s.data || [];
+    const st = await db.from("streak_tokens").select("*").eq("email", myEmail).maybeSingle();
+    if (!st.error) streakData = st.data;
+    await loadAchievementExtras();
+    await checkNewAchievements();
+  } catch (e) { console.warn("tcCheckAchievements failed:", e); }
+}
+window.tcCheckAchievements = tcCheckAchievements;
