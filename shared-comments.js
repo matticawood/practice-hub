@@ -885,6 +885,7 @@
           metadata: { parent_id: parentId, emoji },
         }).catch(() => {});
       }
+      window.tcCheckAchievements?.();  // reacting can earn engagement achievements
     },
 
     // Show likers popover for a parent ID
@@ -1069,6 +1070,7 @@
           exclude:  [_cfg?.ownerEmail].filter(Boolean),
         });
       } catch(e){ console.warn("comment side-effects failed:", e); }
+      window.tcCheckAchievements?.();  // commenting can earn engagement achievements
       if(ta){ta.value="";ta.style.height="";}
       _clearState(key);
       _reset();
@@ -1118,6 +1120,7 @@
           exclude:  [replyToEmail].filter(Boolean),
         });
       } catch(e){ console.warn("reply side-effects failed:", e); }
+      window.tcCheckAchievements?.();  // replying can earn engagement achievements
       Comments.cancelReply(commentId);
       try { await Comments.load(parentId); }
       catch(e){ console.warn("comment reload failed:", e); _resetReply(); }
@@ -1260,6 +1263,7 @@
           metadata: { event_type: eventType, item_id: idStr, emoji },
         });
       }
+      window.tcCheckAchievements?.();  // reacting can earn engagement achievements
     },
 
     // Show reply composer for a comment
