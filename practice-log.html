@@ -6823,6 +6823,7 @@
         <button class="tab-dd-item active" data-dd-val="dashboard"    onclick="ddTab('log','dashboard')">Dashboard</button>
         <button class="tab-dd-item"        data-dd-val="stats"        onclick="ddTab('log','stats')">Stats</button>
         <button class="tab-dd-item"        data-dd-val="goals"        onclick="ddTab('log','goals')">Goals</button>
+        <button class="tab-dd-item"        data-dd-val="roadmap"      onclick="ddTab('log','roadmap')">Roadmap</button>
         <button class="tab-dd-item"        data-dd-val="history"      onclick="ddTab('log','history')">History</button>
         <button class="tab-dd-item"        data-dd-val="leaderboard"  onclick="ddTab('log','leaderboard')">Leaderboard</button>
         <button class="tab-dd-item"        data-dd-val="achievements" onclick="ddTab('log','achievements')" id="dd-ach-item" style="display:none">Achievements</button>
@@ -6875,6 +6876,7 @@
     <button class="msn-item active" data-msn-val="dashboard"    onclick="switchMainLbTab('dashboard')">Home</button>
     <button class="msn-item"        data-msn-val="stats"        onclick="switchMainLbTab('stats')">Stats</button>
     <button class="msn-item"        data-msn-val="goals"        onclick="switchMainLbTab('goals')">Goals</button>
+    <button class="msn-item"        data-msn-val="roadmap"      onclick="switchMainLbTab('roadmap')">Roadmap</button>
     <button class="msn-item"        data-msn-val="history"      onclick="switchMainLbTab('history')">History</button>
     <button class="msn-item"        data-msn-val="leaderboard"  onclick="switchMainLbTab('leaderboard')">Ranks</button>
     <button class="msn-item"        data-msn-val="achievements" onclick="switchMainLbTab('achievements')" id="msn-ach-item" style="display:none">Badges</button>
@@ -7154,6 +7156,11 @@
         </div>
       </div>
       <div id="ach-grid"></div>
+    </div>
+
+    <!-- Roadmap panel -->
+    <div id="lb-panel-roadmap" style="display:none;margin-top:14px">
+      <div id="roadmap-content"><div class="page-loading"><div class="loading-spinner"></div></div></div>
     </div>
 
     <!-- Community feed panel -->
@@ -9573,6 +9580,8 @@ function switchMainLbTab(main) {
   const lbPanel         = document.getElementById("lb-panel-leaderboard");
   const achPanel        = document.getElementById("lb-panel-achievements");
   const communityPanel  = document.getElementById("lb-panel-community");
+  const roadmapPanel    = document.getElementById("lb-panel-roadmap");
+  if (roadmapPanel)   roadmapPanel.style.display   = main === "roadmap"      ? "" : "none";
   if (dashPanel)      dashPanel.style.display      = main === "dashboard"    ? "" : "none";
   if (statsPanel)     statsPanel.style.display     = main === "stats"        ? "" : "none";
   if (goalsPanel)     goalsPanel.style.display     = main === "goals"        ? "" : "none";
@@ -9588,6 +9597,7 @@ function switchMainLbTab(main) {
   if (main === "goals")        { if (_goalsLoaded) { renderWeeklyGoalWidget(); renderPieceGoals(); } else { loadWeeklyGoal(); loadPieceGoals(); } }
   if (main === "leaderboard")  { renderLeaderboard(); loadLbOptOut(); }
   if (main === "achievements") { renderAchievements(); }
+  if (main === "roadmap")      { if (typeof renderRoadmap === "function") renderRoadmap(); }
   if (main === "community")    { renderCommunityFeed(); }
   // Keep dropdown in sync
   const dd = document.getElementById('tab-dd-log');
@@ -19324,6 +19334,7 @@ async function bootApp() {
   const _gotoMap = {
     stats:        { panel: "log",    sub: "stats" },
     goals:        { panel: "log",    sub: "goals" },
+    roadmap:      { panel: "log",    sub: "roadmap" },
     history:      { panel: "log",    sub: "history" },
     leaderboard:  { panel: "log",    sub: "leaderboard" },
     achievements: { panel: "log",    sub: "achievements" },
@@ -21312,6 +21323,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026060502"></script>
 <script src="/shared-member-modal.js?v=11"></script>
+<script src="/roadmap-levels.js?v=1"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
@@ -21640,6 +21652,243 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       if (open) _loadDraftFromId(open.dataset.draftOpen);
     });
   })();
+</script>
+
+<!-- ── Practice Roadmap ───────────────────────────────────────────────────── -->
+<style>
+  #lb-panel-roadmap { animation: dashFadeUp .4s cubic-bezier(.22,.61,.36,1) both; }
+  .rm-head { margin-bottom: 16px; }
+  .rm-head h2 { font-size: 1.4rem; font-weight: 800; letter-spacing: -.015em; margin: 0 0 4px; color: var(--text); }
+  .rm-note { font-size: .82rem; color: var(--text-muted); line-height: 1.5; }
+  .rm-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+  body.hub-mode .rm-card { box-shadow: 0 5px 18px rgba(60,40,20,.06); }
+  .rm-total-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .rm-total-stage { font-size: 1.5rem; font-weight: 800; color: var(--text); line-height: 1.1; letter-spacing: -.01em; }
+  .rm-total-grade { font-size: .8rem; color: var(--text-muted); margin-top: 3px; }
+  .rm-total-hours { text-align: right; flex-shrink: 0; }
+  .rm-total-hours .n { font-size: 1.6rem; font-weight: 900; color: var(--accent); line-height: 1; }
+  .rm-total-hours .l { font-size: .62rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .1em; margin-top: 4px; }
+  .rm-total-hours .baseline { font-size: .64rem; color: var(--text-muted); margin-top: 3px; }
+  .rm-progress { margin-bottom: 4px; }
+  .rm-bar { height: 8px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+  .rm-bar > i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #f7cb33, #f0a500); transition: width .6s cubic-bezier(.22,.61,.36,1); }
+  .rm-next { font-size: .74rem; color: var(--text-muted); margin-top: 6px; }
+  .rm-section-label { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted); margin: 18px 0 10px; }
+  .rm-path { position: relative; }
+  .rm-stage { position: relative; padding: 0 0 4px 38px; }
+  .rm-stage::before { content: ""; position: absolute; left: 13px; top: 26px; bottom: -4px; width: 2px; background: var(--border); }
+  .rm-stage:last-child::before { display: none; }
+  .rm-stage-dot { position: absolute; left: 4px; top: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); border: 2px solid var(--border); display: grid; place-items: center; font-size: .6rem; font-weight: 800; color: var(--text-muted); }
+  .rm-stage.done .rm-stage-dot { background: var(--accent); border-color: var(--accent); color: #3a2a00; }
+  .rm-stage.current .rm-stage-dot { background: var(--accent); border-color: var(--accent); color: #3a2a00; box-shadow: 0 0 0 4px rgba(245,197,24,.18); }
+  .rm-stage-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; padding: 3px 0 10px; flex-wrap: wrap; }
+  .rm-stage-name { font-size: .95rem; font-weight: 700; color: var(--text); }
+  .rm-stage.future .rm-stage-name { color: var(--text-muted); }
+  .rm-stage-meta { font-size: .72rem; color: var(--text-muted); }
+  .rm-stage-cur-pill { font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: #3a2a00; background: var(--accent); border-radius: 20px; padding: 2px 7px; }
+  .rm-stage-chev { margin-left: auto; color: var(--text-muted); transition: transform .2s; flex-shrink: 0; align-self: center; }
+  .rm-stage.open .rm-stage-chev { transform: rotate(180deg); }
+  .rm-stage-detail { display: none; padding: 0 0 14px; }
+  .rm-stage.open .rm-stage-detail { display: block; }
+  .rm-detail-block { margin-bottom: 10px; }
+  .rm-detail-label { font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: #b8900a; margin-bottom: 4px; }
+  .rm-detail-text { font-size: .85rem; color: var(--text); line-height: 1.6; }
+  .rm-browse { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: .78rem; font-weight: 700; color: #b8900a; text-decoration: none; }
+  .rm-browse:hover { text-decoration: underline; }
+  .rm-subgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  @media (max-width: 560px) { .rm-subgrid { grid-template-columns: 1fr; } }
+  .rm-sub { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 15px 16px; }
+  body.hub-mode .rm-sub { box-shadow: 0 4px 14px rgba(60,40,20,.05); }
+  .rm-sub-label { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+  .rm-sub-stage { font-size: 1.05rem; font-weight: 800; color: var(--text); margin: 3px 0 2px; }
+  .rm-sub-hours { font-size: .72rem; color: var(--text-muted); margin-bottom: 10px; }
+  .rm-baseline-btn { display: inline-flex; align-items: center; gap: 7px; background: transparent; border: 1.5px solid var(--border); border-radius: 10px; color: var(--text); cursor: pointer; font-family: inherit; font-size: .82rem; font-weight: 700; padding: 10px 14px; transition: border-color .15s; }
+  .rm-baseline-btn:hover { border-color: var(--accent); }
+  .rm-bl-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .rm-bl-row label { font-size: .82rem; color: var(--text); }
+  .rm-bl-row input { width: 90px; text-align: right; background: var(--surface-2); border: 1.5px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-family: inherit; font-size: .9rem; }
+  .rm-bl-row input:focus { outline: none; border-color: var(--accent); }
+  .rm-bl-hint { font-size: .72rem; color: var(--text-muted); margin: 4px 0 12px; }
+  .rm-bl-actions { display: flex; gap: 8px; }
+  .rm-bl-save { background: linear-gradient(135deg,#f7cb33,#f0a500); color: #3a2a00; border: none; border-radius: 10px; padding: 10px 18px; font-weight: 800; font-size: .85rem; cursor: pointer; font-family: inherit; }
+  .rm-bl-cancel { background: transparent; border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 16px; font-weight: 700; font-size: .85rem; cursor: pointer; font-family: inherit; color: var(--text-muted); }
+</style>
+<script>
+  let _practiceBaseline = null;   // null = not loaded; false = loading; object/0 = loaded
+  const _RM_TYPE_TO_TRACK = { piece:"repertoire", book:"repertoire", technique:"technique", sightreading:"sight_reading", theory:"musicianship", eartraining:"musicianship", improvisation:"musicianship" };
+
+  async function _rmLoadBaseline() {
+    const who = (typeof viewingEmail === "string" && viewingEmail) ? viewingEmail : myEmail;
+    if (!who) { _practiceBaseline = 0; return; }
+    try {
+      const { data, error } = await db.from("practice_baseline").select("*").eq("email", who).maybeSingle();
+      if (error) throw error;
+      _practiceBaseline = data || 0;
+    } catch (e) { console.warn("baseline load failed:", e?.message || e); _practiceBaseline = 0; }
+  }
+
+  function _rmTrackMinutes() {
+    const m = { total:0, repertoire:0, technique:0, sight_reading:0, musicianship:0 };
+    (typeof allSessions !== "undefined" ? allSessions || [] : []).forEach(s =>
+      (s.practice_items || []).forEach(it => {
+        const mins = it.duration_minutes || 0;
+        m.total += mins;
+        const tk = _RM_TYPE_TO_TRACK[it.item_type];
+        if (tk) m[tk] += mins;
+      })
+    );
+    if (_practiceBaseline && typeof _practiceBaseline === "object") {
+      const tot = Number(_practiceBaseline.total_minutes) || 0;
+      m.total += tot;
+      const split = _practiceBaseline.split || {};
+      ["repertoire","technique","sight_reading","musicianship"].forEach(k => { m[k] += tot * ((Number(split[k]) || 0) / 100); });
+    }
+    return m;
+  }
+
+  function _rmLevelFor(trackKey, hours) {
+    const lv = window.ROADMAP.levels[trackKey];
+    let cur = lv[0];
+    for (const L of lv) { if (hours + 1e-9 >= L.hours) cur = L; else break; }
+    const idx = lv.indexOf(cur);
+    const next = lv[idx + 1] || null;
+    const progress = next ? Math.max(0, Math.min(1, (hours - cur.hours) / (next.hours - cur.hours))) : 1;
+    return { cur, next, idx, progress };
+  }
+
+  function _rmFmtHrs(mins) {
+    const h = mins / 60;
+    if (h < 10) return (Math.round(h * 10) / 10) + "h";
+    return Math.round(h) + "h";
+  }
+
+  function renderRoadmap() {
+    const el = document.getElementById("roadmap-content");
+    if (!el || !window.ROADMAP) return;
+    if (_practiceBaseline === null) {
+      _practiceBaseline = false; // loading sentinel
+      _rmLoadBaseline().then(renderRoadmap);
+      return;
+    }
+    if (_practiceBaseline === false) return; // still loading
+
+    const mins = _rmTrackMinutes();
+    const isSelf = ((typeof viewingEmail === "string" ? viewingEmail : myEmail) === myEmail);
+    const totalHrs = mins.total / 60;
+    const T = _rmLevelFor("total", totalHrs);
+    const baselineHrs = (_practiceBaseline && typeof _practiceBaseline === "object") ? (Number(_practiceBaseline.total_minutes) || 0) / 60 : 0;
+    const nextTxt = T.next ? `${_rmFmtHrs((T.next.hours * 60) - mins.total)} to ${T.next.name}` : "You have reached the final stage.";
+
+    const stagesHTML = window.ROADMAP.levels.total.map(L => {
+      const state = L.level < (T.idx + 1) ? "done" : (L.level === (T.idx + 1) ? "current" : "future");
+      const browse = (L.tier != null)
+        ? `<a class="rm-browse" href="/resources.html?difficulty=${L.tier}"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Browse ${L.tierLabel} pieces</a>` : "";
+      return `<div class="rm-stage ${state} ${state === "current" ? "open" : ""}">
+        <div class="rm-stage-dot">${state === "done" ? "&#10003;" : L.level}</div>
+        <div class="rm-stage-head" onclick="_rmToggle(this)">
+          <span class="rm-stage-name">${L.name}</span>
+          ${state === "current" ? '<span class="rm-stage-cur-pill">You are here</span>' : ""}
+          <span class="rm-stage-meta">${L.hours.toLocaleString()}h${L.grade ? " &middot; " + L.grade : ""}</span>
+          <svg class="rm-stage-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="rm-stage-detail">
+          <div class="rm-detail-block"><div class="rm-detail-label">What you can now do</div><div class="rm-detail-text">${escHtml(L.canDo)}</div></div>
+          <div class="rm-detail-block"><div class="rm-detail-label">What to focus on now</div><div class="rm-detail-text">${escHtml(L.focus)}</div></div>
+          ${browse}
+        </div>
+      </div>`;
+    }).join("");
+
+    const subHTML = window.ROADMAP.tracks.filter(t => t.key !== "total").map(t => {
+      const L = _rmLevelFor(t.key, mins[t.key] / 60);
+      const nx = L.next ? `${_rmFmtHrs((L.next.hours * 60) - mins[t.key])} to ${L.next.name}` : "Final stage";
+      return `<div class="rm-sub">
+        <div class="rm-sub-label">${t.label}</div>
+        <div class="rm-sub-stage">${L.cur.name}</div>
+        <div class="rm-sub-hours">${_rmFmtHrs(mins[t.key])} &middot; ${nx}</div>
+        <div class="rm-bar"><i style="width:${Math.round(L.progress * 100)}%"></i></div>
+      </div>`;
+    }).join("");
+
+    el.innerHTML = `
+      <div class="rm-head">
+        <h2>Your Roadmap</h2>
+        <div class="rm-note">${escHtml(window.ROADMAP.note)}</div>
+      </div>
+      <div class="rm-card">
+        <div class="rm-total-top">
+          <div>
+            <div class="rm-sub-label">Total Practice</div>
+            <div class="rm-total-stage">${T.cur.name}</div>
+            <div class="rm-total-grade">${T.cur.grade || ""}</div>
+          </div>
+          <div class="rm-total-hours">
+            <div class="n">${_rmFmtHrs(mins.total)}</div>
+            <div class="l">Total</div>
+            ${baselineHrs > 0 ? `<div class="baseline">incl. ${Math.round(baselineHrs)}h before joining</div>` : ""}
+          </div>
+        </div>
+        <div class="rm-progress"><div class="rm-bar"><i style="width:${Math.round(T.progress * 100)}%"></i></div></div>
+        <div class="rm-next">${nextTxt}</div>
+        <div class="rm-section-label">The journey</div>
+        <div class="rm-path">${stagesHTML}</div>
+      </div>
+      <div class="rm-section-label">By area</div>
+      <div class="rm-subgrid">${subHTML}</div>
+      ${isSelf ? `<div style="margin-top:16px">
+        <button class="rm-baseline-btn" onclick="_rmOpenBaseline()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${baselineHrs > 0 ? "Edit your prior hours" : "Add your prior practice hours"}</button>
+        <div id="rm-baseline-form" style="display:none"></div>
+      </div>` : ""}
+    `;
+  }
+
+  function _rmToggle(headEl) { headEl.parentElement.classList.toggle("open"); }
+
+  function _rmOpenBaseline() {
+    const wrap = document.getElementById("rm-baseline-form");
+    if (!wrap) return;
+    if (wrap.style.display !== "none") { wrap.style.display = "none"; wrap.innerHTML = ""; return; }
+    const b = (_practiceBaseline && typeof _practiceBaseline === "object") ? _practiceBaseline : {};
+    const split = b.split || {};
+    const totalH = b.total_minutes ? Math.round((Number(b.total_minutes) || 0) / 60) : "";
+    const pct = k => (split[k] != null ? split[k] : "");
+    wrap.innerHTML = `
+      <div class="rm-card">
+        <div class="rm-sub-label" style="margin-bottom:10px">Practice before The Practice Room</div>
+        <div class="rm-bl-row"><label>Total hours</label><input id="rm-bl-total" type="number" min="0" step="1" value="${totalH}" placeholder="e.g. 300"></div>
+        <div class="rm-bl-hint">Roughly how those hours split across areas (percentages). Anything left over still counts toward your total.</div>
+        <div class="rm-bl-row"><label>Repertoire %</label><input id="rm-bl-repertoire" type="number" min="0" max="100" step="1" value="${pct('repertoire')}" placeholder="45"></div>
+        <div class="rm-bl-row"><label>Technique %</label><input id="rm-bl-technique" type="number" min="0" max="100" step="1" value="${pct('technique')}" placeholder="25"></div>
+        <div class="rm-bl-row"><label>Sight-reading %</label><input id="rm-bl-sight_reading" type="number" min="0" max="100" step="1" value="${pct('sight_reading')}" placeholder="10"></div>
+        <div class="rm-bl-row"><label>Musicianship %</label><input id="rm-bl-musicianship" type="number" min="0" max="100" step="1" value="${pct('musicianship')}" placeholder="20"></div>
+        <div class="rm-bl-actions">
+          <button class="rm-bl-save" onclick="_rmSaveBaseline()">Save</button>
+          <button class="rm-bl-cancel" onclick="_rmOpenBaseline()">Cancel</button>
+        </div>
+      </div>`;
+    wrap.style.display = "";
+  }
+
+  async function _rmSaveBaseline() {
+    const totalH = parseFloat(document.getElementById("rm-bl-total").value) || 0;
+    const split = {};
+    ["repertoire","technique","sight_reading","musicianship"].forEach(k => {
+      const v = parseFloat(document.getElementById("rm-bl-" + k).value);
+      if (v > 0) split[k] = Math.min(100, v);
+    });
+    if (Object.values(split).reduce((a, b) => a + b, 0) > 100) { showToast("Your percentages add up to more than 100. Please adjust.", 3500, true); return; }
+    try {
+      const payload = { email: myEmail, total_minutes: Math.round(totalH * 60), split, updated_at: new Date().toISOString() };
+      const { error } = await db.from("practice_baseline").upsert(payload, { onConflict: "email" });
+      if (error) throw error;
+      _practiceBaseline = payload;
+      showToast("Prior hours saved.", 2500);
+      renderRoadmap();
+    } catch (e) {
+      console.warn("baseline save failed:", e?.message || e);
+      showToast("Could not save prior hours (has the migration been run?).", 4500, true);
+    }
+  }
 </script>
 </body>
 </html>

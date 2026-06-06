@@ -19,6 +19,7 @@ const SH_SUBNAV = {
     { label: "Dashboard", href: "/practice-log.html" },
     { label: "Stats", href: "/practice-log.html?goto=stats" },
     { label: "Goals", href: "/practice-log.html?goto=goals" },
+    { label: "Roadmap", href: "/practice-log.html?goto=roadmap" },
     { label: "History", href: "/practice-log.html?goto=history" },
     { label: "Leaderboard", href: "/practice-log.html?goto=leaderboard" },
     { label: "Achievements", href: "/practice-log.html?goto=achievements" },

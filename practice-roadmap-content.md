@@ -1,0 +1,225 @@
+# The Practice Room — Practice Roadmap content (draft for review)
+
+This is the draft copy for the hours based practice roadmap. It seeds the admin editable
+`roadmap_levels` table, so anything here can be tuned later in the app without a redeploy.
+
+Three threads run through every level and deepen stage by stage:
+1. What you can do (capability).
+2. Understanding the music in order to make musical decisions.
+3. Problem solving: recognising recurring patterns and problems, and knowing how to fix them, more efficiently as you improve.
+
+Standing note shown on the roadmap page:
+> A guide, not a finish line. Everyone's journey is different, and hours are only part of the story.
+
+Track mapping (which logged practice feeds which track):
+| Track | Counts from |
+|---|---|
+| Repertoire | piece, book |
+| Technique | technique |
+| Sight-reading | sightreading |
+| Musicianship | theory, eartraining, improvisation |
+| Total (headline) | everything; "other" counts to Total only |
+
+Stages and cumulative-hour thresholds:
+| Stage | Total | Repertoire | Technique | Sight-reading | Musicianship |
+|---|--|--|--|--|--|
+| 1 First Steps | 0 | 0 | 0 | 0 | 0 |
+| 2 Beginner | 50 | 25 | 15 | 5 | 10 |
+| 3 Foundations | 150 | 70 | 40 | 15 | 30 |
+| 4 Intermediate | 350 | 160 | 90 | 35 | 70 |
+| 5 Confident | 700 | 320 | 175 | 70 | 140 |
+| 6 Advanced | 1,200 | 550 | 300 | 120 | 240 |
+| 7 Performer | 2,000 | 900 | 500 | 200 | 400 |
+| 8 Artist | 3,500 | 1,600 | 875 | 350 | 700 |
+
+Stage to pieces-library difficulty (library tiers: 0 Absolute Beginner, 1 Beginner, 2 Lower Intermediate, 3 Upper Intermediate, 4 Advanced, 5 Expert). Each stage names the kind of library piece a player can expect to be comfortable learning, so the build can link a stage straight to a filtered library view:
+| Stage | Comfortable learning (library tier) |
+|---|---|
+| 1 First Steps | Absolute Beginner |
+| 2 Beginner | Beginner |
+| 3 Foundations | Beginner moving into Lower Intermediate |
+| 4 Intermediate | Lower Intermediate |
+| 5 Confident | Upper Intermediate |
+| 6 Advanced | Advanced |
+| 7 Performer | Advanced moving into Expert |
+| 8 Artist | Expert |
+
+---
+
+## TOTAL JOURNEY
+
+### 1. First Steps — 0 to 50 hours — before Grade 1
+**What you can now do:** You are getting comfortable at the instrument for the first time. You can find your way around the keys, name the white notes without searching, and play simple single line melodies with one hand. You are beginning to use both hands together on very easy material, keeping a slow steady beat, and you can read basic notes around middle C. You are also starting to hear when something sounds right or wrong, even if you cannot yet say why, and short familiar tunes are within reach. In the library, the pieces you will be comfortable learning are those rated Absolute Beginner.
+**What to focus on now:** The priority is consistency and comfort, not difficulty. Aim to play most days, even for ten or fifteen minutes, so the movements start to feel natural. Concentrate on a relaxed hand shape, curved fingers and a loose wrist, and on keeping a steady pulse rather than rushing. When something goes wrong, get into the habit of stopping, finding the exact note or beat that tripped you, and trying that small part again slowly. The daily habit and that simple stop-and-fix instinct matter far more now than anything hard.
+
+### 2. Beginner — 50 to 150 hours — around Grade 1 to 2
+**What you can now do:** Simple pieces with both hands are coming together. You keep a steady pulse, read fluently in the most common keys, and coordinate your hands in straightforward textures such as a melody over a simple accompaniment. You are playing music you actually recognise, and you are beginning to understand a little of what you are playing, hearing the difference between major and minor and noticing where a phrase rises and falls. You can usually tell which hand or which bar is causing a problem. In the library, you will be comfortable learning Beginner rated pieces.
+**What to focus on now:** Build a reliable reading foundation so you are not memorising everything by ear. When a passage trips you, identify exactly where it goes wrong, practise that hand or that bar on its own slowly, then put it back together only once it is secure. This habit of isolating the problem is one of the most valuable things you can learn now. Begin your major scales and simple five finger patterns for evenness and finger strength, count out loud to keep time, and start shaping phrases with simple louder and softer contrasts so your playing already carries a little meaning.
+
+### 3. Foundations — 150 to 350 hours — around Grade 3 to 4
+**What you can now do:** Your hands are becoming genuinely independent, so the two parts can do different things at once with growing ease. You are comfortable in more keys, you handle dynamics and articulation such as legato and staccato, and you can play pieces with real character across a wider range of moods. You are starting to understand how a piece is put together, recognising its key and some of its chords, and you are noticing that the same kinds of difficulties, such as awkward fingerings or hand crossings, come up again and again. In the library, you are comfortable with Beginner pieces and starting to reach into Lower Intermediate.
+**What to focus on now:** Consolidate technique with regular scales and arpeggios across more keys, as this underpins almost everything ahead. Practise in small sections rather than always from the top, and when a spot keeps failing, slow down and work out why, because more often than not the fix is better fingering written into the score. Start connecting what you see on the page to what you hear, so dynamics and phrasing become choices rather than accidents. Introduce a little sight reading and some basic theory, and keep choosing pieces you love so the work stays enjoyable.
+
+### 4. Intermediate — 350 to 700 hours — around Grade 5
+**What you can now do:** You are a genuine intermediate player who is starting to understand the music, not just read it. You can shape a phrase with intention, manage trickier rhythms and fuller textures, and follow the structure of a piece, recognising its key, its main chords, and where the music builds tension and resolves it. Because you now understand a fair amount of theory, around Grade 5 standard, you can begin to see why a piece works the way it does, and you are building a personal toolkit of fixes for the recurring problems you meet. In the library, Lower Intermediate pieces are comfortable to learn.
+**What to focus on now:** This is where comprehension becomes the engine of your playing. As you learn a piece, ask what is happening in the music: what key you are in, what the chords are doing, where each phrase is heading and where its high point falls, then use those answers to decide on your dynamics, phrasing and voicing. When something will not come together, diagnose the real cause, whether it is coordination, fingering, rhythm or tension, and choose the practice method that targets it. Keep isolating hard passages with slow, metronome led practice, and make theory, sight reading and aural work regular habits, because they let you understand more of the music more quickly.
+
+### 5. Confident — 700 to 1,200 hours — around Grade 6 to 7
+**What you can now do:** You play with real expression and control, and harder repertoire is genuinely within reach. Your technique supports your musical ideas rather than holding them back, so you can manage faster passages, larger leaps and more complex textures. You understand the music well enough to interpret with a clear sense of style and shape, and you recognise familiar patterns and problems quickly, so you waste far less time working out how to practise something. In the library, you can expect to be comfortable with Upper Intermediate pieces.
+**What to focus on now:** Refine the details that separate competent from convincing playing: tone, dynamic range, careful pedalling, and the subtle timing that makes phrasing feel natural. Let your understanding of harmony and structure guide these choices, so your interpretation is informed rather than instinctive. Lean on the practice strategies you have built for recurring difficulties, and keep adding to that toolkit. Practise performing, not just learning, by playing for others and recording yourself to hear what an audience hears, then use what you notice to decide what to fix next.
+
+### 6. Advanced — 1,200 to 2,000 hours — around Grade 8 standard
+**What you can now do:** You are playing at roughly Grade 8 standard, and you have the maturity to interpret rather than simply play, because you genuinely understand the music in front of you. You can analyse a score, hear its harmony and structure, and grasp enough of the composer's intentions to form your own informed view of how a piece should sound. Your technique is fluent, and your experience means you diagnose and solve most problems almost as soon as they appear. In the library, Advanced rated pieces are within comfortable reach.
+**What to focus on now:** Let interpretation grow out of understanding. Study scores closely, trace the harmony, map the structure, and find the moments that carry the meaning, then make deliberate choices about phrasing, balance, pedalling and rubato that serve what you have understood. Refine your technique so the hardest passages are secure under pressure, build stamina for full programmes, and keep sharpening your self-diagnosis so practice stays efficient. Test your interpretations by performing and recording, and aim for playing that says something because you know what the music is saying.
+
+### 7. Performer — 2,000 to 3,500 hours — around ARSM to LRSM diploma
+**What you can now do:** You are in performer territory. You can prepare and deliver a polished recital programme, sustaining technical control and musical focus across a full set of demanding works. This is the level of an entry performance diploma such as ARSM, with the next tier in view. You understand the music deeply enough to bring a developing personal voice to it, and your problem solving is fast and reliable, so you can learn advanced repertoire to a high standard within a sensible timeframe. In the library, you can take on Advanced pieces and begin reaching into Expert.
+**What to focus on now:** The priorities are programme building, performance craft and consistency. Assemble balanced programmes and rehearse them as wholes, work on stage presence and managing nerves, and learn to recover seamlessly when something slips. Deepen your stylistic understanding so your Bach, Chopin and Debussy each sound idiomatic, letting period and genre inform your decisions. Keep raising your technical ceiling so the music is never limited by mechanics, and use your well honed practice strategies to prepare efficiently. Regular performing and feedback from advanced teachers or peers are what move you forward here.
+
+### 8. Artist — 3,500 hours and beyond — around LRSM to FRSM
+**What you can now do:** You have a lifetime of music in your hands. This is advanced diploma artistry, where the instrument serves whatever you want to say. You command a deep and wide repertoire, your technique is essentially transparent, and your understanding of music lets you interpret, communicate and, if you wish, teach and create at a high level. Problems are rare and quickly solved, because experience has given you the patterns and the answers. In the library, even Expert rated pieces are within your reach.
+**What to focus on now:** Progress here is self directed and driven by artistry rather than levels. Pursue the repertoire and projects that genuinely move you, refine your interpretive voice, and keep your technique, understanding and musicianship in peak condition through ongoing focused work. Many players at this stage give back by teaching, accompanying, composing, arranging or performing. There is no real ceiling from here, so the focus is simply continuing to grow into the musician you want to be.
+
+---
+
+## REPERTOIRE — pieces you can play
+
+### 1. First Steps — 0 to 25 hours
+**What you can now do:** You can play your first complete little pieces, simple melodies with one hand and very easy two hand material at a gentle tempo. You are learning what it feels like to take a short piece from unfamiliar to playable, and to hear when a note is wrong. In the library, the pieces you will be comfortable learning are those rated Absolute Beginner.
+**What to focus on now:** Choose very easy pieces you enjoy and play them right through, even slowly. When you hit a wrong note or a stumble, stop, find the exact spot, and repeat just that bar until it is comfortable. Getting used to finishing a piece, and fixing the small things along the way, is the whole job at this stage.
+
+### 2. Beginner — 25 to 70 hours
+**What you can now do:** You have a small repertoire of easy pieces you can play through and enjoy, with both hands in simple textures. You are starting to notice the shape of a melody and where a piece feels like it is going. In the library, you can expect to be comfortable learning pieces rated Beginner.
+**What to focus on now:** Build a habit of learning a new easy piece every week or two. Practise hands separately when needed, identify which bar is causing trouble and isolate it, then combine slowly. Begin adding simple dynamics so each piece carries a little expression rather than being just the right notes in time.
+
+### 3. Foundations — 70 to 160 hours
+**What you can now do:** You can play early intermediate pieces with more notes, more keys and real musical character. You can recognise the key of a piece and some of its chords, and you are beginning to see why a passage is built the way it is. In the library, you are comfortable with Beginner pieces and starting to reach into Lower Intermediate.
+**What to focus on now:** Learn pieces a little faster by spotting their patterns, the repeated phrases, sequences and familiar chord shapes, so you are not reading every note as if it were new. Bring out the melody over the accompaniment, add dynamics and articulation as deliberate choices, and write in fingering wherever a spot keeps tripping you, since that solves most repeated mistakes.
+
+### 4. Intermediate — 160 to 320 hours
+**What you can now do:** You can play solid intermediate repertoire such as easier sonatinas, popular classics and pieces with fuller textures. You understand enough about how a piece is constructed to make real interpretive decisions, and you recognise the recurring difficulties that come up across different pieces. In the library, Lower Intermediate pieces are now comfortable to learn.
+**What to focus on now:** As you learn a piece, work out its structure and harmony, then decide how you want it to sound and shape your dynamics, phrasing and voicing to match. Practise difficult passages by diagnosing the actual cause and applying the right method, slow practice, separate hands, rhythm variations, rather than just playing them again. Start memorising sections where it helps and building stamina by playing longer pieces from start to finish.
+
+### 5. Confident — 320 to 550 hours
+**What you can now do:** You can carry substantial pieces with expression, contrast and a clear sense of style, holding a longer work together from beginning to end. You understand the music well enough that your interpretations feel intentional, and you solve familiar problems quickly because you have met them before. In the library, you can expect to be comfortable learning Upper Intermediate pieces.
+**What to focus on now:** Choose repertoire that stretches you in specific ways, and use your understanding of harmony, structure and style to shape genuinely musical performances. Refine tone, balance and pedalling, and keep a practice toolkit ready for the recurring technical and musical challenges you encounter. Perform your pieces for others and record them, then let what you hear decide what you polish next.
+
+### 6. Advanced — 550 to 900 hours
+**What you can now do:** You can take on demanding repertoire at roughly Grade 8 standard across classical, jazz or contemporary styles. You can analyse a piece, understand the composer's intentions, and form your own informed interpretation, and your experience lets you solve most problems almost as they appear. In the library, Advanced rated pieces are within comfortable reach.
+**What to focus on now:** Build a varied repertoire across periods and styles, and let close study of each score drive your interpretive decisions about phrasing, colour and rubato. Secure the hardest passages so they hold up under pressure, and keep your self-diagnosis sharp so learning stays efficient. Aim for performances that communicate a clear musical idea, not just accurate notes.
+
+### 7. Performer — 900 to 1,600 hours
+**What you can now do:** You can prepare recital level programmes and perform them end to end, sustaining technical and musical focus across a full set. You bring a developing personal voice to advanced repertoire, informed by deep understanding of the music. In the library, you can take on Advanced pieces and begin reaching into Expert.
+**What to focus on now:** Assemble and rehearse balanced programmes as wholes, work on the craft of performing them convincingly, and ensure each style sounds idiomatic. Keep raising your technical ceiling and use efficient, well honed practice strategies to learn demanding works to a high standard within sensible timeframes.
+
+### 8. Artist — 1,600 hours and beyond
+**What you can now do:** You command a deep and wide repertoire and can take on almost anything you set your mind to, making it your own. Your understanding of music and your transparent technique let the pieces speak through you. In the library, even Expert rated pieces are within your reach.
+**What to focus on now:** Follow the repertoire that genuinely moves you, refine your interpretive voice, and keep your playing in peak condition. Consider sharing your repertoire through performing, accompanying or teaching. From here the journey is yours to direct.
+
+---
+
+## TECHNIQUE — general facility
+
+### 1. First Steps — 0 to 15 hours
+**What you can now do:** You can play five finger patterns and simple scales, and your hands are learning to move evenly and stay relaxed. You are starting to feel the difference between a tense hand and a free one.
+**What to focus on now:** Keep technique gentle and regular. Focus on a relaxed hand, curved fingers and an even sound, and notice when tension creeps in so you can release it. A few minutes of careful five finger work and simple scales each day builds the foundation everything else rests on.
+
+### 2. Beginner — 15 to 40 hours
+**What you can now do:** You can play major scales and basic arpeggios in common keys, hands separately and beginning to combine them. You can tell when your playing is uneven or rushed.
+**What to focus on now:** Build evenness and a steady pulse with a metronome, and practise hands separately before joining them. When a scale is bumpy, find the exact finger crossing that causes it and work on just that movement. Understanding that smoothness comes from the thumb passing under cleanly will fix most early scale problems.
+
+### 3. Foundations — 40 to 90 hours
+**What you can now do:** You can play scales and arpeggios in more keys with steadier evenness and control, and your hands are becoming independent. You are noticing the same technical problems, such as uneven fingers or awkward turns, recurring across different exercises.
+**What to focus on now:** Widen your key coverage and keep the sound even and relaxed at a comfortable tempo. Diagnose recurring weaknesses, perhaps a weaker fourth and fifth finger or an uneven left hand, and give them targeted attention. Connect technique to the music you are playing, so the skills you drill show up in your pieces.
+
+### 4. Intermediate — 90 to 175 hours
+**What you can now do:** You can play scales and arpeggios across most keys at a comfortable tempo with cleaner coordination. You understand how a scale or chord shape relates to the keys and pieces you are working on, and you have reliable ways to fix common technical problems.
+**What to focus on now:** Push tempo gradually while keeping evenness and a relaxed hand, using rhythms and accents to iron out unevenness. Connect your technical work to comprehension, knowing why a passage uses a particular scale or arpeggio helps you learn it faster. Keep building the practice methods that solve recurring issues so they become second nature.
+
+### 5. Confident — 175 to 300 hours
+**What you can now do:** You can play in all keys, faster and more even, with technique that genuinely supports musical phrasing. You recognise technical challenges quickly and know which practice method will solve them.
+**What to focus on now:** Add more demanding work such as double notes, octaves and trickier coordination, always prioritising a free, relaxed hand. Use your understanding of the music to decide how technique should serve it, for example shaping a fast passage rather than just playing it cleanly. Keep refining the patterns and fixes you rely on so practice stays efficient.
+
+### 6. Advanced — 300 to 500 hours
+**What you can now do:** You have fluent technique with the speed, stamina and hand independence to handle demanding passages. You understand the technical demands of advanced repertoire and diagnose and solve problems almost as they appear.
+**What to focus on now:** Maintain and extend your technique so the hardest writing is secure under pressure, and target the specific demands of the pieces you are learning. Let musical intention guide technical work, so control, tone and evenness all serve interpretation. Keep your self-diagnosis sharp so technical obstacles rarely slow you down.
+
+### 7. Performer — 500 to 875 hours
+**What you can now do:** You have reliable, near virtuoso control that holds up under performance pressure. Your technique is at the service of your musical understanding, and you solve technical problems efficiently and almost automatically.
+**What to focus on now:** Keep your technique in peak condition with focused maintenance, and prepare the specific challenges of recital repertoire well ahead of performance. Ensure your technical choices support idiomatic, stylish playing, and rely on your refined practice strategies to stay efficient.
+
+### 8. Artist — 875 hours and beyond
+**What you can now do:** Your technique is essentially transparent, entirely at the service of the music. Whatever you understand and want to express, your hands can deliver.
+**What to focus on now:** Maintain your technique through ongoing focused work, and direct it toward the music and projects that matter to you. At this level technique is a tool you command rather than a goal you chase.
+
+---
+
+## SIGHT-READING
+
+### 1. First Steps — 0 to 5 hours
+**What you can now do:** You can name notes and find them on the keys without hunting, and you are starting to connect the dots on the stave to the right keys.
+**What to focus on now:** Practise naming and finding notes quickly and regularly. Read very simple lines slowly, keeping your eyes on the page rather than your hands, and do not worry about speed yet.
+
+### 2. Beginner — 5 to 15 hours
+**What you can now do:** You can read very simple one hand lines at a slow, steady pace, recognising basic note and rhythm patterns. You can tell when you have misread something.
+**What to focus on now:** Read a little new, easy music most days, always keeping a steady beat and resisting the urge to stop and correct. Start to recognise common patterns such as steps, skips and simple rhythms, since spotting patterns is what makes reading faster.
+
+### 3. Foundations — 15 to 35 hours
+**What you can now do:** You can read simple two hand pieces hands together with early fluency, and you understand basic key signatures and time signatures well enough to expect what is coming.
+**What to focus on now:** Keep going without stopping, even over small mistakes, as fluency matters more than perfection when reading. Look ahead of where you are playing, scan a new piece first for its key, time signature and obvious patterns, and use that understanding to read more confidently.
+
+### 4. Intermediate — 35 to 70 hours
+**What you can now do:** You can confidently sight read easy pieces first time through, recognising chords and common progressions as you go. You notice the kinds of passages that tend to trip you.
+**What to focus on now:** Read regularly at a level slightly below your playing standard, always keeping the pulse. Use your growing theory to read in chunks, seeing a chord or a scale shape rather than individual notes, and identify your recurring reading weaknesses, perhaps rhythm or ledger lines, so you can target them.
+
+### 5. Confident — 70 to 120 hours
+**What you can now do:** You can read intermediate music fluently, keeping going and grasping the shape of the music as you play. You understand enough to anticipate harmony and phrasing while reading.
+**What to focus on now:** Stretch to slightly harder material and keep reading new pieces often. Train your eyes to look further ahead, and lean on your understanding of harmony and structure to predict what comes next, which is the real engine of fluent reading.
+
+### 6. Advanced — 120 to 200 hours
+**What you can now do:** You can sight read fairly difficult repertoire at tempo, taking in harmony, texture and phrasing at a glance. You quickly recognise and handle the patterns that used to slow you down.
+**What to focus on now:** Read a wide range of styles and textures, including accompaniments and ensemble parts. Keep prioritising flow and musical sense over note perfect accuracy, and use your deep familiarity with patterns to read larger groups at once.
+
+### 7. Performer — 200 to 350 hours
+**What you can now do:** You can read advanced scores quickly and musically, grasping the music almost as fast as you see it. Reading is now a practical, reliable skill you can use in performance and collaboration.
+**What to focus on now:** Read demanding repertoire and accompaniments regularly to keep the skill sharp, and practise reading under realistic conditions such as accompanying or playing with others.
+
+### 8. Artist — 350 hours and beyond
+**What you can now do:** You can read almost anything at sight, accompanying and collaborating with ease, taking in and shaping unfamiliar music in real time.
+**What to focus on now:** Use and maintain the skill through regular reading, accompanying and collaboration, keeping it fluent across every style you meet.
+
+---
+
+## MUSICIANSHIP — theory, ear and improvisation
+
+### 1. First Steps — 0 to 10 hours
+**What you can now do:** You know the musical alphabet, basic note values and where sounds live on the keys. You can hear when a tune goes up or down and tell two very different sounds apart.
+**What to focus on now:** Learn the basics of how music is written and counted, and start really listening as you play, noticing pitch direction and simple rhythm. Connecting what you hear to what you see is the foundation of everything that follows.
+
+### 2. Beginner — 10 to 30 hours
+**What you can now do:** You can read rhythm and pitch confidently, understand simple time signatures, and recognise a few intervals and the difference between major and minor by ear.
+**What to focus on now:** Build the link between sound and symbol, clapping rhythms and singing or humming simple intervals. Notice the major or minor feel of the pieces you play, and start to connect the theory you learn to the music under your hands rather than treating it as separate.
+
+### 3. Foundations — 30 to 70 hours
+**What you can now do:** You understand keys, scales and basic chords, you can hear major versus minor reliably, and you recognise simple chord progressions. You can pick out a simple tune by ear with some effort.
+**What to focus on now:** Learn how scales and chords are built and how they appear in your repertoire, so theory becomes a way of understanding what you play. Practise recognising common intervals and chords by ear, and try working out simple melodies, since this trains both your ear and your understanding together.
+
+### 4. Intermediate — 70 to 140 hours
+**What you can now do:** You understand theory to around Grade 5 standard, recognise common chords and progressions, and are starting to improvise simple ideas. You can use this understanding to make real musical decisions in your playing.
+**What to focus on now:** Apply theory directly to interpretation, using your knowledge of key, harmony and structure to decide how a piece should be shaped. Strengthen your ear with regular interval and chord recognition, and begin improvising over simple chord progressions to connect theory, ear and creativity.
+
+### 5. Confident — 140 to 240 hours
+**What you can now do:** You understand harmony and can analyse the music you play, you have a reliable ear for intervals and chords, and you are comfortable improvising over basic changes. You hear and understand patterns that recur across many pieces.
+**What to focus on now:** Deepen your harmonic understanding so analysis routinely informs your interpretive choices. Keep training your ear toward quicker, more accurate recognition, and develop your improvisation so you can express simple ideas freely. Look for the recurring harmonic and structural patterns that make new pieces faster to understand.
+
+### 6. Advanced — 240 to 400 hours
+**What you can now do:** You have advanced theory and aural skills, you can analyse complex music, and you improvise and harmonise with real freedom. Your understanding lets you grasp a composer's intentions and form your own interpretation.
+**What to focus on now:** Use detailed analysis to drive your performances, and keep your ear sharp enough to hear structure and harmony as you listen and play. Extend your improvisation and harmonisation, and apply your understanding to solve musical problems and make confident interpretive decisions.
+
+### 7. Performer — 400 to 700 hours
+**What you can now do:** You have a deep musical understanding that lets you analyse, arrange and improvise fluently, and an ear that supports high level performance and collaboration.
+**What to focus on now:** Bring your full musicianship to bear on performance, letting analysis, ear and stylistic knowledge shape every decision. Keep developing your creative skills through improvisation, arranging or composing as suits your goals.
+
+### 8. Artist — 700 hours and beyond
+**What you can now do:** You have a complete musician's ear and mind, which you apply to anything you play or create. Understanding, listening and creativity work together as one.
+**What to focus on now:** Direct your musicianship toward the music and projects that matter to you, and keep it sharp through ongoing listening, analysis and creative work. At this level your understanding is a lifelong instrument in its own right.
