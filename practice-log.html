@@ -21746,6 +21746,19 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   .rm-motif { position: absolute; z-index: 0; pointer-events: none; transform: translate(-50%, -50%); }
   .rm-compass { position: absolute; top: 16px; right: 18px; width: 54px; height: 54px; z-index: 1; pointer-events: none; opacity: .2; color: #8a6d2e; }
   .rm-map-trail { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }
+  .rm-traveller { position: absolute; z-index: 2; transform: translate(-50%, -100%); width: 62px; pointer-events: none; filter: drop-shadow(0 4px 4px rgba(40,30,10,.25)); }
+  .rm-traveller svg { width: 100%; height: auto; display: block; }
+
+  /* Area jars: stacked inventory panel pinned top-left of the map */
+  .rm-jarstack { position: absolute; top: 14px; left: 14px; z-index: 4; display: flex; flex-direction: column; gap: 9px; padding: 12px 13px; border-radius: 16px; background: color-mix(in srgb, var(--surface) 84%, transparent); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); border: 1px solid var(--border); box-shadow: 0 10px 26px -16px rgba(0,0,0,.45); }
+  .rm-jarstack-title { font-size: .56rem; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; color: var(--text-muted); }
+  .rm-jaritem { display: flex; align-items: center; gap: 11px; cursor: pointer; }
+  .rm-jaritem .rm-jar3d { width: 40px; height: 50px; flex-shrink: 0; }
+  .rm-jaritem .rm-jar3d-pct { font-size: .62rem; }
+  .rm-jaritem-txt { min-width: 0; }
+  .rm-jaritem-name { font-size: .74rem; font-weight: 800; line-height: 1.1; }
+  .rm-jaritem-meta { font-size: .62rem; color: var(--text-muted); margin-top: 1px; }
+  @media (max-width: 560px) { .rm-jarstack { gap: 7px; padding: 9px 10px; } .rm-jaritem .rm-jar3d { width: 34px; height: 42px; } .rm-jaritem-name { font-size: .68rem; } }
   .rm-mnode { position: absolute; z-index: 3; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 9px; }
   .rm-mstage { text-align: center; font-size: .95rem; font-weight: 800; color: var(--text); white-space: nowrap; line-height: 1.1; }
   .rm-mstage small { display: block; font-size: .65rem; font-weight: 600; color: var(--text-muted); margin-top: 3px; }
@@ -21926,59 +21939,75 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     };
     Object.values(areaInfo).forEach(a => { a.desc = AREA_DESC[a.key] || ""; });
     window._rmAreas = areaInfo;
-    const areasByStage = {};
-    Object.values(areaInfo).forEach(a => { (areasByStage[a.levelIdx] = areasByStage[a.levelIdx] || []).push(a); });
 
-    const jar3d = (a) => {
-      const pct = Math.round(a.progress * 100);
-      return `<div class="rm-area-stop" onclick="_rmOpenArea('${a.key}')" title="${escHtml(a.label + (a.desc ? " — " + a.desc : ""))}">
-        <div class="rm-area-stop-head"><span class="rm-area-stop-name" style="color:${a.color}">${a.label}</span><span class="rm-area-stop-lv">Level ${a.level}</span></div>
-        <div class="rm-jar3d" style="--rmc:${a.color}">
-          <div class="rm-jar3d-body"><div class="rm-jar3d-liquid" data-rm-fill="${a.next ? pct : 100}"></div></div>
-          <div class="rm-jar3d-shine"></div>
-          <div class="rm-jar3d-rim"></div>
-          <div class="rm-jar3d-pct">${a.next ? pct + "%" : "&#9733;"}</div>
-        </div>
-      </div>`;
-    };
+    // Area jars now live in a stacked panel pinned to the top-left of the map.
+    const jarStackHTML = `<div class="rm-jarstack">
+      <div class="rm-jarstack-title">Your areas</div>
+      ${Object.values(areaInfo).map(a => {
+        const pct = Math.round(a.progress * 100);
+        return `<div class="rm-jaritem" onclick="_rmOpenArea('${a.key}')" title="${escHtml(a.label + " — " + a.desc)}">
+          <div class="rm-jar3d" style="--rmc:${a.color}">
+            <div class="rm-jar3d-body"><div class="rm-jar3d-liquid" data-rm-fill="${a.next ? pct : 100}"></div></div>
+            <div class="rm-jar3d-shine"></div><div class="rm-jar3d-rim"></div>
+            <div class="rm-jar3d-pct">${a.next ? pct + "%" : "&#9733;"}</div>
+          </div>
+          <div class="rm-jaritem-txt">
+            <div class="rm-jaritem-name" style="color:${a.color}">${a.label}</div>
+            <div class="rm-jaritem-meta">Level ${a.level} &middot; ${_rmFmtHrs(a.mins)}</div>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`;
 
     // --- Treasure-map journey: a stone per stage on an irregular winding
-    //     route across an illustrated landscape. Each area's jar sits at the
-    //     stone for that AREA's own level; the highlighted (current) stone is
-    //     the overall Total level. ---
+    //     route across an illustrated landscape, with collectible coins
+    //     along the trail and a traveller pushing a piano at the current
+    //     stage. The highlighted stone is the overall Total level. ---
     const totLevels = window.ROADMAP.levels.total;
-    // Irregular hand-drawn route: each stage has its own x fraction and its
-    // own vertical advance from the previous one (so jumps are uneven).
+    // Irregular hand-drawn route. Early stages stay clear of the top-left
+    // jar panel; each stage has its own x and its own vertical advance.
     const STEP_POS = [
-      { x: 0.17, dy: 0   },
-      { x: 0.66, dy: 78  },
-      { x: 0.80, dy: 168 },
-      { x: 0.27, dy: 118 },
-      { x: 0.13, dy: 176 },
-      { x: 0.55, dy: 92  },
-      { x: 0.85, dy: 158 },
-      { x: 0.38, dy: 132 }
+      { x: 0.46, dy: 0   },
+      { x: 0.74, dy: 104 },
+      { x: 0.48, dy: 150 },
+      { x: 0.80, dy: 120 },
+      { x: 0.28, dy: 174 },
+      { x: 0.62, dy: 104 },
+      { x: 0.86, dy: 152 },
+      { x: 0.40, dy: 140 }
     ];
-    const MAP_TOP = 64, MAP_BOT = 92;
+    const MAP_TOP = 70, MAP_BOT = 96;
     const stepY = []; let _acc = MAP_TOP;
     STEP_POS.forEach((s, i) => { _acc += s.dy; stepY[i] = _acc; });
     const mapH = stepY[stepY.length - 1] + MAP_BOT;
+    window._rmState.progress = T.progress;
     const nodesHTML = totLevels.map((L, i) => {
       const state = i < T.idx ? "done" : (i === T.idx ? "current" : "future");
       const node = state === "done" ? CHECK : (state === "future" ? LOCK : String(L.level));
       const frac = STEP_POS[i] ? STEP_POS[i].x : 0.5;
-      const side = frac < 0.5 ? "left" : "right";
       const y = stepY[i];
-      const jars = (areasByStage[i] || []).map(jar3d).join("");
-      const jarPos = side === "left"
-        ? `left:calc(${(frac * 100).toFixed(2)}% + 46px)`
-        : `right:calc(${((1 - frac) * 100).toFixed(2)}% + 46px)`;
-      const jarsHTML = jars ? `<div class="rm-mjars ${side}" style="${jarPos};top:${y}px">${jars}</div>` : "";
       return `<div class="rm-mnode ${state}" style="left:${(frac * 100).toFixed(2)}%;top:${y}px">
           <div class="rm-mstage">${L.name}<small>${L.hours.toLocaleString()}h${L.grade ? " &middot; " + L.grade : ""}</small>${state === "current" ? '<span class="rm-mhere">You are here</span>' : ""}</div>
           <button class="rm-stone ${state}" onclick="_rmOpenStone(${L.level})" title="${escHtml(L.name)}">${node}</button>
-        </div>${jarsHTML}`;
+        </div>`;
     }).join("");
+    // Traveller pushing an upright piano, parked at the current stage.
+    const cIdx = Math.min(T.idx, STEP_POS.length - 1);
+    const travFrac = STEP_POS[cIdx] ? STEP_POS[cIdx].x : 0.5;
+    const PIANO = `<svg viewBox="0 0 66 50" aria-hidden="true">
+      <ellipse cx="30" cy="46" rx="26" ry="3" fill="#000" opacity=".12"/>
+      <rect x="4" y="11" width="27" height="30" rx="2" fill="#5b3a29"/>
+      <rect x="4" y="11" width="27" height="7" rx="2" fill="#714836"/>
+      <rect x="7" y="21" width="21" height="3" rx="1" fill="#caa46b"/>
+      <rect x="7" y="30" width="21" height="6" fill="#f3ecd9"/>
+      <g fill="#2a1c12"><rect x="9" y="30" width="2" height="4"/><rect x="13" y="30" width="2" height="4"/><rect x="19" y="30" width="2" height="4"/><rect x="23" y="30" width="2" height="4"/></g>
+      <circle cx="9" cy="43" r="2.6" fill="#2c2c2c"/><circle cx="26" cy="43" r="2.6" fill="#2c2c2c"/>
+      <path d="M44 25 L34 23" stroke="#e6b486" stroke-width="3.2" stroke-linecap="round"/>
+      <circle cx="48" cy="14" r="5" fill="#e6b486"/>
+      <path d="M48 19 L47 34" stroke="#3f6fa3" stroke-width="5" stroke-linecap="round"/>
+      <path d="M47 34 L41 45 M47 34 L52 45" stroke="#33414f" stroke-width="3.4" stroke-linecap="round"/>
+    </svg>`;
+    const travellerHTML = `<div class="rm-traveller" style="left:calc(${(travFrac * 100).toFixed(2)}% + 40px);top:${stepY[cIdx] + 8}px">${PIANO}</div>`;
     const compass = `<svg class="rm-compass" viewBox="0 0 100 100" aria-hidden="true">
       <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width="2.5"/>
       <circle cx="50" cy="50" r="35" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 4"/>
@@ -21987,7 +22016,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       <text x="50" y="20" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">N</text>
     </svg>`;
     const land = _rmLandscape(mapH);
-    const mapHTML = `<div class="rm-map" id="rm-map" style="height:${mapH}px">${land}${compass}<svg class="rm-map-trail"></svg>${nodesHTML}</div>`;
+    const mapHTML = `<div class="rm-map" id="rm-map" style="height:${mapH}px">${land}${compass}<svg class="rm-map-trail"></svg>${travellerHTML}${nodesHTML}${jarStackHTML}</div>`;
 
     const statsHTML = `<div class="rm-stats">
       <div class="rm-stats-top">
@@ -22038,7 +22067,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   }
   function _rmLandscape(H) {
     const W = 1000;
-    const hill = (yf, amp, fill, op) => {
+    const hill = (yf, amp, grad, op) => {
       const y = yf * H;
       let d = `M0 ${y.toFixed(0)}`;
       const n = 5;
@@ -22049,34 +22078,54 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
         d += ` Q${cx} ${cy} ${x} ${y.toFixed(0)}`;
       }
       d += ` L${W} ${H.toFixed(0)} L0 ${H.toFixed(0)} Z`;
-      return `<path d="${d}" fill="${fill}" opacity="${op}"/>`;
+      return `<path d="${d}" fill="url(#${grad})" opacity="${op}"/>`;
     };
+    const grads = `<defs>
+      <linearGradient id="rmSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dcebf2"/><stop offset="0.22" stop-color="#e4eede"/><stop offset="0.48" stop-color="#f0ead5"/><stop offset="0.74" stop-color="#e6e9ef"/><stop offset="1" stop-color="#f6f8fa"/></linearGradient>
+      <linearGradient id="rmG1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d8ecc4"/><stop offset="1" stop-color="#bcdca0"/></linearGradient>
+      <linearGradient id="rmG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c3dca8"/><stop offset="1" stop-color="#a6cb86"/></linearGradient>
+      <linearGradient id="rmG3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ecdcab"/><stop offset="1" stop-color="#dcc488"/></linearGradient>
+      <linearGradient id="rmG4" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d4dae3"/><stop offset="1" stop-color="#bcc4d0"/></linearGradient>
+      <linearGradient id="rmG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f6f9"/><stop offset="1" stop-color="#e6ebf0"/></linearGradient>
+    </defs>`;
     const bands = `<svg class="rm-land" viewBox="0 0 ${W} ${H.toFixed(0)}" preserveAspectRatio="none" aria-hidden="true">
-      <defs><linearGradient id="rmSky" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#eaf2e7"/><stop offset="0.26" stop-color="#e2eed8"/>
-        <stop offset="0.5" stop-color="#f0ead7"/><stop offset="0.74" stop-color="#e4e8ee"/>
-        <stop offset="1" stop-color="#f5f7f9"/></linearGradient></defs>
+      ${grads}
       <rect width="${W}" height="${H.toFixed(0)}" fill="url(#rmSky)"/>
-      ${hill(0.30, 60, "#cfe3bb", 0.5)}
-      ${hill(0.50, 80, "#bcd6a4", 0.5)}
-      ${hill(0.70, 70, "#e6d4a0", 0.55)}
-      ${hill(0.85, 95, "#cdd5df", 0.6)}
-      ${hill(0.95, 80, "#eef1f4", 0.85)}
+      ${hill(0.30, 60, "rmG1", 0.7)}
+      ${hill(0.50, 82, "rmG2", 0.7)}
+      ${hill(0.70, 72, "rmG3", 0.75)}
+      ${hill(0.85, 96, "rmG4", 0.8)}
+      ${hill(0.95, 80, "rmG5", 0.95)}
     </svg>`;
-    const TREE = '<svg viewBox="0 0 24 30" fill="currentColor"><path d="M12 1 L19 12 H5 Z"/><path d="M12 8 L21 21 H3 Z"/><rect x="10.5" y="20" width="3" height="8" rx="1" fill="#8a6a3e"/></svg>';
-    const MTN = '<svg viewBox="0 0 40 26" fill="currentColor"><path d="M2 26 L15 4 L23 16 L28 10 L38 26 Z"/><path d="M12 8 L15 4 L18.5 9 L16 11 L14 9.5 Z" fill="#fff" opacity=".85"/></svg>';
-    const XSPOT = '<svg viewBox="0 0 24 24" fill="none" stroke="#b5552f" stroke-width="3.5" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+    // Characterful, lightly-shaded motifs (each baked with its own colours).
+    const TREE = '<svg viewBox="0 0 24 30"><path d="M12 1 L19 12 H12 Z" fill="#6f9a4e"/><path d="M12 1 L5 12 H12 Z" fill="#84ad62"/><path d="M12 8 L21 21 H12 Z" fill="#5f8c42"/><path d="M12 8 L3 21 H12 Z" fill="#79a157"/><rect x="10.6" y="20" width="2.8" height="8" rx="1" fill="#7a5733"/></svg>';
+    const PINE = '<svg viewBox="0 0 24 32"><path d="M12 2 L18 12 H12 Z" fill="#3f7a52"/><path d="M12 2 L6 12 H12 Z" fill="#4f9061"/><path d="M12 9 L19 19 H12 Z" fill="#367046"/><path d="M12 9 L5 19 H12 Z" fill="#458357"/><path d="M12 16 L21 28 H12 Z" fill="#2e6440"/><path d="M12 16 L3 28 H12 Z" fill="#3d7750"/><rect x="10.6" y="27" width="2.8" height="5" fill="#6b4a2c"/></svg>';
+    const MTN = '<svg viewBox="0 0 44 30"><path d="M2 30 L16 4 L25 18 L31 11 L42 30 Z" fill="#c2cad6"/><path d="M16 4 L25 18 L16 18 Z" fill="#a7b0c0"/><path d="M31 11 L42 30 L31 30 Z" fill="#aeb7c5"/><path d="M12 10 L16 4 L20 11 L17 13 L14 11 Z" fill="#fff"/><path d="M28 14.5 L31 11 L34 15 L31.5 16 Z" fill="#fff"/></svg>';
+    const HOUSE = '<svg viewBox="0 0 32 28"><rect x="5" y="13" width="22" height="12" fill="#ecd6ad"/><rect x="5" y="13" width="22" height="12" fill="#000" opacity=".06"/><path d="M3 14 L16 3 L29 14 Z" fill="#b5552f"/><path d="M16 3 L29 14 L16 14 Z" fill="#9a4527"/><rect x="13" y="17" width="6" height="8" fill="#7a5733"/><rect x="7.5" y="16" width="4" height="4" fill="#a7d0e0"/><rect x="20.5" y="16" width="4" height="4" fill="#a7d0e0"/></svg>';
+    const CLOUD = '<svg viewBox="0 0 44 20"><ellipse cx="13" cy="13" rx="11" ry="7" fill="#fff"/><ellipse cx="26" cy="10" rx="12" ry="8.5" fill="#fff"/><ellipse cx="35" cy="14" rx="8" ry="5.5" fill="#fff"/></svg>';
+    const SIGN = '<svg viewBox="0 0 26 26"><rect x="11.5" y="6" width="2.6" height="17" fill="#7a5733"/><path d="M2 8 L17 8 L21 11.5 L17 15 L2 15 Z" fill="#caa56f"/><path d="M2 8 L17 8 L17 15 L2 15 Z" fill="#000" opacity=".07"/></svg>';
+    const FLAG = '<svg viewBox="0 0 22 30"><rect x="4" y="2" width="2.4" height="26" fill="#5b4a36"/><path d="M6 3 L19 7 L6 12 Z" fill="#e0584a"/><path d="M6 3 L19 7 L6 7 Z" fill="#ef6b5d"/></svg>';
+    const XSPOT = '<svg viewBox="0 0 24 24" fill="none" stroke="#b5552f" stroke-width="4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
     const M = [
-      { s: TREE, x: 44, y: 0.30, w: 26, o: .45, c: "#86a866" },
-      { s: TREE, x: 53, y: 0.34, w: 20, o: .38, c: "#7ea15e" },
-      { s: TREE, x: 32, y: 0.45, w: 30, o: .42, c: "#86a866" },
-      { s: TREE, x: 64, y: 0.50, w: 22, o: .34, c: "#7ea15e" },
-      { s: MTN,  x: 30, y: 0.66, w: 120, o: .40, c: "#aab4c2" },
-      { s: MTN,  x: 62, y: 0.74, w: 160, o: .34, c: "#9aa6b6" },
-      { s: TREE, x: 18, y: 0.80, w: 22, o: .30, c: "#86a866" },
-      { s: XSPOT, x: 52, y: 0.93, w: 30, o: .80, c: "#b5552f" }
+      { s: CLOUD, x: 72, y: 0.05, w: 64, o: .9 },
+      { s: CLOUD, x: 22, y: 0.10, w: 46, o: .75 },
+      { s: HOUSE, x: 20, y: 0.255, w: 46, o: .96 },
+      { s: TREE,  x: 30, y: 0.235, w: 26, o: .95 },
+      { s: TREE,  x: 60, y: 0.21, w: 24, o: .9 },
+      { s: TREE,  x: 67, y: 0.245, w: 19, o: .85 },
+      { s: PINE,  x: 38, y: 0.40, w: 28, o: .95 },
+      { s: PINE,  x: 44, y: 0.425, w: 22, o: .9 },
+      { s: TREE,  x: 16, y: 0.44, w: 24, o: .9 },
+      { s: PINE,  x: 70, y: 0.46, w: 24, o: .88 },
+      { s: SIGN,  x: 54, y: 0.55, w: 30, o: .95 },
+      { s: MTN,   x: 26, y: 0.66, w: 130, o: .95 },
+      { s: MTN,   x: 58, y: 0.735, w: 175, o: .92 },
+      { s: MTN,   x: 82, y: 0.70, w: 110, o: .85 },
+      { s: PINE,  x: 14, y: 0.60, w: 22, o: .85 },
+      { s: FLAG,  x: 58, y: 0.905, w: 34, o: .95 },
+      { s: XSPOT, x: 50, y: 0.95, w: 30, o: .85 }
     ];
-    const motifs = M.map(m => `<div class="rm-motif" style="left:${m.x}%;top:${(m.y * H).toFixed(0)}px;width:${m.w}px;opacity:${m.o};color:${m.c}">${m.s}</div>`).join("");
+    const motifs = M.map(m => `<div class="rm-motif" style="left:${m.x}%;top:${(m.y * H).toFixed(0)}px;width:${m.w}px;opacity:${m.o}">${m.s}</div>`).join("");
     return bands + motifs;
   }
   function _rmDrawTrail() {
@@ -22116,14 +22165,37 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       return d;
     };
     const idx = (window._rmState && window._rmState.idx) || 0;
+    const progress = (window._rmState && window._rmState.progress) || 0;
     const W = map.clientWidth, H = map.clientHeight;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     svg.setAttribute("width", W); svg.setAttribute("height", H);
     const greyD = smooth(pts);
     const goldD = idx >= 1 ? smooth(pts.slice(0, 2 * idx + 1)) : "";
-    svg.innerHTML =
+    // Collectible coins along each segment: each coin is worth 100/N% of the
+    // step. Completed steps are all gold; the current step shows how many are
+    // collected; future steps are faint outlines.
+    const NS = "http://www.w3.org/2000/svg";
+    const NCOINS = 5;
+    let coinsHTML = "";
+    for (let i = 0; i < stones.length - 1; i++) {
+      const seg = [pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]];
+      const tmp = document.createElementNS(NS, "path");
+      tmp.setAttribute("d", smooth(seg));
+      let len = 0; try { len = tmp.getTotalLength(); } catch (e) { len = 0; }
+      if (!len) continue;
+      const collected = i < idx ? NCOINS : (i === idx ? Math.round(progress * NCOINS) : 0);
+      for (let k = 0; k < NCOINS; k++) {
+        const pt = tmp.getPointAtLength(len * (k + 0.5) / NCOINS);
+        coinsHTML += (k < collected)
+          ? `<g transform="translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})"><circle r="8" fill="url(#rmCoinG)" stroke="#a9760d" stroke-width="1"/><circle r="5" fill="none" stroke="#fff4c4" stroke-width="1.3" opacity=".75"/></g>`
+          : `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="6.5" fill="#fffaf0" stroke="#bcae90" stroke-width="1.6" stroke-dasharray="2.2 2.4" opacity=".85"/>`;
+      }
+    }
+    const defs = `<defs><radialGradient id="rmCoinG" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#ffe7a0"/><stop offset="0.5" stop-color="#f4c430"/><stop offset="1" stop-color="#d99a10"/></radialGradient></defs>`;
+    svg.innerHTML = defs +
       `<path d="${greyD}" fill="none" stroke="#9a8048" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".5"/>` +
-      (goldD ? `<path d="${goldD}" fill="none" stroke="#e8920a" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="0.1 13"/>` : "");
+      (goldD ? `<path d="${goldD}" fill="none" stroke="#e8920a" stroke-width="4" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".5"/>` : "") +
+      coinsHTML;
   }
 
   function _rmCountUp(node, target) {
