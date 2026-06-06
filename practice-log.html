@@ -1218,6 +1218,35 @@
     body.hub-mode .wiz-save-btn { box-shadow: 0 5px 16px -7px rgba(240,165,0,.5); }
     .wiz-save-btn:hover { opacity: .92; }
     .wiz-save-btn:active { transform: scale(.985); }
+    /* Secondary "Save draft" action + auto-save status */
+    .wiz-draft-btn {
+      width: 100%; margin-bottom: 8px;
+      background: transparent; color: var(--text-muted);
+      border: 1.5px solid var(--border); border-radius: 12px;
+      padding: 12px 20px; font-size: .9rem; font-weight: 700; cursor: pointer;
+      font-family: inherit; transition: border-color .15s, color .15s, background .15s;
+    }
+    .wiz-draft-btn:hover { border-color: var(--accent); color: var(--text); }
+    .wiz-draft-btn:active { transform: scale(.985); }
+    #wiz-draft-status {
+      font-size: .72rem; color: var(--text-muted); text-align: center;
+      min-height: 14px; margin-bottom: 6px; opacity: 0; transition: opacity .2s;
+    }
+    #wiz-draft-status.show { opacity: .8; }
+    #wiz-draft-restored {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      background: rgba(245,197,24,.08); border: 1px solid rgba(245,197,24,.25);
+      border-radius: 10px; padding: 9px 12px; margin-bottom: 12px;
+      font-size: .8rem; color: var(--text); flex-shrink: 0;
+    }
+    #wiz-draft-restored span { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; color: var(--text-muted); }
+    #wiz-draft-restored svg { color: var(--accent); flex-shrink: 0; }
+    #wiz-discard-draft-btn {
+      background: none; border: none; color: var(--accent); cursor: pointer;
+      font-family: inherit; font-size: .78rem; font-weight: 700; padding: 2px 4px;
+      flex-shrink: 0;
+    }
+    #wiz-discard-draft-btn:hover { text-decoration: underline; }
     /* Hidden backing store */
     #wiz-backing { display: none !important; }
 
@@ -7691,6 +7720,10 @@
 
       <!-- Screen last: Overview / review -->
       <div class="wiz-screen" id="wiz-screen-overview">
+        <div id="wiz-draft-restored" style="display:none">
+          <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 14"/></svg>Restored your unsaved draft.</span>
+          <button type="button" id="wiz-discard-draft-btn">Discard</button>
+        </div>
         <div id="wiz-overview-date-pill">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <span id="wiz-overview-date-text">Today</span>
@@ -7716,6 +7749,8 @@
       </div>
       <!-- Overview save action -->
       <div id="wiz-save-actions" style="display:none">
+        <div id="wiz-draft-status" aria-live="polite"></div>
+        <button id="wiz-save-draft-btn" class="wiz-draft-btn" type="button">Save draft &amp; finish later</button>
         <button id="wiz-next-btn" class="wiz-save-btn">Save Session</button>
       </div>
     </div>
@@ -16376,8 +16411,9 @@ function openWizard() {
   document.getElementById("log-wizard-backdrop").classList.add("open");
   document.body.style.overflow = "hidden";
 
-  if (editingSessionId && formItems.length > 0) {
-    // Editing an existing session — open on overview so user can tap items to edit
+  if ((editingSessionId || _currentDraftId) && formItems.length > 0) {
+    // Editing an existing session, or resuming a draft — open on the overview
+    // so the user can tap items to edit
     _wizScreen  = 'overview';
     _wizItemIdx = 0;
     document.getElementById("wiz-screen-date").className     = "wiz-screen";
@@ -16812,9 +16848,13 @@ document.getElementById("stats-section").addEventListener("click", (e) => {
   if (btn) renderCategoryBars(btn.dataset.catPeriod);
 });
 
-document.getElementById("log-fab").addEventListener("click", () => {
+document.getElementById("log-fab").addEventListener("click", async () => {
   editingSessionId = null;
   resetLogForm();
+  const _rb = document.getElementById("wiz-draft-restored");
+  if (_rb) _rb.style.display = "none";
+  _currentDraftId = null; _draftLastJSON = null;
+  await _maybeResumeDraft();   // restore an unsaved draft if one exists
   openWizard();
 });
 
@@ -18293,6 +18333,9 @@ async function saveSession() {
 
     // Reload data
     await loadData();
+
+    // Session is saved — drop the in-progress draft (no-ops if none).
+    await _deleteCurrentDraft();
 
     // Detect & notify any achievements earned by THIS session right away, rather
     // than waiting for the user to open the Stats tab (loadData has just
@@ -21122,6 +21165,177 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     });
   }
+</script>
+
+<!-- ── Practice-log drafts: auto-save the in-progress entry + restore on reopen ──
+     Drafts live in their own table (practice_session_drafts) so they can never
+     leak into totals / streak / heatmap. A draft mirrors a session's items
+     (collectItemData shape), so addItem() restores it exactly like editing. -->
+<script>
+  let _currentDraftId = null;   // DB id of the draft being auto-saved (new entries only)
+  let _draftTimer     = null;
+  let _draftSaving    = false;
+  let _draftLastJSON  = null;
+
+  function _draftWizardOpen() {
+    return !!document.getElementById("log-wizard-backdrop")?.classList.contains("open");
+  }
+
+  // Serialize the current form WITHOUT mutating the DOM (don't pull the slotted
+  // item back — that would disrupt an item being edited). Iterate formItems for
+  // canonical order; each block is read wherever it currently lives.
+  function _serializeDraft() {
+    const items = [];
+    let idx = 0;
+    if (Array.isArray(window.formItems || formItems)) {
+      for (const fi of formItems) {
+        if (!document.getElementById(`item-block-${fi.id}`)) continue;
+        const data = collectItemData(fi.id, idx++);
+        if (data) items.push(data);
+      }
+    }
+    return {
+      session_date: document.getElementById("session-date")?.value || null,
+      notes: document.getElementById("session-notes")?.value.trim() || null,
+      items
+    };
+  }
+
+  function _draftHasContent(d) {
+    return !!(d && (d.items?.length || (d.notes && d.notes.length)));
+  }
+
+  function _setDraftStatus(text) {
+    const el = document.getElementById("wiz-draft-status");
+    if (!el) return;
+    el.textContent = text;
+    el.classList.add("show");
+  }
+
+  async function _saveDraftNow(opts = {}) {
+    if (_draftSaving || editingSessionId || !myEmail) return;
+    const d = _serializeDraft();
+    const json = JSON.stringify(d);
+    if (!opts.force && json === _draftLastJSON) return;       // nothing changed
+    if (!_draftHasContent(d)) {                                // emptied out
+      if (_currentDraftId) { await _deleteCurrentDraft(); }
+      _draftLastJSON = json;
+      return;
+    }
+    _draftSaving = true;
+    try {
+      const payload = {
+        email: myEmail, session_date: d.session_date, notes: d.notes,
+        items: d.items, updated_at: new Date().toISOString()
+      };
+      if (_currentDraftId) {
+        const { error } = await db.from("practice_session_drafts").update(payload).eq("id", _currentDraftId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await db.from("practice_session_drafts").insert(payload).select("id").single();
+        if (error) throw error;
+        _currentDraftId = data.id;
+      }
+      _draftLastJSON = json;
+      _setDraftStatus("Draft saved");
+    } catch (e) {
+      console.warn("Draft save failed:", e?.message || e);
+    } finally {
+      _draftSaving = false;
+    }
+  }
+
+  function _scheduleDraftSave() {
+    if (editingSessionId || !_draftWizardOpen()) return;
+    if (_draftTimer) clearTimeout(_draftTimer);
+    _draftTimer = setTimeout(() => { _saveDraftNow(); }, 1200);
+  }
+
+  async function _deleteCurrentDraft() {
+    const id = _currentDraftId;
+    _currentDraftId = null;
+    _draftLastJSON = null;
+    if (!id) return;
+    try { await db.from("practice_session_drafts").delete().eq("id", id); }
+    catch (e) { console.warn("Draft delete failed:", e?.message || e); }
+  }
+
+  async function _fetchLatestDraft() {
+    if (!myEmail) return null;
+    try {
+      const { data, error } = await db.from("practice_session_drafts")
+        .select("*").eq("email", myEmail)
+        .order("updated_at", { ascending: false }).limit(1);
+      if (error) throw error;
+      return (data && data[0]) || null;
+    } catch (e) { console.warn("Draft fetch failed:", e?.message || e); return null; }
+  }
+
+  function _loadDraftIntoForm(draft) {
+    formItems = [];
+    itemCounter = 0;
+    document.getElementById("items-container").innerHTML = "";
+    if (draft.session_date) document.getElementById("session-date").value = draft.session_date;
+    document.getElementById("session-notes").value = draft.notes || "";
+    const items = Array.isArray(draft.items) ? draft.items.slice() : [];
+    items.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    for (const item of items) addItem(item);     // same restore path as editing a session
+    if (typeof updatePerItemTotal === "function") updatePerItemTotal();
+  }
+
+  async function _maybeResumeDraft() {
+    const draft = await _fetchLatestDraft();
+    if (!draft || !_draftHasContent({ items: draft.items, notes: draft.notes })) return false;
+    _loadDraftIntoForm(draft);
+    _currentDraftId = draft.id;
+    _draftLastJSON = JSON.stringify(_serializeDraft());
+    const banner = document.getElementById("wiz-draft-restored");
+    if (banner) banner.style.display = "flex";
+    return true;
+  }
+
+  // ── Wiring ──────────────────────────────────────────────────────────────────
+  (function _wireDrafts() {
+    const backdrop = document.getElementById("log-wizard-backdrop");
+    if (!backdrop) return;
+
+    // Any text/duration edit inside the wizard → debounced save
+    backdrop.addEventListener("input",  _scheduleDraftSave, true);
+    backdrop.addEventListener("change", _scheduleDraftSave, true);
+
+    // Items added / removed → save
+    const itemsEl = document.getElementById("items-container");
+    if (itemsEl && "MutationObserver" in window) {
+      new MutationObserver(() => _scheduleDraftSave()).observe(itemsEl, { childList: true });
+    }
+
+    // Flush immediately when the app is backgrounded or closed
+    window.addEventListener("pagehide", () => { if (_draftWizardOpen()) _saveDraftNow({ force: true }); });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && _draftWizardOpen()) _saveDraftNow({ force: true });
+    });
+
+    // Explicit "Save draft & finish later"
+    const saveDraftBtn = document.getElementById("wiz-save-draft-btn");
+    if (saveDraftBtn) saveDraftBtn.addEventListener("click", async () => {
+      if (editingSessionId) { closeWizard(); return; }
+      saveDraftBtn.disabled = true;
+      if (_draftTimer) clearTimeout(_draftTimer);
+      await _saveDraftNow({ force: true });
+      saveDraftBtn.disabled = false;
+      if (_currentDraftId) showToast("Draft saved — pick up where you left off any time.", 4000);
+      closeWizard();
+    });
+
+    // Discard the restored draft
+    const discardBtn = document.getElementById("wiz-discard-draft-btn");
+    if (discardBtn) discardBtn.addEventListener("click", async () => {
+      await _deleteCurrentDraft();
+      const banner = document.getElementById("wiz-draft-restored");
+      if (banner) banner.style.display = "none";
+      closeWizard();
+    });
+  })();
 </script>
 </body>
 </html>
