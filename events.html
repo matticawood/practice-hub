@@ -4504,6 +4504,7 @@ async function joinStream(eventId, options = {}) {
       });
 
       // Register listeners BEFORE join() so events aren't missed
+      window._callFrame.on("recording-started", _stampStreamStart);
       window._callFrame.on("joined-meeting", async () => {
         // Refresh participant list for layout controls
         _refreshStreamParticipants();
@@ -5693,6 +5694,20 @@ async function setupVodQaList(ev) {
   }
 }
 
+// Stamp stream_started_at = the moment cloud recording actually begins. The
+// recording IS the VOD, so this is the true t=0 for Q&A timestamp sync — and it
+// fires regardless of whether Mux RTMP/live was provisioned (e.g. test events).
+function _stampStreamStart() {
+  if (!currentEvent || currentEvent.stream_started_at) return;
+  const ts = new Date().toISOString();
+  currentEvent.stream_started_at = ts;
+  db.from("live_events").update({ stream_started_at: ts }).eq("id", currentEvent.id)
+    .then(({ error }) => {
+      if (error) console.error("[VOD] stream_started_at save failed:", error.message);
+      else console.log("[VOD] stream_started_at stamped on recording-started:", ts);
+    });
+}
+
 function vodSeekTo(seconds) {
   const player = document.getElementById("vod-mux-player");
   if (!player) return;
@@ -5932,6 +5947,7 @@ async function _joinRoomImpl(eventId) {
     })
     .on("track-started",  _refreshBsGrid)
     .on("track-stopped",  _refreshBsGrid)
+    .on("recording-started", _stampStreamStart)
     // 8. Wire up app-message for bs-spotlight/bs-hide
     .on("app-message", e => {
       const msg = e.data;
