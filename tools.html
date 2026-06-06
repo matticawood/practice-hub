@@ -229,12 +229,34 @@
     .levelup-prompt span   { font-size: .76rem; color: rgba(210,200,185,.35); line-height: 1.6; }
 
     /* History below game */
-    .game-history-section { margin-top: 36px; }
+    .game-history-section { margin-top: 24px; }
+    /* Recent is a collapsible dropdown so Passage Fixer stays as compact as the
+       other tools; it expands on click. */
+    .game-history-toggle {
+      display: flex; align-items: center; gap: 9px; width: 100%;
+      background: none; border: none; border-top: 1px solid rgba(255,255,255,.07);
+      padding: 12px 2px 0; margin: 0; cursor: pointer; font-family: inherit;
+      -webkit-tap-highlight-color: transparent;
+    }
     .game-history-label {
       font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-      color: rgba(255,255,255,.2); margin-bottom: 10px;
+      color: rgba(255,255,255,.35); transition: color .12s;
     }
+    .game-history-toggle:hover .game-history-label { color: rgba(255,255,255,.55); }
+    .game-history-count {
+      font-size: .6rem; font-weight: 700; line-height: 1; color: rgba(245,197,24,.85);
+      background: rgba(245,197,24,.1); border-radius: 20px; padding: 3px 7px;
+    }
+    .game-history-count:empty { display: none; }
+    .game-history-chevron {
+      width: 15px; height: 15px; margin-left: auto; color: rgba(255,255,255,.3);
+      transition: transform .25s ease;
+    }
+    .game-history-toggle:hover .game-history-chevron { color: rgba(255,255,255,.5); }
+    .game-history-section:not(.is-collapsed) .game-history-chevron { transform: rotate(180deg); }
+    .game-history-section.is-collapsed .game-history-scroll { display: none; }
     .game-history-scroll {
+      margin-top: 12px;
       max-height: 320px; overflow-y: auto;
       scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.1) transparent;
     }
@@ -814,9 +836,13 @@
           </div>
         </div>
 
-        <div class="game-history-section">
-          <div class="game-history-label">Recent</div>
-          <div class="game-history-scroll">
+        <div class="game-history-section is-collapsed" id="history-section">
+          <button type="button" class="game-history-toggle" id="history-toggle" onclick="toggleHistory()" aria-expanded="false">
+            <span class="game-history-label">Recent</span>
+            <span class="game-history-count" id="history-count"></span>
+            <svg class="game-history-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="game-history-scroll" id="history-scroll">
             <div id="history-list"></div>
             <div id="history-empty" class="history-empty">No games yet - start your first passage above.</div>
           </div>
@@ -1491,23 +1517,30 @@ async function saveGame(outcome) {
 }
 
 async function loadHistory() {
-  const list  = document.getElementById("history-list");
-  const empty = document.getElementById("history-empty");
+  const list    = document.getElementById("history-list");
+  const empty   = document.getElementById("history-empty");
+  const section = document.getElementById("history-section");
+  const countEl = document.getElementById("history-count");
   if (!list) return;
-  if (!myEmail) { empty.style.display = "block"; return; }
+  // Hide the whole Recent dropdown for first-time users (no games yet), so a
+  // fresh Passage Fixer is as compact as the other tools.
+  const hideSection = () => { if (section) section.style.display = "none"; if (countEl) countEl.textContent = ""; };
+  if (!myEmail) { hideSection(); return; }
 
   const { data, error } = await db.from("passage_games")
     .select("*").eq("email", myEmail)
     .order("created_at", { ascending: false }).limit(20);
 
-  if (error) { console.error("loadHistory error:", error); empty.style.display = "block"; return; }
+  if (error) { console.error("loadHistory error:", error); hideSection(); return; }
 
   if (!data || data.length === 0) {
     list.innerHTML = "";
-    empty.style.display = "block";
+    hideSection();
     return;
   }
 
+  if (section) section.style.display = "";
+  if (countEl) countEl.textContent = String(data.length);
   empty.style.display = "none";
   const outcomeLabel = { cleared:"Cleared", leveled_up:"Levelled up", abandoned:"Abandoned" };
   list.innerHTML = data.map(function(g) {
@@ -1530,6 +1563,16 @@ async function loadHistory() {
   const sc = document.querySelector(".game-history-scroll");
   if (sc) { sc.onscroll = _updateHistoryFade; }
   _updateHistoryFade();
+}
+
+// Expand / collapse the Recent dropdown.
+function toggleHistory() {
+  const sec = document.getElementById("history-section");
+  const tog = document.getElementById("history-toggle");
+  if (!sec) return;
+  const collapsed = sec.classList.toggle("is-collapsed");
+  if (tog) tog.setAttribute("aria-expanded", String(!collapsed));
+  if (!collapsed) _updateHistoryFade();
 }
 
 // Toggle the Recent-list bottom fade based on scroll position.
