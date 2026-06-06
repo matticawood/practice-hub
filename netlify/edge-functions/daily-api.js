@@ -927,6 +927,56 @@ export default async (request) => {
     return json({ ok: true, muxAssetId: assetId, muxPlaybackId });
   }
 
+  // ── Action: backfill-recording-start ───────────────────────────────────────
+  // Self-repair for stream_started_at (VOD t=0 used to sync Q&A timestamps).
+  // When a stream never started Mux RTMP (e.g. a test/backstage rehearsal), the
+  // live go-live path can miss stamping stream_started_at. The Daily cloud
+  // recording still exists, and its start time IS the true VOD t=0. This fetches
+  // that start time and fills the column — but ONLY when it's null, so a real
+  // live stream's stamped value is never overwritten. Safe & idempotent.
+  if (action === "backfill-recording-start") {
+    if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
+    const { eventId: eid } = body;
+    if (!eid) return json({ error: "eventId required" }, 400);
+
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    const supaHeaders = {
+      "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json"
+    };
+
+    const evRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}&select=daily_room_name,stream_started_at`,
+      { headers: supaHeaders }
+    );
+    const ev = (await evRes.json())?.[0];
+    if (!ev) return json({ error: "Event not found" }, 404);
+    if (ev.stream_started_at) return json({ ok: true, stream_started_at: ev.stream_started_at, skipped: "already set" });
+    if (!ev.daily_room_name)  return json({ ok: false, reason: "no room name" });
+
+    // Find this room's recordings and use the EARLIEST start_ts (the session
+    // start, in case the stream produced multiple recording segments).
+    const recRes = await fetch(
+      `https://api.daily.co/v1/recordings?room_name=${encodeURIComponent(ev.daily_room_name)}&limit=10`,
+      { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
+    );
+    const recData = await recRes.json();
+    const startTimes = (recData?.data || []).map(r => r.start_ts).filter(Boolean);
+    if (!startTimes.length) return json({ ok: false, reason: "no recording start_ts found" });
+    const startIso = new Date(Math.min(...startTimes) * 1000).toISOString();
+
+    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
+      method: "PATCH",
+      headers: { ...supaHeaders, "Prefer": "return=minimal" },
+      body: JSON.stringify({ stream_started_at: startIso })
+    });
+    if (!patchRes.ok) {
+      const err = await patchRes.text().catch(() => patchRes.status);
+      return json({ error: "Could not save stream_started_at: " + err }, 500);
+    }
+    return json({ ok: true, stream_started_at: startIso });
+  }
+
   // ── Action: setup-webhook ──────────────────────────────────────────────────
   // Deletes any existing webhook and re-registers at the current deploy URL.
   // Safe to call any time — fixes stale URLs from old Netlify deploys.

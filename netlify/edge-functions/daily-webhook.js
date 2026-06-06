@@ -34,21 +34,18 @@ export default async (request) => {
 
   console.log("Recording data:", { room_name, recording_id, has_download_link: !!download_link });
 
-  // If download_link missing, fetch it from Daily.co using recording_id
-  if (!download_link) {
-    if (!recording_id) {
-      console.error("No download_link and no recording_id — cannot proceed");
-      return new Response("OK");
-    }
-    console.log("Fetching download_link from Daily.co for recording:", recording_id);
+  // Fetch the recording details from Daily.co whenever the download_link OR the
+  // recording start time is missing (the start time is VOD t=0 for Q&A sync).
+  if ((!download_link || !start_ts) && recording_id) {
+    console.log("Fetching recording details from Daily.co for:", recording_id);
     const recRes = await fetch(`https://api.daily.co/v1/recordings/${recording_id}`, {
       headers: { "Authorization": `Bearer ${DAILY_API_KEY}` }
     });
     const recData = await recRes.json();
     console.log("Daily.co recording fetch:", JSON.stringify(recData));
-    download_link = recData?.download_link;
-    if (!room_name) room_name = recData?.room_name;
-    if (!start_ts)  start_ts  = recData?.start_ts;
+    if (!download_link) download_link = recData?.download_link;
+    if (!room_name)     room_name     = recData?.room_name;
+    if (!start_ts)      start_ts      = recData?.start_ts;
   }
 
   if (!room_name || !download_link) {
