@@ -910,13 +910,18 @@ export default async (request) => {
     const supaHeaders = {
       "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal"
     };
+    // Stamp VOD t=0 from the asset's own recording start so Q&A timestamps sync
+    // to this exact video. Mux's recording_times is the authoritative start.
+    const recPatch = {
+      mux_asset_id:       assetId,
+      mux_playback_id:    muxPlaybackId,
+      mux_live_stream_id: null,   // recording is saved — live stream ID no longer needed
+    };
+    const recStart = asset.recording_times?.[0]?.started_at;
+    if (recStart) recPatch.stream_started_at = new Date(recStart).toISOString();
     const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
       method: "PATCH", headers: supaHeaders,
-      body: JSON.stringify({
-        mux_asset_id:       assetId,
-        mux_playback_id:    muxPlaybackId,
-        mux_live_stream_id: null,   // recording is saved — live stream ID no longer needed
-      })
+      body: JSON.stringify(recPatch)
     });
     if (!patchRes.ok) {
       const patchErr = await patchRes.text().catch(() => patchRes.status);
@@ -929,11 +934,17 @@ export default async (request) => {
 
   // ── Action: backfill-recording-start ───────────────────────────────────────
   // Self-repair for stream_started_at (VOD t=0 used to sync Q&A timestamps).
-  // When a stream never started Mux RTMP (e.g. a test/backstage rehearsal), the
-  // live go-live path can miss stamping stream_started_at. The Daily cloud
-  // recording still exists, and its start time IS the true VOD t=0. This fetches
-  // that start time and fills the column — but ONLY when it's null, so a real
-  // live stream's stamped value is never overwritten. Safe & idempotent.
+  //
+  // The VOD a member watches is the MUX ASSET referenced by mux_playback_id.
+  // When Mux records the live stream itself (ingest_type "live_rtmp"), the asset
+  // carries recording_times[0].started_at — the exact wall-clock moment the
+  // recording began. THAT is the authoritative t=0 for this video, so we read it
+  // straight from the asset. (Daily's own cloud recording is a *separate* file
+  // with a different start; using it here would anchor Q&A offsets to the wrong
+  // video.) Falls back to the Daily recording's start_ts only when the asset has
+  // no recording_times (e.g. a VOD built from the Daily file via the webhook).
+  //
+  // Only fills a null value — a real stream's stamped t=0 is never overwritten.
   if (action === "backfill-recording-start") {
     if (!(await isAdmin())) return json({ error: "Forbidden" }, 403);
     const { eventId: eid } = body;
@@ -946,24 +957,41 @@ export default async (request) => {
     };
 
     const evRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}&select=daily_room_name,stream_started_at`,
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}&select=daily_room_name,stream_started_at,mux_asset_id`,
       { headers: supaHeaders }
     );
     const ev = (await evRes.json())?.[0];
     if (!ev) return json({ error: "Event not found" }, 404);
     if (ev.stream_started_at) return json({ ok: true, stream_started_at: ev.stream_started_at, skipped: "already set" });
-    if (!ev.daily_room_name)  return json({ ok: false, reason: "no room name" });
 
-    // Find this room's recordings and use the EARLIEST start_ts (the session
-    // start, in case the stream produced multiple recording segments).
-    const recRes = await fetch(
-      `https://api.daily.co/v1/recordings?room_name=${encodeURIComponent(ev.daily_room_name)}&limit=10`,
-      { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
-    );
-    const recData = await recRes.json();
-    const startTimes = (recData?.data || []).map(r => r.start_ts).filter(Boolean);
-    if (!startTimes.length) return json({ ok: false, reason: "no recording start_ts found" });
-    const startIso = new Date(Math.min(...startTimes) * 1000).toISOString();
+    let startIso = null;
+    let source   = null;
+
+    // Primary: the Mux asset's own recording start (matches the displayed VOD).
+    if (ev.mux_asset_id) {
+      const MUX_TOKEN_ID     = Netlify.env.get("MUX_TOKEN_ID");
+      const MUX_TOKEN_SECRET = Netlify.env.get("MUX_TOKEN_SECRET");
+      const muxAuth = "Basic " + btoa(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`);
+      const aRes = await fetch(`https://api.mux.com/video/v1/assets/${ev.mux_asset_id}`, {
+        headers: { "Authorization": muxAuth }
+      });
+      const asset = (await aRes.json())?.data;
+      const recStart = asset?.recording_times?.[0]?.started_at;
+      if (recStart) { startIso = new Date(recStart).toISOString(); source = "mux_recording_times"; }
+    }
+
+    // Fallback: the Daily cloud recording's start (for webhook/Daily-file VODs).
+    if (!startIso && ev.daily_room_name) {
+      const recRes = await fetch(
+        `https://api.daily.co/v1/recordings?room_name=${encodeURIComponent(ev.daily_room_name)}&limit=10`,
+        { headers: { "Authorization": `Bearer ${DAILY_API_KEY}` } }
+      );
+      const recData = await recRes.json();
+      const startTimes = (recData?.data || []).map(r => r.start_ts).filter(Boolean);
+      if (startTimes.length) { startIso = new Date(Math.min(...startTimes) * 1000).toISOString(); source = "daily_start_ts"; }
+    }
+
+    if (!startIso) return json({ ok: false, reason: "no recording start time found (mux or daily)" });
 
     const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
       method: "PATCH",
@@ -974,7 +1002,7 @@ export default async (request) => {
       const err = await patchRes.text().catch(() => patchRes.status);
       return json({ error: "Could not save stream_started_at: " + err }, 500);
     }
-    return json({ ok: true, stream_started_at: startIso });
+    return json({ ok: true, stream_started_at: startIso, source });
   }
 
   // ── Action: setup-webhook ──────────────────────────────────────────────────
