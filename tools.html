@@ -646,6 +646,7 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-header.js?v=2026060502"></script>
+<script src="/shared-achievements.js?v=1"></script>
 
 <main id="app-main" style="display:none">
   <div id="panel-tools">
@@ -1206,6 +1207,10 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
 
 let myEmail = "";
 let myName  = "";
+// Globals required by shared-achievements.js (engine reads these at call-time)
+let allSessions = [];
+let streakData = null;
+let viewingEmail = null;
 
 function escHtml(str) {
   return String(str ?? "")
@@ -2234,7 +2239,8 @@ async function nrSaveScore() {
     if (metaEl) metaEl.textContent += " \xb7 Score not saved (" + error.code + ": " + error.message + ")";
     return;
   }
-  // achievement tracking only available on hub
+  // Detect any newly earned achievements now that this score is saved.
+  toolsCheckAchievements().catch(e => console.warn("toolsCheckAchievements failed:", e));
 }
 
 async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAcc, filterKey) {
@@ -3564,6 +3570,31 @@ async function crSaveScore() {
       }).then(() => {}).catch(e => console.warn("high-score notify failed:", e));
     }
   } catch(e) { console.error("CR save:",e); }
+  // Detect any newly earned achievements now that this score is saved.
+  toolsCheckAchievements().catch(e => console.warn("toolsCheckAchievements failed:", e));
+}
+
+// Load the current user's full session + streak data, then run the shared
+// achievement engine (from shared-achievements.js). Replicates practice-log.html's
+// loadData() queries so checkNewAchievements() sees identical data — required so it
+// writes the complete earned-id set to localStorage and never re-notifies later.
+async function toolsCheckAchievements() {
+  try {
+    if (!myEmail) return;
+    const [sessionsResult, streakResult] = await Promise.all([
+      db.rpc("get_my_sessions", { p_email: myEmail }),
+      db.from("streak_tokens")
+        .select("*")
+        .eq("email", myEmail)
+        .maybeSingle()
+    ]);
+    allSessions = (sessionsResult.data || []);
+    streakData = streakResult.data;
+    await loadAchievementExtras();
+    await checkNewAchievements();
+  } catch (e) {
+    console.warn("toolsCheckAchievements failed:", e);
+  }
 }
 
 async function crLoadLeaderboard(rowsElId) {
