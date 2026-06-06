@@ -30,7 +30,7 @@ export default async (request) => {
     return new Response("OK");
   }
 
-  let { room_name, download_link, recording_id } = recordingData;
+  let { room_name, download_link, recording_id, start_ts } = recordingData;
 
   console.log("Recording data:", { room_name, recording_id, has_download_link: !!download_link });
 
@@ -48,6 +48,7 @@ export default async (request) => {
     console.log("Daily.co recording fetch:", JSON.stringify(recData));
     download_link = recData?.download_link;
     if (!room_name) room_name = recData?.room_name;
+    if (!start_ts)  start_ts  = recData?.start_ts;
   }
 
   if (!room_name || !download_link) {
@@ -63,7 +64,7 @@ export default async (request) => {
 
   // ── Find event by room_name ────────────────────────────────────────────────
   const evRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/live_events?daily_room_name=eq.${encodeURIComponent(room_name)}&select=id`,
+    `${SUPABASE_URL}/rest/v1/live_events?daily_room_name=eq.${encodeURIComponent(room_name)}&select=id,stream_started_at`,
     { headers: supabaseHeaders }
   );
   const events = await evRes.json();
@@ -100,12 +101,22 @@ export default async (request) => {
   const muxPlaybackId = asset.playback_ids?.[0]?.id || null;
 
   // ── Update event ──────────────────────────────────────────────────────────
+  const patch = { mux_asset_id: muxAssetId, mux_playback_id: muxPlaybackId };
+  // Backfill VOD t=0 from the Daily recording's start time when it wasn't
+  // captured live (e.g. a stream that never started Mux RTMP, like test events).
+  // This is the exact recording the Mux asset is built from, so it's the true
+  // t=0 for Q&A timestamp sync. Never overwrite an existing value. start_ts is
+  // Daily's recording start in epoch seconds.
+  if (!events[0].stream_started_at && start_ts) {
+    patch.stream_started_at = new Date(start_ts * 1000).toISOString();
+    console.log("Backfilling stream_started_at from recording start_ts:", patch.stream_started_at);
+  }
   const patchRes = await fetch(
     `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`,
     {
       method: "PATCH",
       headers: supabaseHeaders,
-      body: JSON.stringify({ mux_asset_id: muxAssetId, mux_playback_id: muxPlaybackId })
+      body: JSON.stringify(patch)
     }
   );
   console.log("Supabase patch status:", patchRes.status);
