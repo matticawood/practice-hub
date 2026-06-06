@@ -281,9 +281,13 @@ Deno.serve(async (req) => {
   let email: string, title: string, content: string, linkUrl: string | null, metadata: any, ntype = "";
   if (body.notification_id) {
     const rows = await supaSelect(
-      `notifications?id=eq.${encodeURIComponent(body.notification_id)}&select=email,title,body,link_url,metadata,type`,
+      `notifications?id=eq.${encodeURIComponent(body.notification_id)}&select=email,title,body,link_url,metadata,type,read`,
     );
     if (!rows.length) return json({ error: "notification not found" }, 404);
+    // Rows inserted as already-read are silent seeds/backfills (e.g. the
+    // one-time historical-achievement seed). They must NOT trigger a push —
+    // otherwise opening the app fires a burst of pushes for old events.
+    if (rows[0].read === true) return json({ sent: 0, reason: "row already read (silent seed)" });
     email    = rows[0].email;
     title    = rows[0].title;
     content  = rows[0].body || "";
