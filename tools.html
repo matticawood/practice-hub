@@ -69,9 +69,12 @@
       border-color: rgba(255,255,255,.08);
     }
 
+    /* Pull tool content closer to the header — the shared #app-main top padding
+       left too much empty space above the tool title (desktop + mobile). */
+    body.tools-mode #app-main { padding-top: 10px; }
     .tools-wrap {
       max-width: 460px; margin: 0 auto;
-      padding: 24px 16px 80px;
+      padding: 6px 16px 80px;
     }
     @media (min-width: 900px) {
       .tools-wrap { max-width: 760px; }
@@ -79,7 +82,12 @@
 
     /* Tool panels */
     .tool-panel { display: none; }
-    .tool-panel.active { display: block; }
+    /* Entrance animation — matches the dashboard's dashFadeUp on open / tool switch. */
+    .tool-panel.active { display: block; animation: dashFadeUp .45s cubic-bezier(.22,.61,.36,1) both; }
+    /* End on transform:none (not translateY(0)) so the settled panel doesn't
+       create a containing block that would trap the fixed countdown overlay. */
+    @keyframes dashFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .tool-panel.active { animation: none; } }
 
     /* Game states */
     .game-state { display: none; }
@@ -222,6 +230,14 @@
     }
     .game-history-scroll::-webkit-scrollbar { width: 4px; }
     .game-history-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 2px; }
+    /* Soft fade at the bottom of the Recent list — only while there's more to scroll. */
+    .game-history-section { position: relative; }
+    .game-history-section::after {
+      content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 52px;
+      background: linear-gradient(to bottom, rgba(15,15,15,0), var(--bg));
+      pointer-events: none; opacity: 0; transition: opacity .2s ease;
+    }
+    .game-history-section.has-more::after { opacity: 1; }
     .history-empty { text-align: center; padding: 28px 0; color: rgba(210,200,185,.25); font-size: .88rem; }
     .history-item {
       display: flex; align-items: center; gap: 12px;
@@ -492,7 +508,12 @@
 
     /* Playing */
     .nr-playing-inner { position: relative; display: flex; flex-direction: column; gap: 14px; }
-    .nr-countdown { position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,.82); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    /* Dark countdown overlay — covers the whole content area but NOT the nav
+       menu: right of the sidebar on desktop, above the bottom bar on mobile.
+       (Moved to <body> in JS so a panel transform can't trap the fixed element.) */
+    .nr-countdown { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.9); display: flex; align-items: center; justify-content: center; }
+    @media (min-width: 769px) { .nr-countdown { left: 244px; } }       /* keep the desktop sidebar menu visible */
+    @media (max-width: 768px) { .nr-countdown { bottom: calc(60px + env(safe-area-inset-bottom, 0px)); } } /* keep the mobile bottom nav visible */
     .nr-countdown-num { font-size: 6rem; font-weight: 900; color: #fff; line-height: 1; animation: nrPop .75s ease-out forwards; }
     @keyframes nrPop { 0% { transform: scale(1.6); opacity: 0; } 40% { transform: scale(1.0); opacity: 1; } 100% { transform: scale(.9); opacity: 0; } }
 
@@ -513,7 +534,7 @@
     .nr-feedback-msg.correct { color: #4ade80; }
     .nr-feedback-msg.wrong   { color: #f87171; }
     .nr-piano-wrap { padding: 0; }
-    .nr-piano { position: relative; display: flex; height: 110px; width: 100%; user-select: none; }
+    .nr-piano { position: relative; display: flex; height: 140px; width: 100%; user-select: none; }
     .nr-white-key { flex: 1; background: #e8e8e8; border: 1px solid #aaa; border-top: 2px solid #bbb; border-radius: 0 0 6px 6px; cursor: pointer; position: relative; transition: background .08s; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
     .nr-white-key:hover:not(:disabled) { background: #d8d8d8; }
     .nr-white-key:active:not(:disabled) { background: #c8c8c8; }
@@ -1431,6 +1452,20 @@ async function loadHistory() {
       '</div>' +
     '</div>';
   }).join("");
+
+  // Show the bottom fade only while there's more list below the fold.
+  const sc = document.querySelector(".game-history-scroll");
+  if (sc) { sc.onscroll = _updateHistoryFade; }
+  _updateHistoryFade();
+}
+
+// Toggle the Recent-list bottom fade based on scroll position.
+function _updateHistoryFade() {
+  const sc  = document.querySelector(".game-history-scroll");
+  const sec = document.querySelector(".game-history-section");
+  if (!sc || !sec) return;
+  const more = sc.scrollHeight - sc.scrollTop - sc.clientHeight > 8;
+  sec.classList.toggle("has-more", more);
 }
 
 // ── METRONOME ─────────────────────────────────────────────────────────────────
@@ -3620,7 +3655,16 @@ async function crLoadLeaderboard(rowsElId) {
 }
 
 // ── Init pips on DOM ready ────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", function() { buildDiscPips(metroNum); updateMetronomeMark(); });
+document.addEventListener("DOMContentLoaded", function() {
+  buildDiscPips(metroNum); updateMetronomeMark();
+  // Move the countdown overlays to <body> so their position:fixed truly covers
+  // the whole viewport. (The tool-panel entrance animation leaves a transform on
+  // the panel, which would otherwise trap a fixed child inside the game box.)
+  ["nr-countdown", "cr-countdown"].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && el.parentElement !== document.body) document.body.appendChild(el);
+  });
+});
 
 // ── Auth & boot ───────────────────────────────────────────────────────────────
 (async function() {
