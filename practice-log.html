@@ -21748,6 +21748,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   @media (max-width: 768px) { .rm-wrap { margin-top: 0; } .rm-map { width: auto; margin: 8px 0 -24px; } }
   .rm-land { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
   .rm-motif { position: absolute; z-index: 0; pointer-events: none; transform: translate(-50%, -50%); }
+  .rm-motif.ground { transform: translate(-50%, -100%); }
   .rm-compass { position: absolute; top: 16px; right: 18px; width: 54px; height: 54px; z-index: 1; pointer-events: none; opacity: .2; color: #8a6d2e; }
   .rm-map-trail { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }
   .rm-traveller { position: absolute; z-index: 5; transform: translate(-50%, -100%); width: 60px; pointer-events: none; filter: drop-shadow(0 4px 4px rgba(40,30,10,.25)); }
@@ -21816,11 +21817,13 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   .rm-stone:active { transform: scale(.96); }
   .rm-stone svg { width: 23px; height: 23px; }
   .rm-stone.done { background: radial-gradient(circle at 35% 28%, #ffe07a, #f0a500); color: #5a3d00; box-shadow: 0 6px 14px rgba(240,165,0,.35), inset 0 -3px 6px rgba(150,100,0,.32), inset 0 3px 5px rgba(255,255,255,.6); }
-  .rm-stone.current { background: radial-gradient(circle at 35% 28%, #ffe890, #f3b200); color: #5a3d00; box-shadow: 0 0 0 6px rgba(245,197,24,.22), 0 8px 18px rgba(240,165,0,.45); animation: rmStonePulse 2.2s ease-in-out infinite; }
-  @keyframes rmStonePulse { 0%, 100% { box-shadow: 0 0 0 6px rgba(245,197,24,.22), 0 8px 18px rgba(240,165,0,.45); } 50% { box-shadow: 0 0 0 11px rgba(245,197,24,.05), 0 8px 18px rgba(240,165,0,.3); } }
+  .rm-stone.current { background: radial-gradient(circle at 35% 28%, #ffe890, #f3b200); color: #5a3d00; box-shadow: 0 6px 16px rgba(240,165,0,.5); }
+  /* Total-level progress ring around the current stone (% to next stage). */
+  .rm-stone.current::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; background: conic-gradient(from -90deg, #f0a500 calc(var(--rmp, 0) * 1%), rgba(120,80,0,.16) 0); -webkit-mask: radial-gradient(closest-side, #0000 83%, #000 85%); mask: radial-gradient(closest-side, #0000 83%, #000 85%); animation: rmRingPulse 2.4s ease-in-out infinite; }
+  @keyframes rmRingPulse { 0%, 100% { filter: drop-shadow(0 0 2px rgba(240,165,0,.5)); } 50% { filter: drop-shadow(0 0 7px rgba(240,165,0,.75)); } }
   .rm-stone.future { opacity: .8; }
   .rm-stone.future svg { opacity: .55; }
-  @media (prefers-reduced-motion: reduce) { .rm-stone.current { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .rm-stone.current::after { animation: none; } }
 
   .rm-area-stop { display: flex; flex-direction: column; align-items: center; gap: 7px; cursor: pointer; }
   .rm-area-stop-head { display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; line-height: 1.12; }
@@ -22053,7 +22056,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       const y = stepY[i];
       return `<div class="rm-mnode ${state}" style="left:${(frac * 100).toFixed(2)}%;top:${y}px">
           <div class="rm-mstage">${L.name}<small>${L.hours.toLocaleString()}h${L.grade ? " &middot; " + L.grade : ""}</small>${state === "current" ? '<span class="rm-mhere">You are here</span>' : ""}</div>
-          <button class="rm-stone ${state}" onclick="_rmOpenStone(${L.level})" title="${escHtml(L.name)}">${node}</button>
+          <button class="rm-stone ${state}"${state === "current" ? ` style="--rmp:${totalPct}"` : ""} onclick="_rmOpenStone(${L.level})" title="${escHtml(L.name)}">${node}</button>
         </div>`;
     }).join("");
     // Traveller pushing an upright piano, parked at the current stage.
@@ -22113,79 +22116,85 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     });
   }
   function _rmLandscape(H) {
-    const W = 1000;
-    const hill = (yf, amp, grad, op) => {
-      const y = yf * H;
-      let d = `M0 ${y.toFixed(0)}`;
-      const n = 5;
+    const W = 1000, SKY = 270;
+    const lf = (f) => (SKY + (H - SKY) * f) / H;
+    const hill = (yf, amp, grad, op, ridge) => {
+      const y = yf * H; let d = `M0 ${y.toFixed(0)}`;
+      const n = 6;
       for (let i = 1; i <= n; i++) {
-        const x = (W * i / n).toFixed(0);
-        const cx = (W * (i - 0.5) / n).toFixed(0);
-        const cy = (y - amp * (i % 2 ? 1 : 0.45)).toFixed(0);
+        const x = (W * i / n).toFixed(0), cx = (W * (i - 0.5) / n).toFixed(0);
+        const cy = (y - amp * (i % 2 ? 1 : 0.4)).toFixed(0);
         d += ` Q${cx} ${cy} ${x} ${y.toFixed(0)}`;
       }
+      const crest = d;
       d += ` L${W} ${H.toFixed(0)} L0 ${H.toFixed(0)} Z`;
-      return `<path d="${d}" fill="url(#${grad})" opacity="${op}"/>`;
+      return `<path d="${d}" fill="url(#${grad})" opacity="${op}"/>` +
+        (ridge ? `<path d="${crest}" fill="none" stroke="${ridge}" stroke-width="2" stroke-linejoin="round" opacity=".5"/>` : "");
     };
     const grads = `<defs>
-      <linearGradient id="rmSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe6f1"/><stop offset="0.15" stop-color="#dbe9e7"/><stop offset="0.46" stop-color="#edeede"/><stop offset="0.72" stop-color="#e7eaef"/><stop offset="1" stop-color="#f6f8fa"/></linearGradient>
-      <radialGradient id="rmGlow"><stop offset="0" stop-color="#fff2c4" stop-opacity=".9"/><stop offset="1" stop-color="#fff2c4" stop-opacity="0"/></radialGradient>
-      <linearGradient id="rmG1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d8ecc4"/><stop offset="1" stop-color="#bcdca0"/></linearGradient>
-      <linearGradient id="rmG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c3dca8"/><stop offset="1" stop-color="#a6cb86"/></linearGradient>
-      <linearGradient id="rmG3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ecdcab"/><stop offset="1" stop-color="#dcc488"/></linearGradient>
-      <linearGradient id="rmG4" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d4dae3"/><stop offset="1" stop-color="#bcc4d0"/></linearGradient>
-      <linearGradient id="rmG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f6f9"/><stop offset="1" stop-color="#e6ebf0"/></linearGradient>
+      <linearGradient id="rmSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b6d8ec"/><stop offset="0.45" stop-color="#d3e6e8"/><stop offset="0.85" stop-color="#ecefe2"/><stop offset="1" stop-color="#edf0e0"/></linearGradient>
+      <radialGradient id="rmGlow"><stop offset="0" stop-color="#fff2c2" stop-opacity=".95"/><stop offset="1" stop-color="#fff2c2" stop-opacity="0"/></radialGradient>
+      <linearGradient id="rmH1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cadfd0"/><stop offset="1" stop-color="#bdd6bb"/></linearGradient>
+      <linearGradient id="rmH2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c2dca8"/><stop offset="1" stop-color="#a8cd88"/></linearGradient>
+      <linearGradient id="rmH3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9cf83"/><stop offset="1" stop-color="#8cb867"/></linearGradient>
+      <linearGradient id="rmH4" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dccb8c"/><stop offset="1" stop-color="#c6ad6a"/></linearGradient>
+      <linearGradient id="rmH5" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c4cad6"/><stop offset="1" stop-color="#abb4c4"/></linearGradient>
+      <linearGradient id="rmH6" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eef2f6"/><stop offset="1" stop-color="#e0e6ee"/></linearGradient>
+      <filter id="rmGrain" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .6 0"/></filter>
     </defs>`;
-    // The green land begins at SKY px from the top; the band above is open
-    // sky for the HUD. lf() maps a 0..1 position within the land to a fraction.
-    const SKY = 270;
-    const lf = (f) => (SKY + (H - SKY) * f) / H;
     const bands = `<svg class="rm-land" viewBox="0 0 ${W} ${H.toFixed(0)}" preserveAspectRatio="none" aria-hidden="true">
       ${grads}
       <rect width="${W}" height="${H.toFixed(0)}" fill="url(#rmSky)"/>
-      <ellipse cx="760" cy="${(0.135 * H).toFixed(0)}" rx="300" ry="${(0.11 * H).toFixed(0)}" fill="url(#rmGlow)"/>
-      ${hill(lf(0), 44, "rmG1", 0.7)}
-      ${hill(lf(0.26), 82, "rmG2", 0.7)}
-      ${hill(lf(0.50), 72, "rmG3", 0.75)}
-      ${hill(lf(0.72), 96, "rmG4", 0.8)}
-      ${hill(lf(0.88), 80, "rmG5", 0.95)}
+      <ellipse cx="760" cy="${(0.13 * H).toFixed(0)}" rx="300" ry="${(0.1 * H).toFixed(0)}" fill="url(#rmGlow)"/>
+      ${hill(lf(-0.04), 34, "rmH1", 0.65)}
+      ${hill(lf(0.14), 58, "rmH2", 0.9, "#d6eeba")}
+      ${hill(lf(0.34), 66, "rmH3", 0.95, "#bfe097")}
+      ${hill(lf(0.56), 78, "rmH4", 0.97, "#ecdca2")}
+      ${hill(lf(0.76), 90, "rmH5", 0.98, "#e0e6f0")}
+      ${hill(lf(0.91), 74, "rmH6", 1, "#fbfdff")}
+      <rect width="${W}" height="${H.toFixed(0)}" filter="url(#rmGrain)" opacity="0.045"/>
     </svg>`;
-    // Characterful, lightly-shaded motifs (each baked with its own colours).
-    const TREE = '<svg viewBox="0 0 24 30"><path d="M12 1 L19 12 H12 Z" fill="#6f9a4e"/><path d="M12 1 L5 12 H12 Z" fill="#84ad62"/><path d="M12 8 L21 21 H12 Z" fill="#5f8c42"/><path d="M12 8 L3 21 H12 Z" fill="#79a157"/><rect x="10.6" y="20" width="2.8" height="8" rx="1" fill="#7a5733"/></svg>';
-    const PINE = '<svg viewBox="0 0 24 32"><path d="M12 2 L18 12 H12 Z" fill="#3f7a52"/><path d="M12 2 L6 12 H12 Z" fill="#4f9061"/><path d="M12 9 L19 19 H12 Z" fill="#367046"/><path d="M12 9 L5 19 H12 Z" fill="#458357"/><path d="M12 16 L21 28 H12 Z" fill="#2e6440"/><path d="M12 16 L3 28 H12 Z" fill="#3d7750"/><rect x="10.6" y="27" width="2.8" height="5" fill="#6b4a2c"/></svg>';
-    const MTN = '<svg viewBox="0 0 44 30"><path d="M2 30 L16 4 L25 18 L31 11 L42 30 Z" fill="#c2cad6"/><path d="M16 4 L25 18 L16 18 Z" fill="#a7b0c0"/><path d="M31 11 L42 30 L31 30 Z" fill="#aeb7c5"/><path d="M12 10 L16 4 L20 11 L17 13 L14 11 Z" fill="#fff"/><path d="M28 14.5 L31 11 L34 15 L31.5 16 Z" fill="#fff"/></svg>';
-    const HOUSE = '<svg viewBox="0 0 32 28"><rect x="5" y="13" width="22" height="12" fill="#ecd6ad"/><rect x="5" y="13" width="22" height="12" fill="#000" opacity=".06"/><path d="M3 14 L16 3 L29 14 Z" fill="#b5552f"/><path d="M16 3 L29 14 L16 14 Z" fill="#9a4527"/><rect x="13" y="17" width="6" height="8" fill="#7a5733"/><rect x="7.5" y="16" width="4" height="4" fill="#a7d0e0"/><rect x="20.5" y="16" width="4" height="4" fill="#a7d0e0"/></svg>';
-    const CLOUD = '<svg viewBox="0 0 44 20"><ellipse cx="13" cy="13" rx="11" ry="7" fill="#fff"/><ellipse cx="26" cy="10" rx="12" ry="8.5" fill="#fff"/><ellipse cx="35" cy="14" rx="8" ry="5.5" fill="#fff"/></svg>';
-    const SIGN = '<svg viewBox="0 0 26 26"><rect x="11.5" y="6" width="2.6" height="17" fill="#7a5733"/><path d="M2 8 L17 8 L21 11.5 L17 15 L2 15 Z" fill="#caa56f"/><path d="M2 8 L17 8 L17 15 L2 15 Z" fill="#000" opacity=".07"/></svg>';
-    const FLAG = '<svg viewBox="0 0 22 30"><rect x="4" y="2" width="2.4" height="26" fill="#5b4a36"/><path d="M6 3 L19 7 L6 12 Z" fill="#e0584a"/><path d="M6 3 L19 7 L6 7 Z" fill="#ef6b5d"/></svg>';
-    const XSPOT = '<svg viewBox="0 0 24 24" fill="none" stroke="#b5552f" stroke-width="4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+
+    // Building blocks (drawn with their base at y=0 so clusters can be grounded
+    // on a hill line). Two-tone fills give light/shade depth.
+    const pine = (x, b, s) => `<g transform="translate(${x} ${b}) scale(${s})"><rect x="-1.5" y="-7" width="3" height="7" fill="#6e4d2e"/><path d="M0 -4 L10 -17 H-10 Z" fill="#4c8a5d"/><path d="M0 -4 L0 -17 H-10 Z" fill="#3f7a50"/><path d="M0 -12 L8.5 -26 H-8.5 Z" fill="#41804f"/><path d="M0 -12 L0 -26 H-8.5 Z" fill="#356b44"/><path d="M0 -20 L6.5 -33 H-6.5 Z" fill="#367047"/><path d="M0 -20 L0 -33 H-6.5 Z" fill="#2c5c39"/></g>`;
+    const oak = (x, b, s) => `<g transform="translate(${x} ${b}) scale(${s})"><rect x="-2" y="-10" width="4" height="10" fill="#7a5733"/><circle cx="-6" cy="-16" r="8" fill="#6c9a4e"/><circle cx="6" cy="-15" r="8" fill="#5e8c44"/><circle cx="0" cy="-22" r="9" fill="#7aad5c"/><circle cx="0" cy="-15" r="8" fill="#6c9a4e"/></g>`;
+    const cot = (x, b, s) => `<g transform="translate(${x} ${b}) scale(${s})"><rect x="-11" y="-13" width="22" height="13" fill="#ecd6ad"/><rect x="0" y="-13" width="11" height="13" fill="#000" opacity=".07"/><path d="M-13 -12 L0 -23 L13 -12 Z" fill="#bb5a32"/><path d="M0 -23 L13 -12 L0 -12 Z" fill="#9c4827"/><rect x="-3" y="-9" width="6" height="9" fill="#7a5733"/><rect x="-9.5" y="-10" width="4" height="4" fill="#bfe0ee"/></g>`;
+    const peak = (x, b, w, h, c) => `<path d="M${x - w} ${b} L${x} ${b - h} L${x + w} ${b} Z" fill="${c}"/><path d="M${x} ${b - h} L${x + w} ${b} L${x} ${b} Z" fill="#000" opacity=".08"/><path d="M${x - w * 0.3} ${b - h * 0.72} L${x} ${b - h} L${x + w * 0.3} ${b - h * 0.72} L${x + w * 0.12} ${b - h * 0.58} L${x} ${b - h * 0.68} L${x - w * 0.12} ${b - h * 0.58} Z" fill="#fff"/>`;
+    const shd = (cx, cy, rx) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${(rx * 0.13).toFixed(1)}" fill="#22351c" opacity=".15"/>`;
+    const forest = (w) => `<svg viewBox="0 0 ${w} 102" style="overflow:visible">${shd(w / 2, 97, w / 2 - 4)}${oak(w * 0.16, 93, 0.85) + pine(w * 0.3, 96, 1.05) + oak(w * 0.46, 90, 0.95) + pine(w * 0.6, 97, 1.2) + pine(w * 0.74, 90, 0.95) + oak(w * 0.88, 95, 0.9) + pine(w * 0.4, 99, 0.78) + pine(w * 0.68, 99, 0.72)}</svg>`;
+    const village = (w) => `<svg viewBox="0 0 ${w} 92" style="overflow:visible">${shd(w / 2, 86, w / 2 - 3)}${cot(w * 0.24, 82, 1) + cot(w * 0.56, 86, 1.2) + oak(w * 0.84, 84, 0.95) + pine(w * 0.06, 84, 0.8)}</svg>`;
+    const range = (w) => `<svg viewBox="0 0 ${w} 122" style="overflow:visible">${shd(w / 2, 116, w / 2 - 4)}${peak(w * 0.3, 114, w * 0.3, 86, "#aab4c4")}${peak(w * 0.68, 114, w * 0.34, 106, "#9aa6ba")}${peak(w * 0.52, 114, w * 0.2, 62, "#b4bdca")}</svg>`;
+    const pond = (w) => { const h = (w * 0.4).toFixed(0); return `<svg viewBox="0 0 ${w} ${h}" style="overflow:visible"><ellipse cx="${w / 2}" cy="${(w * 0.22).toFixed(0)}" rx="${w / 2 - 4}" ry="${(w * 0.15).toFixed(0)}" fill="#9cc6e0"/><ellipse cx="${w / 2}" cy="${(w * 0.19).toFixed(0)}" rx="${w / 2 - 11}" ry="${(w * 0.12).toFixed(0)}" fill="#c3e2f2"/><ellipse cx="${w * 0.38}" cy="${(w * 0.16).toFixed(0)}" rx="${w * 0.15}" ry="${(w * 0.025).toFixed(1)}" fill="#fff" opacity=".55"/></svg>`; };
     const SUN = '<svg viewBox="0 0 48 48"><g stroke="#f4bf48" stroke-width="2.4" stroke-linecap="round"><line x1="24" y1="3" x2="24" y2="9"/><line x1="24" y1="39" x2="24" y2="45"/><line x1="3" y1="24" x2="9" y2="24"/><line x1="39" y1="24" x2="45" y2="24"/><line x1="9.5" y1="9.5" x2="13.5" y2="13.5"/><line x1="34.5" y1="34.5" x2="38.5" y2="38.5"/><line x1="38.5" y1="9.5" x2="34.5" y2="13.5"/><line x1="13.5" y1="34.5" x2="9.5" y2="38.5"/></g><circle cx="24" cy="24" r="11" fill="#fcd45e"/><circle cx="20" cy="20" r="4" fill="#fff" opacity=".5"/></svg>';
+    const CLOUD = '<svg viewBox="0 0 44 20"><ellipse cx="13" cy="13" rx="11" ry="7" fill="#fff"/><ellipse cx="26" cy="10" rx="12" ry="8.5" fill="#fff"/><ellipse cx="35" cy="14" rx="8" ry="5.5" fill="#fff"/></svg>';
     const BIRD = '<svg viewBox="0 0 24 9"><path d="M1 7 Q6 1 11.5 6 Q17 1 23 7" fill="none" stroke="#7a8390" stroke-width="1.5" stroke-linecap="round"/></svg>';
-    const M = [
-      { s: SUN,   x: 76, y: 0.135, w: 54, o: .95 },
-      { s: CLOUD, x: 20, y: 0.175, w: 54, o: .75 },
-      { s: CLOUD, x: 90, y: 0.16, w: 44, o: .68 },
-      { s: BIRD,  x: 52, y: 0.16, w: 24, o: .5 },
-      { s: BIRD,  x: 58, y: 0.178, w: 17, o: .42 },
-      { s: BIRD,  x: 47, y: 0.186, w: 13, o: .35 },
-      { s: HOUSE, x: 20, y: 0.255, w: 46, o: .96 },
-      { s: TREE,  x: 30, y: 0.235, w: 26, o: .95 },
-      { s: TREE,  x: 60, y: 0.21, w: 24, o: .9 },
-      { s: TREE,  x: 67, y: 0.245, w: 19, o: .85 },
-      { s: PINE,  x: 38, y: 0.40, w: 28, o: .95 },
-      { s: PINE,  x: 44, y: 0.425, w: 22, o: .9 },
-      { s: TREE,  x: 16, y: 0.44, w: 24, o: .9 },
-      { s: PINE,  x: 70, y: 0.46, w: 24, o: .88 },
-      { s: SIGN,  x: 54, y: 0.55, w: 30, o: .95 },
-      { s: MTN,   x: 26, y: 0.66, w: 130, o: .95 },
-      { s: MTN,   x: 58, y: 0.735, w: 175, o: .92 },
-      { s: MTN,   x: 82, y: 0.70, w: 110, o: .85 },
-      { s: PINE,  x: 14, y: 0.60, w: 22, o: .85 },
-      { s: FLAG,  x: 58, y: 0.905, w: 34, o: .95 },
-      { s: XSPOT, x: 50, y: 0.95, w: 30, o: .85 }
+    const FLAG = '<svg viewBox="0 0 22 32"><rect x="4" y="2" width="2.4" height="30" fill="#5b4a36"/><path d="M6 3 L19 7 L6 12 Z" fill="#e0584a"/><path d="M6 3 L19 7 L6 7 Z" fill="#ef6b5d"/></svg>';
+    const XSPOT = '<svg viewBox="0 0 24 24" fill="none" stroke="#b5552f" stroke-width="4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+
+    const sky = [
+      { s: SUN, x: 76, y: 0.13, w: 56, o: .95 },
+      { s: CLOUD, x: 20, y: 0.175, w: 58, o: .8 },
+      { s: CLOUD, x: 90, y: 0.155, w: 46, o: .7 },
+      { s: BIRD, x: 52, y: 0.16, w: 24, o: .5 },
+      { s: BIRD, x: 58, y: 0.178, w: 17, o: .42 },
+      { s: BIRD, x: 47, y: 0.186, w: 13, o: .35 }
     ];
-    const motifs = M.map(m => `<div class="rm-motif" style="left:${m.x}%;top:${(m.y * H).toFixed(0)}px;width:${m.w}px;opacity:${m.o}">${m.s}</div>`).join("");
-    return bands + motifs;
+    // Grounded clusters, anchored to a hill line (f within the land 0..1).
+    const ground = [
+      { s: village(124), x: 18, f: 0.17, w: 134, o: 1 },
+      { s: forest(150), x: 76, f: 0.16, w: 150, o: 1 },
+      { s: forest(176), x: 31, f: 0.37, w: 182, o: 1 },
+      { s: pond(150), x: 64, f: 0.43, w: 150, o: .95 },
+      { s: forest(128), x: 87, f: 0.5, w: 126, o: .96 },
+      { s: forest(108), x: 13, f: 0.6, w: 104, o: .92 },
+      { s: range(226), x: 33, f: 0.65, w: 236, o: 1 },
+      { s: range(182), x: 76, f: 0.73, w: 190, o: .97 }
+    ];
+    const skyHTML = sky.map(m => `<div class="rm-motif" style="left:${m.x}%;top:${(m.y * H).toFixed(0)}px;width:${m.w}px;opacity:${m.o}">${m.s}</div>`).join("");
+    const grHTML = ground.map(m => `<div class="rm-motif ground" style="left:${m.x}%;top:${(lf(m.f) * H).toFixed(0)}px;width:${m.w}px;opacity:${m.o}">${m.s}</div>`).join("");
+    const summit = `<div class="rm-motif ground" style="left:58%;top:${(lf(0.9) * H).toFixed(0)}px;width:30px">${FLAG}</div><div class="rm-motif" style="left:50%;top:${(lf(0.955) * H).toFixed(0)}px;width:30px">${XSPOT}</div>`;
+    return bands + skyHTML + grHTML + summit;
   }
   function _rmDrawTrail() {
     const map = document.getElementById("rm-map");
