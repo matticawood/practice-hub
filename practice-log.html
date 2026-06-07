@@ -22155,7 +22155,9 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     // Obstacles the trail should bow around (match the scenery positions).
     const _OSKY = 360, _oy = (f) => _OSKY + (mapH - _OSKY) * f;
     window._rmObstacles = [
-      { x: 0.60, y: _oy(0.30) - 6, r: 60 }   // pond
+      { x: 0.60, y: _oy(0.30) - 6, r: 60 },   // pond
+      { x: 0.08, y: _oy(0.73) - 44, r: 96 },  // left mountain
+      { x: 0.95, y: _oy(0.83) - 40, r: 84 }   // right mountain
     ];
     const nodesHTML = totLevels.map((L, i) => {
       const state = i < T.idx ? "done" : (i === T.idx ? "current" : "future");
@@ -22164,7 +22166,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       const y = stepY[i];
       const side = STEP_POS[i] && STEP_POS[i].side ? STEP_POS[i].side : (frac >= 0.5 ? "left" : "right");
       return `<div class="rm-mnode ${state}" data-side="${side}" style="left:${(frac * 100).toFixed(2)}%;top:${y}px">
-          <div class="rm-mstage">${L.name}<small>${L.hours.toLocaleString()}h${L.grade ? " &middot; " + L.grade : ""}</small>${state === "current" ? '<span class="rm-mhere">You are here</span>' : ""}</div>
+          <div class="rm-mstage">${L.name}<small>${L.hours.toLocaleString()}h${L.grade ? " &middot; " + (L.level > 1 ? L.grade.replace(/^Around /, "working towards ") : L.grade) : ""}</small>${state === "current" ? '<span class="rm-mhere">You are here</span>' : ""}</div>
           <button class="rm-stone ${state}"${state === "current" ? ` style="--rmp:${totalPct}"` : ""} onclick="_rmOpenStone(${L.level})" title="${escHtml(L.name)}">${node}</button>
         </div>`;
     }).join("");
@@ -22545,10 +22547,11 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       { s: BIRD, x: 47, y: 0.186, w: 13, o: .35, c: "rm-bird", ad: -2.6 }
     ];
     // Distant mountains, set wide so they frame rather than block the trail.
-    // Mountains live in the grey/alpine band only, framing the sides.
+    // Mountains live in the grey/alpine band only, framing the far sides so the
+    // trail (which stays central) never has to cross them at any width.
     const ground = [
-      { s: range(220), x: 16, f: 0.74, w: 230, o: .86 },
-      { s: range(188), x: 88, f: 0.81, w: 196, o: .82 }
+      { s: range(220), x: 8, f: 0.74, w: 230, o: .86 },
+      { s: range(188), x: 95, f: 0.83, w: 196, o: .82 }
     ];
     // Biome dressing: grass tufts / wildflowers / a bench across the green park,
     // and a beach-volleyball game on the sand.
@@ -22748,6 +22751,30 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
         it.mk.style.top = (p.y + ny * OFF).toFixed(1) + "px";
       });
     }
+
+    // Lift any level label that would cover a stone, landmark or another label,
+    // so nothing overlaps at any width. Relative-top shifts only the label, so
+    // the stone stays anchored on the trail.
+    const lObst = [...map.querySelectorAll(".rm-stone, .rm-camp.ground, .rm-mstage, .rm-amarker, .rm-mhere")];
+    const lNodes = [...map.querySelectorAll(".rm-mnode")];
+    lNodes.forEach(n => { const l = n.querySelector(".rm-mstage"); if (l) l.style.top = "0px"; });
+    lNodes.forEach(n => {
+      const lbl = n.querySelector(".rm-mstage"), own = n.querySelector(".rm-stone");
+      if (!lbl) return;
+      for (let t = 0; t < 7; t++) {
+        const lr = lbl.getBoundingClientRect();
+        let push = 0;
+        for (const o of lObst) {
+          if (o === lbl || o === own || n.contains(o)) continue;
+          const r = o.getBoundingClientRect();
+          if (lr.right <= r.left || r.right <= lr.left || lr.bottom <= r.top || r.bottom <= lr.top) continue;
+          if (r.top > lr.top - 2) push = Math.max(push, lr.bottom - r.top + 8);
+        }
+        if (push < 2) break;
+        const cur = parseFloat(lbl.style.top) || 0;
+        lbl.style.top = (cur - Math.min(push, 22)) + "px";
+      }
+    });
   }
 
   function _rmCountUp(node, target) {
