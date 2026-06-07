@@ -22090,6 +22090,13 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     STEP_POS.forEach((s, i) => { _acc += s.dy; stepY[i] = _acc; });
     const mapH = stepY[stepY.length - 1] + MAP_BOT;
     window._rmState.progress = T.progress;
+    // Obstacles the trail should bow around (match the scenery positions).
+    const _OSKY = 270, _oy = (f) => _OSKY + (mapH - _OSKY) * f;
+    window._rmObstacles = [
+      { x: 0.60, y: _oy(0.47) - 6, r: 62 },   // pond
+      { x: 0.45, y: _oy(0.66) - 50, r: 96 },  // left mountains
+      { x: 0.76, y: _oy(0.73) - 46, r: 82 }   // right mountains
+    ];
     const nodesHTML = totLevels.map((L, i) => {
       const state = i < T.idx ? "done" : (i === T.idx ? "current" : "future");
       const node = state === "done" ? CHECK : (state === "future" ? LOCK : String(L.level));
@@ -22200,8 +22207,8 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     // together and the join never drifts. Flows in from off-screen (no random
     // start) and pools at the end.
     const water = (() => {
-      const y0 = lf(0.25) * H, y1 = lf(0.43) * H, ym = (y0 + y1) / 2;
-      const px = 640, prx = 80, pry = 26;
+      const y0 = lf(0.25) * H, y1 = lf(0.47) * H, ym = (y0 + y1) / 2;
+      const px = 600, prx = 80, pry = 26;
       const d = `M-30 ${y0.toFixed(0)} C200 ${(y0 + 22).toFixed(0)} 250 ${(y0 + 78).toFixed(0)} 440 ${ym.toFixed(0)} S590 ${(y1 - 6).toFixed(0)} ${px} ${y1.toFixed(0)}`;
       return `<path d="${d}" fill="none" stroke="url(#rmWater)" stroke-width="20" stroke-linecap="round" opacity=".92"/>` +
         `<path d="${d}" fill="none" stroke="#e3f2fb" stroke-width="5" stroke-linecap="round" opacity=".5"/>` +
@@ -22255,7 +22262,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     // Grounded clusters, anchored to a hill line (f within the land 0..1).
     const ground = [
       { s: village(130), x: 18, f: 0.18, w: 138, o: 1 },
-      { s: range(226), x: 33, f: 0.65, w: 236, o: 1 },
+      { s: range(226), x: 45, f: 0.66, w: 236, o: 1 },
       { s: range(182), x: 76, f: 0.73, w: 190, o: .97 }
     ];
     // Illustrated trees, grouped into copses on the hill lines.
@@ -22297,6 +22304,16 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
         const nx = -dy / len, ny = dx / len;
         const amp = Math.min(48, len * 0.2) * (i % 2 ? 1 : -1);
         pts.push({ x: (a.x + b.x) / 2 + nx * amp, y: (a.y + b.y) / 2 + ny * amp });
+      }
+    }
+    // Bend the route around obstacles (pond, mountains): push each wavy
+    // midpoint outside any obstacle's radius so the curve bows around it.
+    const obs = window._rmObstacles || [], OW = map.clientWidth;
+    for (let i = 1; i < pts.length; i += 2) {
+      for (const o of obs) {
+        const ox = o.x * OW, oy = o.y, R = o.r + 12;
+        let dx = pts[i].x - ox, dy = pts[i].y - oy, d = Math.hypot(dx, dy);
+        if (d < R) { if (d < 1) { dx = 0; dy = -1; d = 1; } pts[i] = { x: ox + dx / d * R, y: oy + dy / d * R }; }
       }
     }
     // One Catmull-Rom path. Build the curve commands once and measure cumulative
@@ -22351,32 +22368,33 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       (goldD ? `<path d="${goldD}" fill="none" stroke="#e8920a" stroke-width="4" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".5"/>` : "") +
       coinsHTML;
 
-    // Piano traveller at the player's progress point, facing travel direction.
-    const trav = map.querySelector(".rm-traveller");
-    if (trav && L) {
-      const t = idx >= last ? 1 : Math.max(0.08, Math.min(0.92, progress));
-      const at = ptAtLen(lenAt(idx, t));
-      trav.style.left = at.x.toFixed(1) + "px";
-      trav.style.top = at.y.toFixed(1) + "px";
+    // Place the overall pin and the four skill tokens, then de-bunch them:
+    // anything sharing a leg is spread along the line so pins never overlap.
+    if (L) {
+      const items = [];
+      const trav = map.querySelector(".rm-traveller");
+      if (trav) items.push({ el: trav, seg: Math.min(idx, last), t: idx >= last ? 1 : Math.max(0.08, Math.min(0.92, progress)), pri: 1 });
+      (window._rmAreas ? Object.values(window._rmAreas) : []).forEach(a => {
+        const mk = map.querySelector(`.rm-amarker[data-rm-amk="${a.key}"]`);
+        if (mk) items.push({ el: mk, seg: Math.min(a.levelIdx, last), t: a.levelIdx >= last ? 1 : Math.max(0.06, Math.min(0.94, a.progress)), pri: 0 });
+      });
+      items.forEach(it => { it.len = lenAt(it.seg, it.t); });
+      const GAP = 30, groups = {};
+      items.forEach(it => { (groups[it.seg] = groups[it.seg] || []).push(it); });
+      Object.values(groups).forEach(g => {
+        g.sort((p, q) => p.len - q.len || q.pri - p.pri);
+        for (let i = 1; i < g.length; i++) if (g[i].len - g[i - 1].len < GAP) g[i].len = g[i - 1].len + GAP;
+        // keep the spread group from overrunning the next stone
+        const a = stoneLen(g[0].seg), b = stoneLen(g[0].seg + 1), span = (g.length - 1) * GAP;
+        const lo = a + 14, hi = b - 14;
+        if (g[g.length - 1].len > hi && hi - lo >= span) { const shift = g[g.length - 1].len - hi; g.forEach(it => it.len -= shift); }
+      });
+      items.forEach(it => {
+        const at = ptAtLen(it.len);
+        it.el.style.left = at.x.toFixed(1) + "px";
+        it.el.style.top = at.y.toFixed(1) + "px";
+      });
     }
-
-    // Area tokens, on the line at each area's level + progress; fan when shared.
-    const areas = window._rmAreas ? Object.values(window._rmAreas) : [];
-    const byLevel = {};
-    areas.forEach(a => { (byLevel[a.levelIdx] = byLevel[a.levelIdx] || []).push(a); });
-    if (L) areas.forEach(a => {
-      const mk = map.querySelector(`.rm-amarker[data-rm-amk="${a.key}"]`);
-      if (!mk) return;
-      const li = Math.min(a.levelIdx, last);
-      const t = li >= last ? 1 : Math.max(0.06, Math.min(0.94, a.progress));
-      // Nudge tokens that share a stage ALONG the line (not across it) so they
-      // separate without leaving the trail.
-      const grp = byLevel[a.levelIdx]; const gi = grp.indexOf(a); const gc = grp.length;
-      const off = (gi - (gc - 1) / 2) * 14;
-      const at = ptAtLen(lenAt(li, t) + off);
-      mk.style.left = at.x.toFixed(1) + "px";
-      mk.style.top = at.y.toFixed(1) + "px";
-    });
   }
 
   function _rmCountUp(node, target) {
