@@ -22553,26 +22553,35 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       `<path d="${fullD}" fill="none" stroke="#9a8048" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".4"/>` +
       (goldPts ? `<path d="${goldPts}" fill="none" stroke="#e8920a" stroke-width="5" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".95"/>` : "");
 
-    // Each skill pin sits AT its level's stone, fanned into a neat row just
-    // below it when several share a level — so a Level-1 skill reads as
-    // Level-1 (not interpolated toward the next stone, which looked misplaced).
+    // Each skill pin sits as far along its level's segment as its progress %
+    // (e.g. 68% of the way to the next level). Pins that would overlap get a
+    // light nudge apart, re-centred so they stay true to their real position.
     // The overall pin tags the current stone.
     if (L && stones.length) {
-      const groups = {};
+      const items = [];
       (window._rmAreas ? Object.values(window._rmAreas) : []).forEach(a => {
         const mk = map.querySelector(`.rm-amarker[data-rm-amk="${a.key}"]`);
         if (!mk) return;
         const seg = Math.min(a.levelIdx, last);
-        (groups[seg] = groups[seg] || []).push(mk);
+        const t = a.levelIdx >= last ? 1 : Math.max(0.02, Math.min(0.98, a.progress || 0));
+        const len = lenAt(seg, t);
+        items.push({ mk, seg, len, len0: len });
       });
-      const SP = 27;
-      Object.keys(groups).forEach(seg => {
-        const g = groups[seg], c = stones[seg] || stones[0], w = (g.length - 1) * SP;
-        g.forEach((mk, i) => {
-          mk.style.left = (c.x - w / 2 + i * SP).toFixed(1) + "px";
-          mk.style.top = (c.y + 64).toFixed(1) + "px";
-        });
+      const GAP = 22, groups = {};
+      items.forEach(it => { (groups[it.seg] = groups[it.seg] || []).push(it); });
+      Object.values(groups).forEach(g => {
+        g.sort((p, q) => p.len - q.len);
+        for (let i = 1; i < g.length; i++) if (g[i].len - g[i - 1].len < GAP) g[i].len = g[i - 1].len + GAP;
+        // re-centre the nudged cluster on the true mean so it doesn't drift forward
+        const mNow = g.reduce((s, it) => s + it.len, 0) / g.length;
+        const mTrue = g.reduce((s, it) => s + it.len0, 0) / g.length;
+        g.forEach(it => it.len += mTrue - mNow);
+        // keep within the segment
+        const lo = stoneLen(g[0].seg) + 12, hi = stoneLen(g[0].seg + 1) - 12;
+        if (g[0].len < lo) { const d = lo - g[0].len; g.forEach(it => it.len += d); }
+        if (g[g.length - 1].len > hi) { const d = g[g.length - 1].len - hi; g.forEach(it => it.len -= d); }
       });
+      items.forEach(it => { const at = ptAtLen(it.len); it.mk.style.left = at.x.toFixed(1) + "px"; it.mk.style.top = at.y.toFixed(1) + "px"; });
       const trav = map.querySelector(".rm-traveller");
       if (trav) { const c = stones[Math.min(idx, last)] || stones[0]; trav.style.left = (c.x + 60).toFixed(1) + "px"; trav.style.top = (c.y + 10).toFixed(1) + "px"; }
     }
