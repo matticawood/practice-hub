@@ -21768,7 +21768,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   .rm-jarstack, .rm-levelcard { padding: 10px 13px; border-radius: 16px; background: color-mix(in srgb, var(--surface) 86%, transparent); -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); border: 1px solid var(--border); box-shadow: 0 12px 28px -18px rgba(0,0,0,.5); }
   .rm-jarstack { display: flex; flex-direction: column; gap: 7px; }
   .rm-jarstack-title { font-size: .54rem; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; color: var(--text-muted); }
-  .rm-jarstack-jars { display: flex; gap: 14px; }
+  .rm-jarstack-jars { display: grid; grid-template-columns: repeat(2, auto); gap: 9px 16px; justify-content: start; }
   .rm-jaritem { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
   .rm-jaritem .rm-jar3d { width: 34px; height: 42px; }
   .rm-jaritem .rm-jar3d-pct { font-size: .55rem; }
@@ -22098,11 +22098,16 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     _rmBindTrail();
   }
 
-  let _rmTrailBound = false;
+  let _rmTrailBound = false, _rmTrailRaf = 0;
   function _rmBindTrail() {
     if (_rmTrailBound) return;
     _rmTrailBound = true;
-    window.addEventListener("resize", () => { clearTimeout(window._rmTrailT); window._rmTrailT = setTimeout(_rmDrawTrail, 120); });
+    // Redraw once per animation frame while resizing so the trail tracks the
+    // stones smoothly instead of lagging and snapping after resize settles.
+    window.addEventListener("resize", () => {
+      if (_rmTrailRaf) return;
+      _rmTrailRaf = requestAnimationFrame(() => { _rmTrailRaf = 0; _rmDrawTrail(); });
+    });
   }
   function _rmLandscape(H) {
     const W = 1000;
@@ -22184,15 +22189,14 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     if (!map) return;
     const svg = map.querySelector(".rm-map-trail");
     if (!svg) return;
+    const NS = "http://www.w3.org/2000/svg";
     const mr = map.getBoundingClientRect();
     const stones = [...map.querySelectorAll(".rm-stone")].map(s => {
       const r = s.getBoundingClientRect();
       return { x: r.left - mr.left + r.width / 2, y: r.top - mr.top + r.height / 2 };
     });
     if (stones.length < 2) return;
-    // Insert a perpendicular-offset midpoint between each pair of stones so
-    // the route bends and wiggles like a hand-drawn map rather than running
-    // straight from stone to stone.
+    // Wavy expanded points: a perpendicular-offset midpoint between each stone.
     const pts = [];
     for (let i = 0; i < stones.length; i++) {
       pts.push(stones[i]);
@@ -22204,94 +22208,86 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
         pts.push({ x: (a.x + b.x) / 2 + nx * amp, y: (a.y + b.y) / 2 + ny * amp });
       }
     }
-    const smooth = (arr) => {
-      if (arr.length < 2) return "";
-      let d = "M" + arr[0].x.toFixed(1) + " " + arr[0].y.toFixed(1);
-      for (let i = 0; i < arr.length - 1; i++) {
-        const p0 = arr[i - 1] || arr[i], p1 = arr[i], p2 = arr[i + 1], p3 = arr[i + 2] || p2;
-        const c1x = p1.x + (p2.x - p0.x) / 5, c1y = p1.y + (p2.y - p0.y) / 5;
-        const c2x = p2.x - (p3.x - p1.x) / 5, c2y = p2.y - (p3.y - p1.y) / 5;
-        d += `C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
-      }
-      return d;
-    };
+    // One Catmull-Rom path. Build the curve commands once and measure cumulative
+    // length at each vertex from that SAME path, so the coins, the piano and the
+    // area tokens all land exactly on the rendered line (no per-segment drift).
+    const head = "M" + pts[0].x.toFixed(1) + " " + pts[0].y.toFixed(1);
+    const segs = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1x = p1.x + (p2.x - p0.x) / 5, c1y = p1.y + (p2.y - p0.y) / 5;
+      const c2x = p2.x - (p3.x - p1.x) / 5, c2y = p2.y - (p3.y - p1.y) / 5;
+      segs.push(`C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`);
+    }
+    const fullD = head + segs.join("");
     const idx = (window._rmState && window._rmState.idx) || 0;
     const progress = (window._rmState && window._rmState.progress) || 0;
     const W = map.clientWidth, H = map.clientHeight;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     svg.setAttribute("width", W); svg.setAttribute("height", H);
-    const greyD = smooth(pts);
-    const goldD = idx >= 1 ? smooth(pts.slice(0, 2 * idx + 1)) : "";
-    // Collectible coins along each segment: each coin is worth 100/N% of the
-    // step. Completed steps are all gold; the current step shows how many are
-    // collected; future steps are faint outlines.
-    const NS = "http://www.w3.org/2000/svg";
+    const goldD = idx >= 1 ? head + segs.slice(0, 2 * idx).join("") : "";
+
+    const fp = document.createElementNS(NS, "path");
+    const cum = [0];
+    for (let i = 0; i < segs.length; i++) {
+      fp.setAttribute("d", head + segs.slice(0, i + 1).join(""));
+      let tl = 0; try { tl = fp.getTotalLength(); } catch (e) { tl = 0; }
+      cum.push(tl);
+    }
+    fp.setAttribute("d", fullD);
+    let L = 0; try { L = fp.getTotalLength(); } catch (e) { L = 0; }
+    const last = stones.length - 1;
+    const stoneLen = (k) => cum[2 * Math.max(0, Math.min(k, last))] || 0;
+    const lenAt = (li, t) => { const a = stoneLen(li), b = stoneLen(li + 1); return a + t * (b - a); };
+    const ptAtLen = (len) => fp.getPointAtLength(Math.max(0, Math.min(L, len)));
+
+    // Coins along each segment (each worth 100/N% of that step).
     const NCOINS = 5;
     let coinsHTML = "";
-    for (let i = 0; i < stones.length - 1; i++) {
-      const seg = [pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]];
-      const tmp = document.createElementNS(NS, "path");
-      tmp.setAttribute("d", smooth(seg));
-      let len = 0; try { len = tmp.getTotalLength(); } catch (e) { len = 0; }
-      if (!len) continue;
+    for (let i = 0; i < last; i++) {
+      const a = stoneLen(i), b = stoneLen(i + 1);
       const collected = i < idx ? NCOINS : (i === idx ? Math.round(progress * NCOINS) : 0);
       for (let k = 0; k < NCOINS; k++) {
-        const pt = tmp.getPointAtLength(len * (k + 0.5) / NCOINS);
+        const p = ptAtLen(a + (k + 0.5) / NCOINS * (b - a));
         coinsHTML += (k < collected)
-          ? `<g transform="translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})"><circle r="8" fill="url(#rmCoinG)" stroke="#a9760d" stroke-width="1"/><circle r="5" fill="none" stroke="#fff4c4" stroke-width="1.3" opacity=".75"/></g>`
-          : `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="6.5" fill="#fffaf0" stroke="#bcae90" stroke-width="1.6" stroke-dasharray="2.2 2.4" opacity=".85"/>`;
+          ? `<g transform="translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})"><circle r="8" fill="url(#rmCoinG)" stroke="#a9760d" stroke-width="1"/><circle r="5" fill="none" stroke="#fff4c4" stroke-width="1.3" opacity=".75"/></g>`
+          : `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="6.5" fill="#fffaf0" stroke="#bcae90" stroke-width="1.6" stroke-dasharray="2.2 2.4" opacity=".85"/>`;
       }
     }
     const defs = `<defs><radialGradient id="rmCoinG" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#ffe7a0"/><stop offset="0.5" stop-color="#f4c430"/><stop offset="1" stop-color="#d99a10"/></radialGradient></defs>`;
     svg.innerHTML = defs +
-      `<path d="${greyD}" fill="none" stroke="#9a8048" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".5"/>` +
+      `<path d="${fullD}" fill="none" stroke="#9a8048" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".5"/>` +
       (goldD ? `<path d="${goldD}" fill="none" stroke="#e8920a" stroke-width="4" stroke-linecap="round" stroke-dasharray="0.1 13" opacity=".5"/>` : "") +
       coinsHTML;
 
-    // Place the piano traveller on the route at the player's progress point,
-    // facing the way it is heading (flip when travelling left-to-right).
+    // Piano traveller at the player's progress point, facing travel direction.
     const trav = map.querySelector(".rm-traveller");
-    if (trav && pts.length >= 3) {
-      const last = stones.length - 1;
-      let seg, t;
-      if (idx >= last) { seg = [pts[2 * last - 2], pts[2 * last - 1], pts[2 * last]]; t = 1; }
-      else { seg = [pts[2 * idx], pts[2 * idx + 1], pts[2 * idx + 2]]; t = Math.max(0.08, Math.min(0.92, progress)); }
-      const tp = document.createElementNS(NS, "path"); tp.setAttribute("d", smooth(seg));
-      let l = 0; try { l = tp.getTotalLength(); } catch (e) { l = 0; }
-      if (l) {
-        const at = tp.getPointAtLength(l * t);
-        const ah = tp.getPointAtLength(Math.min(l, l * t + 8));
-        const right = ah.x >= at.x;
-        trav.style.left = at.x.toFixed(1) + "px";
-        trav.style.top = at.y.toFixed(1) + "px";
-        trav.style.transform = `translate(-50%, -100%)${right ? " scaleX(-1)" : ""}`;
-      }
+    if (trav && L) {
+      const t = idx >= last ? 1 : Math.max(0.08, Math.min(0.92, progress));
+      const len = lenAt(idx, t);
+      const at = ptAtLen(len), ah = ptAtLen(len + 8);
+      const right = ah.x >= at.x;
+      trav.style.left = at.x.toFixed(1) + "px";
+      trav.style.top = at.y.toFixed(1) + "px";
+      trav.style.transform = `translate(-50%, -100%)${right ? " scaleX(-1)" : ""}`;
     }
 
-    // Area travelers: one token per area, riding the trail at its own level
-    // and progress. Tokens at the same stage fan apart so they stay readable.
+    // Area tokens, on the line at each area's level + progress; fan when shared.
     const areas = window._rmAreas ? Object.values(window._rmAreas) : [];
     const byLevel = {};
     areas.forEach(a => { (byLevel[a.levelIdx] = byLevel[a.levelIdx] || []).push(a); });
-    const lastStone = stones.length - 1;
-    areas.forEach(a => {
+    if (L) areas.forEach(a => {
       const mk = map.querySelector(`.rm-amarker[data-rm-amk="${a.key}"]`);
       if (!mk) return;
-      const li = Math.min(a.levelIdx, lastStone);
-      let seg, t;
-      if (li >= lastStone) { seg = [pts[2 * lastStone - 2], pts[2 * lastStone - 1], pts[2 * lastStone]]; t = 1; }
-      else { seg = [pts[2 * li], pts[2 * li + 1], pts[2 * li + 2]]; t = Math.max(0.06, Math.min(0.94, a.progress)); }
-      const tp = document.createElementNS(NS, "path"); tp.setAttribute("d", smooth(seg));
-      let l = 0; try { l = tp.getTotalLength(); } catch (e) { l = 0; }
-      if (!l) return;
-      const at = tp.getPointAtLength(l * t);
-      const ah = tp.getPointAtLength(Math.min(l, l * t + 6));
-      const dx = ah.x - at.x, dy = ah.y - at.y, len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len, ny = dx / len;
+      const li = Math.min(a.levelIdx, last);
+      const t = li >= last ? 1 : Math.max(0.06, Math.min(0.94, a.progress));
+      // Nudge tokens that share a stage ALONG the line (not across it) so they
+      // separate without leaving the trail.
       const grp = byLevel[a.levelIdx]; const gi = grp.indexOf(a); const gc = grp.length;
-      const off = (gi - (gc - 1) / 2) * 15;
-      mk.style.left = (at.x + nx * off).toFixed(1) + "px";
-      mk.style.top = (at.y + ny * off).toFixed(1) + "px";
+      const off = (gi - (gc - 1) / 2) * 14;
+      const at = ptAtLen(lenAt(li, t) + off);
+      mk.style.left = at.x.toFixed(1) + "px";
+      mk.style.top = at.y.toFixed(1) + "px";
     });
   }
 
