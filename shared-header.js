@@ -19,6 +19,7 @@ const SH_SUBNAV = {
     { label: "Dashboard", href: "/practice-log.html" },
     { label: "Stats", href: "/practice-log.html?goto=stats" },
     { label: "Goals", href: "/practice-log.html?goto=goals" },
+    { label: "Roadmap", href: "/practice-log.html?goto=roadmap" },
     { label: "History", href: "/practice-log.html?goto=history" },
     { label: "Leaderboard", href: "/practice-log.html?goto=leaderboard" },
     { label: "Achievements", href: "/practice-log.html?goto=achievements" },
@@ -50,6 +51,13 @@ const SH_SUBNAV = {
     { label: "One-to-One", href: "/clinic-booking.html" },
   ],
 };
+
+// Roadmap is still WIP: show it everywhere (dev/preview/local) EXCEPT the live
+// community domain, so only I can see it on dev until it's ready to launch.
+const SH_IS_COMMUNITY = location.hostname === "app.matthewcawood.com";
+if (SH_IS_COMMUNITY) {
+  SH_SUBNAV.hub = SH_SUBNAV.hub.filter((i) => i.href !== "/practice-log.html?goto=roadmap");
+}
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 (function() {
