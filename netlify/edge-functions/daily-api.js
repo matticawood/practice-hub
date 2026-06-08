@@ -452,6 +452,10 @@ export default async (request) => {
           enable_prejoin_ui: false,
           start_video_off:   !isOwner,
           start_audio_off:   !isOwner,
+          // True view-only lock for non-owners: they physically cannot publish any
+          // media, even if the room allows it or a (stale) client tries to enable a
+          // camera. Invited guests/host are is_owner:true and keep full camera/mic.
+          permissions:       isOwner ? undefined : { canSend: [], hasPresence: true },
         }
       })
     });

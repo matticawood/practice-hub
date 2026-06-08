@@ -52,6 +52,13 @@ const SH_SUBNAV = {
   ],
 };
 
+// Roadmap is still WIP: show it everywhere (dev/preview/local) EXCEPT the live
+// community domain, so only I can see it on dev until it's ready to launch.
+const SH_IS_COMMUNITY = location.hostname === "app.matthewcawood.com";
+if (SH_IS_COMMUNITY) {
+  SH_SUBNAV.hub = SH_SUBNAV.hub.filter((i) => i.href !== "/practice-log.html?goto=roadmap");
+}
+
 // ── CSS ───────────────────────────────────────────────────────────────────────
 (function() {
   const s = document.createElement("style");
