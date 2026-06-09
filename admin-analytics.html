@@ -1096,6 +1096,23 @@ function renderInsights2(d) {
   const lvlCounts = Array(8).fill(0);
   for (const e of members) { if (!(minsBy[e] || baseMap[e])) continue; const hrs = ((minsBy[e] || 0) + (baseMap[e] || 0)) / 60; let l = 0; for (let i = 0; i < TH.length; i++) if (hrs >= TH[i]) l = i; lvlCounts[l]++; }
 
+  // Week-1/2 activation funnel: of members who started 7+ days ago, did they form a
+  // habit (>=3 practice days within their first 14 days)? Repeated early multi-day
+  // engagement is the strongest leading retention signal (research).
+  const firstA = {};
+  for (const e of Object.keys(aDays)) firstA[e] = Math.max(...[...aDays[e]].map(dAgo));
+  const actCohort = [...members].filter(e => firstA[e] != null && firstA[e] >= 7);
+  const actReachedFirst = actCohort.filter(e => pDays[e] && pDays[e].size > 0).length;
+  const actActivated = actCohort.filter(e => { const st = firstA[e]; const pd = pDays[e] ? [...pDays[e]].map(dAgo).filter(x => x <= st && x > st - 14).length : 0; return pd >= 3; }).length;
+  const actRate = actCohort.length ? Math.round(actActivated / actCohort.length * 100) : 0;
+
+  // Community commitment tiers (Orbit-style depth): Contributor > Reactor > Lurker > Absent
+  const hasPost = new Set(), hasReact = new Set();
+  [...(d.posts || []), ...(d.comments || []), ...(d.actComments || []), ...(d.cfComments || [])].forEach(r => { const e = low(r.email); if (e && !EX.has(e)) hasPost.add(e); });
+  [...(d.likes || []), ...(d.actReactions || []), ...(d.cfLikes || [])].forEach(r => { const e = low(r.email); if (e && !EX.has(e)) hasReact.add(e); });
+  let tContrib = 0, tReact = 0, tLurk = 0, tAbsent = 0;
+  for (const e of members) { if (hasPost.has(e)) tContrib++; else if (hasReact.has(e)) tReact++; else if (aDays[e]) tLurk++; else tAbsent++; }
+
   // Insights = levers to TEST
   const insights = [], addI = (sev, t) => insights.push({ sev, t });
   if (reactList.length) addI(0, `<b>${reactList.length}</b> paying member${reactList.length > 1 ? "s" : ""} silent on the new platform 14+ days — your #1 reactivation list (still subscribed). Personal outreach is the proven small-community win-back.`);
@@ -1128,6 +1145,12 @@ function renderInsights2(d) {
     ${kpi(streak7Pct + "%", "On a 7+ day streak", `<span style="font-size:.7rem;color:#64748b">${streak7}/${wap.size}</span>`, streak7Pct >= 40 ? "#4ade80" : "#f59e0b")}
   </div>`;
 
+  const funnel = [{ n: "Started 7+ days ago", v: actCohort.length, c: "#475569" }, { n: "Logged ≥1 session", v: actReachedFirst, c: "#60a5fa" }, { n: "Activated (3+ days in first 2 wks)", v: actActivated, c: "#4ade80" }];
+  const fMax = funnel[0].v || 1;
+  h += `<h2 class="section-header">${ico('trend')}Activation funnel <span class="section-meta">do new members form a habit? · ${actRate}% activated</span></h2>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">${funnel.map(f => `<div style="display:flex;align-items:center;gap:10px;font-size:.84rem"><div style="flex:0 0 240px;color:#cbd5e1">${f.n}</div><div style="flex:1;background:#0d1525;border-radius:5px;overflow:hidden;height:18px"><div style="width:${Math.max(2, Math.round(f.v / fMax * 100))}%;height:100%;background:${f.c}"></div></div><div style="flex:0 0 30px;text-align:right;color:#cbd5e1;font-weight:700">${f.v}</div></div>`).join("")}</div>
+    <p style="font-size:.72rem;color:#64748b;margin-bottom:28px">Activation = a forming habit (≥3 practice days within 2 weeks of first showing up). The first 1–2 weeks is where retention is won — protect it. Fills out as post-migration cohorts mature.</p>`;
+
   const segs = [{ n: "Active (≤7d)", v: nActive, c: "#4ade80" }, { n: "Slipping (8–14d)", v: nSlip, c: "#f59e0b" }, { n: "Reactivate (paying, 14d+)", v: reactList.length, c: "#3b82f6" }, { n: "Churned (cancelled)", v: churnedN, c: "#7f1d1d" }];
   const segTot = segs.reduce((s, x) => s + x.v, 0) || 1;
   h += `<h2 class="section-header">${ico('refresh')}Member lifecycle <span class="section-meta">${members.size} paying · ${churnedN} cancelled</span></h2>
@@ -1155,6 +1178,12 @@ function renderInsights2(d) {
   const vMax = Math.max(1, ...valActs.map(x => x.wk));
   h += `<h2 class="section-header">${ico('bars')}Engagement by action <span class="section-meta">distinct members this week · deliberate value-actions, not time-on-page</span></h2>
     <div style="margin-bottom:28px">${valActs.filter(a => a.wk || a.prev).sort((a, b) => b.wk - a.wk).map(a => { const pct = Math.round(a.wk / vMax * 100), pm = members.size ? Math.round(a.wk / members.size * 100) : 0; return `<div style="display:flex;align-items:center;gap:10px;font-size:.84rem;padding:2px 0"><div style="flex:0 0 150px;color:#cbd5e1">${a.label}</div><div style="flex:1;display:flex;align-items:center;gap:8px"><div style="flex:1;background:#0d1525;border-radius:5px;overflow:hidden;height:16px"><div style="width:${Math.max(2, pct)}%;height:100%;background:linear-gradient(90deg,#38bdf8,#3b82f6)"></div></div><span style="flex:0 0 24px;color:#60a5fa;font-weight:700;text-align:right">${a.wk}</span></div><div style="flex:0 0 50px;text-align:right;color:#64748b">${pm}%</div><div style="flex:0 0 50px;text-align:right">${delta(a.wk, a.prev) || "—"}</div></div>`; }).join("")}</div>`;
+
+  const tiers = [{ n: "Contributor (posts/comments)", v: tContrib, c: "#a855f7" }, { n: "Reactor (reactions only)", v: tReact, c: "#c084fc" }, { n: "Lurker (active, silent)", v: tLurk, c: "#475569" }, { n: "Absent", v: tAbsent, c: "#1e293b" }];
+  const tTot = tiers.reduce((s, x) => s + x.v, 0) || 1;
+  h += `<h2 class="section-header">${ico('chat')}Community commitment <span class="section-meta">depth, not counts · ${members.size ? Math.round(tContrib / members.size * 100) : 0}% contribute</span></h2>
+    <div style="display:flex;height:26px;border-radius:8px;overflow:hidden;margin-bottom:10px">${tiers.map(t => t.v ? `<div title="${t.n}: ${t.v}" style="width:${t.v / tTot * 100}%;background:${t.c};min-width:2px"></div>` : "").join("")}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:28px;font-size:.8rem">${tiers.map(t => `<div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:${t.c}"></span><b style="color:var(--text)">${t.v}</b> <span style="color:var(--text-muted)">${t.n}</span></div>`).join("")}</div>`;
 
   if (hotspots.length) h += `<h2 class="section-header">${ico('target')}Where members get stuck <span class="section-meta">hardest passages · content / clinic opportunities</span></h2>
     <div style="margin-bottom:28px">${hotspots.map(p => `<div style="display:flex;align-items:center;gap:10px;font-size:.82rem;padding:4px 0;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.label)}${p.piece ? ` <span style="color:#64748b">· ${escHtml(p.piece)}</span>` : ""}</div><div style="flex:0 0 64px;text-align:right;color:#64748b">${p.games} games</div><div style="flex:0 0 78px;text-align:right;color:${p.clearPct >= 60 ? '#4ade80' : '#f59e0b'}">${p.clearPct}% clear</div><div style="flex:0 0 92px;text-align:right;color:${p.abandonPct > 30 ? '#f87171' : '#64748b'}">${p.abandonPct}% abandon</div><div style="flex:0 0 52px;text-align:right;color:#64748b">${p.students.size} ppl</div></div>`).join("")}</div>`;
@@ -1536,34 +1565,9 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
   </div>
   </details>`;
 
-  // Overview stats
-  html += `
-  <div class="overview-grid">
-    <div class="stat-card">
-      <div class="stat-value">${totalStudents}</div>
-      <div class="stat-label">Students</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value">${activeThisWeek}</div>
-      <div class="stat-label">Active this week</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value">${activeThisMonth}</div>
-      <div class="stat-label">Active this month</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value">${totalSessions}</div>
-      <div class="stat-label">Sessions total</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value">${fmtMins(totalMins)}</div>
-      <div class="stat-label">Total practice time</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value">${pendingRequests}</div>
-      <div class="stat-label">Pending requests</div>
-    </div>
-  </div>`;
+  // (Overview stat grid removed — superseded by the Retention Console KPI band.)
+  // Everything below is secondary detail beneath the console.
+  html += `<h2 class="section-header" style="margin-top:8px;color:#64748b;font-size:1rem">Secondary detail</h2>`;
 
   // Student cards (detail view — the dense Members table up top is the primary view)
   html += `<details style="margin-bottom:24px"><summary style="cursor:pointer;color:#64748b;font-size:.85rem;font-weight:600;padding:6px 0">Student cards (detailed)</summary>`;
@@ -1703,11 +1707,8 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
     html += `</div>`;
   }
 
-  // ── Passage Fixer section ─────────────────────────────────
-  html += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">
-    ${ico('target','#a5b4fc')}Passage Fixer
-    <span class="section-meta">${totalGames} games all time · ${gamesThisWeek} this week</span>
-  </h2>`;
+  // ── Passage Fixer section (collapsed — difficulty hotspots in the console is the lead) ──
+  html += `<details style="margin-bottom:16px"><summary style="cursor:pointer;color:#cbd5e1;font-size:.95rem;font-weight:700;padding:8px 0;border-top:2px solid #1e2d4a;margin-top:8px">${ico('target','#a5b4fc')}Passage Fixer detail — ${totalGames} games all time · ${gamesThisWeek} this week</summary>`;
 
   if (totalGames === 0) {
     html += `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:32px">No passage games played yet.</p>`;
@@ -1870,7 +1871,7 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
       </div>`;
     }
   }
-  html += `</div>`;
+  html += `</div></details>`;
 
   document.getElementById("analytics-loading").style.display  = "none";
   document.getElementById("analytics-content").style.display  = "block";
