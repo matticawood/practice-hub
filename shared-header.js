@@ -1372,9 +1372,12 @@ const _SH_HUB_LABELS = {
 function _shPageLabel(path) {
   if (!path) return "";
   const clean = path.split("?")[0].split("#")[0];
-  const detail = path.includes("#") ? path.split("#")[1] : "";
-  if (clean === "/practice-log.html" && detail) {
-    return _SH_HUB_LABELS[detail] || "Hub";
+  const hi = path.indexOf("#");
+  const detail = hi >= 0 ? path.slice(hi + 1) : "";
+  if (detail) {
+    // The Hub reports short tokens (resolved via the map); other pages report a
+    // ready-made label (e.g. "Community · Members"), used directly.
+    return _SH_HUB_LABELS[detail] || detail;
   }
   return _SH_PAGE_LABELS[clean] || clean.replace(/\.html$/, "").replace(/^\//, "") || "Home";
 }
