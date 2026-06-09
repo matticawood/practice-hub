@@ -528,7 +528,7 @@ async function loadAnalytics() {
   // Community-health data: membership, community engagement, events, roadmap baseline.
   const _safe = async (p) => { try { return (await p).data || []; } catch (e) { console.warn("load failed:", e); return []; } };
   const [aeRows, posts, comments, likes, rsvps, attendance, events, baseline] = await Promise.all([
-    _safe(db.from("allowed_emails").select("email")),
+    _safe(db.from("allowed_emails").select("email, stripe_customer_id")),
     _safe(db.from("community_posts").select("email, type, created_at")),
     _safe(db.from("community_post_comments").select("email, created_at")),
     _safe(db.from("community_post_likes").select("email, created_at")),
@@ -538,8 +538,34 @@ async function loadAnalytics() {
     _safe(db.from("practice_baseline").select("email, total_minutes")),
   ]);
 
+  // Live Stripe check: who is actually subscribed right now. A member with no
+  // active subscription is "churned" — folded into EXCLUDED_EMAILS so every
+  // section drops them, but surfaced as a Churned count/segment in the header.
+  let activeEmails = new Set(), activeCustomerIds = new Set(), hasSubData = false;
+  try {
+    const { data: { session } } = await db.auth.getSession();
+    const r = await fetch("/.netlify/functions/active-subscribers", { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (r.ok) {
+      const j = await r.json();
+      (j.emails || []).forEach(e => activeEmails.add((e || "").toLowerCase()));
+      (j.customerIds || []).forEach(c => activeCustomerIds.add(c));
+      hasSubData = activeEmails.size > 0 || activeCustomerIds.size > 0;
+    } else { console.warn("active-subscribers:", r.status); }
+  } catch (e) { console.warn("Could not load active subscribers:", e); }
+
+  const churnedSet = new Set();
+  if (hasSubData) {
+    for (const r of (aeRows || [])) {
+      const e = (r.email || "").toLowerCase();
+      if (!e || EXCLUDED_EMAILS.has(e)) continue;
+      const active = activeEmails.has(e) || (r.stripe_customer_id && activeCustomerIds.has(r.stripe_customer_id));
+      if (!active) churnedSet.add(e);
+    }
+    churnedSet.forEach(e => EXCLUDED_EMAILS.add(e)); // drop churned from every section
+  }
+
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
-  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline }); }
+  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, churnedCount: churnedSet.size, hasSubData }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
@@ -735,14 +761,18 @@ function renderInsights(d) {
     <h1 style="font-size:1.3rem;margin:0;color:#fff">${ico('health')}Community health</h1>
     <div style="font-size:.8rem;color:#64748b;margin-top:2px">The numbers that show whether the product is working. Owner/test excluded · Δ vs previous period.</div></div>`;
 
+  const churned = d.churnedCount || 0;
+  const churnRate = (totalMembers + churned) > 0 ? Math.round(churned / (totalMembers + churned) * 100) : 0;
+
   // KPI row
   h += `<div class="overview-grid">
-    ${kpi(totalMembers, "Members")}
+    ${kpi(totalMembers, "Members", d.hasSubData ? `<span style="font-size:.72rem;color:#64748b">active subscribers</span>` : "")}
     ${kpi(activatedPct + "%", "Activated", `<span style="font-size:.72rem;color:#64748b">${activated}/${totalMembers} logged ≥1</span>`, activatedPct >= 60 ? "#4ade80" : "#f59e0b")}
     ${kpi(wau, "Active this week", delta(wau, wauPrev), "#4ade80")}
     ${kpi(mau, "Active this month", delta(mau, mauPrev), "#4ade80")}
     ${kpi(sessWk, "Sessions this week", delta(sessWk, sessWkPrev), "#60a5fa")}
     ${kpi(commWk, "Community actions / wk", delta(commWk, commWkPrev), "#a855f7")}
+    ${d.hasSubData ? kpi(churned, "Churned", `<span style="font-size:.72rem;color:#64748b">${churnRate}% of all-time</span>`, "#ef4444") : ""}
   </div>`;
 
   // Lifecycle
@@ -753,8 +783,9 @@ function renderInsights(d) {
     { n: "Dormant (30d+)", v: dormantList.length, c: "#ef4444" },
     { n: "Never activated", v: neverArr.length, c: "#475569" },
   ];
+  if (d.hasSubData && churned) segs.push({ n: "Churned", v: churned, c: "#7f1d1d" });
   const segTot = segs.reduce((s, x) => s + x.v, 0) || 1;
-  h += `<h2 class="section-header" style="margin-top:32px">${ico('refresh')}Member lifecycle <span class="section-meta">${totalMembers} members</span></h2>
+  h += `<h2 class="section-header" style="margin-top:32px">${ico('refresh')}Member lifecycle <span class="section-meta">${totalMembers} active${d.hasSubData ? ` · ${churned} churned` : ""}</span></h2>
     <div style="display:flex;height:30px;border-radius:8px;overflow:hidden;margin-bottom:10px">
       ${segs.map(s => s.v ? `<div title="${s.n}: ${s.v}" style="width:${s.v / segTot * 100}%;background:${s.c};min-width:2px"></div>` : "").join("")}
     </div>
