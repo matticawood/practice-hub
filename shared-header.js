@@ -2022,7 +2022,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       a.className = "sh-user-menu-item";
       a.id = "sh-admin-analytics-link";
       a.href = "/admin-analytics.html";
-      a.textContent = "📊 Admin Analytics";
+      a.textContent = "Admin Analytics";
       _menu.insertBefore(a, _logout);
     }
   }
