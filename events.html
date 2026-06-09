@@ -4915,7 +4915,20 @@ async function joinStream(eventId, options = {}) {
             .select("name").eq("email", myEmail2).maybeSingle();
           const myName2 = nameRow2?.name || myEmail2.split("@")[0] || "Guest";
           call.sendAppMessage({ type: "viewer-info", name: myName2, email: myEmail2 }, "*");
-        } catch(e) { console.warn("viewer-info send:", e); }
+
+          // Record that this viewer attended, so the "Tuned In Live" achievements
+          // count everyone who joins — not only those who happened to chat / ask a
+          // question. One row per (event, viewer); rejoining is a no-op. Test events
+          // are excluded so they never grant the achievement.
+          if (myEmail2 && currentEvent?.id && !currentEvent.test) {
+            await db.from("event_attendance").upsert(
+              { event_id: currentEvent.id, email: myEmail2, name: myName2 },
+              { onConflict: "event_id,email", ignoreDuplicates: true }
+            );
+            // Grant the achievement straight away (force past the 15s debounce).
+            window.tcCheckAchievements?.({ force: true });
+          }
+        } catch(e) { console.warn("viewer-info / attendance:", e); }
       });
 
       // Receive stage invites from the host

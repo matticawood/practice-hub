@@ -206,7 +206,17 @@
   pweek:{icon:"🗓️",name:"Perfect Week",desc:"Practise all 7 days of a single calendar week"},
   wkwarr:{icon:"🌅",name:"Weekend Warrior",desc:"Practise on both Saturday and Sunday of the same weekend"},
   renais:{icon:"🎨",name:"Renaissance Musician",desc:"Practise every type: piece, technique, sight-reading, improvisation, theory, ear training and method book"},
+  rm1:{name:"First Steps",desc:"Begin your roadmap journey"},
+  rm2:{name:"Beginner",desc:"Reach the Beginner stage (50h)"},
+  rm3:{name:"Foundations",desc:"Reach the Foundations stage (150h)"},
+  rm4:{name:"Intermediate",desc:"Reach the Intermediate stage (350h)"},
+  rm5:{name:"Confident",desc:"Reach the Confident stage (700h)"},
+  rm6:{name:"Advanced",desc:"Reach the Advanced stage (1,200h)"},
+  rm7:{name:"Performer",desc:"Reach the Performer stage (2,000h)"},
+  rm8:{name:"Artist",desc:"Reach the Artist stage (3,500h)"},
   };
+  // Roadmap stage trophies render the level's statue artwork (not an SVG badge).
+  const ACH_TROPHY_IMG = { rm1:"/statue-l1.webp",rm2:"/statue-l2.webp",rm3:"/statue-l3.webp",rm4:"/statue-l4.webp",rm5:"/statue-l5.webp",rm6:"/statue-l6.webp",rm7:"/statue-l7.webp",rm8:"/statue-l8.webp" };
 
   const ACH_CAT = {
   s1:"sessions",s10:"sessions",s50:"sessions",s100:"sessions",s250:"sessions",s500:"sessions",
@@ -235,6 +245,7 @@
   crg1:"chordrec",crg10:"chordrec",crg50:"chordrec",crs10:"chordrec",crs20:"chordrec",crs30:"chordrec",crtreb:"chordrec",crbass:"chordrec",crkey:"chordrec",
   cmp1:"community",cmp10:"community",cmp25:"community",cmp50:"community",cmc1:"community",cmc10:"community",cmc50:"community",cmc100:"community",cmr1:"community",cmr25:"community",cmr100:"community",cmcs:"community",cmav:"community",
   lv1:"live",lv5:"live",lv10:"live",
+  rm1:"roadmap",rm2:"roadmap",rm3:"roadmap",rm4:"roadmap",rm5:"roadmap",rm6:"roadmap",rm7:"roadmap",rm8:"roadmap",
   tmo25:"time",pweek:"streak",wkwarr:"sessions",renais:"variety",
   };
 
@@ -259,6 +270,7 @@
   chordrec:["crg1","crg10","crg50","crs10","crs20","crs30","crtreb","crbass","crkey"],
   community:["cmp1","cmp10","cmp25","cmp50","cmc1","cmc10","cmc50","cmc100","cmr1","cmr25","cmr100","cmcs","cmav"],
   live:["lv1","lv5","lv10"],
+  roadmap:["rm1","rm2","rm3","rm4","rm5","rm6","rm7","rm8"],
   };
 
   /* ── Badge SVG system (ported from practice-log.html) ── */
@@ -269,14 +281,14 @@
   const _BADGE_SHAPE={circle:`<circle cx="27" cy="27" r="24.5"`,hex:`<polygon points="27,3 48,15.5 48,38.5 27,51 6,38.5 6,15.5"`,shield:`<path d="M27 3L49 13v21q0 14-22 17Q5 48 5 34V13z"`,star:`<polygon points="27,2 33.2,18.5 50.8,19.3 37,30.3 41.7,47.2 27,37.5 12.3,47.2 17,30.3 3.2,19.3 20.8,18.5"`,diamond:`<polygon points="27,3 51,27 27,51 3,27"`,};
   const _BADGE_SHINE={circle:`<path d="M10 14Q27 3 44 14Q27 23 10 14Z" fill="rgba(255,255,255,.14)"/>`,hex:`<path d="M14 16L27 6 40 16Q27 24 14 16Z" fill="rgba(255,255,255,.14)"/>`,shield:`<path d="M11 14L27 6 43 14Q27 22 11 14Z" fill="rgba(255,255,255,.14)"/>`,star:`<path d="M18 18L27 5 36 18Q27 25 18 18Z" fill="rgba(255,255,255,.14)"/>`,diamond:`<path d="M16 18L27 4 38 18Q27 26 16 18Z" fill="rgba(255,255,255,.14)"/>`,};
   const _BADGE_CAT_SHAPE={sessions:'circle',time:'hex',streak:'shield',pieces:'diamond',scales:'hex',sightread:'circle',improv:'star',theorycat:'circle',eartraining:'hex',depth:'star',books:'circle',variety:'star',saves:'shield',reading:'shield',community:'circle',game:'hex',library:'diamond',noterec:'star',chordrec:'diamond',live:'star',};
-  const _BADGE_PALETTE={sessions:['#93c5fd','#2563eb','#1d4ed8'],time:['#fde68a','#f59e0b','#b45309'],streak:['#fca5a5','#ef4444','#b91c1c'],pieces:['#c4b5fd','#7c3aed','#5b21b6'],scales:['#6ee7b7','#059669','#047857'],sightread:['#67e8f9','#0891b2','#0e7490'],improv:['#fdba74','#ea580c','#c2410c'],theorycat:['#86efac','#16a34a','#15803d'],eartraining:['#d8b4fe','#9333ea','#7e22ce'],depth:['#fca5a5','#dc2626','#991b1b'],books:['#a5b4fc','#4338ca','#3730a3'],variety:['#f9a8d4','#db2777','#be185d'],saves:['#fde68a','#ca8a04','#a16207'],reading:['#5eead4','#0d9488','#0f766e'],community:['#7dd3fc','#0284c7','#0369a1'],game:['#fdba74','#c2410c','#9a3412'],library:['#f9a8d4','#be185d','#9d174d'],noterec:['#d9f99d','#65a30d','#3f6212'],chordrec:['#f0abfc','#c026d3','#86198f'],live:['#fda4af','#e11d48','#9f1239'],};
+  const _BADGE_PALETTE={sessions:['#93c5fd','#2563eb','#1d4ed8'],time:['#fde68a','#f59e0b','#b45309'],streak:['#fca5a5','#ef4444','#b91c1c'],pieces:['#c4b5fd','#7c3aed','#5b21b6'],scales:['#6ee7b7','#059669','#047857'],sightread:['#67e8f9','#0891b2','#0e7490'],improv:['#fdba74','#ea580c','#c2410c'],theorycat:['#86efac','#16a34a','#15803d'],eartraining:['#d8b4fe','#9333ea','#7e22ce'],depth:['#fca5a5','#dc2626','#991b1b'],books:['#a5b4fc','#4338ca','#3730a3'],variety:['#f9a8d4','#db2777','#be185d'],saves:['#fde68a','#ca8a04','#a16207'],reading:['#5eead4','#0d9488','#0f766e'],community:['#7dd3fc','#0284c7','#0369a1'],game:['#fdba74','#c2410c','#9a3412'],library:['#f9a8d4','#be185d','#9d174d'],noterec:['#d9f99d','#65a30d','#3f6212'],chordrec:['#f0abfc','#c026d3','#86198f'],live:['#fda4af','#e11d48','#9f1239'],roadmap:['#fde68a','#f0a500','#9a6a00'],};
 
   function _lerpHex(h1,h2,t){const p=s=>parseInt(s,16);const r=Math.round(p(h1.slice(1,3))+(p(h2.slice(1,3))-p(h1.slice(1,3)))*t);const g=Math.round(p(h1.slice(3,5))+(p(h2.slice(3,5))-p(h1.slice(3,5)))*t);const b=Math.round(p(h1.slice(5,7))+(p(h2.slice(5,7))-p(h1.slice(5,7)))*t);return`#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;}
   let _bdgUID=0;
   // NB: gradient ids are namespaced ("smmg…") so they never collide with the
   // host page's own achBadgeSVG ids ("g…"). A duplicate SVG gradient id makes
   // url(#…) resolve to the wrong/removed node → blank badge graphics.
-  function achBadgeSVG(id,size=38){const cat=ACH_CAT[id]||'sessions';const uid=++_bdgUID;const shape=_BADGE_CAT_SHAPE[cat]||'circle';const el=_BADGE_SHAPE[shape];const pal=_BADGE_PALETTE[cat]||_BADGE_PALETTE.sessions;const catIds=ACH_CAT_ORDER[cat]||[id];const ti=Math.max(0,catIds.indexOf(id));const t=catIds.length>1?ti/(catIds.length-1):0;const topC=t<=0.5?_lerpHex(pal[0],pal[1],t*2):pal[1];const botC=t<=0.5?pal[2]:_lerpHex(pal[2],pal[1],(1-t)*2);const iconPaths=ACH_ICON_MAP[id]||_AI.STAR;return`<svg viewBox="0 0 54 54" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="smmg${uid}" x1="27" y1="2" x2="27" y2="52" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="${topC}"/><stop offset="100%" stop-color="${botC}"/></linearGradient></defs>${el} fill="url(#smmg${uid})" stroke="rgba(0,0,0,.18)" stroke-width="1.5"/>${_BADGE_SHINE[shape]}<g transform="translate(15,15)"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">${iconPaths}</svg></g></svg>`;}
+  function achBadgeSVG(id,size=38){const _ti=ACH_TROPHY_IMG[id];if(_ti)return`<img src="${_ti}" width="${size}" height="${size}" alt="" draggable="false" loading="lazy" style="display:block;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(30,18,4,.35))">`;const cat=ACH_CAT[id]||'sessions';const uid=++_bdgUID;const shape=_BADGE_CAT_SHAPE[cat]||'circle';const el=_BADGE_SHAPE[shape];const pal=_BADGE_PALETTE[cat]||_BADGE_PALETTE.sessions;const catIds=ACH_CAT_ORDER[cat]||[id];const ti=Math.max(0,catIds.indexOf(id));const t=catIds.length>1?ti/(catIds.length-1):0;const topC=t<=0.5?_lerpHex(pal[0],pal[1],t*2):pal[1];const botC=t<=0.5?pal[2]:_lerpHex(pal[2],pal[1],(1-t)*2);const iconPaths=ACH_ICON_MAP[id]||_AI.STAR;return`<svg viewBox="0 0 54 54" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="smmg${uid}" x1="27" y1="2" x2="27" y2="52" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="${topC}"/><stop offset="100%" stop-color="${botC}"/></linearGradient></defs>${el} fill="url(#smmg${uid})" stroke="rgba(0,0,0,.18)" stroke-width="1.5"/>${_BADGE_SHINE[shape]}<g transform="translate(15,15)"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">${iconPaths}</svg></g></svg>`;}
 
   const POST_TYPES = {
     progress:    { label: "Share Your Progress", short: "Progress",     color: "#10b981", bg: "rgba(16,185,129,.15)",  border: "rgba(16,185,129,.3)"  },
