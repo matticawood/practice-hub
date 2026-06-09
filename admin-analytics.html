@@ -538,9 +538,17 @@ async function loadAnalytics() {
     _safe(db.from("practice_baseline").select("email, total_minutes")),
   ]);
 
-  // Live Stripe check: who is actually subscribed right now. A member with no
-  // active subscription is "churned" — folded into EXCLUDED_EMAILS so every
-  // section drops them, but surfaced as a Churned count/segment in the header.
+  // ── Who counts as a current member ──
+  // The live allowed_emails list is the source of truth: cancelling a subscription
+  // removes the row. So the membership gate is "are you still in allowed_emails?".
+  // Anyone who appears in the DATA (sessions/usage/community) but is NOT on that
+  // list is a former/churned member — drop them everywhere, count them as churned.
+  const baseExcluded = new Set([...EXCLUDED_EMAILS]); // owner/reviewer only, captured before churn
+  const memberSet = new Set((aeRows || []).map(r => (r.email || "").toLowerCase()).filter(e => e && !baseExcluded.has(e)));
+  const haveMembership = memberSet.size > 0;
+
+  // Secondary signal (best-effort): a member still listed but with no active Stripe
+  // subscription (cancelled but not yet removed). Fails open if Stripe is down.
   let activeEmails = new Set(), activeCustomerIds = new Set(), hasSubData = false;
   try {
     const { data: { session } } = await db.auth.getSession();
@@ -554,18 +562,28 @@ async function loadAnalytics() {
   } catch (e) { console.warn("Could not load active subscribers:", e); }
 
   const churnedSet = new Set();
-  if (hasSubData) {
-    for (const r of (aeRows || [])) {
-      const e = (r.email || "").toLowerCase();
-      if (!e || EXCLUDED_EMAILS.has(e)) continue;
-      const active = activeEmails.has(e) || (r.stripe_customer_id && activeCustomerIds.has(r.stripe_customer_id));
-      if (!active) churnedSet.add(e);
+  if (haveMembership) {
+    // (a) former members: have data but are no longer on the allowed_emails list
+    const dataEmails = new Set();
+    (allSessions || []).forEach(s => s.email && dataEmails.add(s.email.toLowerCase()));
+    (usageRows || []).forEach(u => u.email && dataEmails.add((u.email || "").toLowerCase()));
+    [...(posts || []), ...(comments || []), ...(likes || [])].forEach(r => r.email && dataEmails.add((r.email || "").toLowerCase()));
+    (baseline || []).forEach(b => b.email && dataEmails.add((b.email || "").toLowerCase()));
+    for (const e of dataEmails) if (!memberSet.has(e) && !baseExcluded.has(e)) churnedSet.add(e);
+    // (b) still listed but no active Stripe subscription
+    if (hasSubData) {
+      for (const r of (aeRows || [])) {
+        const e = (r.email || "").toLowerCase();
+        if (!e || baseExcluded.has(e)) continue;
+        const active = activeEmails.has(e) || (r.stripe_customer_id && activeCustomerIds.has(r.stripe_customer_id));
+        if (!active) churnedSet.add(e);
+      }
     }
     churnedSet.forEach(e => EXCLUDED_EMAILS.add(e)); // drop churned from every section
   }
 
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
-  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, churnedCount: churnedSet.size, hasSubData }); }
+  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, churnedCount: churnedSet.size, hasSubData: haveMembership }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
