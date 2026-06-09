@@ -538,6 +538,21 @@ async function loadAnalytics() {
     _safe(db.from("practice_baseline").select("email, total_minutes")),
   ]);
 
+  // Extra signals for the dense dashboard (all best-effort).
+  const [pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows] = await Promise.all([
+    _safe(db.from("piece_goals").select("email, goal_date, target_date, started_at")),
+    _safe(db.from("note_game_scores").select("email, created_at")),
+    _safe(db.from("chord_game_scores").select("email, created_at")),
+    _safe(db.from("content_feed_posts").select("id, type, created_at")),
+    _safe(db.from("content_feed_comments").select("email, created_at")),
+    _safe(db.from("content_feed_likes").select("email")),
+    _safe(db.from("activity_comments").select("email, created_at")),
+    _safe(db.from("activity_reactions").select("email")),
+    _safe(db.from("saved_posts").select("email, post_type, created_at")),
+    _safe(db.from("achievement_events").select("email, achievement_id")),
+    _safe(db.from("feedback").select("email, type, created_at")),
+  ]);
+
   // ── Who counts as a current member ──
   // The live allowed_emails list is the source of truth: cancelling a subscription
   // removes the row. So the membership gate is "are you still in allowed_emails?".
@@ -583,7 +598,7 @@ async function loadAnalytics() {
   }
 
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
-  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership }); }
+  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
@@ -607,10 +622,8 @@ function renderFeatureUsage(usageRows) {
   const max     = sorted.length ? sorted[0][1] : 1;
   const totalAll = sorted.reduce((s, [, v]) => s + v, 0);
   const fmtT = secs => fmtMins(secs / 60);
-  let html = `<h2 class="section-header" style="border-bottom-color:#1e2d4a;margin-top:32px">
-    ${ico('bars','#4ade80')}Feature usage
-    <span class="section-meta">${fmtT(totalAll)} total active time · ${sorted.length} views</span></h2>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:28px">`;
+  let html = `<details style="margin-bottom:8px"><summary style="cursor:pointer;color:#cbd5e1;font-size:.95rem;font-weight:700;padding:8px 0;border-top:2px solid #1e2d4a;margin-top:24px">${ico('bars','#4ade80')}Feature usage detail — ${sorted.length} views · ${fmtT(totalAll)} total active time</summary>
+    <div style="display:flex;flex-direction:column;gap:6px;margin:14px 0 28px">`;
   for (const [view, secs] of sorted.slice(0, 40)) {
     const pct = Math.max(2, Math.round(secs / max * 100));
     const u   = users[view] ? users[view].size : 0;
@@ -650,7 +663,7 @@ function renderFeatureUsage(usageRows) {
       <div style="flex:0 0 320px;text-align:right;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="top views">${top}</div>
     </div>`;
   }
-  html += `</div>`;
+  html += `</div></details>`;
   el.insertAdjacentHTML("beforeend", html);
 }
 
@@ -767,6 +780,57 @@ function renderInsights(d) {
     });
   }
 
+  // ── Per-area engagement (from feature_usage) ──
+  const areaOf = (view) => {
+    const v = String(view || "");
+    if (v.startsWith("Hub · Roadmap")) return "Roadmap";
+    if (v.startsWith("Community"))      return "Community";
+    if (v.startsWith("Content"))        return "Content";
+    if (v.startsWith("Practice Tools")) return "Tools & games";
+    if (v.startsWith("Resources"))      return "Resources";
+    if (v.startsWith("Live Clinics"))   return "Live events";
+    if (v.startsWith("Hub"))            return "Hub (other)";
+    return null;
+  };
+  const AREA_ORDER = ["Practice log", "Roadmap", "Community", "Content", "Tools & games", "Resources", "Live events", "Hub (other)"];
+  const areaAgg = {}; AREA_ORDER.forEach(a => areaAgg[a] = { mem: new Set(), secWk: 0, secPrev: 0 });
+  (d.usageRows || []).forEach(u => {
+    const e = low(u.email); if (!e || EX.has(e)) return;
+    const a = areaOf(u.view); if (!a) return;
+    const x = dAgo(u.day), s = Number(u.seconds) || 0;
+    if (x < 7) { areaAgg[a].mem.add(e); areaAgg[a].secWk += s; }
+    else if (x < 14) areaAgg[a].secPrev += s;
+  });
+  sessions.forEach(s => { if (dAgo(s.session_date) < 7) areaAgg["Practice log"].mem.add(low(s.email)); });
+  areaAgg["Practice log"].secWk  = sessions.filter(s => dAgo(s.session_date) < 7).reduce((m, s) => m + sessMins(s), 0) * 60;
+  areaAgg["Practice log"].secPrev = sessions.filter(s => { const x = dAgo(s.session_date); return x >= 7 && x < 14; }).reduce((m, s) => m + sessMins(s), 0) * 60;
+
+  // Goals (best-effort: a goal_date marks completion)
+  const goalsByMember = {}; let goalsSet = 0, goalsDone = 0;
+  (d.pieceGoals || []).forEach(g => { const e = low(g.email); if (!e || EX.has(e)) return; goalsSet++; if (g.goal_date) goalsDone++; goalsByMember[e] = (goalsByMember[e] || 0) + 1; });
+
+  // ── Insights & actions (prioritised: 0 high, 1 med, 2 low) ──
+  const churnedN = d.churnedCount || 0;
+  const churnPct = (totalMembers + churnedN) > 0 ? Math.round(churnedN / (totalMembers + churnedN) * 100) : 0;
+  const roadmapWk = areaAgg["Roadmap"].mem.size, roadmapPct = wau ? Math.round(roadmapWk / wau * 100) : 0;
+  const lurkers = Math.max(0, totalMembers - posterSet.size);
+  let worstArea = null, worstDrop = 0;
+  for (const a of AREA_ORDER) { const { secWk, secPrev } = areaAgg[a]; if (secPrev > 600 && secWk < secPrev) { const dr = Math.round((secPrev - secWk) / secPrev * 100); if (dr > worstDrop) { worstDrop = dr; worstArea = a; } } }
+  const recentFeedback = (d.feedbackRows || []).filter(f => !EX.has(low(f.email)) && tAgo(f.created_at) <= 14).length;
+  const insights = [];
+  const addI = (sev, text) => insights.push({ sev, text });
+  if (riskList.length)              addI(0, `<b>${riskList.length}</b> member${riskList.length > 1 ? "s" : ""} at-risk (active, then quiet 8–30 days) — reach out before they lapse.`);
+  if (neverArr.length)              addI(0, `<b>${neverArr.length}</b> member${neverArr.length > 1 ? "s" : ""} joined but never did anything — fix onboarding or send a nudge.`);
+  if (churnedN)                     addI(churnPct >= 15 ? 0 : 1, `Churn is <b>${churnPct}%</b> of all-time members (${churnedN} cancelled).`);
+  if (wau && roadmapPct < 30)       addI(1, `Only <b>${roadmapPct}%</b> of active members opened the roadmap this week — promote it.`);
+  if (totalMembers && lurkers > 0)  addI(lurkers > totalMembers * 0.6 ? 1 : 2, `<b>${lurkers}</b> of ${totalMembers} members never post (${pctPosting}% do) — seed discussion or prompt them.`);
+  if (worstArea)                    addI(1, `<b>${worstArea}</b> usage down <b>${worstDrop}%</b> vs last week.`);
+  if (recentFeedback)               addI(1, `<b>${recentFeedback}</b> feedback item${recentFeedback > 1 ? "s" : ""} in the last 2 weeks — review and reply.`);
+  if (mau && wau) { const st = Math.round(wau / mau * 100); if (st < 40) addI(2, `Stickiness (WAU/MAU) is <b>${st}%</b> — members aren't returning weekly.`); }
+  if (goalsSet && goalsDone / goalsSet < 0.3) addI(2, `Only <b>${Math.round(goalsDone / goalsSet * 100)}%</b> of piece goals reached completion (${goalsDone}/${goalsSet}).`);
+  if (!insights.length)             addI(2, `Nothing urgent — engagement looks healthy.`);
+  insights.sort((a, b) => a.sev - b.sev);
+
   // ── Helpers ──
   const delta = (cur, prev) => {
     if (prev === 0) return cur > 0 ? `<span style="color:#4ade80;font-size:.72rem;font-weight:700">▲ new</span>` : "";
@@ -809,6 +873,32 @@ function renderInsights(d) {
     ${kpi(commWk, "Community actions / wk", delta(commWk, commWkPrev), "#a855f7")}
     ${d.hasSubData ? kpi(churned, "Churned", `<span style="font-size:.72rem;color:#64748b">${churnRate}% of all-time</span>`, "#ef4444") : ""}
   </div>`;
+
+  // Insights & actions
+  const sevC = ["#ef4444", "#f59e0b", "#3b82f6"];
+  h += `<h2 class="section-header" style="margin-top:28px">${ico('warn')}Insights &amp; actions</h2>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:28px">
+      ${insights.slice(0, 9).map(i => `<div style="padding:9px 12px;background:#0d1525;border-left:3px solid ${sevC[i.sev]};border-radius:6px;font-size:.86rem;color:#cbd5e1;line-height:1.4">${i.text}</div>`).join("")}
+    </div>`;
+
+  // Area engagement matrix
+  const areaRows = AREA_ORDER.map(a => ({ a, m: areaAgg[a].mem.size, secWk: areaAgg[a].secWk, secPrev: areaAgg[a].secPrev }))
+    .filter(r => r.m || r.secWk || r.secPrev);
+  const areaMax = Math.max(1, ...areaRows.map(r => r.m));
+  h += `<h2 class="section-header">${ico('bars')}Where the time goes <span class="section-meta">active members &amp; time · this week</span></h2>
+    <div style="margin-bottom:28px">
+      <div style="display:flex;gap:10px;font-size:.62rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;padding:0 2px 5px">
+        <div style="flex:0 0 120px">Area</div><div style="flex:1">Active members</div><div style="flex:0 0 56px;text-align:right">% mbrs</div><div style="flex:0 0 70px;text-align:right">Time/wk</div><div style="flex:0 0 56px;text-align:right">WoW</div></div>
+      ${areaRows.map(r => {
+        const pct = Math.round(r.m / areaMax * 100), pm = totalMembers ? Math.round(r.m / totalMembers * 100) : 0;
+        return `<div style="display:flex;align-items:center;gap:10px;font-size:.84rem;padding:2px 0">
+          <div style="flex:0 0 120px;color:#cbd5e1">${r.a}</div>
+          <div style="flex:1;display:flex;align-items:center;gap:8px"><div style="flex:1;background:#0d1525;border-radius:5px;overflow:hidden;height:16px"><div style="width:${Math.max(2, pct)}%;height:100%;background:linear-gradient(90deg,#38bdf8,#3b82f6)"></div></div><span style="flex:0 0 24px;color:#60a5fa;font-weight:700;text-align:right">${r.m}</span></div>
+          <div style="flex:0 0 56px;text-align:right;color:#64748b">${pm}%</div>
+          <div style="flex:0 0 70px;text-align:right;color:#cbd5e1">${r.secWk ? fmtMins(r.secWk / 60) : "—"}</div>
+          <div style="flex:0 0 56px;text-align:right">${delta(Math.round(r.secWk), Math.round(r.secPrev)) || "—"}</div></div>`;
+      }).join("")}
+    </div>`;
 
   // Lifecycle
   const segs = [
@@ -885,6 +975,43 @@ function renderInsights(d) {
       }).join("") : `<p style="color:var(--text-muted);font-size:.82rem">No past events.</p>`}
     </div>
   </div>`;
+
+  // ── Dense member table (one row per current member) ──
+  const streakMap = {}; (d.allStreaks || []).forEach(s => streakMap[low(s.email)] = s);
+  const gamesMap = {};
+  const bumpGame = e => { e = low(e); if (e && !EX.has(e)) gamesMap[e] = (gamesMap[e] || 0) + 1; };
+  (d.allGames || []).forEach(g => bumpGame(g.email));
+  (d.noteScores || []).forEach(g => bumpGame(g.email));
+  (d.chordScores || []).forEach(g => bumpGame(g.email));
+  const postsMap = {}; posts.forEach(p => { const e = low(p.email); postsMap[e] = (postsMap[e] || 0) + 1; });
+  const recentByMember = {}; sessions.forEach(s => { if (dAgo(s.session_date) < 28) { const e = low(s.email); recentByMember[e] = (recentByMember[e] || 0) + 1; } });
+  const lvlOf = hrs => { let l = 0; for (let i = 0; i < TH.length; i++) if (hrs >= TH[i]) l = i; return l; };
+  const mrows = [...memberSet].map(e => {
+    const a = act[e], m = mem[e] || { count: 0, mins: 0 };
+    const hrs = (m.mins + (baseMap[e] || 0)) / 60;
+    return { e, ls: a ? dAgo(a.last) : null, sess: m.count, hrs, perWk: +((recentByMember[e] || 0) / 4).toFixed(1),
+      streak: (streakMap[e] && streakMap[e].current_streak) || 0, lvl: lvlOf(hrs), games: gamesMap[e] || 0, posts: postsMap[e] || 0, goals: goalsByMember[e] || 0 };
+  }).sort((a, b) => (a.ls == null ? 1e9 : a.ls) - (b.ls == null ? 1e9 : b.ls));
+  const dotC = ls => ls == null ? "#475569" : ls <= 7 ? "#4ade80" : ls <= 30 ? "#f59e0b" : "#ef4444";
+  const cell = (v, extra = "") => `<td style="padding:5px 7px;text-align:right;${extra}">${v}</td>`;
+  h += `<h2 class="section-header">${ico('users')}Members <span class="section-meta">${mrows.length} · most recently active first</span></h2>
+    <div style="overflow-x:auto;margin-bottom:24px"><table style="width:100%;border-collapse:collapse;font-size:.82rem">
+      <thead><tr style="color:#64748b;text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid #1e2d4a">
+        <th style="padding:4px 7px"></th><th style="padding:4px 7px;text-align:left">Member</th>
+        <th style="padding:4px 7px;text-align:right">Last</th><th style="padding:4px 7px;text-align:right">Sess</th>
+        <th style="padding:4px 7px;text-align:right">Hrs</th><th style="padding:4px 7px;text-align:right">/wk</th>
+        <th style="padding:4px 7px;text-align:right">Streak</th><th style="padding:4px 7px;text-align:left">Level</th>
+        <th style="padding:4px 7px;text-align:right">Games</th><th style="padding:4px 7px;text-align:right">Posts</th>
+        <th style="padding:4px 7px;text-align:right">Goals</th></tr></thead><tbody>
+      ${mrows.map(r => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 7px"><span style="width:8px;height:8px;border-radius:50%;background:${dotC(r.ls)};display:inline-block"></span></td>
+        <td style="padding:5px 7px;color:#cbd5e1;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(r.e)}</td>
+        ${cell(r.ls == null ? "—" : r.ls === 0 ? "today" : r.ls + "d", "color:#64748b")}
+        ${cell(r.sess || "—")}${cell(r.hrs ? Math.round(r.hrs) + "h" : "—")}${cell(r.perWk || "—")}
+        ${cell(r.streak || "—", r.streak ? "color:#f59e0b;font-weight:700" : "color:#64748b")}
+        <td style="padding:5px 7px;color:#94a3b8">${r.sess ? STG[r.lvl] : "—"}</td>
+        ${cell(r.games || "—")}${cell(r.posts || "—")}${cell(r.goals || "—")}</tr>`).join("")}
+    </tbody></table></div>`;
 
   h += `<div style="border-bottom:2px solid #1e2d4a;margin:8px 0 18px"></div>`;
   el.insertAdjacentHTML("afterbegin", h);
@@ -1273,9 +1400,9 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
     </div>
   </div>`;
 
-  // Student cards
-  html += `<h2 class="section-header">${ico('users')}Students <span class="section-meta">sorted by most recently active</span></h2>`;
-  html += `<div class="students-grid">`;
+  // Student cards (detail view — the dense Members table up top is the primary view)
+  html += `<details style="margin-bottom:24px"><summary style="cursor:pointer;color:#64748b;font-size:.85rem;font-weight:600;padding:6px 0">Student cards (detailed)</summary>`;
+  html += `<div class="students-grid" style="margin-top:10px">`;
   for (const st of students) {
     const days    = daysSince(st.lastDate);
     const streak  = streakMap[st.email];
@@ -1317,7 +1444,7 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
       </div>
     </div>`;
   }
-  html += `</div>`;
+  html += `</div></details>`;
 
   // Two column: top pieces + pending requests
   html += `<div class="two-col">`;
@@ -1488,8 +1615,7 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
     html += `</div>`;
 
     // Per-student breakdown
-    html += `<div>
-      <h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a">Usage by student</h3>`;
+    html += `<div><details><summary style="cursor:pointer;color:#64748b;font-size:.82rem;font-weight:600;padding:4px 0">Usage by student</summary>`;
     const gameStudents = Object.entries(gamesByStudent)
       .sort((a, b) => b[1].total - a[1].total);
     if (gameStudents.length === 0) {
@@ -1519,7 +1645,7 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
       }
       html += `</div>`;
     }
-    html += `</div></div>`;
+    html += `</details></div></div>`;
 
     // Recent passage game activity
     html += `<h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a">Recent passage game activity</h3>`;
