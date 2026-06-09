@@ -1417,6 +1417,42 @@ async function _shHeartbeat() {
   } catch (e) {
     window._shPresenceLastError = e;
   }
+  // Feature-usage time tracking: bank time on the current view, flush ~minutely.
+  _shAccrueUsage();
+  if (Date.now() - _shLastFlush > 55_000) _shFlushUsage();
+}
+
+// ── Feature-usage time tracking ───────────────────────────────────────────────
+// Accrues seconds spent on each resolved view label and flushes them to the
+// feature_usage table (via the add_feature_usage RPC) so the admin page can show
+// what's actually used. Only counts visible/active time; idle gaps are dropped.
+let _shUsageLabel = null, _shUsageSince = 0, _shUsageBuf = {}, _shLastFlush = 0;
+function _shCurrentViewLabel() {
+  const detail = (typeof window !== "undefined" && window._shPageDetail) ? ("#" + window._shPageDetail) : "";
+  return _shPageLabel(location.pathname + (location.search || "") + detail);
+}
+function _shAccrueUsage() {
+  const now = Date.now();
+  const visible = (typeof document === "undefined") || document.visibilityState === "visible";
+  if (_shUsageLabel && _shUsageSince && visible) {
+    const secs = (now - _shUsageSince) / 1000;
+    if (secs >= 1 && secs < 1800) _shUsageBuf[_shUsageLabel] = (_shUsageBuf[_shUsageLabel] || 0) + secs;
+  }
+  _shUsageLabel = _shCurrentViewLabel();
+  _shUsageSince = now;
+}
+async function _shFlushUsage() {
+  _shAccrueUsage();
+  const entries = Object.entries(_shUsageBuf).filter(([, s]) => s >= 1);
+  if (!entries.length || !_shPresenceDb) return;
+  _shUsageBuf = {};
+  _shLastFlush = Date.now();
+  for (const [view, secs] of entries) {
+    try {
+      const { error } = await _shPresenceDb.rpc("add_feature_usage", { p_view: view, p_seconds: Math.round(secs) });
+      if (error) throw error;
+    } catch (e) { _shUsageBuf[view] = (_shUsageBuf[view] || 0) + secs; } // re-buffer on failure
+  }
 }
 // Pages call this after changing `window._shPageDetail` to push the new view
 // immediately, instead of waiting up to 60s for the next heartbeat.
@@ -1425,12 +1461,19 @@ window._shStartPresence = function(db, email) {
   if (!db || !email) return;
   _shPresenceDb = db;
   _shPresenceEmail = email.toLowerCase();
+  // Seed usage tracking at the current view.
+  _shUsageLabel = _shCurrentViewLabel();
+  _shUsageSince = Date.now();
+  _shLastFlush = Date.now();
   if (_shHeartbeatTimer) clearInterval(_shHeartbeatTimer);
   _shHeartbeat();
   _shHeartbeatTimer = setInterval(_shHeartbeat, 60_000);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") _shHeartbeat();
+    if (document.visibilityState === "visible") { _shUsageSince = Date.now(); _shHeartbeat(); }
+    else { _shFlushUsage(); }  // leaving/backgrounding — bank + flush time so far
   });
+  // Best-effort flush when the tab is closed/navigated away.
+  window.addEventListener("pagehide", () => { _shFlushUsage(); });
 };
 
 let _shPresenceRefreshTimer = null;
