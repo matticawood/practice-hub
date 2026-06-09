@@ -518,7 +518,53 @@ async function loadAnalytics() {
     upcomingClinics = cData.bookings || [];
   } catch(e) { console.warn("Could not load clinic bookings:", e); }
 
+  // Feature-usage time per view (what gets used most)
+  let usageRows = [];
+  try {
+    const uRes = await db.from("feature_usage").select("email, view, seconds, day");
+    usageRows = uRes.data || [];
+  } catch(e) { console.warn("Could not load feature usage:", e); }
+
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
+  renderFeatureUsage(usageRows);
+}
+
+// ── Feature usage: total active time per view, most-used first ─────────────────
+function renderFeatureUsage(usageRows) {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+  const rows = (usageRows || []).filter(r => !EXCLUDED_EMAILS.has((r.email || "").toLowerCase()));
+  if (!rows.length) return;
+  const wkStr = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  const byView = {}, byView7 = {}, users = {};
+  for (const r of rows) {
+    const v = r.view || "Unknown", s = Number(r.seconds) || 0;
+    byView[v] = (byView[v] || 0) + s;
+    (users[v] = users[v] || new Set()).add(r.email);
+    if ((r.day || "") >= wkStr) byView7[v] = (byView7[v] || 0) + s;
+  }
+  const sorted  = Object.entries(byView).sort((a, b) => b[1] - a[1]);
+  const max     = sorted.length ? sorted[0][1] : 1;
+  const totalAll = sorted.reduce((s, [, v]) => s + v, 0);
+  const fmtT = secs => fmtMins(secs / 60);
+  let html = `<h2 class="section-header" style="border-bottom-color:#1e2d4a;margin-top:32px">
+    <span style="color:#4ade80">📊</span> Feature usage
+    <span class="section-meta">${fmtT(totalAll)} total active time · ${sorted.length} views</span></h2>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:28px">`;
+  for (const [view, secs] of sorted.slice(0, 40)) {
+    const pct = Math.max(2, Math.round(secs / max * 100));
+    const u   = users[view] ? users[view].size : 0;
+    const w7  = byView7[view] ? fmtT(byView7[view]) : "—";
+    html += `<div style="display:flex;align-items:center;gap:10px;font-size:.85rem">
+      <div style="flex:0 0 210px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${String(view).replace(/</g,"&lt;")}</div>
+      <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#4ade80,#22c55e)"></div></div>
+      <div style="flex:0 0 72px;text-align:right;color:#4ade80;font-weight:700">${fmtT(secs)}</div>
+      <div style="flex:0 0 60px;text-align:right;color:#64748b" title="last 7 days">${w7}</div>
+      <div style="flex:0 0 44px;text-align:right;color:#64748b" title="distinct members">${u}👤</div>
+    </div>`;
+  }
+  html += `</div>`;
+  el.insertAdjacentHTML("beforeend", html);
 }
 
 // ── Helpers ──────────────────────────────────────────────────
