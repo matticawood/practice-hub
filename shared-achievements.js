@@ -204,6 +204,7 @@ const ACH_COLOURS = {
   chordrec:    ["rgba(217,70,239,.13)",  "rgba(217,70,239,.35)",  "#d946ef"],
   community:   ["rgba(2,132,199,.13)",   "rgba(2,132,199,.35)",   "#0284c7"],
   live:        ["rgba(225,29,72,.13)",   "rgba(225,29,72,.35)",   "#e11d48"],
+  roadmap:     ["rgba(240,165,0,.15)",   "rgba(240,165,0,.40)",   "#f0a500"],
 };
 
 // ── Per-achievement unique SVG icon inner-paths ───────────────────────────
@@ -365,6 +366,7 @@ const _BADGE_CAT_SHAPE = {
   eartraining:'hex', depth:'star', books:'circle', variety:'star',
   saves:'shield', reading:'shield', community:'circle', game:'hex',
   library:'diamond', noterec:'star', chordrec:'diamond', live:'star',
+  roadmap:'circle',
 };
 // Colour palette per category [light, mid, dark] — interpolated by tier
 const _BADGE_PALETTE = {
@@ -388,6 +390,7 @@ const _BADGE_PALETTE = {
   noterec:     ['#d9f99d','#65a30d','#3f6212'],  // light lime → vivid → deep green
   chordrec:    ['#f0abfc','#c026d3','#86198f'],  // light fuchsia → vivid → deep magenta
   live:        ['#fda4af','#e11d48','#9f1239'],  // soft rose → vivid → deep crimson
+  roadmap:     ['#fde68a','#f0a500','#9a6a00'],  // pale gold → trophy gold → deep bronze
 };
 function _lerpHex(h1, h2, t) {
   const p = s => parseInt(s, 16);
@@ -402,6 +405,17 @@ function achBadgeSVG(ach, earned, size = 54) {
   const cat   = ach.cat;
   const shape = _BADGE_CAT_SHAPE[cat] || 'circle';
   const el    = _BADGE_SHAPE[shape];
+
+  // Roadmap trophies use the level's STATUE artwork as the badge: full colour when
+  // earned (with the same idle bob + sheen + grounding as the roadmap/dashboard
+  // trophies), the veiled statue when still locked.
+  if (ach.img) {
+    if (!earned) {
+      return `<img src="${ACH_TROPHY_VEILED}" width="${size}" height="${size}" alt="" draggable="false" loading="lazy"
+        style="display:block;object-fit:contain;opacity:.78;filter:drop-shadow(0 2px 4px rgba(30,18,4,.35))">`;
+    }
+    return `<span class="ach-trophy" style="width:${size}px;height:${size}px;--trophy:url('${ach.img}')"><img src="${ach.img}" width="${size}" height="${size}" alt="" draggable="false" loading="lazy"><span class="ach-trophy-shimmer"></span></span>`;
+  }
 
   if (!earned) {
     // lock icon — colour inherits from parent via CSS variable so it matches muted text
@@ -428,9 +442,16 @@ function achBadgeSVG(ach, earned, size = 54) {
         <stop offset="0%" stop-color="${topC}"/>
         <stop offset="100%" stop-color="${botC}"/>
       </linearGradient>
+      <linearGradient id="s${uid}" x1="0" y1="0" x2="1" y2="0.4">
+        <stop offset="0.38" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.5" stop-color="#fff" stop-opacity="0.5"/>
+        <stop offset="0.62" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+      <clipPath id="c${uid}">${el}/></clipPath>
     </defs>
     ${el} fill="url(#g${uid})" stroke="rgba(255,255,255,.28)" stroke-width="1.5"/>
     ${_BADGE_SHINE[shape]}
+    <g clip-path="url(#c${uid})"><rect class="ach-sheen-rect" x="-54" y="0" width="162" height="54" fill="url(#s${uid})" transform="translate(150 0)"/></g>
     <g transform="translate(15,15)"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" style="color:rgba(255,255,255,.95)">${iconPaths}</svg></g>
   </svg>`;
 }
@@ -449,11 +470,32 @@ const ACH_CAT_SVG = {
   books:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
   variety:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>`,
   saves:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+  roadmap:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>`,
 };
 function achIconSVG(cat) { return ACH_CAT_SVG[cat] || ACH_CAT_SVG.sessions; }
 
+// ── Roadmap trophies ────────────────────────────────────────────────────────
+// Each roadmap stage's badge is the level's STATUE artwork (not an SVG icon),
+// and locked ones show the veiled statue. Keep ids/order in sync with the maps
+// duplicated in community.html and shared-member-modal.js.
+const ACH_TROPHY_IMG = {
+  rm1: "/statue-l1.webp", rm2: "/statue-l2.webp", rm3: "/statue-l3.webp", rm4: "/statue-l4.webp",
+  rm5: "/statue-l5.webp", rm6: "/statue-l6.webp", rm7: "/statue-l7.webp", rm8: "/statue-l8.webp",
+};
+const ACH_TROPHY_VEILED = "/statue-veiled.webp";
+// Cumulative practice MINUTES to reach each stage (= ROADMAP.levels.total hours).
+// A trophy only broadcasts when reached by climbing ABOVE your prior-hours level,
+// i.e. baselineMins < threshold; anything your prior hours already cover is shown
+// but never recorded/broadcast (the "starting line").
+const ACH_ROADMAP_MINS = {
+  rm1: 0, rm2: 3000, rm3: 9000, rm4: 21000, rm5: 42000, rm6: 72000, rm7: 120000, rm8: 210000,
+};
+
 // Count unique practice days (multiple sessions on the same day count as one)
 const _achUniqueDays = s => new Set(s.map(x => x.session_date)).size;
+// Total practice minutes INCLUDING the user's manually-added prior-hours baseline,
+// so roadmap trophies match the level shown on their map.
+const _achRoadmapMins = (s, x) => _achTotalMins(s) + ((x && x.baselineMins) || 0);
 
 const ACHIEVEMENTS = [
   // Sessions — counted by unique practice days, not raw session count
@@ -636,6 +678,17 @@ const ACHIEVEMENTS = [
   { id:"lv1",   cat:"live",      icon:"📺", name:"Tuned In Live",    desc:"Join your first live stream",                          check:(s,x)=>(x.liveAttended||0)>=1,    prog:(s,x)=>[(x.liveAttended||0),1]    },
   { id:"lv5",   cat:"live",      icon:"📺", name:"Front Row",        desc:"Join 5 live streams",                                  check:(s,x)=>(x.liveAttended||0)>=5,    prog:(s,x)=>[(x.liveAttended||0),5]    },
   { id:"lv10",  cat:"live",      icon:"📺", name:"Devoted Viewer",   desc:"Join 10 live streams",                                 check:(s,x)=>(x.liveAttended||0)>=10,   prog:(s,x)=>[(x.liveAttended||0),10]   },
+
+  // ── Roadmap stage trophies (badge = the level's statue) ──────────────────────
+  // check counts logged + prior-hours; prog shows total minutes vs the threshold.
+  { id:"rm1", cat:"roadmap", img:"/statue-l1.webp", name:"First Steps",  desc:"Begin your roadmap journey",       check:(s,x)=>_achRoadmapMins(s,x)>=0,      prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),0]      },
+  { id:"rm2", cat:"roadmap", img:"/statue-l2.webp", name:"Beginner",     desc:"Reach the Beginner stage (50h)",   check:(s,x)=>_achRoadmapMins(s,x)>=3000,   prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),3000]   },
+  { id:"rm3", cat:"roadmap", img:"/statue-l3.webp", name:"Foundations",  desc:"Reach the Foundations stage (150h)",check:(s,x)=>_achRoadmapMins(s,x)>=9000,   prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),9000]   },
+  { id:"rm4", cat:"roadmap", img:"/statue-l4.webp", name:"Intermediate", desc:"Reach the Intermediate stage (350h)",check:(s,x)=>_achRoadmapMins(s,x)>=21000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),21000]  },
+  { id:"rm5", cat:"roadmap", img:"/statue-l5.webp", name:"Confident",    desc:"Reach the Confident stage (700h)", check:(s,x)=>_achRoadmapMins(s,x)>=42000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),42000]  },
+  { id:"rm6", cat:"roadmap", img:"/statue-l6.webp", name:"Advanced",     desc:"Reach the Advanced stage (1,200h)",check:(s,x)=>_achRoadmapMins(s,x)>=72000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),72000]  },
+  { id:"rm7", cat:"roadmap", img:"/statue-l7.webp", name:"Performer",    desc:"Reach the Performer stage (2,000h)",check:(s,x)=>_achRoadmapMins(s,x)>=120000, prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),120000] },
+  { id:"rm8", cat:"roadmap", img:"/statue-l8.webp", name:"Artist",       desc:"Reach the Artist stage (3,500h)",  check:(s,x)=>_achRoadmapMins(s,x)>=210000, prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),210000] },
 ];
 
 // Extra achievement data (reading list, collection, passage games)
@@ -646,7 +699,7 @@ let _achExtras = {
   nrGamesPlayed:0, nrBestScore:0, nrBestTreble:0, nrBestBass:0, nrBestMixed:0, nrBestAcc:0, nrBestKey:0, nrKeysPlayed:0,
   crGamesPlayed:0, crBestScore:0, crBestTreble:0, crBestBass:0, crBestKey:0,
   postCount:0, commentCount:0, reactionCount:0, liveAttended:0,
-  maxPostComments:0, hasAvatar:false,
+  maxPostComments:0, hasAvatar:false, baselineMins:0,
 };
 
 async function loadAchievementExtras() {
@@ -722,7 +775,7 @@ async function loadAchievementExtras() {
       return (data || []).map(r => r.event_id);
     } catch { return []; }
   };
-  const [postCount, commentCounts, reactionCounts, chatEvents, qaEvents] = await Promise.all([
+  const [postCount, commentCounts, reactionCounts, chatEvents, qaEvents, attendEvents] = await Promise.all([
     _cnt("community_posts", "email", email),
     Promise.all([
       _cnt("community_post_comments",       "email", email),
@@ -739,12 +792,23 @@ async function loadAchievementExtras() {
     ]),
     _eventIds("event_chat"),
     _eventIds("event_qa"),
+    _eventIds("event_attendance"),
   ]);
   _achExtras.postCount     = postCount;
   _achExtras.commentCount  = commentCounts.reduce((a, b) => a + b, 0);
   _achExtras.reactionCount = reactionCounts.reduce((a, b) => a + b, 0);
-  // "Attended live" = participated (chat or Q&A) in a distinct live event.
-  _achExtras.liveAttended  = new Set([...chatEvents, ...qaEvents].filter(Boolean)).size;
+  // "Attended live" = joined (recorded in event_attendance) OR participated
+  // (chat / Q&A) in a distinct live event. The attendance rows are the reliable
+  // signal; chat/Q&A are kept so historical participation still counts.
+  _achExtras.liveAttended  = new Set([...attendEvents, ...chatEvents, ...qaEvents].filter(Boolean)).size;
+
+  // Manually-added "practice from before" baseline, in minutes — added to logged
+  // minutes so roadmap trophies reflect total playing experience (matching the map).
+  try {
+    const { data: bl } = await db.from("practice_baseline")
+      .select("total_minutes").ilike("email", email).maybeSingle();
+    _achExtras.baselineMins = Number(bl?.total_minutes) || 0;
+  } catch { _achExtras.baselineMins = 0; }
 
   // Profile photo set? (Say Cheese)
   try {
@@ -815,6 +879,20 @@ async function checkNewAchievements() {
     newOnes = newOnes.filter(id => !dbKnown.has(id));
   }
 
+  // ── Roadmap "starting line" ────────────────────────────────────────────────
+  // A roadmap trophy whose threshold is already covered by the user's manually
+  // entered prior-hours baseline is shown as earned (via its check) but never
+  // recorded or broadcast — it's their declared starting point, not an in-app
+  // achievement. Only trophies reached by climbing ABOVE the baseline level get
+  // recorded + posted to the feed. Result: editing your prior-hours number can
+  // never push a trophy into the activity feed. This is deterministic from
+  // baselineMins, so it's consistent across devices.
+  const _baseMins = (_achExtras && _achExtras.baselineMins) || 0;
+  newOnes = newOnes.filter(id => {
+    const t = ACH_ROADMAP_MINS[id];
+    return (t === undefined) ? true : (_baseMins < t);
+  });
+
   // ── Silent introduction of the achievements expansion ──────────────────────
   // These IDs were added in a batch. Existing members who already qualify would
   // otherwise get a burst of toasts + bell + push notifications and flood the
@@ -831,6 +909,7 @@ async function checkNewAchievements() {
     "cmr1","cmr25","cmr100","cmcs","cmav",
     "lv1","lv5","lv10","nrtreb","nrkey","nrkey3",
     "tmo25","pweek","wkwarr","renais",
+    "rm1","rm2","rm3","rm4","rm5","rm6","rm7","rm8",
   ]);
   const _introKey = "ach_silentintro_v1_" + myEmail;
   if (!localStorage.getItem(_introKey)) {
