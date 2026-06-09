@@ -1909,6 +1909,113 @@ document.addEventListener("keydown", function(e) {
   }
 });
 
+// First-login welcome modal: shows once per member (gated on allowed_emails.welcome_seen_at),
+// then stamps the flag so it never reappears. Copy is intentionally evidence-led and warm.
+window._shMaybeShowOnboarding = async function(db, myEmail) {
+  if (!db || !myEmail) return;
+  // ?welcome=preview / ?info=preview force a variant and never stamp (for the owner to iterate).
+  const qp = new URLSearchParams(location.search);
+  const forceWelcome = qp.get("welcome") === "preview", forceInfo = qp.get("info") === "preview";
+  const preview = forceWelcome || forceInfo;
+  let variant;
+  if (forceWelcome) variant = "welcome";
+  else if (forceInfo) variant = "info";
+  else {
+    try {
+      const { data } = await db.from("allowed_emails").select("welcome_seen_at, info_seen_at").eq("email", myEmail).maybeSingle();
+      if (!data) return;
+      if (!data.welcome_seen_at) variant = "welcome";     // new member → welcome
+      else if (!data.info_seen_at) variant = "info";      // existing member → one-off info
+      else return;                                        // already seen what they needed
+    } catch (e) { return; }
+  }
+  if (document.getElementById("sh-welcome-backdrop")) return;
+  const V = {
+    welcome: {
+      h: "Welcome, I'm glad you made the decision to join The Practice Room.",
+      intro: "Have a look around: the roadmap, the clinics, the community, the practice tools. But if you do one thing first, make it this:",
+      key: "Log your practice.",
+      evidence: "It's the single most evidence-backed habit you can build. Across 138 trials, simply tracking your progress made people more likely to reach their goals, and it works even better when you record it.",
+      fbBullet: "Real, <b>more accurate and personalised feedback</b> when you need it",
+      habit: "It's all built to help you stick with it and become the player you want to be. Don't worry if it doesn't click straight away. Research found it takes around 66 days to form a habit, so if you can keep practicing and logging, even a quick note, you are greatly increasing your chances of success.",
+      breadth: "But logging is just the start. I aim to keep building learning materials to help you along the way, and there's already plenty more to do here: live clinics, practice tools, an ever-growing amount of content, and the community.",
+      close: "So... welcome, and if you need anything, I'm here to help.",
+      primary: "Log my first practice →", secondary: "Look around first",
+    },
+    info: {
+      h: "Getting the most out of The Practice Room",
+      intro: "Now that the new platform has been up and running for a few weeks, here's the one thing worth doing if you haven't already:",
+      key: "Did you know:",
+      evidence: "Logging your practice is the single most evidence-backed habit you can build. Across 138 trials, simply tracking your progress made people more likely to reach their goals, and it works even better when you record it.",
+      fbBullet: "Real, <b>more accurate and personalised feedback</b> when you need it",
+      habit: "It's all built to help you stick with it and become the player you want to be. Don't worry if logging doesn't click straight away. Research found it takes around 66 days to form a habit, so if you can keep practicing and logging, even a quick note, you are greatly increasing your chances of success.",
+      breadth: "But logging is just the start. I aim to keep building learning materials to help you along the way, and there's already plenty more to do here: live clinics, practice tools, an ever-growing amount of content, and the community.",
+      close: "If you need anything, I'm here to help.",
+      primary: "Log a practice →", secondary: "Maybe later",
+    },
+  }[variant];
+
+  if (!document.getElementById("sh-welcome-css")) {
+    const css = document.createElement("style");
+    css.id = "sh-welcome-css";
+    css.textContent = `
+      #sh-welcome-backdrop { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; background: rgba(20,16,10,.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); padding: 20px; opacity: 0; transition: opacity .2s ease; }
+      #sh-welcome-backdrop.open { opacity: 1; }
+      .sh-welcome-card { background: #fff; color: #4a443b; max-width: 600px; width: 100%; max-height: 88vh; overflow-y: auto; border-radius: 18px; box-shadow: 0 24px 60px -12px rgba(0,0,0,.5); padding: 32px 34px 26px; font-family: inherit; line-height: 1.5; transform: translateY(10px) scale(.98); transition: transform .24s cubic-bezier(.2,.7,.3,1); }
+      #sh-welcome-backdrop.open .sh-welcome-card { transform: none; }
+      .sh-welcome-card h2 { font-size: 1.22rem; font-weight: 800; margin: 0 0 13px; color: #1a1410; line-height: 1.32; }
+      .sh-welcome-card p { margin: 0 0 11px; font-size: .88rem; }
+      .sh-w-key { font-size: 1.08rem; font-weight: 800; color: #b07400; margin: 3px 0 15px !important; }
+      .sh-w-list { list-style: none; margin: 0 0 12px; padding: 0; }
+      .sh-w-list li { position: relative; padding-left: 19px; margin-bottom: 6px; font-size: .88rem; }
+      .sh-w-list li::before { content: ""; position: absolute; left: 3px; top: .62em; width: 6px; height: 6px; border-radius: 50%; background: #f0a500; }
+      .sh-w-list li b { color: #2a2620; }
+      .sh-welcome-card .sh-w-close { font-weight: 700; color: #2a2620; margin-bottom: 6px; }
+      .sh-welcome-card .sh-w-sign { font-size: .88rem; font-weight: 700; color: #1a1410; margin: 0; }
+      .sh-w-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+      .sh-w-primary { background: linear-gradient(135deg,#f7cb33,#f0a500); color: #2a1d00; border: none; border-radius: 11px; padding: 12px 18px; font: inherit; font-weight: 800; cursor: pointer; }
+      .sh-w-secondary { background: transparent; color: #6b6256; border: 1.5px solid #d8d2c6; border-radius: 11px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; }
+      .sh-w-primary:hover { filter: brightness(1.04); }
+      .sh-w-secondary:hover { border-color: #b9b1a2; color: #2a2620; }
+      .sh-welcome-card details { margin-top: 16px; font-size: .8rem; color: #8a8275; }
+      .sh-welcome-card summary { cursor: pointer; font-weight: 600; }`;
+    document.head.appendChild(css);
+  }
+
+  const bd = document.createElement("div");
+  bd.id = "sh-welcome-backdrop";
+  bd.innerHTML = `<div class="sh-welcome-card" role="dialog" aria-modal="true" aria-label="${V.h}">
+    <h2>${V.h}</h2>
+    <p>${V.intro}</p>
+    ${V.key ? `<p class="sh-w-key">${V.key}</p>` : ""}
+    <p>${V.evidence}</p>
+    <p>It's also the key that unlocks many of the most useful features here:</p>
+    <ul class="sh-w-list">
+      <li>Your <b>roadmap</b>, so you know what to expect at your level</li>
+      <li>Your <b>stats and insights</b>, so you know what to work on next</li>
+      <li>${V.fbBullet}</li>
+      <li>The ability to share your progress with a <b>community</b> for motivation and encouragement</li>
+    </ul>
+    <p>${V.habit}</p>
+    <p>${V.breadth}</p>
+    <p class="sh-w-close">${V.close}</p>
+    <p class="sh-w-sign">Matt</p>
+    <div class="sh-w-actions">
+      <button class="sh-w-primary" id="sh-w-log">${V.primary}</button>
+      <button class="sh-w-secondary" id="sh-w-look">${V.secondary}</button>
+    </div>
+    <details><summary>The science</summary><p style="margin-top:8px">Tracking progress: Harkin et al. 2016, Psychological Bulletin (138 RCTs). Specific goals: Locke &amp; Latham 2002. Knowing your next step: Gollwitzer &amp; Sheeran 2006. How long habits take: on average about 66 days (Lally et al., 2010). Each is independently evidenced; the effects don't multiply and nothing's guaranteed, but the odds are genuinely in your favour.</p></details>
+  </div>`;
+  document.body.appendChild(bd);
+  requestAnimationFrame(() => bd.classList.add("open"));
+
+  const stamp = () => { if (preview) return; const now = new Date().toISOString(); const patch = variant === "welcome" ? { welcome_seen_at: now, info_seen_at: now } : { info_seen_at: now }; try { db.from("allowed_emails").update(patch).eq("email", myEmail).then(() => {}, () => {}); } catch (e) {} };
+  const close = () => { stamp(); bd.classList.remove("open"); setTimeout(() => bd.remove(), 240); };
+  bd.querySelector("#sh-w-look").addEventListener("click", close);
+  bd.addEventListener("click", (e) => { if (e.target === bd) close(); });
+  bd.querySelector("#sh-w-log").addEventListener("click", () => { stamp(); window.location.href = "/practice-log.html?log=1"; });
+};
+
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
   window._shIsAdmin = isAdmin;
   // Wire the shared @mention engine (autocomplete + notifications) on every page.
@@ -2026,6 +2133,9 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       _menu.insertBefore(a, _logout);
     }
   }
+
+  // First-login onboarding modal (welcome for new members, one-off info for existing).
+  if (myEmail && db) window._shMaybeShowOnboarding?.(db, myEmail);
 
   // ── iOS push notifications (only inside the native PWA shell) ──
   if (myEmail && db && /PWAShell/i.test(navigator.userAgent || "")) {
