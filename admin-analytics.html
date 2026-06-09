@@ -533,7 +533,7 @@ async function loadAnalytics() {
     _safe(db.from("community_post_comments").select("email, created_at")),
     _safe(db.from("community_post_likes").select("email, created_at")),
     _safe(db.from("event_rsvps").select("event_id, email")),
-    _safe(db.from("event_attendance").select("event_id, email")),
+    _safe(db.from("event_attendance").select("event_id, email, joined_at")),
     _safe(db.from("live_events").select("id, title, scheduled_at, status")),
     _safe(db.from("practice_baseline").select("email, total_minutes")),
   ]);
@@ -598,7 +598,7 @@ async function loadAnalytics() {
   }
 
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
-  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows }); }
+  try { renderInsights2({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
@@ -1011,6 +1011,171 @@ function renderInsights(d) {
         ${cell(r.streak || "—", r.streak ? "color:#f59e0b;font-weight:700" : "color:#64748b")}
         <td style="padding:5px 7px;color:#94a3b8">${r.sess ? STG[r.lvl] : "—"}</td>
         ${cell(r.games || "—")}${cell(r.posts || "—")}${cell(r.goals || "—")}</tr>`).join("")}
+    </tbody></table></div>`;
+
+  h += `<div style="border-bottom:2px solid #1e2d4a;margin:8px 0 18px"></div>`;
+  el.insertAdjacentHTML("afterbegin", h);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Retention console (research-driven). North star: Weekly Active Practitioners.
+// Migration-aware lifecycle (Reactivate = paying but silent 14d+; Churned = cancelled).
+// De-biased engagement (value-actions, not time-on-page). Streaks. Power-user curve.
+// Difficulty hotspots. Insights framed as levers to TEST (correlation ≠ causation).
+// ══════════════════════════════════════════════════════════════════════════════
+function renderInsights2(d) {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+  const EX = EXCLUDED_EMAILS, now = Date.now(), DAY = 86400000, REACT_DAYS = 14;
+  const low = e => (e || "").toLowerCase();
+  const dAgo = ds => ds ? Math.floor((now - new Date(String(ds).slice(0, 10) + "T12:00:00").getTime()) / DAY) : null;
+  const sessMins = s => (s.timing_mode === "per_item") ? (s.practice_items || []).reduce((a, i) => a + (i.duration_minutes || 0), 0) : (s.duration_minutes || 0);
+  const TH = [0, 50, 150, 350, 700, 1200, 2000, 3500], STG = ["First Steps", "Beginner", "Foundations", "Intermediate", "Confident", "Advanced", "Performer", "Artist"];
+  const sessions = (d.allSessions || []).filter(s => !EX.has(low(s.email)));
+  const members = new Set((d.aeRows || []).map(r => low(r.email)).filter(e => e && !EX.has(e)));
+
+  // Per-member: practice days, cross-app active days, last-active
+  const pDays = {}, aDays = {}, lastA = {};
+  const addAct = (e, ds) => { e = low(e); if (!e || EX.has(e) || !ds) return; const day = String(ds).slice(0, 10); (aDays[e] = aDays[e] || new Set()).add(day); const x = dAgo(day); if (lastA[e] == null || x < lastA[e]) lastA[e] = x; };
+  sessions.forEach(s => { const e = low(s.email); (pDays[e] = pDays[e] || new Set()).add(String(s.session_date).slice(0, 10)); addAct(e, s.session_date); members.add(e); });
+  (d.usageRows || []).forEach(u => addAct(u.email, u.day));
+  [...(d.posts || []), ...(d.comments || []), ...(d.likes || []), ...(d.actComments || []), ...(d.cfComments || [])].forEach(r => addAct(r.email, r.created_at));
+  [...(d.allGames || []), ...(d.noteScores || []), ...(d.chordScores || [])].forEach(g => addAct(g.email, g.created_at));
+  (d.attendance || []).forEach(a => addAct(a.email, a.joined_at));
+
+  // North star: Weekly Active Practitioners
+  const pracIn = (a, b) => new Set(sessions.filter(s => { const x = dAgo(s.session_date); return x >= a && x < b; }).map(s => low(s.email)));
+  const wap = pracIn(0, 7), wapPrev = pracIn(7, 14);
+  const retained = [...wap].filter(e => wapPrev.has(e)).length;
+  const consistent = [...wap].filter(e => pDays[e] && [...pDays[e]].filter(day => dAgo(day) < 7).length >= 3).length;
+  const wapWeeks = []; for (let w = 11; w >= 0; w--) wapWeeks.push({ v: pracIn(w * 7, (w + 1) * 7).size });
+
+  // Streaks
+  const streakMap = {}; (d.allStreaks || []).forEach(s => streakMap[low(s.email)] = s);
+  const streak7 = [...wap].filter(e => (streakMap[e] && streakMap[e].current_streak || 0) >= 7).length;
+  const streak7Pct = wap.size ? Math.round(streak7 / wap.size * 100) : 0;
+  const breaking = [...members].map(e => ({ e, s: (streakMap[e] && streakMap[e].current_streak) || 0, last: dAgo(streakMap[e] && streakMap[e].last_session_date) })).filter(x => x.s >= 5 && x.last != null && x.last >= 1).sort((a, b) => b.s - a.s);
+
+  // Migration-aware lifecycle
+  let nActive = 0, nSlip = 0; const reactList = [], slipList = [];
+  for (const e of members) { const la = lastA[e];
+    if (la == null || la > REACT_DAYS) reactList.push({ e, la });
+    else if (la > 7) { nSlip++; slipList.push({ e, la }); }
+    else nActive++; }
+  reactList.sort((a, b) => (a.la == null ? 1e9 : a.la) - (b.la == null ? 1e9 : b.la));
+  slipList.sort((a, b) => a.la - b.la);
+  const churnedN = d.churnedCount || 0;
+
+  // Power-user curve (active days / 28d)
+  const bands = { "1 day": 0, "2–3": 0, "4–7": 0, "8–14": 0, "15+": 0 };
+  for (const e of members) { const n = aDays[e] ? [...aDays[e]].filter(day => dAgo(day) < 28).length : 0; if (!n) continue; if (n === 1) bands["1 day"]++; else if (n <= 3) bands["2–3"]++; else if (n <= 7) bands["4–7"]++; else if (n <= 14) bands["8–14"]++; else bands["15+"]++; }
+
+  // De-biased engagement: distinct members per value-action
+  const mWin = (rows, f, a, b) => { const set = new Set(); for (const r of rows) { const e = low(r.email); if (!e || EX.has(e)) continue; const ds = f(r); if (!ds) continue; const x = dAgo(ds); if (x >= a && x < b) set.add(e); } return set.size; };
+  const gc = r => r.created_at, gj = r => r.joined_at, gd = r => r.day;
+  const social = [...(d.posts || []), ...(d.comments || []), ...(d.actComments || [])];
+  const tools = [...(d.allGames || []), ...(d.noteScores || []), ...(d.chordScores || [])];
+  const roadmapViews = (d.usageRows || []).filter(u => String(u.view || "").startsWith("Hub · Roadmap"));
+  const valActs = [
+    { label: "Logged practice", wk: wap.size, prev: wapPrev.size },
+    { label: "Posted / commented", wk: mWin(social, gc, 0, 7), prev: mWin(social, gc, 7, 14) },
+    { label: "Reacted", wk: mWin(d.likes || [], gc, 0, 7), prev: mWin(d.likes || [], gc, 7, 14) },
+    { label: "Opened roadmap", wk: mWin(roadmapViews, gd, 0, 7), prev: mWin(roadmapViews, gd, 7, 14) },
+    { label: "Used tools / drills", wk: mWin(tools, gc, 0, 7), prev: mWin(tools, gc, 7, 14) },
+    { label: "Attended a clinic", wk: mWin(d.attendance || [], gj, 0, 7), prev: mWin(d.attendance || [], gj, 7, 14) },
+  ];
+
+  // Difficulty hotspots
+  const passAgg = {};
+  (d.allGames || []).forEach(g => { if (EX.has(low(g.email))) return; const k = (g.passage_label || "").trim(); if (!k) return; const a = passAgg[k] = passAgg[k] || { label: g.passage_label, piece: g.piece_label || "", games: 0, won: 0, abandoned: 0, students: new Set() }; a.games++; if (g.outcome === "cleared" || g.outcome === "leveled_up") a.won++; if (g.outcome === "abandoned") a.abandoned++; a.students.add(low(g.email)); });
+  const hotspots = Object.values(passAgg).filter(p => p.games >= 3).map(p => ({ ...p, clearPct: Math.round(p.won / p.games * 100), abandonPct: Math.round(p.abandoned / p.games * 100), struggle: p.games * (1 - p.won / p.games) })).sort((a, b) => b.struggle - a.struggle).slice(0, 8);
+
+  // Roadmap levels
+  const baseMap = {}; (d.baseline || []).forEach(b => { const e = low(b.email); if (!EX.has(e)) baseMap[e] = Number(b.total_minutes) || 0; });
+  const minsBy = {}; sessions.forEach(s => { const e = low(s.email); minsBy[e] = (minsBy[e] || 0) + sessMins(s); });
+  const lvlCounts = Array(8).fill(0);
+  for (const e of members) { if (!(minsBy[e] || baseMap[e])) continue; const hrs = ((minsBy[e] || 0) + (baseMap[e] || 0)) / 60; let l = 0; for (let i = 0; i < TH.length; i++) if (hrs >= TH[i]) l = i; lvlCounts[l]++; }
+
+  // Insights = levers to TEST
+  const insights = [], addI = (sev, t) => insights.push({ sev, t });
+  if (reactList.length) addI(0, `<b>${reactList.length}</b> paying member${reactList.length > 1 ? "s" : ""} silent on the new platform 14+ days — your #1 reactivation list (still subscribed). Personal outreach is the proven small-community win-back.`);
+  if (slipList.length) addI(0, `<b>${slipList.length}</b> active member${slipList.length > 1 ? "s" : ""} slipping (quiet 8–14d) — nudge before the habit breaks (week 1–2 is where retention is won/lost).`);
+  if (breaking.length) addI(1, `<b>${breaking.length}</b> streak${breaking.length > 1 ? "s" : ""} (5+ days) about to break today — a reminder could save them (10-day streak ≈ much lower dropout at Duolingo).`);
+  if (churnedN) addI(1, `<b>${churnedN}</b> truly cancelled (left allowed_emails).`);
+  if (wap.size && retained / wap.size < 0.5) addI(1, `Only <b>${Math.round(retained / wap.size * 100)}%</b> of practitioners practised last week too — habit isn't sticking. Protect the first 2 weeks.`);
+  if (wap.size && streak7Pct < 40) addI(2, `Only <b>${streak7Pct}%</b> of practitioners have a 7+ day streak — building streak habit is a retention lever worth testing (reminders, streak-freeze).`);
+  addI(2, `Reading this right: members who do more of <i>everything</i> retain more mostly because they're already keen (confounding). Treat the above as levers to <b>test</b> (a nudge, a re-onboard) — not proven causes.`);
+  insights.sort((a, b) => a.sev - b.sev);
+
+  // ── helpers ──
+  const delta = (c, p) => { if (p === 0) return c > 0 ? `<span style="color:#4ade80;font-size:.72rem;font-weight:700">▲new</span>` : ""; const x = Math.round((c - p) / p * 100); if (x === 0) return `<span style="color:#64748b;font-size:.72rem">0%</span>`; const col = x > 0 ? "#4ade80" : "#f87171"; return `<span style="color:${col};font-size:.72rem;font-weight:700">${x > 0 ? "▲" : "▼"}${Math.abs(x)}%</span>`; };
+  const kpi = (v, l, sub, c) => `<div class="stat-card"><div class="stat-value" style="color:${c || 'var(--text)'}">${v}</div><div class="stat-label">${l}</div>${sub ? `<div style="margin-top:3px">${sub}</div>` : ""}</div>`;
+  const spark = (arr, c) => { const mx = Math.max(1, ...arr.map(x => x.v)); return `<div style="display:flex;align-items:flex-end;gap:2px;height:32px;margin-top:6px">` + arr.map(x => `<div style="flex:1;background:${c};border-radius:2px 2px 0 0;height:${Math.max(6, Math.round(x.v / mx * 100))}%"></div>`).join("") + `</div>`; };
+  const elist = (arr, note, col) => arr.length ? arr.slice(0, 12).map(x => `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.8rem"><span style="color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(x.e)}</span><span style="color:${col};flex-shrink:0">${note(x)}</span></div>`).join("") : `<p style="color:var(--text-muted);font-size:.82rem">None</p>`;
+
+  // ── build ──
+  let h = `<div style="border-bottom:2px solid #1e2d4a;margin:0 0 16px;padding-bottom:6px"><h1 style="font-size:1.3rem;margin:0;color:#fff">Retention console</h1><div style="font-size:.78rem;color:#64748b;margin-top:2px">Owner/test excluded · churned = cancelled · Δ vs previous 7 days · reactivate threshold ${REACT_DAYS}d</div></div>`;
+
+  h += `<div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:14px;margin-bottom:24px">
+    <div class="stat-card" style="border-color:#1e40af;align-items:stretch;text-align:left">
+      <div class="stat-label" style="color:#93c5fd">★ North star · Weekly Active Practitioners</div>
+      <div style="display:flex;align-items:baseline;gap:8px"><div class="stat-value" style="color:#fff;font-size:2.1rem">${wap.size}</div>${delta(wap.size, wapPrev.size)}</div>
+      <div style="font-size:.72rem;color:#64748b">logged a real session in the last 7 days</div>
+      ${spark(wapWeeks, "#3b82f6")}<div style="font-size:.6rem;color:#64748b;text-align:right">12-week trend</div>
+    </div>
+    ${kpi(retained, "Retained (2-wk)", `<span style="font-size:.7rem;color:#64748b">${wap.size ? Math.round(retained / wap.size * 100) : 0}% practised both weeks</span>`, "#4ade80")}
+    ${kpi(consistent, "Consistent (3+ days/wk)", `<span style="font-size:.7rem;color:#64748b">of ${wap.size} practitioners</span>`, "#4ade80")}
+    ${kpi(streak7Pct + "%", "On a 7+ day streak", `<span style="font-size:.7rem;color:#64748b">${streak7}/${wap.size}</span>`, streak7Pct >= 40 ? "#4ade80" : "#f59e0b")}
+  </div>`;
+
+  const segs = [{ n: "Active (≤7d)", v: nActive, c: "#4ade80" }, { n: "Slipping (8–14d)", v: nSlip, c: "#f59e0b" }, { n: "Reactivate (paying, 14d+)", v: reactList.length, c: "#3b82f6" }, { n: "Churned (cancelled)", v: churnedN, c: "#7f1d1d" }];
+  const segTot = segs.reduce((s, x) => s + x.v, 0) || 1;
+  h += `<h2 class="section-header">${ico('refresh')}Member lifecycle <span class="section-meta">${members.size} paying · ${churnedN} cancelled</span></h2>
+    <div style="display:flex;height:30px;border-radius:8px;overflow:hidden;margin-bottom:10px">${segs.map(s => s.v ? `<div title="${s.n}: ${s.v}" style="width:${s.v / segTot * 100}%;background:${s.c};min-width:2px"></div>` : "").join("")}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px;font-size:.8rem">${segs.map(s => `<div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:${s.c}"></span><b style="color:var(--text)">${s.v}</b> <span style="color:var(--text-muted)">${s.n}</span></div>`).join("")}</div>
+    <div class="two-col" style="margin-bottom:32px">
+      <div><h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a;color:#3b82f6">${ico('refresh')}Reactivate — paying, not migrated</h3>
+        <p style="font-size:.72rem;color:#64748b;margin:0 0 6px">Still subscribed, silent ${REACT_DAYS}+ days. Highest-leverage list — personal outreach.</p>
+        ${elist(reactList, x => x.la == null ? "never here" : x.la + "d ago", "#3b82f6")}
+        ${reactList.length > 12 ? `<p style="font-size:.72rem;color:#64748b;margin-top:6px">+${reactList.length - 12} more</p>` : ""}</div>
+      <div><h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a;color:#f59e0b">${ico('warn')}Slipping &amp; streaks at risk</h3>
+        ${elist(slipList, x => x.la + "d quiet", "#f59e0b")}
+        ${breaking.length ? `<div style="margin-top:8px;font-size:.72rem;color:#64748b">Streaks about to break: ${breaking.slice(0, 6).map(x => escHtml(x.e.split("@")[0]) + " (" + x.s + "d)").join(", ")}</div>` : ""}</div>
+    </div>`;
+
+  const sevC = ["#ef4444", "#f59e0b", "#3b82f6"];
+  h += `<h2 class="section-header">${ico('warn')}Levers to test</h2>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:28px">${insights.slice(0, 8).map(i => `<div style="padding:9px 12px;background:#0d1525;border-left:3px solid ${sevC[i.sev]};border-radius:6px;font-size:.85rem;color:#cbd5e1;line-height:1.45">${i.t}</div>`).join("")}</div>`;
+
+  const pucMax = Math.max(1, ...Object.values(bands));
+  h += `<h2 class="section-header">${ico('bars')}Engagement distribution <span class="section-meta">active days per member · last 28 days</span></h2>
+    <div style="display:flex;align-items:flex-end;gap:10px;height:110px;margin-bottom:8px">${Object.entries(bands).map(([k, v]) => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%"><div style="color:#cbd5e1;font-size:.8rem;font-weight:700;margin-bottom:3px">${v}</div><div style="width:100%;background:linear-gradient(180deg,#38bdf8,#3b82f6);border-radius:4px 4px 0 0;height:${Math.max(3, Math.round(v / pucMax * 100))}%"></div><div style="color:#64748b;font-size:.68rem;margin-top:4px">${k}</div></div>`).join("")}</div>
+    <p style="font-size:.72rem;color:#64748b;margin-bottom:28px">Grow the right side (the "smile"). No universal good stickiness ratio exists — watch your own trend.</p>`;
+
+  const vMax = Math.max(1, ...valActs.map(x => x.wk));
+  h += `<h2 class="section-header">${ico('bars')}Engagement by action <span class="section-meta">distinct members this week · deliberate value-actions, not time-on-page</span></h2>
+    <div style="margin-bottom:28px">${valActs.filter(a => a.wk || a.prev).sort((a, b) => b.wk - a.wk).map(a => { const pct = Math.round(a.wk / vMax * 100), pm = members.size ? Math.round(a.wk / members.size * 100) : 0; return `<div style="display:flex;align-items:center;gap:10px;font-size:.84rem;padding:2px 0"><div style="flex:0 0 150px;color:#cbd5e1">${a.label}</div><div style="flex:1;display:flex;align-items:center;gap:8px"><div style="flex:1;background:#0d1525;border-radius:5px;overflow:hidden;height:16px"><div style="width:${Math.max(2, pct)}%;height:100%;background:linear-gradient(90deg,#38bdf8,#3b82f6)"></div></div><span style="flex:0 0 24px;color:#60a5fa;font-weight:700;text-align:right">${a.wk}</span></div><div style="flex:0 0 50px;text-align:right;color:#64748b">${pm}%</div><div style="flex:0 0 50px;text-align:right">${delta(a.wk, a.prev) || "—"}</div></div>`; }).join("")}</div>`;
+
+  if (hotspots.length) h += `<h2 class="section-header">${ico('target')}Where members get stuck <span class="section-meta">hardest passages · content / clinic opportunities</span></h2>
+    <div style="margin-bottom:28px">${hotspots.map(p => `<div style="display:flex;align-items:center;gap:10px;font-size:.82rem;padding:4px 0;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.label)}${p.piece ? ` <span style="color:#64748b">· ${escHtml(p.piece)}</span>` : ""}</div><div style="flex:0 0 64px;text-align:right;color:#64748b">${p.games} games</div><div style="flex:0 0 78px;text-align:right;color:${p.clearPct >= 60 ? '#4ade80' : '#f59e0b'}">${p.clearPct}% clear</div><div style="flex:0 0 92px;text-align:right;color:${p.abandonPct > 30 ? '#f87171' : '#64748b'}">${p.abandonPct}% abandon</div><div style="flex:0 0 52px;text-align:right;color:#64748b">${p.students.size} ppl</div></div>`).join("")}</div>`;
+
+  const lvlMax = Math.max(1, ...lvlCounts);
+  h += `<h2 class="section-header">${ico('map')}Roadmap levels <span class="section-meta">logged + prior hours</span></h2>
+    <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:28px">${STG.map((s, i) => { const pct = Math.max(2, Math.round(lvlCounts[i] / lvlMax * 100)); return `<div style="display:flex;align-items:center;gap:10px;font-size:.84rem"><div style="flex:0 0 120px;color:#cbd5e1">${s}</div><div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:16px"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#f7cb33,#f0a500)"></div></div><div style="flex:0 0 36px;text-align:right;color:#f0a500;font-weight:700">${lvlCounts[i]}</div></div>`; }).join("")}</div>`;
+
+  // Dense member table with segment
+  const gamesMap = {}, bumpG = e => { e = low(e); if (e && !EX.has(e)) gamesMap[e] = (gamesMap[e] || 0) + 1; };
+  [...(d.allGames || []), ...(d.noteScores || []), ...(d.chordScores || [])].forEach(g => bumpG(g.email));
+  const postsMap = {}; [...(d.posts || []), ...(d.comments || [])].forEach(p => { const e = low(p.email); if (!EX.has(e)) postsMap[e] = (postsMap[e] || 0) + 1; });
+  const goalsMap = {}; (d.pieceGoals || []).forEach(g => { const e = low(g.email); if (!EX.has(e)) goalsMap[e] = (goalsMap[e] || 0) + 1; });
+  const lvlOf = hrs => { let l = 0; for (let i = 0; i < TH.length; i++) if (hrs >= TH[i]) l = i; return l; };
+  const segOf = la => la == null || la > REACT_DAYS ? { t: "reactivate", c: "#3b82f6" } : la > 7 ? { t: "slipping", c: "#f59e0b" } : { t: "active", c: "#4ade80" };
+  const mrows = [...members].map(e => { const la = lastA[e], hrs = ((minsBy[e] || 0) + (baseMap[e] || 0)) / 60; return { e, la, seg: segOf(la), sess: pDays[e] ? pDays[e].size : 0, hrs, w28: aDays[e] ? [...aDays[e]].filter(day => dAgo(day) < 28).length : 0, streak: (streakMap[e] && streakMap[e].current_streak) || 0, lvl: lvlOf(hrs), games: gamesMap[e] || 0, posts: postsMap[e] || 0, goals: goalsMap[e] || 0 }; }).sort((a, b) => (a.la == null ? 1e9 : a.la) - (b.la == null ? 1e9 : b.la));
+  const cell = (v, ex = "") => `<td style="padding:5px 7px;text-align:right;${ex}">${v}</td>`;
+  h += `<h2 class="section-header">${ico('users')}Members <span class="section-meta">${mrows.length} paying · most recently active first</span></h2>
+    <div style="overflow-x:auto;margin-bottom:24px"><table style="width:100%;border-collapse:collapse;font-size:.82rem">
+    <thead><tr style="color:#64748b;text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid #1e2d4a"><th style="padding:4px 7px"></th><th style="padding:4px 7px;text-align:left">Member</th><th style="padding:4px 7px;text-align:left">Segment</th><th style="padding:4px 7px;text-align:right">Last</th><th style="padding:4px 7px;text-align:right">Pract.&nbsp;days</th><th style="padding:4px 7px;text-align:right">Hrs</th><th style="padding:4px 7px;text-align:right">Days/28</th><th style="padding:4px 7px;text-align:right">Streak</th><th style="padding:4px 7px;text-align:left">Level</th><th style="padding:4px 7px;text-align:right">Games</th><th style="padding:4px 7px;text-align:right">Posts</th><th style="padding:4px 7px;text-align:right">Goals</th></tr></thead><tbody>
+    ${mrows.map(r => `<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 7px"><span style="width:8px;height:8px;border-radius:50%;background:${r.seg.c};display:inline-block"></span></td><td style="padding:5px 7px;color:#cbd5e1;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(r.e)}</td><td style="padding:5px 7px;color:${r.seg.c}">${r.seg.t}</td>${cell(r.la == null ? "never" : r.la === 0 ? "today" : r.la + "d", "color:#64748b")}${cell(r.sess || "—")}${cell(r.hrs ? Math.round(r.hrs) + "h" : "—")}${cell(r.w28 || "—")}${cell(r.streak || "—", r.streak ? "color:#f59e0b;font-weight:700" : "color:#64748b")}<td style="padding:5px 7px;color:#94a3b8">${r.sess ? STG[r.lvl] : "—"}</td>${cell(r.games || "—")}${cell(r.posts || "—")}${cell(r.goals || "—")}</tr>`).join("")}
     </tbody></table></div>`;
 
   h += `<div style="border-bottom:2px solid #1e2d4a;margin:8px 0 18px"></div>`;
