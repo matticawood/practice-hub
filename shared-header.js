@@ -1361,9 +1361,21 @@ const _SH_PAGE_LABELS = {
   "/support.html":        "Support",
   "/admin-analytics.html":"Admin",
 };
+// Friendly labels for the Hub's internal sub-views (reported via window._shPageDetail
+// as a #fragment, since they switch without changing the URL).
+const _SH_HUB_LABELS = {
+  dashboard: "Hub · Dashboard", stats: "Hub · Stats", goals: "Hub · Goals",
+  roadmap: "Hub · Roadmap", history: "Hub · History", leaderboard: "Hub · Leaderboard",
+  achievements: "Hub · Achievements", community: "Hub · Community", log: "Hub · Practice Log",
+  library: "Library", theory: "Theory", tools: "Practice Tools", feedback: "Feedback",
+};
 function _shPageLabel(path) {
   if (!path) return "";
   const clean = path.split("?")[0].split("#")[0];
+  const detail = path.includes("#") ? path.split("#")[1] : "";
+  if (clean === "/practice-log.html" && detail) {
+    return _SH_HUB_LABELS[detail] || "Hub";
+  }
   return _SH_PAGE_LABELS[clean] || clean.replace(/\.html$/, "").replace(/^\//, "") || "Home";
 }
 function _shRelTime(ts) {
@@ -1387,10 +1399,14 @@ async function _shHeartbeat() {
   if (!_shPresenceDb || !_shPresenceEmail) return;
   if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
   try {
+    // Pages may expose `window._shPageDetail` (e.g. the Hub's current sub-tab) so
+    // presence can show exactly where someone is, not just the file. Appended as a
+    // #fragment that _shPageLabel resolves to a friendly label.
+    const detail = (typeof window !== "undefined" && window._shPageDetail) ? ("#" + window._shPageDetail) : "";
     const { error } = await _shPresenceDb.from("user_presence").upsert({
       email: _shPresenceEmail,
       last_seen_at: new Date().toISOString(),
-      page: location.pathname + (location.search || ""),
+      page: location.pathname + (location.search || "") + detail,
     }, { onConflict: "email" });
     // Expose last error on window so we can spot RLS / schema issues from devtools.
     window._shPresenceLastError = error || null;
@@ -1399,6 +1415,9 @@ async function _shHeartbeat() {
     window._shPresenceLastError = e;
   }
 }
+// Pages call this after changing `window._shPageDetail` to push the new view
+// immediately, instead of waiting up to 60s for the next heartbeat.
+window._shPing = function() { _shHeartbeat(); };
 window._shStartPresence = function(db, email) {
   if (!db || !email) return;
   _shPresenceDb = db;
