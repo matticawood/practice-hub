@@ -583,7 +583,7 @@ async function loadAnalytics() {
   }
 
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
-  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, churnedCount: churnedSet.size, hasSubData: haveMembership }); }
+  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
@@ -683,18 +683,35 @@ function renderInsights(d) {
   }
   const memEmails = Object.keys(mem);
 
-  // Membership
+  // Cross-app activity recency per member: the most recent of a logged session,
+  // any feature/page use, or a community action. So "quiet" means "stopped showing
+  // up anywhere", not just "stopped logging practice".
+  const act = {}, actEvents = [];
+  const touch = (email, ds) => {
+    const e = low(email); if (!e || !ds || EX.has(e)) return;
+    const day = String(ds).slice(0, 10);
+    actEvents.push({ e, x: dAgo(day) });
+    if (!act[e]) act[e] = { first: day, last: day };
+    else { if (day < act[e].first) act[e].first = day; if (day > act[e].last) act[e].last = day; }
+  };
+  (d.allSessions || []).forEach(s => touch(s.email, s.session_date));
+  (d.usageRows   || []).forEach(u => touch(u.email, u.day));
+  [...(d.posts || []), ...(d.comments || []), ...(d.likes || [])].forEach(r => touch(r.email, r.created_at));
+
+  // Membership (current = on the allowed_emails list)
   const memberSet = new Set((d.aeRows || []).map(r => low(r.email)).filter(e => e && !EX.has(e)));
-  memEmails.forEach(e => memberSet.add(e)); // safety: anyone with sessions counts as a member
+  memEmails.forEach(e => memberSet.add(e));
+  Object.keys(act).forEach(e => memberSet.add(e)); // anyone active counts as a member
   const totalMembers = memberSet.size;
-  const activated = memEmails.length;
-  const neverArr = [...memberSet].filter(e => !mem[e]);
+  const activated = memEmails.length;               // logged ≥1 practice session
   const activatedPct = totalMembers ? Math.round(activated / totalMembers * 100) : 0;
 
-  // Lifecycle by recency
-  let nNew = 0, nActive = 0; const riskList = [], dormantList = [];
-  for (const e of memEmails) {
-    const ls = dAgo(mem[e].last), fs = dAgo(mem[e].first);
+  // Lifecycle by LAST ACTIVITY anywhere in the app
+  let nNew = 0, nActive = 0; const riskList = [], dormantList = [], neverArr = [];
+  for (const e of memberSet) {
+    const a = act[e];
+    if (!a) { neverArr.push(e); continue; }          // on the list, never did anything
+    const ls = dAgo(a.last), fs = dAgo(a.first);
     if (ls <= 7) { nActive++; if (fs <= 7) nNew++; }
     else if (ls <= 30) riskList.push({ email: e, days: ls });
     else dormantList.push({ email: e, days: ls });
@@ -702,7 +719,7 @@ function renderInsights(d) {
   riskList.sort((a, b) => a.days - b.days);
 
   // Active counts + previous-period deltas
-  const activeIn = (a, b) => new Set(sessions.filter(s => { const x = dAgo(s.session_date); return x >= a && x < b; }).map(s => low(s.email))).size;
+  const activeIn = (a, b) => new Set(actEvents.filter(ev => ev.x >= a && ev.x < b).map(ev => ev.e)).size;
   const countIn  = (arr, key, a, b) => arr.filter(r => { const x = key === "sd" ? dAgo(r.session_date) : tAgo(r.created_at); return x >= a && x < b; }).length;
   const wau = activeIn(0, 7),  wauPrev = activeIn(7, 14);
   const mau = activeIn(0, 30), mauPrev = activeIn(30, 60);
@@ -799,7 +816,7 @@ function renderInsights(d) {
     { n: "Active", v: nActive - nNew, c: "#4ade80" },
     { n: "At-risk (8–30d)", v: riskList.length, c: "#f59e0b" },
     { n: "Dormant (30d+)", v: dormantList.length, c: "#ef4444" },
-    { n: "Never activated", v: neverArr.length, c: "#475569" },
+    { n: "Never active", v: neverArr.length, c: "#475569" },
   ];
   if (d.hasSubData && churned) segs.push({ n: "Churned", v: churned, c: "#7f1d1d" });
   const segTot = segs.reduce((s, x) => s + x.v, 0) || 1;
@@ -813,8 +830,8 @@ function renderInsights(d) {
     <div class="two-col" style="margin-bottom:32px">
       <div><h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a;color:#f59e0b">${ico('warn')}At-risk — re-engage these</h3>
         ${list(riskList.slice(0, 12).map(r => ({ email: r.email, note: `${r.days}d quiet` })), "#f59e0b")}</div>
-      <div><h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a;color:#94a3b8">${ico('moon')}Joined, never practised</h3>
-        ${list(neverArr.slice(0, 12).map(e => ({ email: e, note: "0 sessions" })), "#94a3b8")}
+      <div><h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a;color:#94a3b8">${ico('moon')}Joined, never active</h3>
+        ${list(neverArr.slice(0, 12).map(e => ({ email: e, note: "no activity" })), "#94a3b8")}
         ${neverArr.length > 12 ? `<p style="font-size:.72rem;color:#64748b;margin-top:6px">+${neverArr.length - 12} more</p>` : ""}</div>
     </div>`;
 
