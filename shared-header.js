@@ -2013,6 +2013,20 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     if (isAdmin) window._shEnableAdminPresence?.();
   }
 
+  // Admin-only: add an "Admin Analytics" link to the avatar dropdown (above Log out).
+  if (isAdmin) {
+    const _menu = document.getElementById("sh-user-menu");
+    const _logout = document.getElementById("sh-logout-btn");
+    if (_menu && _logout && !document.getElementById("sh-admin-analytics-link")) {
+      const a = document.createElement("a");
+      a.className = "sh-user-menu-item";
+      a.id = "sh-admin-analytics-link";
+      a.href = "/admin-analytics.html";
+      a.textContent = "📊 Admin Analytics";
+      _menu.insertBefore(a, _logout);
+    }
+  }
+
   // ── iOS push notifications (only inside the native PWA shell) ──
   if (myEmail && db && /PWAShell/i.test(navigator.userAgent || "")) {
     window._shInitIOSPush?.(db, myEmail);
