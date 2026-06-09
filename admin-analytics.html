@@ -525,8 +525,24 @@ async function loadAnalytics() {
     usageRows = uRes.data || [];
   } catch(e) { console.warn("Could not load feature usage:", e); }
 
+  // Community-health data: membership, community engagement, events, roadmap baseline.
+  const _safe = async (p) => { try { return (await p).data || []; } catch (e) { console.warn("load failed:", e); return []; } };
+  const [aeRows, posts, comments, likes, rsvps, attendance, events, baseline] = await Promise.all([
+    _safe(db.from("allowed_emails").select("email")),
+    _safe(db.from("community_posts").select("email, type, created_at")),
+    _safe(db.from("community_post_comments").select("email, created_at")),
+    _safe(db.from("community_post_likes").select("email, created_at")),
+    _safe(db.from("event_rsvps").select("event_id, email")),
+    _safe(db.from("event_attendance").select("event_id, email")),
+    _safe(db.from("live_events").select("id, title, scheduled_at, status")),
+    _safe(db.from("practice_baseline").select("email, total_minutes")),
+  ]);
+
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
-  renderFeatureUsage(usageRows);
+  try { renderInsights({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline }); }
+  catch (e) { console.error("renderInsights failed:", e); }
+  try { renderFeatureUsage(usageRows); }
+  catch (e) { console.error("renderFeatureUsage failed:", e); }
 }
 
 // ── Feature usage: total active time per view, most-used first ─────────────────
@@ -592,6 +608,220 @@ function renderFeatureUsage(usageRows) {
   }
   html += `</div>`;
   el.insertAdjacentHTML("beforeend", html);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Command-center: the metrics that actually drive product decisions, pinned to the
+// TOP of the page. Lifecycle/cohorts anchor on first-session ACTIVATION (members
+// have no signup date). Renders above everything else via afterbegin.
+// ══════════════════════════════════════════════════════════════════════════════
+function renderInsights(d) {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+  const EX = EXCLUDED_EMAILS, now = Date.now(), DAY = 86400000;
+  const low = e => (e || "").toLowerCase();
+  const sessMins = s => (s.timing_mode === "per_item")
+    ? (s.practice_items || []).reduce((a, i) => a + (i.duration_minutes || 0), 0)
+    : (s.duration_minutes || 0);
+  const sessions = (d.allSessions || []).filter(s => !EX.has(low(s.email)));
+  const dAgo = ds => Math.floor((now - new Date(ds + "T12:00:00").getTime()) / DAY);
+  const tAgo = ts => Math.floor((now - new Date(ts).getTime()) / DAY);
+
+  // Per-member activation profile
+  const mem = {};
+  for (const s of sessions) {
+    const e = low(s.email); if (!e) continue;
+    const dt = s.session_date;
+    if (!mem[e]) mem[e] = { first: dt, last: dt, count: 0, mins: 0 };
+    const m = mem[e]; m.count++; m.mins += sessMins(s);
+    if (dt < m.first) m.first = dt;
+    if (dt > m.last)  m.last  = dt;
+  }
+  const memEmails = Object.keys(mem);
+
+  // Membership
+  const memberSet = new Set((d.aeRows || []).map(r => low(r.email)).filter(e => e && !EX.has(e)));
+  memEmails.forEach(e => memberSet.add(e)); // safety: anyone with sessions counts as a member
+  const totalMembers = memberSet.size;
+  const activated = memEmails.length;
+  const neverArr = [...memberSet].filter(e => !mem[e]);
+  const activatedPct = totalMembers ? Math.round(activated / totalMembers * 100) : 0;
+
+  // Lifecycle by recency
+  let nNew = 0, nActive = 0; const riskList = [], dormantList = [];
+  for (const e of memEmails) {
+    const ls = dAgo(mem[e].last), fs = dAgo(mem[e].first);
+    if (ls <= 7) { nActive++; if (fs <= 7) nNew++; }
+    else if (ls <= 30) riskList.push({ email: e, days: ls });
+    else dormantList.push({ email: e, days: ls });
+  }
+  riskList.sort((a, b) => a.days - b.days);
+
+  // Active counts + previous-period deltas
+  const activeIn = (a, b) => new Set(sessions.filter(s => { const x = dAgo(s.session_date); return x >= a && x < b; }).map(s => low(s.email))).size;
+  const countIn  = (arr, key, a, b) => arr.filter(r => { const x = key === "sd" ? dAgo(r.session_date) : tAgo(r.created_at); return x >= a && x < b; }).length;
+  const wau = activeIn(0, 7),  wauPrev = activeIn(7, 14);
+  const mau = activeIn(0, 30), mauPrev = activeIn(30, 60);
+  const sessWk = countIn(sessions, "sd", 0, 7), sessWkPrev = countIn(sessions, "sd", 7, 14);
+
+  // Community engagement
+  const cap = arr => (arr || []).filter(r => !EX.has(low(r.email)));
+  const posts = cap(d.posts), comments = cap(d.comments), likes = cap(d.likes);
+  const commIn = (a, b) => countIn(posts, "ts", a, b) + countIn(comments, "ts", a, b) + countIn(likes, "ts", a, b);
+  const commWk = commIn(0, 7), commWkPrev = commIn(7, 14);
+  const posterSet = new Set([...posts, ...comments].map(r => low(r.email)));
+  const pctPosting = totalMembers ? Math.round(posterSet.size / totalMembers * 100) : 0;
+  const contrib = {};
+  for (const r of [...posts, ...comments]) contrib[low(r.email)] = (contrib[low(r.email)] || 0) + 1;
+  const topContrib = Object.entries(contrib).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  // Roadmap level distribution (total track) — logged + prior-hours baseline
+  const TH = [0, 50, 150, 350, 700, 1200, 2000, 3500];
+  const STG = ["First Steps", "Beginner", "Foundations", "Intermediate", "Confident", "Advanced", "Performer", "Artist"];
+  const baseMap = {}; let withPrior = 0;
+  for (const r of (d.baseline || [])) { const e = low(r.email); if (EX.has(e)) continue; const m = Number(r.total_minutes) || 0; baseMap[e] = m; if (m > 0) withPrior++; }
+  const lvlCounts = Array(8).fill(0);
+  for (const e of memEmails) {
+    const hrs = (mem[e].mins + (baseMap[e] || 0)) / 60;
+    let lvl = 0; for (let i = 0; i < TH.length; i++) if (hrs >= TH[i]) lvl = i;
+    lvlCounts[lvl]++;
+  }
+  const lvlMax = Math.max(...lvlCounts, 1);
+
+  // Livestream attendance (past events)
+  const pastEvents = (d.events || []).filter(e => new Date(e.scheduled_at).getTime() < now)
+    .sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)).slice(0, 8);
+  const setBy = (arr) => { const o = {}; for (const r of (arr || [])) { if (EX.has(low(r.email))) continue; (o[r.event_id] = o[r.event_id] || new Set()).add(low(r.email)); } return o; };
+  const rsvpBy = setBy(d.rsvps), attBy = setBy(d.attendance);
+
+  // 12-week trends
+  const weeks = [];
+  for (let w = 11; w >= 0; w--) {
+    const a = w * 7, b = (w + 1) * 7;
+    weeks.push({
+      label: w === 0 ? "this wk" : `${w}w`,
+      sessions: countIn(sessions, "sd", a, b),
+      active: activeIn(a, b),
+      comm: commIn(a, b),
+    });
+  }
+
+  // ── Helpers ──
+  const delta = (cur, prev) => {
+    if (prev === 0) return cur > 0 ? `<span style="color:#4ade80;font-size:.72rem;font-weight:700">▲ new</span>` : "";
+    const p = Math.round((cur - prev) / prev * 100);
+    if (p === 0) return `<span style="color:#64748b;font-size:.72rem;font-weight:700">– 0%</span>`;
+    const c = p > 0 ? "#4ade80" : "#f87171", ar = p > 0 ? "▲" : "▼";
+    return `<span style="color:${c};font-size:.72rem;font-weight:700">${ar} ${Math.abs(p)}%</span>`;
+  };
+  const kpi = (val, label, extra = "", color = "var(--text)") =>
+    `<div class="stat-card"><div class="stat-value" style="color:${color}">${val}</div>
+     <div class="stat-label">${label}</div>${extra ? `<div style="margin-top:4px">${extra}</div>` : ""}</div>`;
+  const miniBars = (vals, color, fmt) => {
+    const mx = Math.max(...vals.map(v => v.v), 1);
+    return `<div style="display:flex;align-items:flex-end;gap:3px;height:64px;margin-top:6px">` +
+      vals.map(v => `<div title="${v.label}: ${fmt(v.v)}" style="flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end">
+        <div style="background:${color};border-radius:3px 3px 0 0;height:${Math.max(3, Math.round(v.v / mx * 100))}%;min-height:2px"></div></div>`).join("") +
+      `</div><div style="display:flex;justify-content:space-between;font-size:.6rem;color:#64748b;margin-top:3px"><span>12w ago</span><span>now</span></div>`;
+  };
+  const list = (rows, color) => rows.length
+    ? rows.map(r => `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.8rem">
+        <span style="color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(r.email)}</span>
+        <span style="color:${color};flex-shrink:0">${r.note}</span></div>`).join("")
+    : `<p style="color:var(--text-muted);font-size:.82rem">None 🎉</p>`;
+
+  // ── Build ──
+  let h = `<div style="border-bottom:2px solid #1e2d4a;margin:0 0 18px;padding-bottom:6px">
+    <h1 style="font-size:1.3rem;margin:0;color:#fff">📊 Community health</h1>
+    <div style="font-size:.8rem;color:#64748b;margin-top:2px">The numbers that show whether the product is working. Owner/test excluded · Δ vs previous period.</div></div>`;
+
+  // KPI row
+  h += `<div class="overview-grid">
+    ${kpi(totalMembers, "Members")}
+    ${kpi(activatedPct + "%", "Activated", `<span style="font-size:.72rem;color:#64748b">${activated}/${totalMembers} logged ≥1</span>`, activatedPct >= 60 ? "#4ade80" : "#f59e0b")}
+    ${kpi(wau, "Active this week", delta(wau, wauPrev), "#4ade80")}
+    ${kpi(mau, "Active this month", delta(mau, mauPrev), "#4ade80")}
+    ${kpi(sessWk, "Sessions this week", delta(sessWk, sessWkPrev), "#60a5fa")}
+    ${kpi(commWk, "Community actions / wk", delta(commWk, commWkPrev), "#a855f7")}
+  </div>`;
+
+  // Lifecycle
+  const segs = [
+    { n: "New", v: nNew, c: "#22c55e" },
+    { n: "Active", v: nActive - nNew, c: "#4ade80" },
+    { n: "At-risk (8–30d)", v: riskList.length, c: "#f59e0b" },
+    { n: "Dormant (30d+)", v: dormantList.length, c: "#ef4444" },
+    { n: "Never activated", v: neverArr.length, c: "#475569" },
+  ];
+  const segTot = segs.reduce((s, x) => s + x.v, 0) || 1;
+  h += `<h2 class="section-header" style="margin-top:32px">🔄 Member lifecycle <span class="section-meta">${totalMembers} members</span></h2>
+    <div style="display:flex;height:30px;border-radius:8px;overflow:hidden;margin-bottom:10px">
+      ${segs.map(s => s.v ? `<div title="${s.n}: ${s.v}" style="width:${s.v / segTot * 100}%;background:${s.c};min-width:2px"></div>` : "").join("")}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px;font-size:.8rem">
+      ${segs.map(s => `<div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:${s.c}"></span><b style="color:var(--text)">${s.v}</b> <span style="color:var(--text-muted)">${s.n}</span></div>`).join("")}
+    </div>
+    <div class="two-col" style="margin-bottom:32px">
+      <div><h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a;color:#f59e0b">⚠️ At-risk — re-engage these</h3>
+        ${list(riskList.slice(0, 12).map(r => ({ email: r.email, note: `${r.days}d quiet` })), "#f59e0b")}</div>
+      <div><h3 class="section-header" style="font-size:.85rem;border-bottom-color:#1e2d4a;color:#94a3b8">💤 Joined, never practised</h3>
+        ${list(neverArr.slice(0, 12).map(e => ({ email: e, note: "0 sessions" })), "#94a3b8")}
+        ${neverArr.length > 12 ? `<p style="font-size:.72rem;color:#64748b;margin-top:6px">+${neverArr.length - 12} more</p>` : ""}</div>
+    </div>`;
+
+  // Trends
+  h += `<h2 class="section-header" style="margin-top:8px">📈 Last 12 weeks</h2>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:32px">
+      <div class="stat-card" style="align-items:stretch;text-align:left">
+        <div class="stat-label">Sessions / week</div>${miniBars(weeks.map(w => ({ label: w.label, v: w.sessions })), "#60a5fa", v => v)}</div>
+      <div class="stat-card" style="align-items:stretch;text-align:left">
+        <div class="stat-label">Active members / week</div>${miniBars(weeks.map(w => ({ label: w.label, v: w.active })), "#4ade80", v => v)}</div>
+      <div class="stat-card" style="align-items:stretch;text-align:left">
+        <div class="stat-label">Community actions / week</div>${miniBars(weeks.map(w => ({ label: w.label, v: w.comm })), "#a855f7", v => v)}</div>
+    </div>`;
+
+  // Roadmap distribution
+  h += `<h2 class="section-header">🗺️ Roadmap levels <span class="section-meta">${activated} on the map · ${withPrior} added prior hours</span></h2>
+    <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:32px">`;
+  for (let i = 0; i < 8; i++) {
+    const pct = Math.max(2, Math.round(lvlCounts[i] / lvlMax * 100));
+    h += `<div style="display:flex;align-items:center;gap:10px;font-size:.84rem">
+      <div style="flex:0 0 120px;color:#cbd5e1">${STG[i]}</div>
+      <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#f7cb33,#f0a500)"></div></div>
+      <div style="flex:0 0 40px;text-align:right;color:#f0a500;font-weight:700">${lvlCounts[i]}</div></div>`;
+  }
+  h += `</div>`;
+
+  // Community + attendance two-col
+  h += `<div class="two-col" style="margin-bottom:32px">
+    <div><h2 class="section-header">💬 Community <span class="section-meta">${pctPosting}% of members post</span></h2>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+        ${kpi(posts.length, "Posts", "", "#a855f7")}
+        ${kpi(comments.length, "Comments", "", "#a855f7")}
+        ${kpi(likes.length, "Reactions", "", "#a855f7")}
+      </div>
+      <h3 class="section-header" style="font-size:.82rem;border-bottom-color:#1e2d4a">Top contributors</h3>
+      ${topContrib.length ? topContrib.map(([e, n]) => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:.8rem">
+          <span style="color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(e)}</span><span style="color:#a855f7;flex-shrink:0">${n}</span></div>`).join("")
+        : `<p style="color:var(--text-muted);font-size:.82rem">No posts yet.</p>`}
+    </div>
+    <div><h2 class="section-header">🎥 Livestream attendance</h2>
+      ${pastEvents.length ? pastEvents.map(ev => {
+        const att = (attBy[ev.id] || new Set()).size, rsv = (rsvpBy[ev.id] || new Set()).size;
+        const rate = rsv ? Math.round(att / rsv * 100) : null;
+        const dt = new Date(ev.scheduled_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+        return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:.82rem">
+            <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(ev.title || "Untitled")}</span>
+            <span style="color:#64748b;flex-shrink:0">${dt}</span></div>
+          <div style="font-size:.72rem;color:var(--text-muted);margin-top:2px">
+            <b style="color:#4ade80">${att} attended</b>${rsv ? ` · ${rsv} RSVP'd${rate !== null ? ` · ${rate}% turnout` : ""}` : ""}</div></div>`;
+      }).join("") : `<p style="color:var(--text-muted);font-size:.82rem">No past events.</p>`}
+    </div>
+  </div>`;
+
+  h += `<div style="border-bottom:2px solid #1e2d4a;margin:8px 0 18px"></div>`;
+  el.insertAdjacentHTML("afterbegin", h);
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -830,7 +1060,9 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
   const top3 = topPieces.slice(0, 3);
 
   html += `
-  <div class="share-bar" style="gap:8px">
+  <details style="margin-bottom:18px">
+  <summary style="cursor:pointer;color:#64748b;font-size:.85rem;font-weight:600;padding:6px 0">📤 Share cards — export images for social</summary>
+  <div class="share-bar" style="gap:8px;margin-top:10px">
     <button class="share-btn" onclick="downloadShareCard()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       Wide summary
@@ -918,7 +1150,8 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
       </div>
 
     </div>
-  </div>`;
+  </div>
+  </details>`;
 
   // Overview stats
   html += `
@@ -1046,7 +1279,7 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
   html += `</div>`; // end two-col
 
   // ── Practice type breakdown ───────────────────────────────
-  html += `<div class="two-col" style="margin-bottom:32px"><div>`;
+  html += `<div style="margin-bottom:32px"><div>`;
   html += `<h2 class="section-header">🎯 Practice type breakdown</h2>`;
   html += `<div class="type-bar-wrap">`;
   for (const [type, cfg] of Object.entries(TYPE_COLORS)) {
@@ -1062,18 +1295,7 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
   }
   html += `</div></div>`;
 
-  // ── Day of week heatmap ───────────────────────────────────
-  html += `<div><h2 class="section-header">📅 Most active days</h2>`;
-  html += `<div class="dow-grid">`;
-  dowCounts.forEach((count, i) => {
-    const pct = count / maxDow;
-    const lvl = count === 0 ? 0 : pct < .33 ? 1 : pct < .66 ? 2 : pct < .9 ? 3 : 4;
-    html += `<div class="dow-cell l${lvl}">
-      <div class="dow-cell-label">${DOW_LABELS[i]}</div>
-      <div class="dow-cell-val">${count}</div>
-    </div>`;
-  });
-  html += `</div></div></div>`;
+  html += `</div>`; // end practice-type section (day-of-week heatmap removed — low signal)
 
   // ── Upcoming clinic bookings ──────────────────────────────
   html += `<h2 class="section-header">🎹 Upcoming clinics <span class="section-meta">${upcomingClinics.length} booked</span></h2>`;
