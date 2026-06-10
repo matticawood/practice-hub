@@ -203,6 +203,9 @@ const SH_SUBNAV = {
         padding-bottom: env(safe-area-inset-bottom, 0px);
         z-index: 500;
       }
+      /* Hide the bottom nav while the on-screen keyboard is up — otherwise the
+         fixed bar floats above the keyboard with a visible gap when you scroll. */
+      html.sh-kb-open #sh-mob-bottom-bar { display: none !important; }
       .sh-mob-tab {
         position: relative;
         flex: 1;
@@ -1202,6 +1205,23 @@ document.addEventListener("DOMContentLoaded", function() {
     </a>
   `;
   document.body.appendChild(bottomBar);
+
+  // Hide the bottom tab bar while the on-screen keyboard is open. The fixed bar
+  // is anchored to the layout viewport, so when the keyboard pushes the visual
+  // viewport up it floats with a visible gap below it as you scroll. We detect
+  // the keyboard via VisualViewport (height shrinks by the keyboard's height)
+  // and toggle html.sh-kb-open, which the CSS hides the bar on.
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const onVVResize = () => {
+      // Keyboard up ≈ visual viewport at least ~120px shorter than the layout
+      // viewport; that threshold ignores the iOS address-bar collapse (~60–90px).
+      const kbUp = (window.innerHeight - vv.height) > 120;
+      document.documentElement.classList.toggle("sh-kb-open", kbUp);
+    };
+    vv.addEventListener("resize", onVVResize);
+    vv.addEventListener("scroll", onVVResize);
+  }
 
   // Notification overlay + panel
   const overlay = document.createElement("div");
