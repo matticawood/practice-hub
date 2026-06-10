@@ -410,7 +410,7 @@
 const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
 const OWNER_EMAIL   = "matthew@matthewcawood.com";
-const EXCLUDED_EMAILS = new Set(["matthew@matthewcawood.com", "mcawoodcanada@gmail.com", "reviewer@matthewcawood.com", "enquiries@matthewcawood.com"]);
+const EXCLUDED_EMAILS = new Set(["matthew@matthewcawood.com", "mcawoodcanada@gmail.com", "reviewer@matthewcawood.com", "enquiries@matthewcawood.com", "system@thepracticeroom.app"]);
 // ══════════════════════════════════════════════════════════════
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
@@ -521,7 +521,7 @@ async function loadAnalytics() {
   // Feature-usage time per view (what gets used most)
   let usageRows = [];
   try {
-    const uRes = await db.from("feature_usage").select("email, view, seconds, day");
+    const uRes = await db.from("feature_usage").select("email, view, seconds, day, platform");
     usageRows = uRes.data || [];
   } catch(e) { console.warn("Could not load feature usage:", e); }
 
@@ -1214,6 +1214,37 @@ function renderInsights2(d) {
   const segOf = la => la == null || la > REACT_DAYS ? { t: "reactivate", c: "#3b82f6" } : la > 7 ? { t: "slipping", c: "#f59e0b" } : { t: "active", c: "#4ade80" };
   const mrows = [...members].map(e => { const la = lastA[e], hrs = ((minsBy[e] || 0) + (baseMap[e] || 0)) / 60; return { e, la, seg: segOf(la), sess: pDays[e] ? pDays[e].size : 0, hrs, w28: aDays[e] ? [...aDays[e]].filter(day => dAgo(day) < 28).length : 0, streak: calcStreak(e), lvl: lvlOf(hrs), games: gamesMap[e] || 0, posts: postsMap[e] || 0, goals: goalsMap[e] || 0 }; }).sort((a, b) => (a.la == null ? 1e9 : a.la) - (b.la == null ? 1e9 : b.la));
   const cell = (v, ex = "") => `<td style="padding:5px 7px;text-align:right;${ex}">${v}</td>`;
+
+  // ── Where members use it: platform breakdown (forward-looking) ──
+  {
+    const platMins = {}, platUsers = {};
+    (d.usageRows || []).forEach(u => {
+      const e = low(u.email); if (!e || EX.has(e)) return;
+      const p = u.platform || "unknown";
+      platMins[p] = (platMins[p] || 0) + (u.seconds || 0) / 60;
+      (platUsers[p] = platUsers[p] || new Set()).add(e);
+    });
+    const LBL = { "ios-app": "iOS app", "android-app": "Android app", "installed-pwa": "Installed PWA", "mobile-web": "Mobile web", "desktop-web": "Desktop web" };
+    const COL = { "ios-app": "#4ade80", "android-app": "#22c55e", "installed-pwa": "#3b82f6", "mobile-web": "#a855f7", "desktop-web": "#f59e0b" };
+    const order = ["ios-app", "android-app", "installed-pwa", "mobile-web", "desktop-web"];
+    const knownMins = order.reduce((a, p) => a + (platMins[p] || 0), 0);
+    const unknownMins = platMins["unknown"] || 0;
+    h += `<h2 class="section-header">${ico('bars')}Where members use it <span class="section-meta">by time spent · native vs web · forward-looking</span></h2>`;
+    if (knownMins < 1) {
+      h += `<div style="font-size:.8rem;color:#64748b;margin-bottom:24px">No platform data yet — it builds up as members use the app after this ships.${unknownMins ? ` (${Math.round(unknownMins / 60)}h of earlier usage predates tracking.)` : ""}</div>`;
+    } else {
+      const bars = order.filter(p => platMins[p]).map(p => {
+        const pct = Math.round(platMins[p] / knownMins * 100);
+        return `<div style="margin-bottom:9px">
+          <div style="display:flex;justify-content:space-between;font-size:.78rem;margin-bottom:3px"><span style="color:#cbd5e1">${LBL[p]}</span><span style="color:#64748b">${pct}% · ${platUsers[p].size} member${platUsers[p].size>1?"s":""} · ${Math.round(platMins[p]/60)}h</span></div>
+          <div style="height:7px;background:#1e2d4a;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${COL[p]}"></div></div></div>`;
+      }).join("");
+      const nativePct = Math.round(((platMins["ios-app"]||0)+(platMins["android-app"]||0)) / knownMins * 100);
+      h += `<div style="margin-bottom:8px">${bars}</div>
+        <div style="font-size:.74rem;color:#64748b;margin-bottom:24px">${nativePct}% of tracked time is in the native apps.${unknownMins ? ` ${Math.round(unknownMins / 60)}h predates tracking (excluded).` : ""}</div>`;
+    }
+  }
+
   h += `<h2 class="section-header">${ico('users')}Members <span class="section-meta">${mrows.length} paying · most recently active first</span></h2>
     <div style="overflow-x:auto;margin-bottom:24px"><table style="width:100%;border-collapse:collapse;font-size:.82rem">
     <thead><tr style="color:#64748b;text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid #1e2d4a"><th style="padding:4px 7px"></th><th style="padding:4px 7px;text-align:left">Member</th><th style="padding:4px 7px;text-align:left">Segment</th><th style="padding:4px 7px;text-align:right">Last</th><th style="padding:4px 7px;text-align:right">Pract.&nbsp;days</th><th style="padding:4px 7px;text-align:right">Hrs</th><th style="padding:4px 7px;text-align:right">Days/28</th><th style="padding:4px 7px;text-align:right">Streak</th><th style="padding:4px 7px;text-align:left">Level</th><th style="padding:4px 7px;text-align:right">Games</th><th style="padding:4px 7px;text-align:right">Posts</th><th style="padding:4px 7px;text-align:right">Goals</th></tr></thead><tbody>

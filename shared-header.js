@@ -1441,15 +1441,39 @@ function _shAccrueUsage() {
   _shUsageLabel = _shCurrentViewLabel();
   _shUsageSince = now;
 }
+// Which surface is this: iOS app (PWAShell), Android app (TWA, detected from the
+// android-app:// launch referrer), installed PWA (standalone), or mobile/desktop
+// web. Cached per session because the TWA referrer is only present on the launch
+// page, not on internal navigations.
+function _shPlatform() {
+  try {
+    const cached = sessionStorage.getItem("_shPlatform");
+    if (cached) return cached;
+    const ua = navigator.userAgent || "";
+    const ref = document.referrer || "";
+    let p;
+    if (/PWAShell/i.test(ua)) p = "ios-app";
+    else if (ref.indexOf("android-app://") === 0) p = "android-app";
+    else {
+      const standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+      const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua) || (window.innerWidth > 0 && window.innerWidth < 768);
+      if (standalone) p = "installed-pwa";
+      else p = mobile ? "mobile-web" : "desktop-web";
+    }
+    sessionStorage.setItem("_shPlatform", p);
+    return p;
+  } catch (e) { return "unknown"; }
+}
 async function _shFlushUsage() {
   _shAccrueUsage();
   const entries = Object.entries(_shUsageBuf).filter(([, s]) => s >= 1);
   if (!entries.length || !_shPresenceDb) return;
   _shUsageBuf = {};
   _shLastFlush = Date.now();
+  const platform = _shPlatform();
   for (const [view, secs] of entries) {
     try {
-      const { error } = await _shPresenceDb.rpc("add_feature_usage", { p_view: view, p_seconds: Math.round(secs) });
+      const { error } = await _shPresenceDb.rpc("add_feature_usage", { p_view: view, p_seconds: Math.round(secs), p_platform: platform });
       if (error) throw error;
     } catch (e) { _shUsageBuf[view] = (_shUsageBuf[view] || 0) + secs; } // re-buffer on failure
   }
@@ -2130,6 +2154,14 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       a.id = "sh-admin-analytics-link";
       a.href = "/admin-analytics.html";
       a.textContent = "Admin Analytics";
+      _menu.insertBefore(a, _logout);
+    }
+    if (_menu && _logout && !document.getElementById("sh-email-studio-link")) {
+      const a = document.createElement("a");
+      a.className = "sh-user-menu-item";
+      a.id = "sh-email-studio-link";
+      a.href = "/email-studio.html";
+      a.textContent = "Email Studio";
       _menu.insertBefore(a, _logout);
     }
   }

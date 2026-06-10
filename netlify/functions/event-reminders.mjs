@@ -12,6 +12,8 @@
 //   REMINDER_FROM              e.g.  The Practice Room <noreply@yourdomain.com>
 //   SITE_URL                   e.g.  https://app.thepracticeroom.co  (no trailing slash)
 
+import { renderLivestreamReminderHTML } from "../../email-templates.mjs";
+
 export const config = { schedule: "*/5 * * * *" };
 
 const SUPABASE_URL = "https://gyskfutmncprqxazgatv.supabase.co";
@@ -98,7 +100,7 @@ export default async () => {
         to: [r.email],
         subject: `Starts in 1 hour: ${ev.title}`,
         headers: { "List-Unsubscribe": `<${unsub}>` },
-        html: emailHtml({ firstName, title: ev.title, timeStr, site: SITE, unsub }),
+        html: renderLivestreamReminderHTML({ firstName, title: ev.title, timeStr, site: SITE, unsub }),
       };
     });
 
@@ -173,56 +175,7 @@ export function fmtMultiZone(when) {
   ];
 }
 
-export function emailHtml({ firstName, title, timeStr, site, unsub }) {
-  const join = site || "#";
-  const logo = `${join}/icon-192.png`;
-  // timeStr may be a single string (user's own tz) or an array of zone lines.
-  const timeHtml = (Array.isArray(timeStr) ? timeStr : [timeStr]).map(esc).join("<br>");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
-<body style="margin:0;padding:0;background:#faf7f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1a1410;-webkit-font-smoothing:antialiased">
-  <span style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(title)} is going live in about an hour.</span>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf7f3;padding:32px 16px">
-    <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:460px;background:#ffffff;border:1px solid #ece5db;border-radius:18px;overflow:hidden">
-
-        <tr><td style="padding:30px 36px 22px;text-align:center">
-          <img src="${esc(logo)}" width="46" height="46" alt="" style="display:inline-block;border-radius:12px">
-          <div style="margin-top:10px;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#a99d8c">The Practice Room</div>
-        </td></tr>
-
-        <tr><td style="padding:0 36px;text-align:center">
-          <span style="display:inline-block;background:#F5C518;color:#1a1410;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:6px 13px;border-radius:999px">● Live in 1 hour</span>
-        </td></tr>
-
-        <tr><td style="padding:18px 36px 4px;text-align:center">
-          <h1 style="margin:0;font-size:22px;line-height:1.3;font-weight:800;color:#1a1410;word-break:break-word">${esc(title)}</h1>
-        </td></tr>
-
-        <tr><td style="padding:10px 36px 0;text-align:center">
-          <div style="display:inline-block;background:#faf7f3;border:1px solid #ece5db;border-radius:10px;padding:10px 16px;font-size:15px;font-weight:600;line-height:1.6;color:#5c5247">${timeHtml}</div>
-        </td></tr>
-
-        <tr><td style="padding:20px 40px 4px;text-align:center">
-          <p style="margin:0;font-size:15px;line-height:1.6;color:#6b6155">Hi ${esc(firstName)}, Matthew will be live in about an hour. Settle in and come join the session.</p>
-        </td></tr>
-
-        <tr><td style="padding:24px 36px 32px;text-align:center">
-          <a href="${esc(join)}" style="display:inline-block;background:#F5C518;color:#1a1410;text-decoration:none;font-weight:700;font-size:15px;padding:14px 34px;border-radius:11px">Join the livestream</a>
-        </td></tr>
-
-        <tr><td style="padding:18px 36px;border-top:1px solid #f0ebe3;text-align:center;font-size:12px;color:#a99d8c;line-height:1.6">
-          You're getting this because you're a member of The Practice Room.<br>
-          <a href="${esc(unsub)}" style="color:#a99d8c;text-decoration:underline">Turn off livestream reminders</a>
-        </td></tr>
-
-      </table>
-    </td></tr>
-  </table>
-</body></html>`;
-}
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
-  );
-}
+// The livestream reminder email itself is rendered by renderLivestreamReminderHTML
+// in the shared email-templates.mjs module (one source of truth, also shown in the
+// Email Studio). The time-formatting helpers above stay here, since they're send-
+// time logic, not template markup.
