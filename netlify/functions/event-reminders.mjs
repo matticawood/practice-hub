@@ -121,6 +121,13 @@ export default async () => {
         console.error(`event-reminders: Resend failed for ${ev.id}`, await res.text());
         break;
       }
+      // Log each recipient so the Email Studio shows exact counts + engagement
+      // (delivered/opened/clicked, via the Resend webhook) for clinic reminders.
+      const out = await res.json().catch(() => ({}));
+      const ids = Array.isArray(out.data) ? out.data : [];
+      await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify(chunk.map((msg, j) => ({ email: msg.to[0], campaign: "livestream_reminder",
+          status: "sent", resend_id: ids[j]?.id || null, meta: { event_id: ev.id } }))) }).catch(() => {});
     }
 
     // Only stamp as reminded if the send succeeded; otherwise retry next tick.
