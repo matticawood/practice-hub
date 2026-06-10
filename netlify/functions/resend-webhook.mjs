@@ -64,17 +64,23 @@ export default async (req) => {
   const m = map[type];
   if (!m) return ok(`ignored ${type}`);
 
+  const sb = (p, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${p}`, { ...opts, headers: {
+    apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
+
   let path = `email_log?resend_id=eq.${encodeURIComponent(emailId)}`;
   if (m.firstOnly) path += `&${m.firstOnly}=is.null`;  // only set the first open/click
-
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method: "PATCH",
-    headers: {
-      apikey: SERVICE, Authorization: `Bearer ${SERVICE}`,
-      "Content-Type": "application/json", Prefer: "return=minimal",
-    },
-    body: JSON.stringify(m.set),
-  });
+  const res = await sb(path, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(m.set) });
   if (!res.ok) { console.error("resend-webhook patch failed", await res.text()); return bad("db error", 500); }
+
+  // Clicks: also log the exact link (and the campaign, looked up by resend_id).
+  if (type === "email.clicked") {
+    const link = evt.data?.click?.link || evt.data?.link || null;
+    const email = (Array.isArray(evt.data?.to) ? evt.data.to[0] : evt.data?.to) || null;
+    let campaign = null;
+    const lr = await sb(`email_log?resend_id=eq.${encodeURIComponent(emailId)}&select=campaign&limit=1`);
+    if (lr.ok) campaign = (await lr.json())[0]?.campaign || null;
+    await sb(`email_clicks`, { method: "POST", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify([{ resend_id: emailId, campaign, email, link, clicked_at: at }]) }).catch(() => {});
+  }
   return ok();
 };
