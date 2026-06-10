@@ -490,14 +490,24 @@ async function renderAutomations() {
   // Email history.
   let logRows = [];
   try {
-    const { data, error } = await db.from("email_log").select("email,campaign,status,sent_at,error").order("sent_at", { ascending: false }).limit(200);
+    const { data, error } = await db.from("email_log").select("email,campaign,status,sent_at,delivered_at,opened_at,clicked_at,bounced_at,complained_at").order("sent_at", { ascending: false }).limit(2000);
     if (error) throw error;
     logRows = data || [];
   } catch (e) {
     el.innerHTML = `<div class="err">Couldn't load email_log (${esc(e.message || e)}). Has its migration been run?</div>`; return;
   }
   const byCamp = {};
-  for (const r of logRows) { const c = (byCamp[r.campaign] = byCamp[r.campaign] || { sent:0,failed:0,test:0,skipped:0,last:null }); if (c[r.status]!=null) c[r.status]++; if (!c.last || r.sent_at > c.last) c.last = r.sent_at; }
+  for (const r of logRows) {
+    const c = (byCamp[r.campaign] = byCamp[r.campaign] || { sent:0,failed:0,test:0,skipped:0,delivered:0,opened:0,clicked:0,bounced:0,complained:0,last:null });
+    if (c[r.status]!=null) c[r.status]++;
+    if (r.delivered_at) c.delivered++;
+    if (r.opened_at) c.opened++;
+    if (r.clicked_at) c.clicked++;
+    if (r.bounced_at) c.bounced++;
+    if (r.complained_at) c.complained++;
+    if (!c.last || r.sent_at > c.last) c.last = r.sent_at;
+  }
+  window._emailLog = logRows;  // for the per-recipient drill-down
 
   const when = ts => ts ? new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+new Date(ts).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}) : "—";
 
@@ -530,13 +540,43 @@ async function renderAutomations() {
   // ── Activity log (every email, including live-clinic reminders) ──
   // No stored per-clinic count, so estimate emails as audience × clinics reminded.
   if (clinicCount) byCamp.livestream_reminder = { sent: `≈${reminderAudience * clinicCount}`, failed:0, test:0, skipped:0, last: clinicLast };
-  const LBL = { relaunch:"Relaunch", reactivation:"Reactivation", waitlist:"Waitlist", livestream_reminder:"Live clinic reminder", welcome_d0:"Welcome · Day 0", welcome_d2:"Welcome · Day 2", welcome_d5:"Welcome · Day 5", welcome_d10:"Welcome · Day 10" };
   const camps = Object.keys(byCamp).sort();
-  el.innerHTML = camps.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
+  const pct = (n,d) => d ? ` <span style="color:#64748b">(${Math.round(n/d*100)}%)</span>` : "";
+  el.innerHTML = (camps.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
     <thead><tr style="color:var(--mut);text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid var(--border)">
-    <th style="padding:4px 7px;text-align:left">Email</th><th style="padding:4px 7px;text-align:right">Sent</th><th style="padding:4px 7px;text-align:right">Failed</th><th style="padding:4px 7px;text-align:right">Test</th><th style="padding:4px 7px;text-align:right">Skipped</th><th style="padding:4px 7px;text-align:right">Last</th></tr></thead><tbody>
-    ${camps.map(c=>{const v=byCamp[c];return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 7px;color:#cbd5e1">${esc(LBL[c]||c)}</td><td style="padding:5px 7px;text-align:right;color:#4ade80;font-weight:600">${v.sent||"—"}</td><td style="padding:5px 7px;text-align:right;color:${v.failed?"#f87171":"var(--mut)"}">${v.failed||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.test||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.skipped||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${when(v.last)}</td></tr>`;}).join("")}
-    </tbody></table></div>` : `<div style="color:var(--mut);font-size:.78rem">No emails sent yet.</div>`;
+      <th style="padding:4px 7px;text-align:left">Email</th><th style="padding:4px 7px;text-align:right">Sent</th><th style="padding:4px 7px;text-align:right">Delivered</th><th style="padding:4px 7px;text-align:right">Opened</th><th style="padding:4px 7px;text-align:right">Bounced</th><th style="padding:4px 7px;text-align:right">Spam</th><th style="padding:4px 7px;text-align:right">Last</th><th></th></tr></thead><tbody>
+    ${camps.map(c=>{const v=byCamp[c];const denom=v.delivered||(typeof v.sent==="number"?v.sent:0);return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:5px 7px;color:#cbd5e1">${esc(STUDIO_LBL[c]||c)}</td>
+      <td style="padding:5px 7px;text-align:right;color:#4ade80;font-weight:600">${v.sent||"—"}</td>
+      <td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.delivered||"—"}</td>
+      <td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.opened?`${v.opened}${pct(v.opened,denom)}`:"—"}</td>
+      <td style="padding:5px 7px;text-align:right;color:${v.bounced?"#f87171":"var(--mut)"}">${v.bounced||"—"}</td>
+      <td style="padding:5px 7px;text-align:right;color:${v.complained?"#f87171":"var(--mut)"}">${v.complained||"—"}</td>
+      <td style="padding:5px 7px;text-align:right;color:var(--mut)">${when(v.last)}</td>
+      <td style="padding:5px 7px;text-align:right">${c!=="livestream_reminder"?`<button class="btn btn-sm" style="padding:3px 9px;font-size:.7rem" onclick="caRecipients('${c}')">Recipients</button>`:""}</td>
+    </tr>`;}).join("")}
+    </tbody></table></div>` : `<div style="color:var(--mut);font-size:.78rem">No emails sent yet.</div>`)
+    + `<div id="recipients-detail" style="margin-top:14px"></div>`;
+}
+
+const STUDIO_LBL = { relaunch:"Relaunch", reactivation:"Reactivation", waitlist:"Waitlist", livestream_reminder:"Live clinic reminder", welcome_d0:"Welcome · Day 0", welcome_d2:"Welcome · Day 2", welcome_d5:"Welcome · Day 5", welcome_d10:"Welcome · Day 10" };
+
+// Per-recipient drill-down: each recipient's furthest-reached state.
+function caRecipients(campaign) {
+  const el = document.getElementById("recipients-detail");
+  if (!el) return;
+  const rows = (window._emailLog || []).filter(r => r.campaign === campaign && r.status === "sent");
+  const stateOf = (r) => r.complained_at ? ["Spam complaint","#f87171"] : r.bounced_at ? ["Bounced","#f87171"]
+    : r.clicked_at ? ["Clicked","#4ade80"] : r.opened_at ? ["Opened","#4ade80"]
+    : r.delivered_at ? ["Delivered","#94a3b8"] : ["Sent","#64748b"];
+  el.innerHTML = `<div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="color:#cbd5e1;font-size:.82rem">Recipients · ${esc(STUDIO_LBL[campaign]||campaign)} (${rows.length})</b>
+      <button class="btn btn-sm" onclick="document.getElementById('recipients-detail').innerHTML=''">Close</button></div>
+    ${rows.length ? `<div style="max-height:340px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:.76rem"><tbody>
+      ${rows.map(r=>{const [s,col]=stateOf(r);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 8px 3px 0;color:#cbd5e1;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.email)}</td><td style="padding:3px 0;text-align:right;color:${col}">${s}</td></tr>`;}).join("")}
+      </tbody></table></div>` : `<div style="color:var(--mut);font-size:.78rem">No sent recipients logged yet.</div>`}
+  </div>`;
 }
 
 async function caSend(campaign, mode) {
