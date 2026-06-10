@@ -59,6 +59,14 @@ export default async (req) => {
     return page("Error", `<p style="font-size:15px;color:#516170">Couldn't update your preferences. Please try again later.</p>`);
   }
 
+  // Attribute the unsubscribe to the email that drove it (Studio analytics).
+  const campaign = url.searchParams.get("c");
+  if (campaign && /^[a-z0-9_]+$/i.test(campaign)) {
+    await sb(`email_log?email=eq.${encodeURIComponent(contact.email)}&campaign=eq.${encodeURIComponent(campaign)}&status=eq.sent`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ unsubscribed_at: new Date().toISOString() }),
+    }).catch(() => {});
+  }
+
   return page(
     "Unsubscribed",
     `<p style="font-size:16px;line-height:1.5;margin:0 0 6px">You've been unsubscribed from ${esc(listName)}.</p>

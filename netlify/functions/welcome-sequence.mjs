@@ -154,7 +154,7 @@ export default async (req) => {
       const batch = chunk.map((p) => {
         const fn = firstName(p.name);
         const timeIn = friendlyAge(p.age);
-        const unsub = `${SITE}/.netlify/functions/email-unsubscribe?t=${p.unsubscribe_token}`;
+        const unsub = `${SITE}/.netlify/functions/email-unsubscribe?t=${p.unsubscribe_token}&c=${step.campaign}`;
         return { from: FROM, to: [p.email], subject: renderSubject(content, fn, timeIn),
           headers: { "List-Unsubscribe": `<${unsub}>` },
           html: renderEmailHTML(content, { firstName: fn, timeIn, site: SITE, unsub }) };
