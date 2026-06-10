@@ -1046,7 +1046,16 @@ window.SavedPosts = (function() {
 })();
 
 // ── Inject static HTML (after DOM is ready) ───────────────────────────────────
-document.addEventListener("DOMContentLoaded", function() {
+// Builds all the shared chrome (header, sub-nav, sidebar, bottom bar, notif +
+// presence panels). Idempotent: safe to call multiple times — only the first
+// call does the work. Runs from whichever fires first, DOMContentLoaded or
+// initSharedHeader (auth can resolve from cache *before* DOMContentLoaded, which
+// previously left the header revealed-but-unbuilt, hiding the bell/search/nav
+// until a manual refresh).
+function _shBuildChrome() {
+  if (window.__shChromeBuilt) return;
+  if (!document.body) return; // body not parsed yet — wait for DOMContentLoaded
+  window.__shChromeBuilt = true;
   // Populate the header element
   const header = document.getElementById("app-header");
   if (header) {
@@ -1294,7 +1303,17 @@ document.addEventListener("DOMContentLoaded", function() {
     </div>
   `;
   document.body.appendChild(presencePanel);
-}); // end DOMContentLoaded
+} // end _shBuildChrome
+
+window._shBuildChrome = _shBuildChrome;
+// Run as soon as the DOM is ready (or immediately if it already is — a plain
+// sync script that the SW serves late can execute after DOMContentLoaded fired,
+// in which case the old addEventListener never ran and the header never built).
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", _shBuildChrome);
+} else {
+  _shBuildChrome();
+}
 
 // ── Sheet helpers (kept as no-ops for backward compat) ────────────────────────
 window._shOpenSheet  = function() {};
@@ -2084,6 +2103,11 @@ window._shMaybeShowOnboarding = async function(db, myEmail) {
 };
 
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
+  // Ensure the chrome exists before we try to reveal/wire it. If auth resolved
+  // from cache before DOMContentLoaded, the build hasn't run yet — build it now
+  // so the bell/search/nav are present to reveal (fixes intermittent missing
+  // header that previously needed a refresh).
+  try { _shBuildChrome(); } catch (e) {}
   window._shIsAdmin = isAdmin;
   // Wire the shared @mention engine (autocomplete + notifications) on every page.
   try { window.Mentions && window.Mentions._init(db, myEmail); } catch (e) {}
