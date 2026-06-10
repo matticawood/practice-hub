@@ -57,6 +57,10 @@
   .frame-pad { background:#faf7f3; border:1px solid var(--border); border-radius:10px; padding:0; overflow:hidden; margin:0 auto; transition:max-width .15s; width:100%; }
   iframe { width:100%; border:0; display:block; background:#faf7f3; }
   .res { font-size:.78rem; margin-top:8px; min-height:1em; }
+  .send-bar { margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+  .send-bar .send-status { font-size:.78rem; color:var(--mut); line-height:1.5; }
+  .group-banner { background:#0f1729; border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:0 0 16px; }
+  .group-banner .gb-top { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
   .ok { color:#4ade80; } .err { color:#f87171; }
   /* auth */
   #auth { display:none; min-height:100vh; align-items:center; justify-content:center; }
@@ -80,10 +84,11 @@
   <p class="intro">Every automated email, exactly as it sends. Edit the words and the preview updates live — what you save here is what goes out (there's no copy hidden anywhere else). Send a test to yourself before anything reaches a member.</p>
   <div id="studio-tabs" class="tabbar"></div>
   <div id="studio-subtabs" class="subtabbar"></div>
+  <div id="studio-group-banner"></div>
   <div id="cards"></div>
 
-  <div class="group-h" style="margin-top:34px">Sends &amp; automations</div>
-  <p class="intro" style="margin-bottom:14px">Trigger one-time sends and see everything that's gone out. Every send is logged, double-sends are blocked, and the recipient list is re-checked server-side before anything leaves.</p>
+  <div class="group-h" style="margin-top:34px">Activity log</div>
+  <p class="intro" style="margin-bottom:14px">Every email that's gone out, across all campaigns. Send controls live on each email's own tab above. Every send is logged, double-sends are blocked, and recipients are re-checked server-side before anything leaves.</p>
   <div id="automations" style="color:var(--mut);font-size:.86rem">Loading…</div>
 </main>
 
@@ -221,6 +226,22 @@ function showGroup(group) {
     const dot = m.status === "ready" ? "#4ade80" : m.status === "live" ? "#4ade80" : "#fbbf24";
     return `<button id="stab-${camp}" onclick="showCampaign('${camp}')"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dot};margin-right:6px;vertical-align:1px"></span>${esc(m.title)}</button>`;
   }).join("");
+  // Group-level automation banner (the welcome sequence is managed as a whole).
+  const banner = document.getElementById("studio-group-banner");
+  if (group === "New-member sequence") {
+    banner.innerHTML = `<div class="group-banner">
+      <div class="gb-top">
+        <div style="color:var(--ink);font-weight:700;font-size:.9rem">Welcome sequence <span style="color:var(--mut);font-weight:500;font-size:.78rem">· runs automatically, Day 0 → 10 after joining</span></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="caSyncDates()">Sync join dates from Stripe</button>
+          <button class="btn btn-sm" onclick="caWelcomePreview()">Preview who's due</button>
+        </div>
+      </div>
+      <div id="ca-result-welcome" style="margin-top:10px;font-size:.78rem;color:var(--mut)"></div>
+    </div>`;
+  } else {
+    banner.innerHTML = "";
+  }
   showCampaign(studioLastCamp[group] || list[0]?.[0]);
 }
 
@@ -243,9 +264,37 @@ function showCampaign(camp) {
 }
 
 function statusBadge(status) {
-  if (status === "ready") return `<span class="badge b-ready">Ready</span>`;
+  if (status === "ready") return `<span class="badge b-ready">Ready to send</span>`;
   if (status === "live")  return `<span class="badge b-ready">Live · automatic</span>`;
   return `<span class="badge b-draft">Draft</span>`;
+}
+
+// Per-email send / automation controls, shown at the bottom of each card so you
+// manage everything from the email's own tab.
+function cardActionsHTML(camp, m) {
+  if (camp === "livestream_reminder") {
+    return `<div class="send-bar"><div class="send-status" id="sendstatus-${camp}">Sent automatically before each clinic.</div></div>`;
+  }
+  // Manual one-time sends: relaunch (members) and any list campaign (waitlist).
+  if (camp === "relaunch" || m.list) {
+    const label = m.list ? "Send to the list →" : "Send now →";
+    return `<div class="send-bar">
+      <div class="send-status" id="sendstatus-${camp}">Loading…</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+        <button class="btn btn-sm" onclick="caPreview('${camp}')">Preview recipients</button>
+        <button class="btn btn-sm btn-gold" onclick="caLive('${camp}')">${label}</button>
+      </div>
+      <div id="ca-result-${camp}" class="res" style="margin-top:8px"></div>
+    </div>`;
+  }
+  if (m.group === "New-member sequence") {
+    const when = esc(m.trigger.replace(/^Auto — /, ""));
+    return `<div class="send-bar"><div class="send-status">Part of the automatic welcome sequence — sends ${when}. Use <b>Send test to me</b> above to see it in your inbox. Manage the whole sequence from the bar at the top of this tab.</div></div>`;
+  }
+  if (camp === "reactivation") {
+    return `<div class="send-bar"><div class="send-status">Evergreen win-back. Its automatic 14-day trigger isn't set up yet (coming next). <b>Send test to me</b> works now.</div></div>`;
+  }
+  return "";
 }
 
 // Read-only card: a faithful preview + context, no editor (for emails whose
@@ -266,6 +315,7 @@ function readOnlyCardHTML(camp, m) {
       <div class="preview-bar"><div class="seg"><button class="on" id="dt-${camp}" data-w="0">Desktop</button><button id="mb-${camp}" data-w="390">Mobile</button></div></div>
       <div class="frame-pad" id="pad-${camp}"><iframe id="pv-${camp}" scrolling="no"></iframe></div>
     </div>
+    ${cardActionsHTML(camp, m)}
   </div>`;
 }
 
@@ -316,6 +366,7 @@ function cardHTML(camp, m, dbRow) {
         <div class="frame-pad" id="pad-${camp}"><iframe id="pv-${camp}" scrolling="no"></iframe></div>
       </div>
     </div>
+    ${cardActionsHTML(camp, m)}
   </div>`;
 }
 
@@ -448,67 +499,39 @@ async function renderAutomations() {
   const byCamp = {};
   for (const r of logRows) { const c = (byCamp[r.campaign] = byCamp[r.campaign] || { sent:0,failed:0,test:0,skipped:0,last:null }); if (c[r.status]!=null) c[r.status]++; if (!c.last || r.sent_at > c.last) c.last = r.sent_at; }
 
-  // Relaunch cohort (dormant members), minus already-sent.
+  const when = ts => ts ? new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+new Date(ts).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}) : "—";
+
+  // Relaunch cohort (dormant members), minus already-sent → window._reactCohort.
   let cohort = [];
   try { const { data, error } = await db.rpc("dormant_members", { days: 14 }); if (error) throw error; cohort = (data || []).map(r => r.member_email); }
   catch (e) { console.warn("dormant_members failed:", e.message); }
   const reactSent = new Set(logRows.filter(r => r.campaign === "relaunch" && r.status === "sent").map(r => (r.email||"").toLowerCase()));
   window._reactCohort = cohort.filter(e => !reactSent.has(e.toLowerCase())).map(e => ({ email: e }));
-  const relaunchN = window._reactCohort.length;
-  const relaunchSentLine = reactSent.size ? `${reactSent.size} already sent` : "none sent yet";
 
   // Waitlist counts.
   let wlTotal = 0, wlOptedOut = 0;
-  try { const { data } = await db.from("email_list_subscriptions").select("opted_out").eq("list_slug","waitlist"); wlTotal = (data||[]).length; wlOptedOut = (data||[]).filter(r=>r.opted_out).length; } catch(e){}
+  try { const { data } = await db.from("email_list_subscriptions").select("opted_out").eq("list_slug","waitlist"); wlTotal=(data||[]).length; wlOptedOut=(data||[]).filter(r=>r.opted_out).length; } catch(e){}
+
+  // Live-clinic reminders are sent by the older scheduler and tracked on live_events.
+  let clinicCount = 0, clinicLast = null;
+  try { const { data } = await db.from("live_events").select("reminder_sent_at").not("reminder_sent_at","is",null); clinicCount=(data||[]).length; for (const r of (data||[])) if (!clinicLast || r.reminder_sent_at>clinicLast) clinicLast=r.reminder_sent_at; } catch(e){}
+
+  // ── Fill the per-email status lines (each email's send controls live in its tab) ──
+  const setStatus = (camp, html) => { const el = document.getElementById(`sendstatus-${camp}`); if (el) el.innerHTML = html; };
+  setStatus("relaunch", `<b style="color:#cbd5e1">${window._reactCohort.length}</b> ready to send · ${reactSent.size ? reactSent.size+" already sent" : "none sent yet"}.`);
   const wlSent = byCamp.waitlist?.sent || 0;
-  const wlSentLine = wlSent ? `${wlSent} already sent` : "none sent yet";
+  setStatus("waitlist", `<b style="color:#cbd5e1">${wlTotal}</b> on the list · ${wlOptedOut} unsubscribed · ${wlSent ? wlSent+" sent" : "none sent yet"}. Current and past members are auto-excluded — Preview for the exact count.`);
+  setStatus("livestream_reminder", `Sent automatically ~1h before each clinic. <b style="color:#cbd5e1">${clinicCount}</b> clinic${clinicCount===1?"":"s"} reminded${clinicLast?` · last ${when(clinicLast)}`:""}.`);
 
-  const pill = (t,c) => `<span style="display:inline-block;background:${c}22;color:${c};font-size:.62rem;font-weight:700;padding:2px 7px;border-radius:999px;margin-left:6px">${t}</span>`;
-  const when = ts => ts ? new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+new Date(ts).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}) : "—";
-  const card = (o) => `
-  <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <div><div style="color:var(--ink);font-weight:700;font-size:.92rem">${o.title}${pill(o.pillTxt,o.pillCol)}</div>
-        <div style="color:var(--mut);font-size:.74rem;margin-top:3px">${o.sub}</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-sm" onclick="caPreview('${o.campaign}')">Preview</button>
-        <button class="btn btn-sm" onclick="caTest('${o.campaign}')">Send test to me</button>
-        <button class="btn btn-sm btn-gold" onclick="caLive('${o.campaign}')">${o.sendLabel}</button>
-      </div>
-    </div>
-    <div id="ca-result-${o.campaign}" style="margin-top:12px;font-size:.78rem;color:var(--mut)"></div>
-  </div>`;
-
-  let html =
-    card({ campaign:"relaunch", title:"Relaunch email", pillTxt:"one-time", pillCol:"#3b82f6",
-      sub:`One-time migration win-back to members silent 14+ days. <b style="color:#cbd5e1">${relaunchN}</b> ready to send · ${relaunchSentLine}.`,
-      sendLabel:`Send to ${relaunchN}` }) +
-    card({ campaign:"waitlist", title:"Waitlist launch", pillTxt:"list · one-time", pillCol:"#a855f7",
-      sub:`<b style="color:#cbd5e1">${wlTotal}</b> on the waiting list · ${wlOptedOut} unsubscribed · ${wlSentLine}. Current and past members auto-excluded — Preview for the exact count.`,
-      sendLabel:`Send to the list` });
-
-  // Welcome sequence (automatic) — preview only; it runs on a schedule once enabled.
-  const wSent = (byCamp.welcome_d0?.sent||0)+(byCamp.welcome_d2?.sent||0)+(byCamp.welcome_d5?.sent||0)+(byCamp.welcome_d10?.sent||0);
-  html += `
-  <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <div><div style="color:var(--ink);font-weight:700;font-size:.92rem">New-member sequence ${pill("automatic","#22c55e")}</div>
-        <div style="color:var(--mut);font-size:.74rem;margin-top:3px">Day 0 → 2 → 5 → 10 after joining. Backfills recent joiners; one email per member per run. ${wSent} sent so far.</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-sm" onclick="caSyncDates()">Sync join dates from Stripe</button>
-        <button class="btn btn-sm" onclick="caWelcomePreview()">Preview who's due</button>
-      </div>
-    </div>
-    <div id="ca-result-welcome" style="margin-top:12px;font-size:.78rem;color:var(--mut)"></div>
-  </div>`;
-
+  // ── Activity log (every email, including live-clinic reminders) ──
+  if (clinicCount) byCamp.livestream_reminder = { sent: clinicCount, failed:0, test:0, skipped:0, last: clinicLast };
+  const LBL = { relaunch:"Relaunch", reactivation:"Reactivation", waitlist:"Waitlist", livestream_reminder:"Live clinic reminder", welcome_d0:"Welcome · Day 0", welcome_d2:"Welcome · Day 2", welcome_d5:"Welcome · Day 5", welcome_d10:"Welcome · Day 10" };
   const camps = Object.keys(byCamp).sort();
-  html += camps.length ? `<div style="overflow-x:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
+  el.innerHTML = camps.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
     <thead><tr style="color:var(--mut);text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid var(--border)">
-    <th style="padding:4px 7px;text-align:left">Campaign</th><th style="padding:4px 7px;text-align:right">Sent</th><th style="padding:4px 7px;text-align:right">Failed</th><th style="padding:4px 7px;text-align:right">Test</th><th style="padding:4px 7px;text-align:right">Skipped</th><th style="padding:4px 7px;text-align:right">Last</th></tr></thead><tbody>
-    ${camps.map(c=>{const v=byCamp[c];return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 7px;color:#cbd5e1">${esc(c)}</td><td style="padding:5px 7px;text-align:right;color:#4ade80;font-weight:600">${v.sent||"—"}</td><td style="padding:5px 7px;text-align:right;color:${v.failed?"#f87171":"var(--mut)"}">${v.failed||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.test||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.skipped||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${when(v.last)}</td></tr>`;}).join("")}
+    <th style="padding:4px 7px;text-align:left">Email</th><th style="padding:4px 7px;text-align:right">Sent</th><th style="padding:4px 7px;text-align:right">Failed</th><th style="padding:4px 7px;text-align:right">Test</th><th style="padding:4px 7px;text-align:right">Skipped</th><th style="padding:4px 7px;text-align:right">Last</th></tr></thead><tbody>
+    ${camps.map(c=>{const v=byCamp[c];return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 7px;color:#cbd5e1">${esc(LBL[c]||c)}</td><td style="padding:5px 7px;text-align:right;color:#4ade80;font-weight:600">${v.sent||"—"}</td><td style="padding:5px 7px;text-align:right;color:${v.failed?"#f87171":"var(--mut)"}">${v.failed||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.test||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.skipped||"—"}</td><td style="padding:5px 7px;text-align:right;color:var(--mut)">${when(v.last)}</td></tr>`;}).join("")}
     </tbody></table></div>` : `<div style="color:var(--mut);font-size:.78rem">No emails sent yet.</div>`;
-  el.innerHTML = html;
 }
 
 async function caSend(campaign, mode) {
