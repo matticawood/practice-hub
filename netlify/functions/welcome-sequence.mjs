@@ -108,10 +108,12 @@ export default async (req) => {
   // ── Plan: one earliest-due-unsent step per member ──────────────────────────
   const now = Date.now(), DAY = 86400000;
   const plan = [];  // { email, name, unsubscribe_token, campaign, age }
+  let enrolled = 0; // real members in the sequence (after excluding owner/test/opt-out)
   for (const m of members) {
     const e = (m.email || "").toLowerCase();
     if (!e || EXCLUDED.has(e) || m.email_opt_out) continue;
     if (!m.created_at) continue;
+    enrolled++;
     const age = Math.floor((now - new Date(m.created_at).getTime()) / DAY);
     const due = STEPS.find((s) => age >= s.day && !sent.has(`${e}|${s.campaign}`));
     if (due) plan.push({ email: m.email, name: m.name, unsubscribe_token: m.unsubscribe_token, campaign: due.campaign, age });
@@ -129,7 +131,7 @@ export default async (req) => {
   if (mode === "preview") {
     return json(200, {
       mode, liveEnabled: process.env.WELCOME_SEQUENCE_LIVE === "true",
-      sequenceStart: SEQUENCE_START, enrolledMembers: members.length, due: plan.length, counts,
+      sequenceStart: SEQUENCE_START, enrolledMembers: enrolled, due: plan.length, counts,
       sample: plan.slice(0, 20).map((p) => ({ email: p.email, step: p.campaign, age: p.age,
         greeting: `Hi ${firstName(p.name)},`, timeIn: p.campaign === "welcome_d10" ? friendlyAge(p.age) : undefined })),
       note: "Preview only — nothing sent.",
