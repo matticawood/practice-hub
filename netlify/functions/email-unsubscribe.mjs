@@ -47,7 +47,7 @@ export default async (req) => {
 
   return page(
     "Unsubscribed",
-    `<p style="font-size:16px;line-height:1.5;margin:0 0 6px">You've been unsubscribed from livestream reminder emails.</p>
-     <p style="font-size:13px;color:#90a0ad;margin:10px 0 0">Changed your mind? Just let us know and we'll turn them back on.</p>`
+    `<p style="font-size:16px;line-height:1.5;margin:0 0 6px">You've been unsubscribed from emails from The Practice Room.</p>
+     <p style="font-size:13px;color:#90a0ad;margin:10px 0 0">You'll still see everything inside the app. Changed your mind? Just let us know and we'll turn emails back on.</p>`
   );
 };
