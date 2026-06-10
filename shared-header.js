@@ -1211,16 +1211,39 @@ document.addEventListener("DOMContentLoaded", function() {
   // viewport up it floats with a visible gap below it as you scroll. We detect
   // the keyboard via VisualViewport (height shrinks by the keyboard's height)
   // and toggle html.sh-kb-open, which the CSS hides the bar on.
-  if (window.visualViewport) {
+  {
+    const FOCUS_SEL = 'input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, [contenteditable=""], [contenteditable=true]';
+    const setKb = (on) => document.documentElement.classList.toggle("sh-kb-open", !!on);
     const vv = window.visualViewport;
-    const onVVResize = () => {
-      // Keyboard up ≈ visual viewport at least ~120px shorter than the layout
-      // viewport; that threshold ignores the iOS address-bar collapse (~60–90px).
-      const kbUp = (window.innerHeight - vv.height) > 120;
-      document.documentElement.classList.toggle("sh-kb-open", kbUp);
-    };
-    vv.addEventListener("resize", onVVResize);
-    vv.addEventListener("scroll", onVVResize);
+
+    if (vv) {
+      // Track the tallest viewport we've seen as the "no keyboard" baseline, so
+      // we compare against the real full height rather than window.innerHeight
+      // (which Android shrinks with the keyboard too).
+      let baseH = vv.height;
+      const evalKb = () => {
+        baseH = Math.max(baseH, vv.height);
+        setKb((baseH - vv.height) > 120);
+      };
+      const onVV = () => {
+        evalKb();
+        // iOS fires resize *during* the close animation, so the last event can
+        // still read a half-open keyboard and leave the bar hidden. Re-check
+        // once the animation has settled.
+        setTimeout(evalKb, 350);
+      };
+      vv.addEventListener("resize", onVV);
+      vv.addEventListener("scroll", onVV);
+    }
+
+    // Safety net: whenever focus leaves all text fields, the keyboard is going
+    // away — guarantee the bar comes back even if a viewport event is missed.
+    document.addEventListener("focusout", () => {
+      setTimeout(() => {
+        const a = document.activeElement;
+        if (!a || !a.closest(FOCUS_SEL)) setKb(false);
+      }, 100);
+    });
   }
 
   // Notification overlay + panel
