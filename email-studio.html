@@ -292,7 +292,11 @@ function cardActionsHTML(camp, m) {
     return `<div class="send-bar"><div class="send-status">Part of the automatic welcome sequence — sends ${when}. Use <b>Send test to me</b> above to see it in your inbox. Manage the whole sequence from the bar at the top of this tab.</div></div>`;
   }
   if (camp === "reactivation") {
-    return `<div class="send-bar"><div class="send-status">Evergreen win-back. Its automatic 14-day trigger isn't set up yet (coming next). <b>Send test to me</b> works now.</div></div>`;
+    return `<div class="send-bar">
+      <div class="send-status">Automatic win-back — sends once to a member when they go 14+ days silent. Only catches people who drift <b>from now on</b> (the launch backlog is handled by Relaunch). Dormant until enabled.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px"><button class="btn btn-sm" onclick="caReactivationPreview()">Preview who's due</button></div>
+      <div id="ca-result-reactivation" class="res" style="margin-top:8px"></div>
+    </div>`;
   }
   return "";
 }
@@ -649,6 +653,18 @@ async function caApplyDates() {
   const r = await fetch("/.netlify/functions/sync-join-dates?mode=apply", { headers: { Authorization: `Bearer ${session.access_token}` } });
   const b = await r.json().catch(() => ({}));
   if (el) el.innerHTML = r.ok ? `<span class="ok">Updated ${b.updated} member${b.updated===1?"":"s"}. Failed ${b.failed||0}.</span> Join dates are now real.` : `<span class="err">Error: ${esc(b.error||"failed")}</span>`;
+}
+
+async function caReactivationPreview() {
+  const el = document.getElementById("ca-result-reactivation");
+  if (el) el.innerHTML = "Checking…";
+  const { data: { session } } = await db.auth.getSession();
+  const r = await fetch("/.netlify/functions/reactivation-sequence?mode=preview", { headers: { Authorization: `Bearer ${session.access_token}` } });
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) { if (el) el.innerHTML = `<span class="err">Error: ${esc(b.error || "failed")}</span>`; return; }
+  if (el) el.innerHTML = `Trigger is ${b.liveEnabled ? `<b style="color:#4ade80">LIVE</b>` : `<b style="color:#fbbf24">dormant</b>`}. ` +
+    `<b style="color:#cbd5e1">${b.due}</b> due now (of ${b.dormantTotal} silent 14+ days; the rest are pre-launch backlog, excluded).` +
+    (b.sample && b.sample.length ? `<div style="margin-top:6px;color:var(--mut);max-height:160px;overflow:auto">${b.sample.map(s=>esc(s.email)).join("<br>")}</div>` : "");
 }
 
 async function caWelcomePreview() {
