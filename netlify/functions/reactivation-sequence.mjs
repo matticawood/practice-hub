@@ -40,6 +40,7 @@ export default async (req) => {
   const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const RESEND  = process.env.RESEND_API_KEY;
   const FROM    = process.env.REMINDER_FROM || "The Practice Room <noreply@matthewcawood.com>";
+  const REPLY_TO = process.env.REPLY_TO || "matthew@matthewcawood.com";
   const SITE    = (process.env.SITE_URL || "https://app.matthewcawood.com").replace(/\/$/, "");
   if (!SERVICE || !RESEND) return json(500, { error: "missing env (SERVICE/RESEND)" });
 
@@ -98,7 +99,7 @@ export default async (req) => {
     const batch = chunk.map((m) => {
       const fn = firstName(m.name);
       const unsub = `${SITE}/.netlify/functions/email-unsubscribe?t=${m.unsubscribe_token}&c=reactivation`;
-      return { from: FROM, to: [m.email], subject: renderSubject(content, fn),
+      return { from: FROM, reply_to: REPLY_TO, to: [m.email], subject: renderSubject(content, fn),
         headers: { "List-Unsubscribe": `<${unsub}>` },
         html: renderEmailHTML(content, { firstName: fn, site: SITE, unsub }) };
     });
