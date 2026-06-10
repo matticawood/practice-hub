@@ -338,21 +338,18 @@
     .sq-footer { padding-top: 12px; border-top: 1px solid #111; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
     .sq-footer-brand { font-size: .62rem; color: #252525; font-weight: 600; letter-spacing: .03em; }
     .sq-footer-url   { font-size: .6rem; color: #252525; }
+  .adm-nav { border:1px solid #1e2d4a; background:#1e293b; color:#e2e8f0; border-radius:8px; padding:7px 12px; font-size:.78rem; cursor:pointer; text-decoration:none; line-height:1; display:inline-flex; align-items:center; }
+  .adm-nav:hover { border-color:#334155; color:#fff; }
   </style>
 </head>
 <body>
 
-<header id="app-header" style="display:none">
-  <div class="header-logo"><img src="/icon-192.png" alt="The Practice Room"></div>
-  <div style="flex:1">
-    <h1>The Practice Room</h1>
-    <p>Admin Analytics</p>
-  </div>
-  <div class="header-user">
-    <span id="header-email"></span>
-    <a class="btn btn-ghost btn-sm" href="/index.html"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>Database</a>
-    <a class="btn btn-ghost btn-sm" href="https://app.matthewcawood.com">The Practice Room</a>
-    <button class="btn btn-ghost btn-sm" id="logout-btn">Log out</button>
+<header id="app-header" style="display:none;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #1e2d4a;position:sticky;top:0;background:#0a0f1e;z-index:20">
+  <div style="font-weight:800;font-size:1.05rem;color:#e2e8f0">Admin Analytics <span id="header-email" style="color:#64748b;font-weight:500;font-size:.8rem;margin-left:8px"></span></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a class="adm-nav" href="/email-studio.html">Email Studio</a>
+    <a class="adm-nav" href="/practice-log.html">The Practice Room</a>
+    <button class="adm-nav" id="logout-btn">Log out</button>
   </div>
 </header>
 
@@ -553,6 +550,12 @@ async function loadAnalytics() {
     _safe(db.from("feedback").select("email, type, created_at")),
   ]);
 
+  // Email campaign performance (owner-read).
+  const [emailLog, emailClicks] = await Promise.all([
+    _safe(db.from("email_log").select("campaign, status, delivered_at, opened_at, clicked_at, bounced_at, complained_at, unsubscribed_at")),
+    _safe(db.from("email_clicks").select("campaign, link")),
+  ]);
+
   // ── Who counts as a current member ──
   // The live allowed_emails list is the source of truth: cancelling a subscription
   // removes the row. So the membership gate is "are you still in allowed_emails?".
@@ -598,7 +601,7 @@ async function loadAnalytics() {
   }
 
   render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
-  try { renderInsights2({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows }); }
+  try { renderInsights2({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows, emailLog, emailClicks }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
@@ -1242,6 +1245,49 @@ function renderInsights2(d) {
       const nativePct = Math.round(((platMins["ios-app"]||0)+(platMins["android-app"]||0)) / knownMins * 100);
       h += `<div style="margin-bottom:8px">${bars}</div>
         <div style="font-size:.74rem;color:#64748b;margin-bottom:24px">${nativePct}% of tracked time is in the native apps.${unknownMins ? ` ${Math.round(unknownMins / 60)}h predates tracking (excluded).` : ""}</div>`;
+    }
+  }
+
+  // ── Email performance ──
+  {
+    const elog = d.emailLog || [], eclicks = d.emailClicks || [];
+    const EC = {};
+    for (const r of elog) {
+      const c = (EC[r.campaign] = EC[r.campaign] || { sent:0, delivered:0, opened:0, clicked:0, bounced:0, complained:0, unsub:0 });
+      if (r.status === "sent") c.sent++;
+      if (r.delivered_at) c.delivered++;
+      if (r.opened_at) c.opened++;
+      if (r.clicked_at) c.clicked++;
+      if (r.bounced_at) c.bounced++;
+      if (r.complained_at) c.complained++;
+      if (r.unsubscribed_at) c.unsub++;
+    }
+    const ELBL = { relaunch:"Relaunch", reactivation:"Reactivation", waitlist:"Waitlist", livestream_reminder:"Live clinic reminder", welcome_d0:"Welcome · Day 0", welcome_d2:"Welcome · Day 2", welcome_d5:"Welcome · Day 5", welcome_d10:"Welcome · Day 10" };
+    const eorder = ["relaunch","reactivation","welcome_d0","welcome_d2","welcome_d5","welcome_d10","waitlist","livestream_reminder"];
+    const ecamps = eorder.filter(c => EC[c] && EC[c].sent > 0).concat(Object.keys(EC).filter(c => !eorder.includes(c) && EC[c] && EC[c].sent > 0));
+    const rt = (n, dn) => dn ? Math.round(n / dn * 100) : 0;
+    h += `<h2 class="section-header">${ico('inbox')}Email performance <span class="section-meta">click rate is the real signal · opens are approximate (Apple MPP inflates them)</span></h2>`;
+    if (!ecamps.length) {
+      h += `<div style="font-size:.8rem;color:#64748b;margin-bottom:24px">No campaign emails sent yet — performance appears here once you send.</div>`;
+    } else {
+      h += `<div style="overflow-x:auto;margin-bottom:10px"><table style="width:100%;border-collapse:collapse;font-size:.82rem">
+        <thead><tr style="color:#64748b;text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid #1e2d4a"><th style="padding:4px 7px;text-align:left">Email</th><th style="padding:4px 7px;text-align:right">Sent</th><th style="padding:4px 7px;text-align:right">Deliv.</th><th style="padding:4px 7px;text-align:right">Open*</th><th style="padding:4px 7px;text-align:right">Click</th><th style="padding:4px 7px;text-align:right">Unsub</th><th style="padding:4px 7px;text-align:right">Bounce</th><th style="padding:4px 7px;text-align:right">Spam</th></tr></thead><tbody>
+        ${ecamps.map(c => { const v = EC[c], dn = v.delivered || v.sent; return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 7px;color:#cbd5e1">${ELBL[c] || c}</td>${cell(v.sent)}${cell(v.delivered ? rt(v.delivered, v.sent) + "%" : "—", "color:#64748b")}${cell(v.opened ? rt(v.opened, dn) + "%" : "—", "color:#64748b")}${cell(v.clicked ? rt(v.clicked, dn) + "%" : "—", "color:#4ade80;font-weight:700")}${cell(v.unsub || "—", v.unsub ? "color:#fbbf24" : "color:#64748b")}${cell(v.bounced || "—", v.bounced ? "color:#f87171" : "color:#64748b")}${cell(v.complained || "—", v.complained ? "color:#f87171" : "color:#64748b")}</tr>`; }).join("")}
+        </tbody></table></div>`;
+      const ins = [];
+      const rated = ecamps.filter(c => EC[c].sent >= 5).map(c => ({ c, r: rt(EC[c].clicked, EC[c].delivered || EC[c].sent) })).sort((a, b) => b.r - a.r);
+      if (rated.length) ins.push(`Best click rate: <b>${ELBL[rated[0].c] || rated[0].c}</b> at <b>${rated[0].r}%</b>${rated.length > 1 ? ` (lowest ${rated[rated.length - 1].r}%)` : ""}. Click rate is your truest engagement signal.`);
+      for (const c of ecamps) { const v = EC[c], br = rt(v.bounced, v.sent), ur = rt(v.unsub, v.sent);
+        if (br >= 4) ins.push(`<span style="color:#f87171">${ELBL[c] || c}: ${br}% bounce rate — clean the list before resending.</span>`);
+        if (ur >= 2) ins.push(`<span style="color:#fbbf24">${ELBL[c] || c}: ${ur}% unsubscribe rate — message or frequency may be off.</span>`);
+        if (v.complained > 0) ins.push(`<span style="color:#f87171">${ELBL[c] || c}: ${v.complained} spam complaint(s).</span>`);
+      }
+      const wsteps = ["welcome_d0","welcome_d2","welcome_d5","welcome_d10"].filter(c => EC[c] && EC[c].sent > 0);
+      if (wsteps.length >= 2) ins.push(`Welcome sequence click rates: ${wsteps.map(c => `${ELBL[c].replace("Welcome · ", "")} ${rt(EC[c].clicked, EC[c].delivered || EC[c].sent)}%`).join(" → ")} — watch where engagement drops off.`);
+      const linkN = {}; for (const k of eclicks) if (k.link) linkN[k.link] = (linkN[k.link] || 0) + 1;
+      const topL = Object.entries(linkN).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      if (topL.length) ins.push(`Most-clicked links: ${topL.map(([l, n]) => `${escHtml(l.replace(/^https?:\/\//, "").slice(0, 42))} (${n})`).join(", ")}.`);
+      h += ins.length ? `<ul style="margin:0 0 24px;padding-left:18px;font-size:.82rem;color:#cbd5e1;line-height:1.7">${ins.map(i => `<li>${i}</li>`).join("")}</ul>` : `<div style="margin-bottom:24px"></div>`;
     }
   }
 
