@@ -513,18 +513,23 @@ async function renderAutomations() {
   try { const { data } = await db.from("email_list_subscriptions").select("opted_out").eq("list_slug","waitlist"); wlTotal=(data||[]).length; wlOptedOut=(data||[]).filter(r=>r.opted_out).length; } catch(e){}
 
   // Live-clinic reminders are sent by the older scheduler and tracked on live_events.
+  // It doesn't store a per-clinic recipient count, so we show the reminder audience
+  // (members with reminders on) and the number of clinics reminded.
   let clinicCount = 0, clinicLast = null;
   try { const { data } = await db.from("live_events").select("reminder_sent_at").not("reminder_sent_at","is",null); clinicCount=(data||[]).length; for (const r of (data||[])) if (!clinicLast || r.reminder_sent_at>clinicLast) clinicLast=r.reminder_sent_at; } catch(e){}
+  let reminderAudience = 0;
+  try { const { data } = await db.from("allowed_emails").select("email").eq("livestream_reminders_opt_out", false); reminderAudience = (data||[]).length; } catch(e){}
 
   // ── Fill the per-email status lines (each email's send controls live in its tab) ──
   const setStatus = (camp, html) => { const el = document.getElementById(`sendstatus-${camp}`); if (el) el.innerHTML = html; };
   setStatus("relaunch", `<b style="color:#cbd5e1">${window._reactCohort.length}</b> ready to send · ${reactSent.size ? reactSent.size+" already sent" : "none sent yet"}.`);
   const wlSent = byCamp.waitlist?.sent || 0;
   setStatus("waitlist", `<b style="color:#cbd5e1">${wlTotal}</b> on the list · ${wlOptedOut} unsubscribed · ${wlSent ? wlSent+" sent" : "none sent yet"}. Current and past members are auto-excluded — Preview for the exact count.`);
-  setStatus("livestream_reminder", `Sent automatically ~1h before each clinic. <b style="color:#cbd5e1">${clinicCount}</b> clinic${clinicCount===1?"":"s"} reminded${clinicLast?` · last ${when(clinicLast)}`:""}.`);
+  setStatus("livestream_reminder", `Goes to about <b style="color:#cbd5e1">${reminderAudience}</b> member${reminderAudience===1?"":"s"} each clinic (everyone with reminders on). <b style="color:#cbd5e1">${clinicCount}</b> clinic${clinicCount===1?"":"s"} reminded so far${clinicLast?` · last ${when(clinicLast)}`:""}.`);
 
   // ── Activity log (every email, including live-clinic reminders) ──
-  if (clinicCount) byCamp.livestream_reminder = { sent: clinicCount, failed:0, test:0, skipped:0, last: clinicLast };
+  // No stored per-clinic count, so estimate emails as audience × clinics reminded.
+  if (clinicCount) byCamp.livestream_reminder = { sent: `≈${reminderAudience * clinicCount}`, failed:0, test:0, skipped:0, last: clinicLast };
   const LBL = { relaunch:"Relaunch", reactivation:"Reactivation", waitlist:"Waitlist", livestream_reminder:"Live clinic reminder", welcome_d0:"Welcome · Day 0", welcome_d2:"Welcome · Day 2", welcome_d5:"Welcome · Day 5", welcome_d10:"Welcome · Day 10" };
   const camps = Object.keys(byCamp).sort();
   el.innerHTML = camps.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
