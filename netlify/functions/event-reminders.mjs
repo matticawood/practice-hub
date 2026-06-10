@@ -90,7 +90,7 @@ export default async () => {
 
     // Build one personalised email per recipient: own timezone + unsubscribe link.
     const batch = recipients.map((r) => {
-      const unsub = `${SITE}/.netlify/functions/email-unsubscribe?t=${r.unsubscribe_token}`;
+      const unsub = `${SITE}/.netlify/functions/email-unsubscribe?t=${r.unsubscribe_token}&c=livestream_reminder`;
       const firstName = (r.name || "").trim().split(/\s+/)[0] || "there";
       const userTz = tzByEmail[r.email.toLowerCase()];
       // Known tz → their local time. Unknown → show PST · EST · GMT to self-orient.

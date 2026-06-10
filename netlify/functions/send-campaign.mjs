@@ -229,7 +229,7 @@ export default async (req) => {
   for (let i = 0; i < eligible.length; i += 100) {
     const chunk = eligible.slice(i, i + 100);
     const batch = chunk.map((m) => {
-      const unsub = `${unsubBase}${m.unsubscribe_token}`;
+      const unsub = `${unsubBase}${m.unsubscribe_token}&c=${campaign}`;
       return {
         from: FROM, to: [m.email],
         subject: renderSubject(content, firstName(m.name)),

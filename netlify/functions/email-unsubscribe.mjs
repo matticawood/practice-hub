@@ -17,7 +17,9 @@ const page = (title, body) =>
   );
 
 export default async (req) => {
-  const token = new URL(req.url).searchParams.get("t");
+  const url = new URL(req.url);
+  const token = url.searchParams.get("t");
+  const campaign = url.searchParams.get("c");  // which email drove the unsubscribe
   // UUID shape only — avoids passing junk into the query.
   if (!token || !/^[0-9a-f-]{36}$/i.test(token)) {
     return page("Invalid link", `<p style="font-size:15px;color:#516170;line-height:1.5">This unsubscribe link looks invalid or incomplete.</p>`);
@@ -26,23 +28,24 @@ export default async (req) => {
   const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!SERVICE) return page("Error", `<p style="font-size:15px;color:#516170">Something went wrong. Please try again later.</p>`);
 
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/allowed_emails?unsubscribe_token=eq.${token}`,
-    {
-      method: "PATCH",
-      headers: {
-        apikey: SERVICE,
-        Authorization: `Bearer ${SERVICE}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({ email_opt_out: true }),
-    }
-  );
+  const sb = (p, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${p}`, { ...opts, headers: {
+    apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
+
+  const res = await sb(`allowed_emails?unsubscribe_token=eq.${token}`, {
+    method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ email_opt_out: true }),
+  });
 
   if (!res.ok) {
     console.error("email-unsubscribe: patch failed", await res.text());
     return page("Error", `<p style="font-size:15px;color:#516170">Couldn't update your preferences. Please try again later.</p>`);
+  }
+
+  // Attribute the unsubscribe to the email that drove it (Studio analytics).
+  const email = (await res.json().catch(() => []))[0]?.email;
+  if (email && campaign && /^[a-z0-9_]+$/i.test(campaign)) {
+    await sb(`email_log?email=eq.${encodeURIComponent(email)}&campaign=eq.${encodeURIComponent(campaign)}&status=eq.sent`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ unsubscribed_at: new Date().toISOString() }),
+    }).catch(() => {});
   }
 
   return page(
