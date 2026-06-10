@@ -128,7 +128,8 @@ export default async (req) => {
   // Owner preview: full plan with sample (owner-authenticated above).
   if (mode === "preview") {
     return json(200, {
-      mode, sequenceStart: SEQUENCE_START, enrolledMembers: members.length, due: plan.length, counts,
+      mode, liveEnabled: process.env.WELCOME_SEQUENCE_LIVE === "true",
+      sequenceStart: SEQUENCE_START, enrolledMembers: members.length, due: plan.length, counts,
       sample: plan.slice(0, 20).map((p) => ({ email: p.email, step: p.campaign, age: p.age,
         greeting: `Hi ${firstName(p.name)},`, timeIn: p.campaign === "welcome_d10" ? friendlyAge(p.age) : undefined })),
       note: "Preview only — nothing sent.",
