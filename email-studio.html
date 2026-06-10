@@ -508,6 +508,7 @@ async function renderAutomations() {
     if (!c.last || r.sent_at > c.last) c.last = r.sent_at;
   }
   window._emailLog = logRows;  // for the per-recipient drill-down
+  try { const { data } = await db.from("email_clicks").select("campaign,email,link,clicked_at").limit(3000); window._emailClicks = data || []; } catch (e) { window._emailClicks = []; }
 
   const when = ts => ts ? new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+new Date(ts).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}) : "—";
 
@@ -573,10 +574,24 @@ function caRecipients(campaign) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <b style="color:#cbd5e1;font-size:.82rem">Recipients · ${esc(STUDIO_LBL[campaign]||campaign)} (${rows.length})</b>
       <button class="btn btn-sm" onclick="document.getElementById('recipients-detail').innerHTML=''">Close</button></div>
-    ${rows.length ? `<div style="max-height:340px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:.76rem"><tbody>
+    ${rows.length ? `<div style="max-height:300px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:.76rem"><tbody>
       ${rows.map(r=>{const [s,col]=stateOf(r);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 8px 3px 0;color:#cbd5e1;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.email)}</td><td style="padding:3px 0;text-align:right;color:${col}">${s}</td></tr>`;}).join("")}
       </tbody></table></div>` : `<div style="color:var(--mut);font-size:.78rem">No sent recipients logged yet.</div>`}
+    ${linksSummaryHTML(campaign)}
   </div>`;
+}
+
+// Which links were clicked, and how often, for a campaign.
+function linksSummaryHTML(campaign) {
+  const clicks = (window._emailClicks || []).filter(c => c.campaign === campaign && c.link);
+  if (!clicks.length) return "";
+  const byLink = {}; for (const c of clicks) byLink[c.link] = (byLink[c.link] || 0) + 1;
+  const ranked = Object.entries(byLink).sort((a,b) => b[1]-a[1]);
+  return `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+    <div style="color:var(--mut);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Links clicked</div>
+    <table style="width:100%;border-collapse:collapse;font-size:.76rem"><tbody>
+    ${ranked.map(([link,n])=>`<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 8px 3px 0;color:#93c5fd;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(link)}</td><td style="padding:3px 0;text-align:right;color:#cbd5e1">${n} click${n===1?"":"s"}</td></tr>`).join("")}
+    </tbody></table></div>`;
 }
 
 async function caSend(campaign, mode) {
