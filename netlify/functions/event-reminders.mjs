@@ -22,6 +22,7 @@ export default async () => {
   const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const RESEND = process.env.RESEND_API_KEY;
   const FROM = process.env.REMINDER_FROM || "The Practice Room <noreply@matthewcawood.com>";
+  const REPLY_TO = process.env.REPLY_TO || "matthew@matthewcawood.com";
   const SITE = (process.env.SITE_URL || "").replace(/\/$/, "");
 
   if (!SERVICE || !RESEND || !FROM) {
@@ -96,7 +97,7 @@ export default async () => {
       // Known tz → their local time. Unknown → show PST · EST · GMT to self-orient.
       const timeStr = userTz ? fmtTime(when, userTz, eventTz) : fmtMultiZone(when);
       return {
-        from: FROM,
+        from: FROM, reply_to: REPLY_TO,
         to: [r.email],
         subject: `Starts in 1 hour: ${ev.title}`,
         headers: { "List-Unsubscribe": `<${unsub}>` },
