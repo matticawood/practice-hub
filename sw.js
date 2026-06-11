@@ -1,5 +1,5 @@
 // The Practice Room — Service Worker
-const CACHE = 'practice-room-v28';
+const CACHE = 'practice-room-v30';
 const PRECACHE = [
   '/',
   '/practice-log.html',
