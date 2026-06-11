@@ -112,7 +112,7 @@ const SH_SUBNAV = {
 
     /* ── Desktop left sidebar (professional dashboard layout) ── */
     #sh-sidebar { display: none; }
-    @media (min-width: 769px) {
+    @media (min-width: 1025px), (orientation: landscape) and (min-width: 769px) {
       body { padding-left: 244px; }
       #sh-sidebar {
         display: flex; flex-direction: column;
@@ -160,7 +160,7 @@ const SH_SUBNAV = {
       .sh-hdr-inner { padding-left: 28px; padding-right: 28px; }
       main { padding-left: 28px; padding-right: 28px; }
     }
-    @media (max-width: 768px) {
+    @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #sh-sidebar { display: none; }
     }
     .sh-tab {
@@ -178,7 +178,7 @@ const SH_SUBNAV = {
     /* ── Hamburger: always hidden ── */
     #sh-hamburger-btn { display: none !important; }
     /* Below the desktop breakpoint the bottom bar takes over: hide inline nav. */
-    @media (max-width: 768px) {
+    @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       .sh-primary-nav { display: none; }
       .sh-hdr-left { flex: 1; gap: 0; }
     }
@@ -192,7 +192,7 @@ const SH_SUBNAV = {
     #sh-mob-bottom-bar {
       display: none;
     }
-    @media (max-width: 768px) {
+    @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #sh-mob-bottom-bar {
         display: flex;
         position: fixed;
@@ -247,7 +247,7 @@ const SH_SUBNAV = {
     }
     /* ── Desktop: secondary nav as light underlined page tabs (GitHub/Stripe style).
        Built from the page's own theme variables so it adapts to light AND dark pages. ── */
-    @media (min-width: 769px) {
+    @media (min-width: 1025px), (orientation: landscape) and (min-width: 769px) {
       #sh-mob-subnav {
         display: block;
         background: transparent;
@@ -276,7 +276,7 @@ const SH_SUBNAV = {
         border-bottom-color: var(--accent, #f5c518);
       }
     }
-    @media (max-width: 768px) {
+    @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #sh-mob-subnav {
         display: block;
         position: sticky;
