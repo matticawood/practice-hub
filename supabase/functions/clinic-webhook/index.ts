@@ -4,6 +4,35 @@ const RESEND_API_KEY        = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL          = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY           = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
+// ── Branded email shell (matches The Practice Room transactional style:
+//    cream card, gold pill eyebrow, logo header, gold CTA) ──────────────
+const BRAND_LOGO = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/logo.png";
+function brandedEmail(o: {
+  eyebrow?: string; heading?: string; paragraphs?: string[];
+  detail?: string; ctaText?: string; ctaHref?: string; footerNote?: string;
+}): string {
+  const P = (h: string) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.62;color:#42382e">${h}</p>`;
+  const body = (o.paragraphs || []).map(P).join("");
+  const eb = o.eyebrow ? `<tr><td style="padding:0 36px 6px;text-align:center"><span style="display:inline-block;background:#F5C518;color:#1a1410;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:6px 13px;border-radius:999px">${o.eyebrow}</span></td></tr>` : "";
+  const hd = o.heading ? `<tr><td style="padding:14px 36px 2px;text-align:center"><h1 style="margin:0;font-size:22px;line-height:1.25;color:#42382e;font-weight:800;letter-spacing:-.01em">${o.heading}</h1></td></tr>` : "";
+  const dt = o.detail ? `<tr><td style="padding:12px 36px 2px"><div style="background:#f7f4ef;border:1px solid #ece5db;border-radius:12px;padding:15px 17px;font-size:14px;line-height:1.65;color:#42382e">${o.detail}</div></td></tr>` : "";
+  const cta = o.ctaText ? `<tr><td style="padding:18px 36px 30px;text-align:center"><a href="${o.ctaHref}" style="display:inline-block;background:#F5C518;color:#1a1410;text-decoration:none;font-weight:700;font-size:15px;padding:14px 34px;border-radius:11px">${o.ctaText}</a></td></tr>` : "";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;padding:0;background:#faf7f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1a1410;-webkit-font-smoothing:antialiased">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf7f3;padding:32px 16px"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #ece5db;border-radius:18px;overflow:hidden">
+<tr><td style="padding:30px 36px 14px;text-align:center"><img src="${BRAND_LOGO}" width="46" height="46" alt="" style="display:inline-block;border-radius:12px"><div style="margin-top:10px;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#a99d8c">Matthew Cawood</div></td></tr>
+${eb}${hd}
+<tr><td style="padding:14px 38px 2px">${body}</td></tr>
+${dt}${cta}
+<tr><td style="padding:20px 36px;border-top:1px solid #f0ebe3;text-align:center;font-size:12px;color:#a99d8c;line-height:1.6">${o.footerNote || "Matthew Cawood · Pianist, Producer &amp; Educator"}<br><a href="https://matthewcawood.com" style="color:#a99d8c;text-decoration:underline">matthewcawood.com</a></td></tr>
+</table></td></tr></table></body></html>`;
+}
+
+// ── Email detail-row icons: hosted PNGs (render in every client, incl. Gmail) ──
+const ICON_BASE = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/icons";
+const ic = (n: string) => `<img src="${ICON_BASE}/${n}.png" width="15" height="15" alt="" style="vertical-align:-2px;margin-right:9px">`;
+
 // ── Package purchase → grant lesson credits + email the buyer ──
 async function grantPackageCredits(meta: Record<string, string>, session: any) {
   const email = (meta.attendeeEmail || session.customer_details?.email || "").toLowerCase();
@@ -26,14 +55,19 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
       body: JSON.stringify({
         from: NOTIFY_FROM,
         to: [email],
-        subject: `Your ${qty}-lesson package is ready 🎹`,
-        html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#1a1410">
-          <h2 style="color:#42382e">You've got ${qty} lessons.</h2>
-          <p style="line-height:1.7">Thanks for booking a package of <strong>${qty} one-hour lessons</strong> with Matthew. You can schedule each one whenever suits you — no need to pay again.</p>
-          <p style="line-height:1.7">To book a lesson, head to the booking page, choose <strong>"Use my lesson package"</strong> and enter this email address (<strong>${email}</strong>):</p>
-          <p><a href="https://matthewcawood.com/book-a-lesson/" style="display:inline-block;background:#f5c518;color:#3a2f12;font-weight:700;text-decoration:none;padding:12px 22px;border-radius:9px">Book a lesson →</a></p>
-          <p style="font-size:.85rem;color:#8a7868;margin-top:20px">Lessons remaining: ${qty}. They never expire.</p>
-        </div>`,
+        subject: `Your ${qty}-lesson package is ready`,
+        html: brandedEmail({
+          eyebrow: "Lesson Package",
+          heading: `You've got ${qty} lessons`,
+          paragraphs: [
+            `Thank you for booking a package of <strong>${qty} one-hour lessons</strong> with Matthew. Schedule each one whenever suits you.`,
+            `When you're ready, head to the booking page, choose <strong>&ldquo;Use my lesson package&rdquo;</strong>, and enter the email on this order: <strong>${email}</strong>.`,
+          ],
+          detail: `${ic("ticket")}<strong>${qty} lesson${qty === 1 ? "" : "s"} remaining</strong> &nbsp;·&nbsp; Valid until ${new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`,
+          ctaText: "Book your first lesson →",
+          ctaHref: "https://matthewcawood.com/book-a-lesson/",
+          footerNote: "Matthew Cawood · Online Piano Lessons",
+        }),
       }),
     });
   } catch (e: any) { console.error("package buyer email failed:", e.message); }
@@ -46,7 +80,13 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
       body: JSON.stringify({
         from: NOTIFY_FROM, to: [NOTIFY_TO],
         subject: `New package: ${qty} lessons — ${meta.attendeeName || email}`,
-        html: `<div style="font-family:system-ui,sans-serif"><p><strong>${meta.attendeeName || "—"}</strong> (${email}) bought a <strong>${qty}-lesson package</strong>.</p><p>Paid £${((session.amount_total||0)/100).toFixed(2)}. They'll book each lesson via the redeem flow.</p></div>`,
+        html: brandedEmail({
+          eyebrow: "New Package",
+          heading: `${qty}-lesson package sold`,
+          paragraphs: [`<strong>${meta.attendeeName || "n/a"}</strong> (${email}) bought a <strong>${qty}-lesson package</strong>.`],
+          detail: `${ic("pound")}Paid <strong>${((session.amount_total||0)/100).toFixed(2)} ${(session.currency||"gbp").toUpperCase()}</strong> &nbsp;·&nbsp; ${qty} credit${qty === 1 ? "" : "s"} granted. They'll book each lesson via the redeem flow.`,
+          footerNote: "Internal notification · matthewcawood.com",
+        }),
       }),
     });
   } catch (_) { /* best-effort */ }
@@ -101,61 +141,34 @@ async function sendNotificationEmail(
       hour: "2-digit", minute: "2-digit",
       timeZone: meta.attendeeTimeZone || "Europe/London",
     });
-    const duration  = meta.duration ? `${meta.duration} Min` : "";
+    const sessionLabel = meta.duration === "60" ? "1-Hour Lesson" : `${meta.duration || ""} Min Clinic`;
     const fileUrl   = meta.fileUrl || null;
 
-    const html = `
-      <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;color:#111">
-        <h2 style="margin-bottom:4px">New Clinic Booking 🎹</h2>
-        <p style="color:#666;margin-top:0">${duration} Clinic · ${dateStr} at ${timeStr}</p>
+    const fileLinks = fileUrl
+      ? fileUrl.split(", ").map((url: string, i: number) =>
+          `<a href="${url}" style="color:#9a6f12;font-weight:600">View file${fileUrl.split(", ").length > 1 ? " " + (i + 1) : ""} →</a>`).join("&nbsp;&nbsp;")
+      : "";
+    const detail = [
+      `${ic("music")}<strong>${sessionLabel}</strong>`,
+      `${ic("calendar")}${dateStr} at ${timeStr}`,
+      `${ic("user")}${meta.attendeeName || "n/a"} &nbsp;·&nbsp; <a href="mailto:${meta.attendeeEmail}" style="color:#9a6f12">${meta.attendeeEmail || "n/a"}</a>`,
+      `${ic("globe")}${meta.attendeeTimeZone || "n/a"}`,
+      `${ic("pound")}Paid ${meta.paid || "n/a"}`,
+      zoomUrl ? `${ic("link")}<a href="${zoomUrl}" style="color:#9a6f12;font-weight:600">Join the Zoom call</a>` : "",
+      fileLinks ? `${ic("clip")}${fileLinks}` : "",
+    ].filter(Boolean).join("<br>");
 
-        <table style="width:100%;border-collapse:collapse;margin:20px 0">
-          <tr>
-            <td style="padding:8px 0;border-bottom:1px solid #eee;color:#888;width:120px">Student</td>
-            <td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600">${meta.attendeeName || "—"}</td>
-          </tr>
-          <tr>
-            <td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Email</td>
-            <td style="padding:8px 0;border-bottom:1px solid #eee">
-              <a href="mailto:${meta.attendeeEmail}" style="color:#2563eb">${meta.attendeeEmail}</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Timezone</td>
-            <td style="padding:8px 0;border-bottom:1px solid #eee">${meta.attendeeTimeZone || "—"}</td>
-          </tr>
-          <tr>
-            <td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Paid</td>
-            <td style="padding:8px 0;border-bottom:1px solid #eee">${meta.paid || "—"}</td>
-          </tr>
-          ${zoomUrl ? `
-          <tr>
-            <td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Zoom</td>
-            <td style="padding:8px 0;border-bottom:1px solid #eee">
-              <a href="${zoomUrl}" style="color:#2563eb">Join meeting →</a>
-            </td>
-          </tr>` : ""}
-        </table>
-
-        ${notes ? `
-        <div style="background:#f9f9f9;border-left:3px solid #2563eb;padding:12px 16px;border-radius:0 6px 6px 0;margin-bottom:16px">
-          <p style="margin:0 0 4px;font-size:.8rem;color:#888;text-transform:uppercase;letter-spacing:.05em">What they want to work on</p>
-          <p style="margin:0;line-height:1.6">${notes.replace(/\n/g, "<br>")}</p>
-        </div>` : ""}
-
-        ${fileUrl ? `
-        <div style="margin-bottom:16px">
-          <p style="margin:0 0 8px;font-size:.8rem;color:#888;text-transform:uppercase;letter-spacing:.05em">Attachments</p>
-          ${fileUrl.split(", ").map((url: string, i: number) => `
-            <a href="${url}" style="display:inline-block;background:#2563eb;color:#fff;padding:7px 14px;border-radius:6px;text-decoration:none;font-size:.85rem;margin-right:6px;margin-bottom:6px">
-              View file ${fileUrl.split(", ").length > 1 ? i + 1 : ""} →
-            </a>`).join("")}
-        </div>` : ""}
-
-        <p style="font-size:.75rem;color:#aaa;margin-top:24px;border-top:1px solid #eee;padding-top:12px">
-          Stripe session: ${meta.stripeSessionId || "—"}
-        </p>
-      </div>`;
+    const html = brandedEmail({
+      eyebrow: "New Booking",
+      heading: `${sessionLabel} booked`,
+      paragraphs: notes
+        ? [`<span style="color:#a99d8c;font-size:13px;text-transform:uppercase;letter-spacing:.05em;font-weight:700">What they want to work on</span><br>${notes.replace(/\n/g, "<br>")}`]
+        : [],
+      detail,
+      ctaText: zoomUrl ? "Join the Zoom call →" : undefined,
+      ctaHref: zoomUrl || undefined,
+      footerNote: `Internal notification · Stripe ${meta.stripeSessionId || "—"}`,
+    });
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -166,7 +179,7 @@ async function sendNotificationEmail(
       body: JSON.stringify({
         from:    NOTIFY_FROM,
         to:      [NOTIFY_TO],
-        subject: `New Booking: ${meta.attendeeName || "Student"} — ${duration} Clinic · ${dateStr}`,
+        subject: `New Booking: ${meta.attendeeName || "Student"} — ${sessionLabel} · ${dateStr}`,
         html,
       }),
     });

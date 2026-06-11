@@ -16,9 +16,12 @@ Deno.serve(async (req) => {
   const email = (new URL(req.url).searchParams.get("email") || "").trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ remaining: 0 });
 
+  // Credits are valid for 12 months from purchase — exclude anything older.
+  const yearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/lesson_credits?select=remaining&email=eq.${encodeURIComponent(email)}`,
+      `${SUPABASE_URL}/rest/v1/lesson_credits?select=remaining&email=eq.${encodeURIComponent(email)}&created_at=gt.${encodeURIComponent(yearAgo)}`,
       { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
     );
     if (!res.ok) { console.error("credits read failed", res.status, await res.text()); return json({ remaining: 0 }); }

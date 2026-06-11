@@ -76,6 +76,46 @@ export const CAMPAIGN_META = {
     status: "live",
     readOnly: true,   // dynamic content (clinic title + each member's local time)
   },
+
+  // ── Booking / lesson emails (transactional, sent by the clinic-webhook and
+  //    lesson-redeem edge functions). Preview-only here: copy lives in the
+  //    functions, shown with sample details. ──
+  booking_package_buyer: {
+    title: "Package purchased",
+    group: "Booking emails",
+    audience: "The customer, right after they buy a lesson package",
+    trigger: "Automatic — on a successful package purchase",
+    status: "live",
+    readOnly: true, booking: "package_buyer",
+    readOnlyNote: "Subject: “Your 6-lesson package is ready”. Sent automatically by the booking system when someone buys a lesson package — tells them how to book each lesson. Shown with sample details; copy lives in the clinic-webhook function.",
+  },
+  booking_lesson_confirmed: {
+    title: "Lesson booked (customer)",
+    group: "Booking emails",
+    audience: "The student, after they redeem a package credit for a lesson",
+    trigger: "Automatic — when a package lesson is booked",
+    status: "live",
+    readOnly: true, booking: "lesson_confirmed",
+    readOnlyNote: "Subject: “Your lesson is booked”. Sent automatically when a package credit is redeemed. Carries a calendar (.ics) attachment plus the two buttons below. Shown with sample details; copy lives in the lesson-redeem function.",
+  },
+  booking_new_booking_notif: {
+    title: "New booking (your copy)",
+    group: "Booking emails",
+    audience: "You — an internal heads-up for every paid booking",
+    trigger: "Automatic — on every paid clinic / lesson booking",
+    status: "live",
+    readOnly: true, booking: "new_booking",
+    readOnlyNote: "Your internal notification for each paid booking (clinic or 1-hour lesson), with what the student wants to work on. Shown with sample details; copy lives in the clinic-webhook function.",
+  },
+  booking_package_notif: {
+    title: "Package sold (your copy)",
+    group: "Booking emails",
+    audience: "You — an internal heads-up when a package sells",
+    trigger: "Automatic — on a successful package purchase",
+    status: "live",
+    readOnly: true, booking: "package_notif",
+    readOnlyNote: "Your internal notification when a lesson package sells. Shown with sample details; copy lives in the clinic-webhook function.",
+  },
 };
 
 export const EMAIL_DEFAULTS = {
@@ -357,4 +397,82 @@ export function contentForCampaign(campaign, dbRow) {
     ctaText:   dbRow.cta_text  ?? base.ctaText,
     ctaHref:   dbRow.cta_href  ?? base.ctaHref,
   };
+}
+
+// ── Booking / lesson emails (transactional) ──────────────────────────────────
+// A faithful JS port of the brandedEmail() shell used by the clinic-webhook and
+// lesson-redeem edge functions, so the Studio previews exactly what gets sent.
+// Copy lives in those functions; this renders preview-only samples.
+const BOOKING_LOGO  = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/logo.png";
+const BOOKING_ICONS = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/icons";
+const bIc = (n) => `<img src="${BOOKING_ICONS}/${n}.png" width="15" height="15" alt="" style="vertical-align:-2px;margin-right:9px">`;
+
+export function renderBookingEmail(o = {}) {
+  const P = (h) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.62;color:#42382e">${h}</p>`;
+  const body = (o.paragraphs || []).map(P).join("");
+  const eb = o.eyebrow ? `<tr><td style="padding:0 36px 6px;text-align:center"><span style="display:inline-block;background:#F5C518;color:#1a1410;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:6px 13px;border-radius:999px">${o.eyebrow}</span></td></tr>` : "";
+  const hd = o.heading ? `<tr><td style="padding:14px 36px 2px;text-align:center"><h1 style="margin:0;font-size:22px;line-height:1.25;color:#42382e;font-weight:800;letter-spacing:-.01em">${o.heading}</h1></td></tr>` : "";
+  const dt = o.detail ? `<tr><td style="padding:12px 36px 2px"><div style="background:#f7f4ef;border:1px solid #ece5db;border-radius:12px;padding:15px 17px;font-size:14px;line-height:1.65;color:#42382e">${o.detail}</div></td></tr>` : "";
+  const btn = (text, href, primary) => `<a href="${href}" style="display:inline-block;box-sizing:border-box;width:240px;margin:5px;padding:13px 10px;text-align:center;background:${primary ? "#F5C518" : "#ffffff"};color:#1a1410;text-decoration:none;font-weight:700;font-size:15px;border-radius:11px;${primary ? "" : "border:1.5px solid #e2d9c9;"}">${text}</a>`;
+  const cta = (o.ctaText || o.cta2Text)
+    ? `<tr><td style="padding:18px 30px 28px;text-align:center">${o.ctaText ? btn(o.ctaText, o.ctaHref || "#", true) : ""}${o.cta2Text ? btn(o.cta2Text, o.cta2Href || "#", false) : ""}</td></tr>`
+    : "";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;padding:0;background:#faf7f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1a1410;-webkit-font-smoothing:antialiased">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf7f3;padding:32px 16px"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #ece5db;border-radius:18px;overflow:hidden">
+<tr><td style="padding:30px 36px 14px;text-align:center"><img src="${BOOKING_LOGO}" width="46" height="46" alt="" style="display:inline-block;border-radius:12px"><div style="margin-top:10px;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#a99d8c">Matthew Cawood</div></td></tr>
+${eb}${hd}
+<tr><td style="padding:14px 38px 2px">${body}</td></tr>
+${dt}${cta}
+<tr><td style="padding:20px 36px;border-top:1px solid #f0ebe3;text-align:center;font-size:12px;color:#a99d8c;line-height:1.6">${o.footerNote || "Matthew Cawood · Pianist, Producer &amp; Educator"}<br><a href="https://matthewcawood.com" style="color:#a99d8c;text-decoration:underline">matthewcawood.com</a></td></tr>
+</table></td></tr></table></body></html>`;
+}
+
+// Preview-only sample renders for the four booking emails, keyed by CAMPAIGN_META.booking.
+export function renderBookingHTML(key) {
+  const ZOOM = "https://zoom.us/j/9876543210";
+  const gcal = "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Piano+Lesson+with+Matthew+Cawood&dates=20260616T140000Z/20260616T150000Z&location=" + encodeURIComponent(ZOOM);
+  if (key === "package_buyer") return renderBookingEmail({
+    eyebrow: "Lesson Package", heading: "You've got 6 lessons",
+    paragraphs: [
+      "Thank you for booking a package of <strong>6 one-hour lessons</strong> with Matthew. Schedule each one whenever suits you.",
+      "When you're ready, head to the booking page, choose <strong>&ldquo;Use my lesson package&rdquo;</strong>, and enter the email on this order: <strong>alex@example.com</strong>.",
+    ],
+    detail: `${bIc("ticket")}<strong>6 lessons remaining</strong> &nbsp;·&nbsp; Valid until 11 June 2027`,
+    ctaText: "Book your first lesson →", ctaHref: "https://matthewcawood.com/book-a-lesson/",
+    footerNote: "Matthew Cawood · Online Piano Lessons",
+  });
+  if (key === "lesson_confirmed") return renderBookingEmail({
+    eyebrow: "Lesson Confirmed", heading: "You're booked in",
+    paragraphs: [
+      "Your 1-hour lesson with Matthew is confirmed. The details are below, and the same link works on the day.",
+      "Add it to your calendar with the button below, or open the attached <strong>lesson.ics</strong> file.",
+    ],
+    detail: `${bIc("calendar")}<strong>Monday, 16 June 2026</strong><br>${bIc("clock")}10:00 (America/Toronto)<br>${bIc("ticket")}5 lessons remaining in your package`,
+    ctaText: "Join the Zoom call →", ctaHref: ZOOM,
+    cta2Text: "Add to Google Calendar", cta2Href: gcal,
+    footerNote: "Matthew Cawood · Online Piano Lessons",
+  });
+  if (key === "new_booking") return renderBookingEmail({
+    eyebrow: "New Booking", heading: "1-Hour Lesson booked",
+    paragraphs: [`<span style="color:#a99d8c;font-size:13px;text-transform:uppercase;letter-spacing:.05em;font-weight:700">What they want to work on</span><br>Chopin Nocturne Op.9 No.2, struggling with the left-hand rubato.`],
+    detail: [
+      `${bIc("music")}<strong>1-Hour Lesson</strong>`,
+      `${bIc("calendar")}Monday, 16 June 2026 at 10:00`,
+      `${bIc("user")}Alex Taylor &nbsp;·&nbsp; <a href="mailto:alex@example.com" style="color:#9a6f12">alex@example.com</a>`,
+      `${bIc("globe")}America/Toronto`,
+      `${bIc("pound")}Paid 90.00 CAD`,
+      `${bIc("link")}<a href="${ZOOM}" style="color:#9a6f12;font-weight:600">Join the Zoom call</a>`,
+    ].join("<br>"),
+    ctaText: "Join the Zoom call →", ctaHref: ZOOM,
+    footerNote: "Internal notification · Stripe cs_test_abc123",
+  });
+  if (key === "package_notif") return renderBookingEmail({
+    eyebrow: "New Package", heading: "6-lesson package sold",
+    paragraphs: [`<strong>Alex Taylor</strong> (alex@example.com) bought a <strong>6-lesson package</strong>.`],
+    detail: `${bIc("pound")}Paid <strong>505.00 CAD</strong> &nbsp;·&nbsp; 6 credits granted. They'll book each lesson via the redeem flow.`,
+    footerNote: "Internal notification · matthewcawood.com",
+  });
+  return "<p style='font-family:sans-serif;padding:24px'>Unknown booking email.</p>";
 }
