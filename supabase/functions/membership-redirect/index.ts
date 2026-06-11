@@ -74,9 +74,16 @@ Deno.serve(async (req) => {
   }
 
   const currency = (country && COUNTRY_CURRENCY[country]) ? COUNTRY_CURRENCY[country] : "GBP";
-  const url = LINKS[currency] ?? LINKS["GBP"];
+  let url = LINKS[currency] ?? LINKS["GBP"];
 
-  console.log(`country=${country} → currency=${currency}`);
+  // Thread the landing-page visitor id through to Stripe. Payment Links accept a
+  // client_reference_id query param, which surfaces in the checkout.session.completed
+  // webhook so we can attribute the conversion back to the exact /signup visit.
+  const vidRaw = new URL(req.url).searchParams.get("vid");
+  const vid = vidRaw ? vidRaw.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64) : "";
+  if (vid) url += (url.includes("?") ? "&" : "?") + "client_reference_id=" + encodeURIComponent(vid);
+
+  console.log(`country=${country} → currency=${currency}${vid ? ` vid=${vid}` : ""}`);
 
   return new Response(null, {
     status: 302,

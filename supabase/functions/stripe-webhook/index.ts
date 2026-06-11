@@ -79,6 +79,26 @@ Deno.serve(async (req) => {
       return new Response("DB error", { status: 500 });
     }
 
+    // Landing-page conversion attribution (best-effort, never blocks provisioning).
+    // The vid was threaded from /signup via Stripe client_reference_id.
+    try {
+      const vid = typeof session.client_reference_id === "string"
+        ? session.client_reference_id.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64)
+        : "";
+      if (vid) {
+        const { error: convErr } = await supabase
+          .from("signup_conversions")
+          .upsert({
+            vid,
+            email,
+            currency: session.currency ? String(session.currency).toUpperCase() : null,
+          }, { onConflict: "vid,email", ignoreDuplicates: true });
+        if (convErr) console.warn("conversion record failed:", convErr.message);
+      }
+    } catch (e) {
+      console.warn("conversion record threw:", e);
+    }
+
     // Send invite email
     const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
       redirectTo: `${APP_URL}/onboarding.html`,

@@ -250,9 +250,9 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
     <h1 style="">The piano platform built<br><span style="">for how you actually learn.</span></h1>
     <p class="hero-sub" style="">The Practice Room is a feature-packed app for piano learners with tools to track your progress, explore repertoire, build theory knowledge, and connect with a community of people who love the instrument as much as you do.</p>
     <div class="hero-cta" style="">
-      <a href="/join.html" class="btn-primary" style="">Join The Practice Room →</a>
+      <a href="/join.html" class="btn-primary" data-cta="join-hero" style="">Join The Practice Room →</a>
     </div>
-    <p class="hero-byline" style=""><span style="font-size: 17px;"><span style="color: rgb(255, 255, 255);">already a member?</span> <a href="/" target="_blank" rel="noopener noreferrer" style=""><span style="color: rgb(238, 207, 0);">Sign In</span></a></span></p>
+    <p class="hero-byline" style=""><span style="font-size: 17px;"><span style="color: rgb(255, 255, 255);">already a member?</span> <a href="/" data-cta="signin" style=""><span style="color: rgb(238, 207, 0);">Sign In</span></a></span></p>
   </div>
 </section>
 <section class="video-section" style="padding: 60px 20px; background: rgb(15, 15, 15); text-align: center;">
@@ -490,7 +490,7 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
       <span class="price-period" style="">/month</span></div>
     <div class="price-equiv" style="">$17.99 USD · €14.99 EUR · pricing shown in your local currency at checkout</div>
   </div>
-  <a href="/join.html" class="btn-primary" style="">Join The Practice Room →</a>
+  <a href="/join.html" class="btn-primary" data-cta="join-final" style="">Join The Practice Room →</a>
   
 <span class="cta-small" style="">Membership includes access to all tools, the pieces library, theory articles, practice tools, live streams, and the community.</span>
 </div>
@@ -504,6 +504,79 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
   if(!('IntersectionObserver' in window)){els.forEach(function(e){e.classList.add('visible')});return;}
   var io=new IntersectionObserver(function(en){en.forEach(function(x){if(x.isIntersecting){x.target.classList.add('visible');io.unobserve(x.target);}})},{threshold:0.12});
   els.forEach(function(e){io.observe(e)});
+})();
+</script>
+
+<script>
+/* Cookieless landing-page analytics. A random vid lives in localStorage; events
+   are beaconed to /.netlify/functions/track. No cookies, no third-party, no PII. */
+(function(){
+  var ENDPOINT='/.netlify/functions/track';
+  var vid;
+  try{
+    vid=localStorage.getItem('tpr_vid');
+    if(!vid){ vid=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2)); localStorage.setItem('tpr_vid',vid); }
+  }catch(e){ vid='nostore-'+Math.random().toString(36).slice(2); }
+
+  var q=new URLSearchParams(location.search);
+  var ua=navigator.userAgent||'';
+  var base={
+    vid:vid,
+    path:location.pathname,
+    referrer:document.referrer||'',
+    utm_source:q.get('utm_source'), utm_medium:q.get('utm_medium'),
+    utm_campaign:q.get('utm_campaign'), utm_content:q.get('utm_content'), utm_term:q.get('utm_term'),
+    device:/Mobi|Android|iPhone|iPad|iPod/i.test(ua)?'mobile':'desktop',
+    screen_w:(window.screen&&screen.width)||0
+  };
+
+  function send(event,extra){
+    var payload=Object.assign({event:event},base,extra||{});
+    try{
+      var body=JSON.stringify(payload);
+      if(navigator.sendBeacon){ navigator.sendBeacon(ENDPOINT,new Blob([body],{type:'application/json'})); }
+      else{ fetch(ENDPOINT,{method:'POST',body:body,headers:{'Content-Type':'application/json'},keepalive:true}); }
+    }catch(e){}
+  }
+
+  // Attach vid to the Join CTAs so it threads through checkout -> Stripe client_reference_id.
+  [].forEach.call(document.querySelectorAll('a[href^="/join.html"]'),function(a){
+    var u=new URL(a.getAttribute('href'),location.origin);
+    u.searchParams.set('vid',vid);
+    if(base.utm_source) u.searchParams.set('utm_source',base.utm_source);
+    a.setAttribute('href',u.pathname+u.search);
+  });
+
+  // view
+  send('view');
+
+  // scroll depth milestones (25/50/75/100), each fired once
+  var hit={}, marks=[25,50,75,100];
+  function onScroll(){
+    var doc=document.documentElement;
+    var h=Math.max(doc.scrollHeight,document.body.scrollHeight);
+    var pct=Math.min(100,Math.round((window.scrollY+window.innerHeight)/h*100));
+    for(var i=0;i<marks.length;i++){ var m=marks[i]; if(pct>=m && !hit[m]){ hit[m]=1; send('scroll',{scroll_pct:m}); } }
+    if(hit[100]) window.removeEventListener('scroll',onScroll);
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});
+  onScroll();
+
+  // video play (mux-player emits a 'play' event)
+  var mp=document.querySelector('mux-player');
+  if(mp){ var played=false; mp.addEventListener('play',function(){ if(!played){ played=true; send('video_play'); } }); }
+
+  // CTA clicks
+  document.addEventListener('click',function(e){
+    var a=e.target.closest && e.target.closest('a[data-cta]');
+    if(a) send('cta_click',{cta:a.getAttribute('data-cta')});
+  },true);
+
+  // time on page (fire once on first hide / unload)
+  var start=Date.now(), left=false;
+  function leave(){ if(left)return; left=true; send('leave',{dur_ms:Date.now()-start}); }
+  document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden') leave(); });
+  window.addEventListener('pagehide',leave);
 })();
 </script>
 </body>

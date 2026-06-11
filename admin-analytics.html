@@ -605,6 +605,8 @@ async function loadAnalytics() {
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
+  try { await renderAcquisition(); }
+  catch (e) { console.error("renderAcquisition failed:", e); }
 }
 
 // ── Feature usage: total active time per view, most-used first ─────────────────
@@ -668,6 +670,208 @@ function renderFeatureUsage(usageRows) {
   }
   html += `</div></details>`;
   el.insertAdjacentHTML("beforeend", html);
+}
+
+// ── Acquisition: /signup landing-page funnel & conversion ──────────────────────
+// Reads the cookieless events beaconed from the public signup page (signup_events)
+// and the per-visitor conversion stitch (signup_conversions, written by the Stripe
+// webhook via client_reference_id). Answers: is the landing page converting, and
+// which traffic sources work?
+async function renderAcquisition() {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+
+  const [evRes, convRes] = await Promise.all([
+    db.from("signup_events").select("vid,event,ts,referrer,utm_source,device,scroll_pct,dur_ms,country"),
+    db.from("signup_conversions").select("vid,email,currency,ts"),
+  ]);
+  const events = evRes.data || [];
+  const convs  = convRes.data || [];
+
+  const esc = s => String(s == null ? "" : s).replace(/</g, "&lt;");
+  const refDomain = r => { try { return new URL(r).hostname.replace(/^www\./, ""); } catch { return ""; } };
+  const fmtDur = ms => { const s = Math.round((ms || 0) / 1000); return s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`; };
+  const pctOf = (n, d) => d ? Math.round(n / d * 100) : 0;
+
+  // Per-vid rollups
+  const views = events.filter(e => e.event === "view");
+  const vidSource = {}, vidDevice = {};
+  for (const e of views) {
+    if (vidSource[e.vid] === undefined) vidSource[e.vid] = e.utm_source || refDomain(e.referrer) || "direct";
+    if (vidDevice[e.vid] === undefined) vidDevice[e.vid] = e.device || "?";
+  }
+  const visitors  = new Set(views.map(e => e.vid));
+  const N = visitors.size;
+
+  const maxScroll = {};
+  for (const e of events) if (e.event === "scroll") maxScroll[e.vid] = Math.max(maxScroll[e.vid] || 0, e.scroll_pct || 0);
+  const engaged   = new Set(Object.keys(maxScroll).filter(v => maxScroll[v] >= 50));
+  const ctaVids   = new Set(events.filter(e => e.event === "cta_click" && /^join/.test(e.cta || "")).map(e => e.vid));
+  const playVids  = new Set(events.filter(e => e.event === "video_play").map(e => e.vid));
+  const convVids  = new Set(convs.map(c => c.vid));
+  const nConv = convVids.size;
+
+  // Median time on page (from leave events)
+  const vidDur = {};
+  for (const e of events) if (e.event === "leave") vidDur[e.vid] = Math.max(vidDur[e.vid] || 0, e.dur_ms || 0);
+  const durs = Object.values(vidDur).sort((a, b) => a - b);
+  const medDur = durs.length ? durs[Math.floor(durs.length / 2)] : 0;
+
+  let h = `<h2 class="section-header" style="border-top:2px solid #1e2d4a;padding-top:24px;margin-top:32px">
+    ${ico('trend','#f5c518')}Landing page <span class="section-meta">/signup · acquisition &amp; conversion</span></h2>`;
+
+  if (!N) {
+    h += `<div style="color:#64748b;font-size:.9rem;margin:8px 0 28px">No landing-page visits recorded yet. Once the page gets traffic, the funnel, traffic sources and conversion rate will appear here.</div>`;
+    el.insertAdjacentHTML("beforeend", h);
+    return;
+  }
+
+  // ── Aggregates (reused by the insight strip and the sections below) ──
+  const srcAgg = {};
+  for (const v of visitors) { const s = vidSource[v] || "direct"; (srcAgg[s] = srcAgg[s] || { visits: 0, conv: 0 }).visits++; }
+  for (const v of convVids) { const s = vidSource[v] || "direct"; if (srcAgg[s]) srcAgg[s].conv++; }
+  const devAgg = {};
+  for (const v of visitors) { const dv = vidDevice[v] || "?"; (devAgg[dv] = devAgg[dv] || { visits: 0, conv: 0 }).visits++; }
+  for (const v of convVids) { const dv = vidDevice[v] || "?"; if (devAgg[dv]) devAgg[dv].conv++; }
+
+  // ── Smart conclusions: interpret the numbers in plain English ──
+  const ins = [];
+  const minSrc = Math.max(8, Math.round(N * 0.08)); // a slice needs this many visits to judge
+  if (N < 30) ins.push({ kind: "info", txt: `Still early — only <b>${N}</b> visit${N === 1 ? "" : "s"} so far. Treat the conclusions below as directional until you have ~30+.` });
+
+  // Biggest funnel drop-off
+  const stepDefs = [
+    ["visitors → engaged", "the hero — people leave before scrolling halfway", N, engaged.size],
+    ["engaged → Join", "the offer — readers engage but don’t click Join", engaged.size, ctaVids.size],
+    ["Join → paid", "checkout — many click Join but don’t finish paying", ctaVids.size, nConv],
+  ];
+  let worst = null;
+  for (const [key, msg, a, b] of stepDefs) { if (a >= Math.max(10, N * 0.1)) { const keep = a ? b / a : 1; if (!worst || keep < worst.keep) worst = { key, msg, keep }; } }
+  if (worst && worst.keep < 0.5) ins.push({ kind: "warn", txt: `Biggest drop-off is <b>${worst.key}</b> — only ${Math.round(worst.keep * 100)}% get through. Focus on ${worst.msg}.` });
+
+  // Best + dead traffic sources by conversion
+  const judgeable = Object.entries(srcAgg).filter(([, d]) => d.visits >= minSrc);
+  const best = judgeable.filter(([, d]) => d.conv > 0).sort((a, b) => (b[1].conv / b[1].visits) - (a[1].conv / a[1].visits))[0];
+  if (best) ins.push({ kind: "good", txt: `<b>${esc(best[0])}</b> is your strongest source — ${pctOf(best[1].conv, best[1].visits)}% conversion from ${best[1].visits} visits. Double down on it.` });
+  const dead = judgeable.filter(([, d]) => d.conv === 0).sort((a, b) => b[1].visits - a[1].visits)[0];
+  if (dead) ins.push({ kind: "warn", txt: `<b>${esc(dead[0])}</b> sent ${dead[1].visits} visits but <b>0</b> conversions — the audience or the offer may be mismatched.` });
+
+  // Device conversion gap
+  const dm = devAgg["mobile"], dd = devAgg["desktop"];
+  if (dm && dd && dm.visits >= minSrc && dd.visits >= minSrc) {
+    const rm = dm.conv / dm.visits, rd = dd.conv / dd.visits;
+    if (rd > 0 && rm < rd * 0.6) ins.push({ kind: "warn", txt: `Mobile converts at ${pctOf(dm.conv, dm.visits)}% vs ${pctOf(dd.conv, dd.visits)}% on desktop — worth checking the mobile experience (${pctOf(dm.visits, N)}% of traffic is mobile).` });
+    else if (rm > 0 && rd < rm * 0.6) ins.push({ kind: "warn", txt: `Desktop converts at ${pctOf(dd.conv, dd.visits)}% vs ${pctOf(dm.conv, dm.visits)}% on mobile — desktop visitors may be hesitating.` });
+  }
+
+  // Does watching the video help?
+  if (playVids.size >= minSrc) {
+    let cp = 0; convVids.forEach(v => { if (playVids.has(v)) cp++; });
+    const noPlay = N - playVids.size, cnp = nConv - cp;
+    const rp = cp / playVids.size, rnp = noPlay ? cnp / noPlay : 0;
+    if (cp > 0 && rp > rnp * 1.3) ins.push({ kind: "good", txt: `Visitors who watch the video convert at ${pctOf(cp, playVids.size)}% vs ${pctOf(cnp, noPlay)}% who don’t — the video is doing the selling.` });
+  }
+
+  if (!ins.length) ins.push({ kind: "info", txt: `Healthy funnel, no red flags — keep feeding it traffic and watch which sources convert.` });
+
+  const kindC = { good: "#4ade80", warn: "#fbbf24", info: "#60a5fa" };
+  h += `<div style="display:flex;flex-direction:column;gap:8px;margin:4px 0 22px">
+    <div style="font-size:.72rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em">What this tells you</div>`;
+  for (const { txt, kind } of ins.slice(0, 5)) {
+    h += `<div style="background:#0d1525;border-left:3px solid ${kindC[kind] || kindC.info};border-radius:6px;padding:10px 14px;font-size:.86rem;color:#cbd5e1;line-height:1.45">${txt}</div>`;
+  }
+  h += `</div>`;
+
+  // Headline tiles
+  const tile = (label, val, color, sub) => `<div style="flex:1;min-width:140px;background:#0d1525;border:1px solid #1e2d4a;border-radius:10px;padding:16px 18px">
+    <div style="font-size:1.5rem;font-weight:800;color:${color};line-height:1">${val}</div>
+    <div style="font-size:.72rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-top:6px">${label}</div>
+    ${sub ? `<div style="font-size:.72rem;color:#64748b;margin-top:3px">${sub}</div>` : ""}</div>`;
+  h += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 22px">
+    ${tile("Visitors", N, "#60a5fa", "unique")}
+    ${tile("Join clicks", ctaVids.size, "#f5c518", `${pctOf(ctaVids.size, N)}% of visitors`)}
+    ${tile("Conversions", nConv, "#4ade80", "attributed to /signup")}
+    ${tile("Conversion rate", pctOf(nConv, N) + "%", "#4ade80", "members ÷ visitors")}
+    ${tile("Median time", fmtDur(medDur), "#cbd5e1", "on page")}
+    ${tile("Video play", pctOf(playVids.size, N) + "%", "#a78bfa", "pressed play")}
+  </div>`;
+
+  // Funnel
+  const steps = [
+    ["Visitors", N, "#60a5fa"],
+    ["Engaged (scrolled ≥50%)", engaged.size, "#818cf8"],
+    ["Clicked Join", ctaVids.size, "#f5c518"],
+    ["Converted (paid)", nConv, "#4ade80"],
+  ];
+  h += `<div style="display:flex;flex-direction:column;gap:8px;margin:0 0 28px">`;
+  for (const [label, count, color] of steps) {
+    const w = Math.max(2, pctOf(count, N));
+    h += `<div style="display:flex;align-items:center;gap:12px;font-size:.85rem">
+      <div style="flex:0 0 200px;color:#cbd5e1">${label}</div>
+      <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:22px"><div style="width:${w}%;height:100%;background:${color}"></div></div>
+      <div style="flex:0 0 110px;text-align:right;color:${color};font-weight:700">${count} <span style="color:#64748b;font-weight:500">· ${pctOf(count, N)}%</span></div>
+    </div>`;
+  }
+  h += `</div>`;
+
+  // Traffic sources (srcAgg computed above)
+  const srcSorted = Object.entries(srcAgg).sort((a, b) => b[1].visits - a[1].visits).slice(0, 12);
+  const srcMax = srcSorted.length ? srcSorted[0][1].visits : 1;
+  h += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('share','#60a5fa')}Traffic sources <span class="section-meta">visits · conversions · rate</span></h2>
+    <div style="display:flex;flex-direction:column;gap:6px;margin:14px 0 28px">`;
+  for (const [src, d] of srcSorted) {
+    const w = Math.max(2, Math.round(d.visits / srcMax * 100));
+    h += `<div style="display:flex;align-items:center;gap:10px;font-size:.85rem">
+      <div style="flex:0 0 200px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(src)}">${esc(src)}</div>
+      <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${w}%;height:100%;background:linear-gradient(90deg,#60a5fa,#3b82f6)"></div></div>
+      <div style="flex:0 0 56px;text-align:right;color:#60a5fa;font-weight:700">${d.visits}</div>
+      <div style="flex:0 0 90px;text-align:right;color:#4ade80" title="conversions">${d.conv} · ${pctOf(d.conv, d.visits)}%</div>
+    </div>`;
+  }
+  h += `</div>`;
+
+  // Device split + scroll depth, side by side (devAgg computed above)
+  const scrollBuckets = [25, 50, 75, 100].map(m => ({ m, n: Object.values(maxScroll).filter(x => x >= m).length }));
+  h += `<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:28px">
+    <div style="flex:1;min-width:240px">
+      <h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('users','#a78bfa')}Device <span class="section-meta">visits · conversion</span></h2>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">`;
+  for (const [dv, d] of Object.entries(devAgg).sort((a, b) => b[1].visits - a[1].visits)) {
+    h += `<div style="display:flex;align-items:center;gap:10px;font-size:.85rem">
+      <div style="flex:0 0 70px;color:#cbd5e1;text-transform:capitalize">${esc(dv)}</div>
+      <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${Math.max(2,pctOf(d.visits,N))}%;height:100%;background:linear-gradient(90deg,#a78bfa,#8b5cf6)"></div></div>
+      <div style="flex:0 0 56px;text-align:right;color:#a78bfa;font-weight:700">${d.visits}</div>
+      <div style="flex:0 0 80px;text-align:right;color:#4ade80" title="conversion">${pctOf(d.conv,d.visits)}%</div>
+    </div>`;
+  }
+  h += `</div></div>
+    <div style="flex:1;min-width:240px">
+      <h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('bars','#4ade80')}Scroll depth</h2>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">`;
+  for (const { m, n } of scrollBuckets) {
+    h += `<div style="display:flex;align-items:center;gap:10px;font-size:.85rem">
+      <div style="flex:0 0 80px;color:#cbd5e1">reached ${m}%</div>
+      <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${Math.max(2,pctOf(n,N))}%;height:100%;background:linear-gradient(90deg,#4ade80,#22c55e)"></div></div>
+      <div style="flex:0 0 70px;text-align:right;color:#4ade80;font-weight:700">${n} · ${pctOf(n,N)}%</div>
+    </div>`;
+  }
+  h += `</div></div></div>`;
+
+  // Daily visits (last 30 days)
+  const byDay = {};
+  for (const e of views) { const d = (e.ts || "").slice(0, 10); if (d) byDay[d] = (byDay[d] || 0) + 1; }
+  const days = [];
+  for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10); days.push([d, byDay[d] || 0]); }
+  const dayMax = Math.max(1, ...days.map(d => d[1]));
+  h += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('calendar','#60a5fa')}Daily visits <span class="section-meta">last 30 days</span></h2>
+    <div style="display:flex;align-items:flex-end;gap:3px;height:90px;margin:14px 0 8px">`;
+  for (const [d, n] of days) {
+    const hgt = Math.max(2, Math.round(n / dayMax * 86));
+    h += `<div title="${d}: ${n}" style="flex:1;background:linear-gradient(180deg,#60a5fa,#3b82f6);height:${hgt}px;border-radius:2px 2px 0 0"></div>`;
+  }
+  h += `</div><div style="display:flex;justify-content:space-between;font-size:.68rem;color:#64748b;margin-bottom:28px"><span>${days[0][0]}</span><span>${days[days.length-1][0]}</span></div>`;
+
+  el.insertAdjacentHTML("beforeend", h);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
