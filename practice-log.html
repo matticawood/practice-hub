@@ -22231,11 +22231,13 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
      container is the full page height (no extra scroll below it). */
   body.rm-immersive #app-main { padding-bottom: 0 !important; }
   body.rm-immersive .history-community-section { margin-bottom: 0 !important; }
-  /* Mobile: lock the document so only the map's internal scroll moves — stops the
-     whole page (header included) being dragged up to reveal white behind the nav. */
-  @media (max-width: 768px) {
-    html.rm-page-lock, html.rm-page-lock body { overflow: hidden !important; height: 100%; }
-  }
+  /* Lock the document while the immersive roadmap is open so ONLY the map's
+     internal scroll moves — the page never scrolls, so the top menu stays put and
+     the browser toolbar doesn't collapse. Applies on every device: on iPad the
+     page WAS scrolling, dragging the top menu away and making the toolbar
+     shrink/jitter. The class is only set while the roadmap is open, so normal
+     page scrolling resumes everywhere else. */
+  html.rm-page-lock, html.rm-page-lock body { overflow: hidden !important; height: 100%; }
   .rm-scroll { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; scrollbar-gutter: stable; }
   /* Cover the map until it has scrolled to the current level, so the user never
      sees the jarring jump-to-bottom; then we fade this away to reveal it in place. */
@@ -23024,11 +23026,23 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     };
     window.addEventListener("resize", onResize);
     // The map scrolls internally, so the window may not fire resize when the
-    // mobile URL bar shows/hides — listen to the visual viewport instead.
+    // mobile/iPad URL bar shows/hides — listen to the visual viewport instead.
+    // But that bar animates over many frames as you scroll, and refitting live
+    // on each one makes the map churn/jitter (worse now that the fill branch
+    // resizes the map from the viewport height). Debounce so we refit ONCE after
+    // the bar settles instead of on every frame.
     if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", onResize);
+      let _vvSettle = 0;
+      window.visualViewport.addEventListener("resize", () => {
+        clearTimeout(_vvSettle);
+        _vvSettle = setTimeout(onResize, 140);
+      });
     }
-    window.addEventListener("orientationchange", () => setTimeout(onResize, 60));
+    // iOS reports interim viewport metrics DURING the rotate animation, so a
+    // single early refit lands a few pixels short (a tiny gap at the bottom,
+    // most visible rotating iPad portrait → landscape). Refit several times as
+    // the new dimensions settle so the final fit is exact.
+    window.addEventListener("orientationchange", () => [60, 250, 500].forEach(d => setTimeout(onResize, d)));
     // Re-draw whenever the map's actual rendered size settles/changes (initial
     // layout, zoom applying, font/image load) — not just on rotation. This is what
     // makes the statues land on their platforms on first paint instead of only
