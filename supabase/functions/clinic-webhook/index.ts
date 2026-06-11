@@ -9,14 +9,18 @@ const SERVICE_KEY           = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const BRAND_LOGO = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/logo.png";
 function brandedEmail(o: {
   eyebrow?: string; heading?: string; paragraphs?: string[];
-  detail?: string; ctaText?: string; ctaHref?: string; footerNote?: string;
+  detail?: string; ctaText?: string; ctaHref?: string;
+  cta2Text?: string; cta2Href?: string; footerNote?: string;
 }): string {
   const P = (h: string) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.62;color:#42382e">${h}</p>`;
   const body = (o.paragraphs || []).map(P).join("");
   const eb = o.eyebrow ? `<tr><td style="padding:0 36px 6px;text-align:center"><span style="display:inline-block;background:#F5C518;color:#1a1410;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:6px 13px;border-radius:999px">${o.eyebrow}</span></td></tr>` : "";
   const hd = o.heading ? `<tr><td style="padding:14px 36px 2px;text-align:center"><h1 style="margin:0;font-size:22px;line-height:1.25;color:#42382e;font-weight:800;letter-spacing:-.01em">${o.heading}</h1></td></tr>` : "";
   const dt = o.detail ? `<tr><td style="padding:12px 36px 2px"><div style="background:#f7f4ef;border:1px solid #ece5db;border-radius:12px;padding:15px 17px;font-size:14px;line-height:1.65;color:#42382e">${o.detail}</div></td></tr>` : "";
-  const cta = o.ctaText ? `<tr><td style="padding:18px 36px 30px;text-align:center"><a href="${o.ctaHref}" style="display:inline-block;background:#F5C518;color:#1a1410;text-decoration:none;font-weight:700;font-size:15px;padding:14px 34px;border-radius:11px">${o.ctaText}</a></td></tr>` : "";
+  const btn = (text: string, href: string, primary: boolean) => `<a href="${href}" style="display:inline-block;box-sizing:border-box;width:240px;margin:5px;padding:13px 10px;text-align:center;background:${primary ? "#F5C518" : "#ffffff"};color:#1a1410;text-decoration:none;font-weight:700;font-size:15px;border-radius:11px;${primary ? "" : "border:1.5px solid #e2d9c9;"}">${text}</a>`;
+  const cta = (o.ctaText || o.cta2Text)
+    ? `<tr><td style="padding:18px 30px 28px;text-align:center">${o.ctaText ? btn(o.ctaText, o.ctaHref || "#", true) : ""}${o.cta2Text ? btn(o.cta2Text, o.cta2Href || "#", false) : ""}</td></tr>`
+    : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
 <body style="margin:0;padding:0;background:#faf7f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1a1410;-webkit-font-smoothing:antialiased">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf7f3;padding:32px 16px"><tr><td align="center">
@@ -32,6 +36,76 @@ ${dt}${cta}
 // ── Email detail-row icons: hosted PNGs (render in every client, incl. Gmail) ──
 const ICON_BASE = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/icons";
 const ic = (n: string) => `<img src="${ICON_BASE}/${n}.png" width="15" height="15" alt="" style="vertical-align:-2px;margin-right:9px">`;
+
+// ── Calendar helpers (universal .ics attachment + Google Calendar link) ──
+const utc = (d: Date | string | number) => new Date(d).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+const escICS = (s: string) => String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+function buildICS(o: { uid: string; start: string; end: string; summary: string; description: string; location?: string }): string {
+  return [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Matthew Cawood//Bookings//EN",
+    "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "BEGIN:VEVENT",
+    `UID:${o.uid}`, `DTSTAMP:${utc(Date.now())}`, `DTSTART:${utc(o.start)}`, `DTEND:${utc(o.end)}`,
+    `SUMMARY:${escICS(o.summary)}`, `DESCRIPTION:${escICS(o.description)}`,
+    o.location ? `LOCATION:${escICS(o.location)}` : "", "STATUS:CONFIRMED", "END:VEVENT", "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+}
+function gcalLink(o: { start: string; end: string; summary: string; description: string; location?: string }): string {
+  const p = new URLSearchParams({ action: "TEMPLATE", text: o.summary, dates: `${utc(o.start)}/${utc(o.end)}`, details: o.description, location: o.location || "" });
+  return `https://calendar.google.com/calendar/render?${p.toString()}`;
+}
+const b64 = (s: string) => btoa(unescape(encodeURIComponent(s)));
+
+// ── Branded confirmation to the CUSTOMER for a single paid booking ──
+async function sendCustomerConfirmation(bookingData: any, meta: Record<string, string>, notes: string | undefined) {
+  try {
+    const to = meta.attendeeEmail;
+    if (!to) return;
+    const tz       = meta.attendeeTimeZone || "Europe/London";
+    const zoomUrl  = bookingData?.meetingUrl || bookingData?.videoCallData?.url || null;
+    const startISO = bookingData?.start || meta.startTime;
+    const durMin   = Number(meta.duration) || 60;
+    const endISO   = new Date(new Date(startISO).getTime() + durMin * 60 * 1000).toISOString();
+    const isLesson = meta.duration === "60";
+    const label    = isLesson ? "1-hour lesson" : `${meta.duration}-minute clinic`;
+    const dateStr  = new Date(startISO).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: tz });
+    const timeStr  = new Date(startISO).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: tz });
+
+    const calSummary = isLesson ? "Piano Lesson with Matthew Cawood" : "Piano Clinic with Matthew Cawood";
+    const calDesc = `Your ${label} with Matthew Cawood.${zoomUrl ? `\n\nJoin: ${zoomUrl}` : ""}${notes ? `\n\nNotes: ${notes}` : ""}`;
+    const calLoc  = zoomUrl || "Online (Zoom)";
+    const calUid  = `${bookingData?.uid || `${startISO}-${to}`}@matthewcawood.com`;
+    const ics = buildICS({ uid: calUid, start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
+    const gcal = gcalLink({ start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
+
+    const html = brandedEmail({
+      eyebrow: "Booking Confirmed",
+      heading: "You're booked in",
+      paragraphs: [
+        zoomUrl
+          ? `Your ${label} with Matthew is confirmed. The details are below, and the same link works on the day.`
+          : `Your ${label} with Matthew is confirmed. You'll receive your meeting link by email shortly.`,
+        `Add it to your calendar with the button below, or open the attached <strong>booking.ics</strong> file.`,
+      ],
+      detail: [`${ic("calendar")}<strong>${dateStr}</strong>`, `${ic("clock")}${timeStr} (${tz})`].join("<br>"),
+      ctaText: zoomUrl ? "Join the Zoom call →" : undefined,
+      ctaHref: zoomUrl || undefined,
+      cta2Text: "Add to Google Calendar",
+      cta2Href: gcal,
+      footerNote: "Matthew Cawood · Online Lessons & Clinics",
+    });
+
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: NOTIFY_FROM, to: [to],
+        subject: isLesson ? "Your lesson is booked" : "Your clinic is booked",
+        html,
+        attachments: [{ filename: "booking.ics", content: b64(ics), content_type: "text/calendar; method=PUBLISH" }],
+      }),
+    });
+  } catch (e: any) { console.error("customer confirmation failed:", e.message); }
+}
 
 // ── Package purchase → grant lesson credits + email the buyer ──
 async function grantPackageCredits(meta: Record<string, string>, session: any) {
@@ -227,7 +301,8 @@ Deno.serve(async (req) => {
 
     // Build notes string — student's own text, plus file link if provided
     // Enrich meta with payment info so the email function can access it
-    meta.paid            = `£${((session.amount_total || 0) / 100).toFixed(2)}`;
+    const paidStr        = `${((session.amount_total || 0) / 100).toFixed(2)} ${(session.currency || "gbp").toUpperCase()}`;
+    meta.paid            = paidStr;
     meta.stripeSessionId = session.id;
 
     const noteParts: string[] = [];
@@ -245,7 +320,7 @@ Deno.serve(async (req) => {
       },
       metadata: {
         stripeSessionId: session.id,
-        paid: `£${((session.amount_total || 0) / 100).toFixed(2)}`,
+        paid: paidStr,
         ...(combinedNotes ? { notes: combinedNotes }  : {}),
         ...(meta.fileUrl  ? { attachmentUrl: meta.fileUrl } : {}),
       },
@@ -272,7 +347,8 @@ Deno.serve(async (req) => {
       console.error("Cal.com booking failed:", JSON.stringify(booking));
     } else {
       console.log("Booking created successfully:", booking.data?.uid);
-      await sendNotificationEmail(booking.data, meta, combinedNotes);
+      await sendNotificationEmail(booking.data, meta, combinedNotes);     // → Matt
+      await sendCustomerConfirmation(booking.data, meta, combinedNotes);  // → customer (branded, +calendar)
     }
   }
 

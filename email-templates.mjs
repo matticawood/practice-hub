@@ -98,6 +98,15 @@ export const CAMPAIGN_META = {
     readOnly: true, booking: "lesson_confirmed",
     readOnlyNote: "Subject: “Your lesson is booked”. Sent automatically when a package credit is redeemed. Carries a calendar (.ics) attachment plus the two buttons below. Shown with sample details; copy lives in the lesson-redeem function.",
   },
+  booking_single_confirmation: {
+    title: "Booking confirmed (customer)",
+    group: "Booking emails",
+    audience: "The customer, after a single paid booking — a clinic or a pay-per 1-hour lesson",
+    trigger: "Automatic — when a single paid booking is made",
+    status: "live",
+    readOnly: true, booking: "single_confirmation",
+    readOnlyNote: "Subject: “Your clinic is booked” / “Your lesson is booked”. Sent automatically to the customer after any single paid booking (a Practice Room clinic, or a pay-per 1-hour lesson). Carries a calendar (.ics) attachment + the two buttons. Shown with sample details; copy lives in the clinic-webhook function.",
+  },
   booking_new_booking_notif: {
     title: "New booking (your copy)",
     group: "Booking emails",
@@ -453,6 +462,17 @@ export function renderBookingHTML(key) {
     ctaText: "Join the Zoom call →", ctaHref: ZOOM,
     cta2Text: "Add to Google Calendar", cta2Href: gcal,
     footerNote: "Matthew Cawood · Online Piano Lessons",
+  });
+  if (key === "single_confirmation") return renderBookingEmail({
+    eyebrow: "Booking Confirmed", heading: "You're booked in",
+    paragraphs: [
+      "Your 30-minute clinic with Matthew is confirmed. The details are below, and the same link works on the day.",
+      "Add it to your calendar with the button below, or open the attached <strong>booking.ics</strong> file.",
+    ],
+    detail: `${bIc("calendar")}<strong>Wednesday, 18 June 2026</strong><br>${bIc("clock")}18:00 (Europe/London)`,
+    ctaText: "Join the Zoom call →", ctaHref: ZOOM,
+    cta2Text: "Add to Google Calendar", cta2Href: gcal,
+    footerNote: "Matthew Cawood · Online Lessons & Clinics",
   });
   if (key === "new_booking") return renderBookingEmail({
     eyebrow: "New Booking", heading: "1-Hour Lesson booked",
