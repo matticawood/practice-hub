@@ -1,6 +1,56 @@
 const STRIPE_WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
 const CAL_API_KEY           = Deno.env.get("CAL_API_KEY")!;
 const RESEND_API_KEY        = Deno.env.get("RESEND_API_KEY")!;
+const SUPABASE_URL          = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_KEY           = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+// ── Package purchase → grant lesson credits + email the buyer ──
+async function grantPackageCredits(meta: Record<string, string>, session: any) {
+  const email = (meta.attendeeEmail || session.customer_details?.email || "").toLowerCase();
+  const qty   = Number(meta.qty) || 0;
+  if (!email || qty <= 0) { console.error("package: missing email/qty", meta); return; }
+
+  // Idempotent on stripe_session_id (unique index); retries are ignored.
+  const ins = await fetch(`${SUPABASE_URL}/rest/v1/lesson_credits`, {
+    method: "POST",
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({ email, package: String(qty), total: qty, remaining: qty, stripe_session_id: session.id }),
+  });
+  if (!ins.ok && ins.status !== 409) console.error("credit insert failed:", ins.status, await ins.text());
+
+  // Buyer email: how to book their lessons
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: NOTIFY_FROM,
+        to: [email],
+        subject: `Your ${qty}-lesson package is ready 🎹`,
+        html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#1a1410">
+          <h2 style="color:#42382e">You've got ${qty} lessons.</h2>
+          <p style="line-height:1.7">Thanks for booking a package of <strong>${qty} one-hour lessons</strong> with Matthew. You can schedule each one whenever suits you — no need to pay again.</p>
+          <p style="line-height:1.7">To book a lesson, head to the booking page, choose <strong>"Use my lesson package"</strong> and enter this email address (<strong>${email}</strong>):</p>
+          <p><a href="https://matthewcawood.com/book-a-lesson/" style="display:inline-block;background:#f5c518;color:#3a2f12;font-weight:700;text-decoration:none;padding:12px 22px;border-radius:9px">Book a lesson →</a></p>
+          <p style="font-size:.85rem;color:#8a7868;margin-top:20px">Lessons remaining: ${qty}. They never expire.</p>
+        </div>`,
+      }),
+    });
+  } catch (e: any) { console.error("package buyer email failed:", e.message); }
+
+  // Notify Matt
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: NOTIFY_FROM, to: [NOTIFY_TO],
+        subject: `New package: ${qty} lessons — ${meta.attendeeName || email}`,
+        html: `<div style="font-family:system-ui,sans-serif"><p><strong>${meta.attendeeName || "—"}</strong> (${email}) bought a <strong>${qty}-lesson package</strong>.</p><p>Paid £${((session.amount_total||0)/100).toFixed(2)}. They'll book each lesson via the redeem flow.</p></div>`,
+      }),
+    });
+  } catch (_) { /* best-effort */ }
+}
 
 const NOTIFY_TO   = "matthew@matthewcawood.com";
 const NOTIFY_FROM = "bookings@matthewcawood.com";
@@ -150,6 +200,12 @@ Deno.serve(async (req) => {
     const meta    = session.metadata || {};
 
     console.log("Session metadata:", JSON.stringify(meta));
+
+    // Package purchase → grant credits, no Cal.com booking yet.
+    if (meta.type === "package") {
+      await grantPackageCredits(meta, session);
+      return new Response(JSON.stringify({ received: true }), { headers: { "Content-Type": "application/json" } });
+    }
 
     if (!meta.eventTypeId || !meta.startTime || !meta.attendeeEmail) {
       console.error("Missing required metadata — cannot create booking");
