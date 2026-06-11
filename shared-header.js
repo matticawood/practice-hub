@@ -1773,6 +1773,90 @@ window._shInitIOSPush = function(db, email) {
   }, { once: true });
 };
 
+// ── Android / web push (Firebase Cloud Messaging, browser/TWA path) ──────────
+// Used everywhere the iOS native shell is NOT (Android TWA, installed PWAs).
+// Registers a dedicated FCM service worker, requests notification permission
+// (mirroring the iOS auto-prompt), gets an FCM web token, and stores it in
+// device_tokens (platform "web"). The existing send-push function already
+// delivers to these tokens — no per-platform branching needed.
+const _SH_FB_CONFIG = {
+  apiKey: "AIzaSyAjLspvkbQtiHo7yEg-B6Tg6AYJ30Sh_Hg",
+  authDomain: "the-practice-room.firebaseapp.com",
+  projectId: "the-practice-room",
+  storageBucket: "the-practice-room.firebasestorage.app",
+  messagingSenderId: "149724607479",
+  appId: "1:149724607479:web:1ec7e02d20d97b15eaf4f2",
+};
+const _SH_VAPID = "BMlPRLV6yjENZBV4hWrd_9rzaEM4yIhi8pYv8FWnVta3ZdCY1e38mJa343Qe_tIb4zm1d4AFNG56X6IuR6Z-5ok";
+let _shWebPushStarted = false;
+
+function _shLoadFirebaseMessaging() {
+  if (self.firebase && self.firebase.messaging) return Promise.resolve();
+  const load = (src) => new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  return load("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js")
+    .then(() => load("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"))
+    .then(() => { if (!self.firebase.apps.length) self.firebase.initializeApp(_SH_FB_CONFIG); });
+}
+
+async function _shSaveWebPushToken(db, email, token) {
+  if (!db || !email || !token) return;
+  let tz = null;
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) {}
+  try {
+    await db.from("device_tokens").upsert({
+      email: email.toLowerCase(),
+      platform: "web",
+      token,
+      timezone: tz,
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: "token" });
+  } catch (e) { console.warn("[webpush] token upsert failed:", e); }
+}
+
+window._shInitWebPush = async function(db, email) {
+  if (_shWebPushStarted) return;
+  // Run only where web push is actually available, and never inside the iOS shell.
+  const supported = "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
+  const isIOSShell = /PWAShell/i.test(navigator.userAgent || "") ||
+    !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers["push-permission-state"]);
+  if (!supported || isIOSShell) return;
+  _shWebPushStarted = true;
+  try {
+    // Dedicated scope so this coexists with sw.js (scope "/") rather than replacing it.
+    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/firebase-cloud-messaging-push-scope" });
+    let perm = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") return;
+    await _shLoadFirebaseMessaging();
+    const messaging = self.firebase.messaging();
+    const token = await messaging.getToken({ vapidKey: _SH_VAPID, serviceWorkerRegistration: reg });
+    if (!token) return;
+    await _shSaveWebPushToken(db, email, token);
+    // Foreground messages — refresh the bell so the new item shows immediately.
+    // Foreground messages: FCM does NOT auto-display these, so show a banner
+    // ourselves (iOS parity), then refresh the bell + app badge.
+    messaging.onMessage((payload) => {
+      try {
+        const n = (payload && payload.notification) || {};
+        const data = (payload && payload.data) || {};
+        if ((n.title || n.body) && Notification.permission === "granted") {
+          reg.showNotification(n.title || "The Practice Room", {
+            body: n.body || "",
+            icon: "/icon-192.png",
+            badge: "/icon-192.png",
+            data: { link_url: data.link_url || "/" },
+          });
+        }
+      } catch (e) {}
+      window._shLoadNotifs?.().then(() => window._shRenderNotifs?.());
+    });
+  } catch (e) { console.warn("[webpush] init failed:", e); }
+};
+
 // ── Main init ─────────────────────────────────────────────────────────────────
 // ── Command palette (global Ctrl/⌘-K search) ─────────────────────────────────
 let _shPalDb = null, _shPalBuilt = false, _shPalItems = [], _shPalIdx = 0, _shPalTimer = null, _shPalSeq = 0;
@@ -2239,6 +2323,17 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // ── iOS push notifications (only inside the native PWA shell) ──
   if (myEmail && db && /PWAShell/i.test(navigator.userAgent || "")) {
     window._shInitIOSPush?.(db, myEmail);
+  } else if (myEmail && db) {
+    // Android (TWA) / installed-PWA web push. Only prompts when running as an
+    // installed app (standalone display mode), so casual browser tabs are not
+    // nagged. The function itself also no-ops inside the iOS shell.
+    const _installed = navigator.standalone === true ||
+      ["standalone", "fullscreen", "minimal-ui"].some(m =>
+        window.matchMedia && window.matchMedia(`(display-mode: ${m})`).matches);
+    // `?testpush=1` forces registration in a normal browser tab so push can be
+    // verified without installing the PWA first (test aid; harmless in prod).
+    const _forceTest = /[?&]testpush=1\b/.test(location.search);
+    if (_installed || _forceTest) window._shInitWebPush?.(db, myEmail);
   }
 
   // Clear any previously active states (initSharedHeader can be called more than
@@ -2409,6 +2504,15 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
 
   function _badge() {
     const u = _notifs.filter(n => !n.read).length;
+    // OS app-icon badge for installed PWA / Android TWA. iOS sets this
+    // server-side via APNs; web/Android must set it client-side from the same
+    // unread count. (Android launchers may render it as a dot rather than the
+    // exact number — an OS limitation, not something we control.)
+    try {
+      if ("setAppBadge" in navigator) {
+        if (u > 0) navigator.setAppBadge(u); else navigator.clearAppBadge();
+      }
+    } catch (e) {}
     const el = document.getElementById("notif-badge");
     if (!el) return;
     if (u > 0) { el.textContent = u > 9 ? "9+" : String(u); el.style.display = "flex"; }

@@ -117,12 +117,26 @@ async function sendOnePush(input: PushInput, accessToken: string): Promise<{ ok:
       data: {
         ...input.data,
         ...(input.linkUrl ? { link_url: input.linkUrl } : {}),
+        // Web/Android: the service worker reads this to set the app-icon badge
+        // (the iOS equivalent of the aps.badge below). Ignored by iOS.
+        badge: String(input.badge),
       },
       apns: {
         payload: {
           aps: { sound: "default", badge: input.badge },
         },
       },
+      // Web/Android (FCM web tokens): make the notification click open the
+      // right page. fcm_options.link must be absolute. Ignored for iOS tokens.
+      ...(input.linkUrl ? {
+        webpush: {
+          fcm_options: {
+            link: input.linkUrl.startsWith("http")
+              ? input.linkUrl
+              : `https://app.matthewcawood.com${input.linkUrl.startsWith("/") ? "" : "/"}${input.linkUrl}`,
+          },
+        },
+      } : {}),
     },
   };
 
