@@ -95,6 +95,7 @@ export default async (req) => {
       quote:        String(body.content?.quote || "").slice(0, 400),
       quoteAuthor:  String(body.content?.quoteAuthor || "").slice(0, 80),
       bullets:      Array.isArray(body.content?.bullets) ? body.content.bullets.map((b) => String(b || "")).filter((b) => b.trim()).slice(0, 12) : [],
+      promoHook:    String(body.content?.promoHook || "").slice(0, 400),
     } : {
       subject:   String(body.content?.subject   || "").slice(0, 200),
       preheader: String(body.content?.preheader || "").slice(0, 200),

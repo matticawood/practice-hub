@@ -640,6 +640,9 @@ export function renderMMTSubject(content, firstName) {
 export function renderMMTHTML(content, ctx = {}) {
   const c = content || {};
   const BRAND = "https://matthewcawood.com", APP = "https://app.matthewcawood.com";
+  const PR_AD = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/practice-room-ad.jpg";
+  const hook = (c.promoHook && c.promoHook.trim()) ||
+    "Monday Music Tips gives you one idea each week. The Practice Room is where those ideas turn into a daily practice that genuinely moves your playing forward.";
   const fn = ctx.firstName || "there";
   const unsub = ctx.unsub || "#";
   const unsubText = ctx.unsubText || "Unsubscribe";
@@ -657,7 +660,7 @@ export function renderMMTHTML(content, ctx = {}) {
     <tr><td style="padding:16px 40px 4px;text-align:center">
       <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#b89b3a;margin-bottom:8px">Quote of the week</div>
       <p style="margin:0;font-size:16px;line-height:1.5;color:#42382e;font-style:italic">"${esc(c.quote)}"</p>
-      ${c.quoteAuthor ? `<p style="margin:7px 0 0;font-size:14px;color:#8a7d6b;font-weight:700">— ${esc(c.quoteAuthor)}</p>` : ""}
+      ${c.quoteAuthor ? `<p style="margin:7px 0 0;font-size:14px;color:#8a7d6b;font-weight:700">${esc(c.quoteAuthor)}</p>` : ""}
     </td></tr>` : "";
 
   const bulletsHtml = bullets.length ? `
@@ -703,17 +706,21 @@ export function renderMMTHTML(content, ctx = {}) {
 
       ${rule}
 
-      <tr><td style="padding:10px 40px 0">
-        <div style="background:#15140f;border-radius:14px;padding:22px 22px 20px;text-align:center">
-          <div style="font-size:19px;font-weight:900;letter-spacing:.02em;color:#F5C518;line-height:1.1">THE PRACTICE ROOM</div>
-          <div style="font-size:12px;color:#cfc6b6;margin-top:5px">The piano platform built for how you <strong style="color:#fff">actually</strong> learn.</div>
-        </div>
+      <tr><td style="padding:12px 40px 0">
+        <a href="${APP}/signup" style="text-decoration:none"><img src="${PR_AD}" alt="The Practice Room" style="display:block;width:100%;height:auto;border-radius:14px;border:1px solid #ece5db"></a>
       </td></tr>
       <tr><td style="padding:16px 40px 0">
-        ${P("Set goals, track your practice, build your repertoire, sharpen your note and chord recognition, join live clinics, and connect with other pianists working toward the same thing.")}
-        ${P("Everything in one place — built specifically for piano players.")}
+        ${P(hook)}
+        <p style="margin:2px 0 6px;font-size:14px;color:#42382e;font-weight:700">Inside, you get:</p>
+        <ul style="margin:4px 0 0;padding-left:20px;color:#42382e">
+          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">Structured practice tracking that keeps you consistent</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">A growing library of pieces broken down step by step</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">Live practice clinics every week, with replays if you miss them</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">A community of pianists working toward the same goal</li>
+        </ul>
       </td></tr>
-      <tr><td style="padding:8px 40px 4px;text-align:center">${gbtn("Explore The Practice Room →", `${APP}/signup`)}</td></tr>
+      <tr><td style="padding:18px 40px 2px;text-align:center">${gbtn("Explore The Practice Room →", `${APP}/signup`)}</td></tr>
+      <tr><td style="padding:6px 40px 0;text-align:center"><p style="margin:0;font-size:13px;color:#8a7d6b;line-height:1.5">Monday Music Tips stays free, every Monday. No pressure either way, and I will see you next week.</p></td></tr>
 
       ${rule}
 
