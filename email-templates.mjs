@@ -648,7 +648,7 @@ export function renderMMTHTML(content, ctx = {}) {
   const unsubText = ctx.unsubText || "Unsubscribe";
   const tokens = { firstName: fn };
   const articleUrl = c.articleUrl || `${BRAND}/monday-music-tips/`;
-  const suggestUrl = c.suggestUrl || "mailto:enquiries@matthewcawood.com?subject=Monday%20Music%20Tip%20suggestion";
+  const suggestUrl = c.suggestUrl || "https://matthewcawood.com/suggest/";
   const intro = (Array.isArray(c.intro) ? c.intro : (c.intro ? [c.intro] : [])).filter(Boolean);
   const bullets = (Array.isArray(c.bullets) ? c.bullets : []).filter(Boolean);
 
@@ -713,15 +713,14 @@ export function renderMMTHTML(content, ctx = {}) {
         ${P(hook)}
         <p style="margin:2px 0 6px;font-size:14px;color:#42382e;font-weight:700">Inside, you get:</p>
         <ul style="margin:4px 0 0;padding-left:20px;color:#42382e">
-          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">A clear roadmap from beginner to advanced, so you always know exactly what to work on next and can see how far you have come</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">A clear roadmap from beginner to advanced, so you always know what to work on next and can see how far you have come</li>
           <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Practice tracking that turns your hours, streaks and sessions into visible progress</li>
-          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">A library of over 100 pieces, each with its background, difficulty and a performance video, matched to your level</li>
-          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Live practice clinics with me every two weeks, all recorded, alongside a community of pianists to learn with</li>
-          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">In-depth theory written for pianists, plus note and chord trainers and a built-in metronome</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Live practice clinics with me every two weeks, all recorded, and a community of pianists to learn alongside</li>
         </ul>
       </td></tr>
       <tr><td style="padding:18px 40px 2px;text-align:center">${gbtn("Explore The Practice Room →", `${APP}/signup`)}</td></tr>
-      <tr><td style="padding:6px 40px 0;text-align:center"><p style="margin:0;font-size:13px;color:#8a7d6b;line-height:1.5">Monday Music Tips stays free, every Monday. No pressure either way, and I will see you next week.</p></td></tr>
+      <tr><td style="padding:5px 40px 0;text-align:center"><span style="font-size:12px;color:#a99d8c">Cancel anytime.</span></td></tr>
+      <tr><td style="padding:10px 40px 0;text-align:center"><p style="margin:0;font-size:13px;color:#8a7d6b;line-height:1.5">Monday Music Tips stays free, every Monday. No pressure either way, and I will see you next week.</p></td></tr>
 
       ${rule}
 

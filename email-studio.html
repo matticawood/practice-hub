@@ -165,7 +165,8 @@
     </div>
     <label for="mmt-bullets">"In this issue I explore" (one point per line)</label>
     <textarea id="mmt-bullets" rows="3" placeholder="First point&#10;Second point&#10;Third point"></textarea>
-    <label for="mmt-hook">The Practice Room intro line (optional, leave blank for the default)</label>
+    <label for="mmt-hook">The Practice Room intro line (auto-suggested from this week's activity, fully editable)</label>
+    <select id="mmt-hook-suggest" style="margin-bottom:7px"></select>
     <textarea id="mmt-hook" rows="2" placeholder="e.g. This week's live clinic digs into exactly this. Come and join us inside The Practice Room."></textarea>
     <div class="preview-wrap" style="margin-top:16px">
       <div class="preview-bar"><span style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)">Live preview</span></div>
@@ -203,7 +204,7 @@
 </div>
 
 <script type="module">
-  import * as ET from "./email-templates.mjs?v=9";
+  import * as ET from "./email-templates.mjs?v=10";
   window.ET = ET;
   window.dispatchEvent(new Event("et-ready"));
 </script>
@@ -371,6 +372,30 @@ async function mmtInit() {
   sel.addEventListener("change", mmtOnArticle);
   ["mmt-issue", "mmt-subject", "mmt-intro", "mmt-quote", "mmt-quote-author", "mmt-bullets", "mmt-hook"].forEach(id => document.getElementById(id).addEventListener("input", mmtPreview));
   mmtOnArticle();
+  buildHookSuggestions();
+}
+
+// Auto-generate teasing intro lines from this week's real activity: the latest
+// live clinic (past = replay, upcoming = join us) and the current weekly focus.
+async function buildHookSuggestions() {
+  const opts = [];
+  try {
+    const now = Date.now();
+    const ev = (await db.from("live_events").select("title,scheduled_at,status").order("scheduled_at", { ascending: false }).limit(8)).data || [];
+    const past = ev.find(e => new Date(e.scheduled_at).getTime() < now || e.status === "ended");
+    const next = ev.filter(e => new Date(e.scheduled_at).getTime() >= now).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0];
+    const wf = (await db.from("weekly_focus").select("headline").order("published_at", { ascending: false }).limit(1)).data || [];
+    if (past) opts.push({ label: "Recent live clinic", text: `This week I ran a live practice clinic on ${past.title} inside The Practice Room. Members joined live, and the replay is waiting there for you.` });
+    if (next) { const d = new Date(next.scheduled_at).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }); opts.push({ label: "Upcoming live clinic", text: `The next live practice clinic is on ${next.title}, ${d}. Come and join us live inside The Practice Room, or catch the replay after.` }); }
+    if (wf[0]) opts.push({ label: "This week's practice focus", text: `This week's practice focus inside The Practice Room is ${wf[0].headline}. Come and work on it alongside everyone else.` });
+  } catch (e) {}
+  opts.push({ label: "Evergreen (built-in default)", text: "" });
+  window._mmtHookOpts = opts;
+  const hs = document.getElementById("mmt-hook-suggest");
+  hs.innerHTML = opts.map((o, i) => `<option value="${i}">${esc(o.label)}</option>`).join("");
+  hs.addEventListener("change", () => { document.getElementById("mmt-hook").value = window._mmtHookOpts[hs.value].text; mmtPreview(); });
+  document.getElementById("mmt-hook").value = opts[0].text;
+  mmtPreview();
 }
 function mmtOnArticle() {
   const i = parseInt(document.getElementById("mmt-article").value, 10);
