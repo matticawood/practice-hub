@@ -143,6 +143,45 @@ export const CAMPAIGN_META = {
     readOnly: true, booking: "package_notif",
     readOnlyNote: "Your internal notification when a lesson package sells. Shown with sample details; copy lives in the clinic-webhook function.",
   },
+
+  // ── Store delivery emails (preview-only; copy lives in the store-webhook /
+  //    store-free functions, shown with sample details). ──
+  store_course_access: {
+    title: "Course access",
+    group: "Store emails",
+    audience: "The customer, right after they buy a video course",
+    trigger: "Automatic — on a successful course purchase",
+    status: "live",
+    readOnly: true, store: "course_access",
+    readOnlyNote: "Subject: “Your course access: …”. Sent automatically when someone buys a course. Carries the magic link to the course player. Shown with sample details; copy lives in the store-webhook function.",
+  },
+  store_pdf_download: {
+    title: "PDF download (paid)",
+    group: "Store emails",
+    audience: "The customer, right after they buy a paid PDF",
+    trigger: "Automatic — on a successful PDF purchase",
+    status: "live",
+    readOnly: true, store: "pdf_download",
+    readOnlyNote: "Subject: “Your download: …”. Sent automatically when someone buys a paid PDF. The button re-signs a fresh download link each time. Shown with sample details; copy lives in the store-webhook function.",
+  },
+  store_free_pdf: {
+    title: "Free PDF",
+    group: "Store emails",
+    audience: "Anyone who grabs a free PDF from the store",
+    trigger: "Automatic — on a free-PDF email capture",
+    status: "live",
+    readOnly: true, store: "free_pdf",
+    readOnlyNote: "Subject: “Your free download: …”. Sent when someone enters their email for a free PDF; also adds them to Monday Music Tips. Shown with sample details; copy lives in the store-free function.",
+  },
+  store_sale_notif: {
+    title: "Store sale (internal)",
+    group: "Store emails",
+    audience: "You",
+    trigger: "Automatic — on any store sale",
+    status: "live",
+    readOnly: true, store: "store_sale",
+    readOnlyNote: "Your internal notification for each store sale. Shown with sample details; copy lives in the store-webhook function.",
+  },
 };
 
 export const EMAIL_DEFAULTS = {
@@ -535,4 +574,46 @@ export function renderBookingHTML(key) {
     footerNote: "Internal notification · matthewcawood.com",
   });
   return "<p style='font-family:sans-serif;padding:24px'>Unknown booking email.</p>";
+}
+
+// Preview-only sample renders for the store delivery emails, keyed by CAMPAIGN_META.store.
+// Real content is generated per-order in the store-webhook / store-free functions.
+export function renderStoreHTML(key) {
+  if (key === "course_access") return renderBookingEmail({
+    eyebrow: "Course Access", heading: "You're in. Let's begin.",
+    paragraphs: [
+      "Thank you for buying <strong>The Art of Understanding Music</strong>. Your access is ready, watch online anytime from any device.",
+      "Tap below to open the course. Keep this email, the link is yours to return to whenever you like.",
+    ],
+    detail: `${bIc("music")}<strong>The Art of Understanding Music</strong>`,
+    ctaText: "Start the course →", ctaHref: "https://matthewcawood.com/store/learn/",
+    footerNote: "Matthew Cawood · Store",
+  });
+  if (key === "pdf_download") return renderBookingEmail({
+    eyebrow: "Your Download", heading: "Thanks for your order",
+    paragraphs: [
+      "Thank you for buying <strong>Beginner Sight Reading Exercises Book</strong>. Your download is ready below.",
+      "The link is personal to you. If it ever expires, just reopen this email and tap it again for a fresh copy.",
+    ],
+    detail: `${bIc("clip")}<strong>Beginner Sight Reading Exercises Book</strong>`,
+    ctaText: "Download your PDF →", ctaHref: "#",
+    footerNote: "Matthew Cawood · Store",
+  });
+  if (key === "free_pdf") return renderBookingEmail({
+    eyebrow: "Free Download", heading: "Here's your PDF",
+    paragraphs: [
+      "Thanks for grabbing <strong>Practice Planner Template</strong>. Tap below to download it, the link works for 7 days.",
+      "You're now on Monday Music Tips too, one short, useful idea about playing every Monday. Unsubscribe anytime.",
+    ],
+    detail: `${bIc("clip")}<strong>Practice Planner Template</strong>`,
+    ctaText: "Download your PDF →", ctaHref: "#",
+    footerNote: "Matthew Cawood · Store",
+  });
+  if (key === "store_sale") return renderBookingEmail({
+    eyebrow: "New Sale", heading: "The Art of Understanding Music",
+    paragraphs: ["<strong>alex@example.com</strong> bought <strong>The Art of Understanding Music</strong> (course)."],
+    detail: `${bIc("pound")}Paid <strong>91.99 CAD</strong>`,
+    footerNote: "Internal notification · matthewcawood.com",
+  });
+  return "<p style='font-family:sans-serif;padding:24px'>Unknown store email.</p>";
 }
