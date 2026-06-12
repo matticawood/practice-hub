@@ -73,9 +73,13 @@ async function sendCustomerConfirmation(bookingData: any, meta: Record<string, s
     const calSummary = isLesson ? "Piano Lesson with Matthew Cawood" : "Piano Clinic with Matthew Cawood";
     const calDesc = `Your ${label} with Matthew Cawood.${zoomUrl ? `\n\nJoin: ${zoomUrl}` : ""}${notes ? `\n\nNotes: ${notes}` : ""}`;
     const calLoc  = zoomUrl || "Online (Zoom)";
-    const calUid  = `${bookingData?.uid || `${startISO}-${to}`}@matthewcawood.com`;
+    const bUid    = bookingData?.uid || "";
+    const calUid  = `${bUid || `${startISO}-${to}`}@matthewcawood.com`;
     const ics = buildICS({ uid: calUid, start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
     const gcal = gcalLink({ start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
+    const changeLine = bUid
+      ? `Need to change your plans? <a href="https://app.cal.com/reschedule/${bUid}" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://app.cal.com/booking/${bUid}?cancel=true" style="color:#9a6f12;font-weight:600">cancel</a> anytime.`
+      : "";
 
     const html = brandedEmail({
       eyebrow: "Booking Confirmed",
@@ -85,7 +89,8 @@ async function sendCustomerConfirmation(bookingData: any, meta: Record<string, s
           ? `Your ${label} with Matthew is confirmed. The details are below, and the same link works on the day.`
           : `Your ${label} with Matthew is confirmed. You'll receive your meeting link by email shortly.`,
         `Add it to your calendar with the button below, or open the attached <strong>booking.ics</strong> file.`,
-      ],
+        changeLine,
+      ].filter(Boolean),
       detail: [`${ic("calendar")}<strong>${dateStr}</strong>`, `${ic("clock")}${timeStr} (${tz})`].join("<br>"),
       ctaText: zoomUrl ? "Join the Zoom call →" : undefined,
       ctaHref: zoomUrl || undefined,

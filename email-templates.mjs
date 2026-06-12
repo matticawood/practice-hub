@@ -107,6 +107,24 @@ export const CAMPAIGN_META = {
     readOnly: true, booking: "single_confirmation",
     readOnlyNote: "Subject: “Your clinic is booked” / “Your lesson is booked”. Sent automatically to the customer after any single paid booking (a Practice Room clinic, or a pay-per 1-hour lesson). Carries a calendar (.ics) attachment + the two buttons. Shown with sample details; copy lives in the clinic-webhook function.",
   },
+  booking_cancelled: {
+    title: "Booking cancelled (customer)",
+    group: "Booking emails",
+    audience: "The customer, when they cancel a booking",
+    trigger: "Automatic — Cal.com webhook (BOOKING_CANCELLED)",
+    status: "live",
+    readOnly: true, booking: "cancelled",
+    readOnlyNote: "Subject: “Your clinic/lesson has been cancelled”. Sent by the cal-webhook function when a booking is cancelled, with a link to rebook. Shown with sample details.",
+  },
+  booking_rescheduled: {
+    title: "Booking moved (customer)",
+    group: "Booking emails",
+    audience: "The customer, when they reschedule a booking",
+    trigger: "Automatic — Cal.com webhook (BOOKING_RESCHEDULED)",
+    status: "live",
+    readOnly: true, booking: "rescheduled",
+    readOnlyNote: "Subject: “Your clinic/lesson has been moved”. Sent by the cal-webhook function when a booking is rescheduled, with the new time, a fresh .ics + calendar button, and change links. Shown with sample details.",
+  },
   booking_new_booking_notif: {
     title: "New booking (your copy)",
     group: "Booking emails",
@@ -470,6 +488,28 @@ export function renderBookingHTML(key) {
       "Add it to your calendar with the button below, or open the attached <strong>booking.ics</strong> file.",
     ],
     detail: `${bIc("calendar")}<strong>Wednesday, 18 June 2026</strong><br>${bIc("clock")}18:00 (Europe/London)`,
+    ctaText: "Join the Zoom call →", ctaHref: ZOOM,
+    cta2Text: "Add to Google Calendar", cta2Href: gcal,
+    footerNote: "Matthew Cawood · Online Lessons & Clinics",
+  });
+  if (key === "cancelled") return renderBookingEmail({
+    eyebrow: "Booking Cancelled", heading: "Your booking is cancelled",
+    paragraphs: [
+      "Your 30-minute clinic with Matthew on <strong>Wednesday, 18 June 2026</strong> has been cancelled.",
+      "Whenever you're ready, you can book another time below.",
+    ],
+    detail: `${bIc("calendar")}<s>Wednesday, 18 June 2026</s><br>${bIc("clock")}<s>18:00 (Europe/London)</s>`,
+    ctaText: "Book another time →", ctaHref: "https://matthewcawood.com/book-a-lesson/",
+    footerNote: "Matthew Cawood · Online Lessons & Clinics",
+  });
+  if (key === "rescheduled") return renderBookingEmail({
+    eyebrow: "Booking Moved", heading: "Your booking has moved",
+    paragraphs: [
+      "Your 30-minute clinic with Matthew has been rescheduled. Here are the new details:",
+      "Add the new time to your calendar below, or open the attached <strong>booking.ics</strong> file.",
+      `Need to change again? <a href="${ZOOM}" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="${ZOOM}" style="color:#9a6f12;font-weight:600">cancel</a>.`,
+    ],
+    detail: `${bIc("calendar")}<strong>Thursday, 19 June 2026</strong><br>${bIc("clock")}18:00 (Europe/London)`,
     ctaText: "Join the Zoom call →", ctaHref: ZOOM,
     cta2Text: "Add to Google Calendar", cta2Href: gcal,
     footerNote: "Matthew Cawood · Online Lessons & Clinics",

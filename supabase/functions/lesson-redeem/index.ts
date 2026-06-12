@@ -176,7 +176,10 @@ Deno.serve(async (req) => {
               ? `Your 1-hour lesson with Matthew is confirmed. The details are below, and the same link works on the day.`
               : `Your 1-hour lesson with Matthew is confirmed. You'll receive your meeting link by email shortly.`,
             `Add it to your calendar with the button below, or open the attached <strong>lesson.ics</strong> file.`,
-          ],
+            (data.uid
+              ? `Need to change your plans? <a href="https://app.cal.com/reschedule/${data.uid}" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://app.cal.com/booking/${data.uid}?cancel=true" style="color:#9a6f12;font-weight:600">cancel</a> anytime.`
+              : ""),
+          ].filter(Boolean),
           detail: [
             `${ic("calendar")}<strong>${dateStr}</strong>`,
             `${ic("clock")}${timeStr} (${tz})`,
