@@ -77,8 +77,9 @@ async function sendCustomerConfirmation(bookingData: any, meta: Record<string, s
     const calUid  = `${bUid || `${startISO}-${to}`}@matthewcawood.com`;
     const ics = buildICS({ uid: calUid, start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
     const gcal = gcalLink({ start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
+    const GATE = "https://matthewcawood.com/manage/";
     const changeLine = bUid
-      ? `Need to change your plans? <a href="https://app.cal.com/reschedule/${bUid}" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://app.cal.com/booking/${bUid}?cancel=true" style="color:#9a6f12;font-weight:600">cancel</a> anytime.`
+      ? `Need to change your plans? <a href="${GATE}?uid=${bUid}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> (free up to 24h before) or <a href="${GATE}?uid=${bUid}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>.`
       : "";
 
     const html = brandedEmail({

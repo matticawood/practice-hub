@@ -144,8 +144,9 @@ Deno.serve(async (req) => {
       const calLoc  = zoomUrl || "Online (Zoom)";
       const ics  = buildICS({ uid: `${uid || startISO}@matthewcawood.com`, start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
       const gcal = gcalLink({ start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
+      const GATE = "https://matthewcawood.com/manage/";
       const changeLine = uid
-        ? `Need to change again? <a href="https://app.cal.com/reschedule/${uid}" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://app.cal.com/booking/${uid}?cancel=true" style="color:#9a6f12;font-weight:600">cancel</a>.`
+        ? `Need to change again? <a href="${GATE}?uid=${uid}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> (free up to 24h before) or <a href="${GATE}?uid=${uid}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>.`
         : "";
 
       if (to) await send(to, isLesson ? "Your lesson has been moved" : "Your clinic has been moved",
