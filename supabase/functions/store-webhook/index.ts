@@ -104,8 +104,8 @@ Deno.serve(async (req) => {
            `Tap below to open the course. Keep this email, the link is yours to return to whenever you like.`]
         : [`Thank you for buying <strong>${item.title}</strong>. Your download is ready below.`,
            `The link is personal to you. If it ever expires, just reopen this email and tap it again for a fresh copy.`])
-        .concat([`When you've had a look, a quick review really helps other pianists — <a href="${reviewHref}" style="color:#b4881a">leave one here</a>.`,
-                 `And if you want to keep going, everything in these resources is taught in depth inside <strong>The Practice Room</strong> — structured practice, a pieces library, theory guides and a community.`]),
+        .concat([`When you've had a look, a quick review really helps other pianists. You can <a href="${reviewHref}" style="color:#b4881a">leave one here</a>.`,
+                 `And if you want to keep going, everything in these resources is taught in depth inside <strong>The Practice Room</strong>: a clear roadmap from beginner to advanced so you always know what to work on next, a growing library of pieces, live clinics with me every two weeks, and a community of pianists to learn alongside.`]),
       detail: `${ic(isCourse ? "music" : "clip")}<strong>${item.title}</strong>`,
       ctaText: isCourse ? "Start the course →" : "Download your PDF →",
       ctaHref,

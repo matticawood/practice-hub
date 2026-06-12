@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
         paragraphs: [
           `Thanks for grabbing <strong>${item.title}</strong>. Tap below to download it, the link works for 7 days.`,
           `You're now on Monday Music Tips too, one short, useful idea about playing every Monday. Unsubscribe anytime.`,
-          `If you'd like to go further, <strong>The Practice Room</strong> turns ideas like these into a structured way to practise — tracking, a pieces library, theory guides and a community.`,
+          `If you'd like to go further, <strong>The Practice Room</strong> takes ideas like these much deeper: a clear roadmap from beginner to advanced so you always know what to work on next, practice tracking, a growing library of pieces, and a community of pianists to learn alongside.`,
         ],
         detail: `${ic("clip")}<strong>${item.title}</strong>`,
         ctaText: "Download your PDF →",

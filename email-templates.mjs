@@ -586,8 +586,8 @@ export function renderStoreHTML(key) {
     paragraphs: [
       "Thank you for buying <strong>The Art of Understanding Music</strong>. Your access is ready, watch online anytime from any device.",
       "Tap below to open the course. Keep this email, the link is yours to return to whenever you like.",
-      "When you've had a look, a quick review really helps other pianists — <a href=\"https://matthewcawood.com/store/the-art-of-understanding-music/#reviews\" style=\"color:#b4881a\">leave one here</a>.",
-      "And if you want to keep going, everything in these resources is taught in depth inside <strong>The Practice Room</strong> — structured practice, a pieces library, theory guides and a community.",
+      "When you've had a look, a quick review really helps other pianists. You can <a href=\"https://matthewcawood.com/store/the-art-of-understanding-music/#reviews\" style=\"color:#b4881a\">leave one here</a>.",
+      "And if you want to keep going, everything in these resources is taught in depth inside <strong>The Practice Room</strong>: a clear roadmap from beginner to advanced so you always know what to work on next, a growing library of pieces, live clinics with me every two weeks, and a community of pianists to learn alongside.",
     ],
     detail: `${bIc("music")}<strong>The Art of Understanding Music</strong>`,
     ctaText: "Start the course →", ctaHref: "https://matthewcawood.com/store/learn/",
@@ -599,8 +599,8 @@ export function renderStoreHTML(key) {
     paragraphs: [
       "Thank you for buying <strong>Beginner Sight Reading Exercises Book</strong>. Your download is ready below.",
       "The link is personal to you. If it ever expires, just reopen this email and tap it again for a fresh copy.",
-      "When you've had a look, a quick review really helps other pianists — <a href=\"https://matthewcawood.com/store/beginner-sight-reading-book/#reviews\" style=\"color:#b4881a\">leave one here</a>.",
-      "And if you want to keep going, everything in these resources is taught in depth inside <strong>The Practice Room</strong> — structured practice, a pieces library, theory guides and a community.",
+      "When you've had a look, a quick review really helps other pianists. You can <a href=\"https://matthewcawood.com/store/beginner-sight-reading-book/#reviews\" style=\"color:#b4881a\">leave one here</a>.",
+      "And if you want to keep going, everything in these resources is taught in depth inside <strong>The Practice Room</strong>: a clear roadmap from beginner to advanced so you always know what to work on next, a growing library of pieces, live clinics with me every two weeks, and a community of pianists to learn alongside.",
     ],
     detail: `${bIc("clip")}<strong>Beginner Sight Reading Exercises Book</strong>`,
     ctaText: "Download your PDF →", ctaHref: "#",
@@ -612,7 +612,7 @@ export function renderStoreHTML(key) {
     paragraphs: [
       "Thanks for grabbing <strong>Practice Planner Template</strong>. Tap below to download it, the link works for 7 days.",
       "You're now on Monday Music Tips too, one short, useful idea about playing every Monday. Unsubscribe anytime.",
-      "If you'd like to go further, <strong>The Practice Room</strong> turns ideas like these into a structured way to practise — tracking, a pieces library, theory guides and a community.",
+      "If you'd like to go further, <strong>The Practice Room</strong> takes ideas like these much deeper: a clear roadmap from beginner to advanced so you always know what to work on next, practice tracking, a growing library of pieces, and a community of pianists to learn alongside.",
     ],
     detail: `${bIc("clip")}<strong>Practice Planner Template</strong>`,
     ctaText: "Download your PDF →", ctaHref: "#",
