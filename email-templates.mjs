@@ -676,21 +676,15 @@ export function renderMMTHTML(content, ctx = {}) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf7f3;padding:32px 16px"><tr><td align="center">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #ece5db;border-radius:18px;overflow:hidden">
 
-      <tr><td style="padding:30px 40px 6px;text-align:center">
+      <tr><td style="padding:30px 40px 4px;text-align:center">
         <img src="${MC_LOGO}" width="46" height="46" alt="" style="display:inline-block;border-radius:12px">
       </td></tr>
-      <tr><td style="padding:8px 40px 0">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="font-size:14px;font-weight:800;color:#42382e;letter-spacing:.01em">Monday Music Tips</td>
-          <td style="text-align:right;font-size:12px;font-weight:700;color:#a99d8c">Issue #${esc(c.issue || "")}</td>
-        </tr></table>
+      <tr><td style="padding:12px 40px 2px;text-align:center">
+        <span style="display:inline-block;background:#F5C518;color:#1a1410;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:6px 14px;border-radius:999px">Monday Music Tips</span>
+        ${c.issue ? `<div style="margin-top:10px;font-size:12px;font-weight:600;letter-spacing:.05em;color:#a99d8c;text-transform:uppercase">Issue ${esc(c.issue)}</div>` : ""}
       </td></tr>
 
-      <tr><td style="padding:18px 40px 2px;text-align:center">
-        <h1 style="margin:0;font-size:26px;line-height:1.2;color:#1a1410;font-weight:800;letter-spacing:-.01em">This week…</h1>
-      </td></tr>
-
-      <tr><td style="padding:16px 40px 2px">
+      <tr><td style="padding:18px 40px 2px">
         ${P(`Happy Monday, ${esc(fn)}.`)}
         ${intro.map(P).join("")}
       </td></tr>
