@@ -642,7 +642,7 @@ export function renderMMTHTML(content, ctx = {}) {
   const BRAND = "https://matthewcawood.com", APP = "https://app.matthewcawood.com";
   const PR_AD = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/practice-room-ad.jpg";
   const hook = (c.promoHook && c.promoHook.trim()) ||
-    "Monday Music Tips gives you one idea each week. The Practice Room is where those ideas turn into a daily practice that genuinely moves your playing forward.";
+    "Monday Music Tips gives you one good idea each week. The Practice Room is the whole system around it: a clear path to follow, the tools to practise well, and the structure to keep improving.";
   const fn = ctx.firstName || "there";
   const unsub = ctx.unsub || "#";
   const unsubText = ctx.unsubText || "Unsubscribe";
@@ -713,10 +713,11 @@ export function renderMMTHTML(content, ctx = {}) {
         ${P(hook)}
         <p style="margin:2px 0 6px;font-size:14px;color:#42382e;font-weight:700">Inside, you get:</p>
         <ul style="margin:4px 0 0;padding-left:20px;color:#42382e">
-          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">Structured practice tracking that keeps you consistent</li>
-          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">A growing library of pieces broken down step by step</li>
-          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">Live practice clinics every week, with replays if you miss them</li>
-          <li style="font-size:14px;line-height:1.55;margin-bottom:6px">A community of pianists working toward the same goal</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">A clear roadmap from beginner to advanced, so you always know exactly what to work on next and can see how far you have come</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Practice tracking that turns your hours, streaks and sessions into visible progress</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">A library of over 100 pieces, each with its background, difficulty and a performance video, matched to your level</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Live practice clinics with me every two weeks, all recorded, alongside a community of pianists to learn with</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">In-depth theory written for pianists, plus note and chord trainers and a built-in metronome</li>
         </ul>
       </td></tr>
       <tr><td style="padding:18px 40px 2px;text-align:center">${gbtn("Explore The Practice Room →", `${APP}/signup`)}</td></tr>
