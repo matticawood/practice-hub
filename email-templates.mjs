@@ -713,9 +713,9 @@ export function renderMMTHTML(content, ctx = {}) {
         ${P(hook)}
         <p style="margin:2px 0 6px;font-size:14px;color:#42382e;font-weight:700">Inside, you get:</p>
         <ul style="margin:4px 0 0;padding-left:20px;color:#42382e">
-          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">A clear roadmap from beginner to advanced, so you always know what to work on next and can see how far you have come</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">A clear roadmap from beginner to advanced, with personalised guidance on exactly what to work on next</li>
           <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Practice tracking that turns your hours, streaks and sessions into visible progress</li>
-          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Live practice clinics with me every two weeks, all recorded, and a community of pianists to learn alongside</li>
+          <li style="font-size:14px;line-height:1.55;margin-bottom:7px">Live practice clinics with me every two weeks, all recorded, and a community of pianists to learn with</li>
         </ul>
       </td></tr>
       <tr><td style="padding:18px 40px 2px;text-align:center">${gbtn("Explore The Practice Room →", `${APP}/signup`)}</td></tr>
