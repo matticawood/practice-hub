@@ -116,6 +116,11 @@
         <datalist id="cmp-contacts"></datalist>
       </div>
     </div>
+    <label for="cmp-brand">From / logo at the top</label>
+    <select id="cmp-brand">
+      <option value="matthew">Matthew Cawood — M logo</option>
+      <option value="practice-room">The Practice Room</option>
+    </select>
     <label for="cmp-subject">Subject</label>
     <input id="cmp-subject" placeholder="e.g. Sight Reading Book Two is here">
     <label for="cmp-eyebrow">Label (optional, small pill at the top)</label>
@@ -196,7 +201,7 @@
 </div>
 
 <script type="module">
-  import * as ET from "./email-templates.mjs?v=6";
+  import * as ET from "./email-templates.mjs?v=7";
   window.ET = ET;
   window.dispatchEvent(new Event("et-ready"));
 </script>
@@ -275,8 +280,9 @@ function composeAudience() {
 }
 function composePreview() {
   const f = document.getElementById("cmp-preview");
+  const brand = document.getElementById("cmp-brand").value;
   f.onload = () => { try { f.style.height = (f.contentWindow.document.body.scrollHeight + 4) + "px"; } catch (e) {} };
-  f.srcdoc = window.ET.renderEmailHTML(composeContent(), { firstName: "Alex", site: SITE, unsub: "#", footerReason: "You'll get an unsubscribe link here.", unsubText: "Unsubscribe" });
+  f.srcdoc = window.ET.renderEmailHTML(composeContent(), { firstName: "Alex", site: SITE, unsub: "#", footerReason: "You'll get an unsubscribe link here.", unsubText: "Unsubscribe", brand });
 }
 let cmpAcTimer = null;
 async function composeAutocomplete(q) {
@@ -289,6 +295,7 @@ async function composeAutocomplete(q) {
 function initCompose() {
   const fields = ["cmp-subject", "cmp-eyebrow", "cmp-body", "cmp-cta-text", "cmp-cta-href"];
   fields.forEach(id => document.getElementById(id).addEventListener("input", composePreview));
+  document.getElementById("cmp-brand").addEventListener("change", composePreview);
   const aud = document.getElementById("cmp-aud");
   aud.addEventListener("change", () => {
     document.getElementById("cmp-person-wrap").style.display = aud.value === "single" ? "" : "none";
@@ -303,17 +310,18 @@ async function composeCall(mode) {
   const res = await fetch("/.netlify/functions/send-campaign", {
     method: "POST",
     headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ adhoc: true, campaignId: cmpCampaignId, content: composeContent(), audience: composeAudience(), mode }),
+    body: JSON.stringify({ adhoc: true, campaignId: cmpCampaignId, brand: document.getElementById("cmp-brand").value, content: composeContent(), audience: composeAudience(), mode }),
   });
   return { ok: res.ok, body: await res.json().catch(() => ({})) };
 }
+function sendErr(b) { return (b && (b.detail?.message || b.detail?.error || b.error)) || "failed"; }
 async function composeTest() {
   const note = document.getElementById("cmp-note");
   const c = composeContent();
   if (!c.subject || !c.paragraphs.length) { note.textContent = "Add a subject and a message first."; return; }
   note.textContent = "Sending test…";
   const { ok, body } = await composeCall("test");
-  note.textContent = ok ? `Test sent to ${OWNER_EMAIL}.` : `Error: ${body.error || "failed"}`;
+  note.textContent = ok ? `Test sent to ${OWNER_EMAIL}.` : `Error: ${sendErr(body)}`;
 }
 async function composeSend() {
   const note = document.getElementById("cmp-note");
@@ -322,7 +330,7 @@ async function composeSend() {
   if (aud.type === "single" && !aud.email) { note.textContent = "Enter the recipient's email."; return; }
   note.textContent = "Checking recipients…";
   const pre = await composeCall("preview");
-  if (!pre.ok) { note.textContent = `Error: ${pre.body.error || "failed"}`; return; }
+  if (!pre.ok) { note.textContent = `Error: ${sendErr(pre.body)}`; return; }
   const n = pre.body.eligibleCount || 0;
   if (!n) { note.textContent = "No eligible recipients (all opted out / already sent)."; return; }
   const who = aud.type === "single" ? aud.email : (aud.type === "members" ? "all members" : document.getElementById("cmp-aud").selectedOptions[0].text);
@@ -330,7 +338,7 @@ async function composeSend() {
   note.textContent = `Sending to ${n}…`;
   const { ok, body } = await composeCall("live");
   if (ok) { note.textContent = `Sent to ${body.sent || 0}${body.failed ? `, ${body.failed} failed` : ""}.`; cmpCampaignId = null; renderAutomations(); }
-  else note.textContent = `Error: ${body.error || "failed"}`;
+  else note.textContent = `Error: ${sendErr(body)}`;
 }
 window.composeTest = composeTest; window.composeSend = composeSend;
 
@@ -397,21 +405,21 @@ async function mmtTest() {
   if (!c.articleTitle || (!c.intro.length && !c.bullets.length)) { note.textContent = "Pick an article and add some content first."; return; }
   note.textContent = "Sending test…";
   const { ok, body } = await mmtCall("test");
-  note.textContent = ok ? `Test sent to ${OWNER_EMAIL}.` : `Error: ${body.error || "failed"}`;
+  note.textContent = ok ? `Test sent to ${OWNER_EMAIL}.` : `Error: ${sendErr(body)}`;
 }
 async function mmtSend() {
   const note = document.getElementById("mmt-note"), c = mmtContent();
   if (!c.articleTitle || (!c.intro.length && !c.bullets.length)) { note.textContent = "Pick an article and add some content first."; return; }
   note.textContent = "Checking recipients…";
   const pre = await mmtCall("preview");
-  if (!pre.ok) { note.textContent = `Error: ${pre.body.error || "failed"}`; return; }
+  if (!pre.ok) { note.textContent = `Error: ${sendErr(pre.body)}`; return; }
   const n = pre.body.eligibleCount || 0;
   if (!n) { note.textContent = "No eligible recipients."; return; }
   if (!confirm(`Send Monday Music Tips #${c.issue || ""} to ${n} subscriber${n > 1 ? "s" : ""}?\n\nThis cannot be undone.`)) { note.textContent = "Cancelled."; return; }
   note.textContent = `Sending to ${n}…`;
   const { ok, body } = await mmtCall("live");
   if (ok) { note.textContent = `Sent to ${body.sent || 0}${body.failed ? `, ${body.failed} failed` : ""}.`; mmtCampaignId = null; renderAutomations(); }
-  else note.textContent = `Error: ${body.error || "failed"}`;
+  else note.textContent = `Error: ${sendErr(body)}`;
 }
 window.mmtTest = mmtTest; window.mmtSend = mmtSend;
 
@@ -900,7 +908,7 @@ function caMsg(campaign, html) { const r = document.getElementById(`ca-result-${
 async function caPreview(campaign) {
   caMsg(campaign, "Checking…");
   const { ok, body } = await caSend(campaign, "preview");
-  if (!ok) return caMsg(campaign, `<span class="err">Error: ${esc(body.error || "failed")}</span>`);
+  if (!ok) return caMsg(campaign, `<span class="err">Error: ${esc(sendErr(body))}</span>`);
   const byReason = {}; for (const s of (body.skipped||[])) byReason[s.reason]=(byReason[s.reason]||0)+1;
   const skipSummary = Object.entries(byReason).map(([r,n])=>`${n} ${r}`).join(" · ");
   let detail = "";

@@ -85,6 +85,7 @@ export default async (req) => {
   const adhoc = body.adhoc ? {
     campaign: String(body.campaignId || `adhoc-${Date.now()}`).slice(0, 80),
     template: adhocTemplate,
+    brand: body.brand === "matthew" ? "matthew" : "practice-room",
     content: adhocTemplate === "mmt" ? {
       issue:        String(body.content?.issue || "").slice(0, 10),
       subject:      String(body.content?.subject || body.content?.articleTitle || "").slice(0, 200),
@@ -271,7 +272,7 @@ export default async (req) => {
       from: FROM, reply_to: REPLY_TO, to: [OWNER_EMAIL],
       subject: `[TEST] ${renderS(content, fn)}`,
       headers: { "List-Unsubscribe": `<${unsub}>` },
-      html: renderH(content, { firstName: fn, timeIn: "about ten days", site: SITE, unsub, footerReason, unsubText }),
+      html: renderH(content, { firstName: fn, timeIn: "about ten days", site: SITE, unsub, footerReason, unsubText, brand: adhoc?.brand }),
     };
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -304,7 +305,7 @@ export default async (req) => {
         from: FROM, reply_to: REPLY_TO, to: [m.email],
         subject: renderS(content, firstName(m.name)),
         headers: { "List-Unsubscribe": `<${unsub}>` },
-        html: renderH(content, { firstName: firstName(m.name), site: SITE, unsub, footerReason, unsubText }),
+        html: renderH(content, { firstName: firstName(m.name), site: SITE, unsub, footerReason, unsubText, brand: adhoc?.brand }),
       };
     });
     const res = await fetch("https://api.resend.com/emails/batch", {

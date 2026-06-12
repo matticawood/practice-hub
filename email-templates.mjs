@@ -343,7 +343,9 @@ export function renderEmailHTML(content, ctx = {}) {
   // Footer text varies by audience: members vs the separate waiting list.
   const footerReason = ctx.footerReason || "You're getting this because you're a member of The Practice Room.";
   const unsubText = ctx.unsubText || "Unsubscribe from emails";
-  const logo = `${site}/icon-192.png`;
+  const brandMatthew = ctx.brand === "matthew";
+  const logo = brandMatthew ? "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/logo.png" : `${site}/icon-192.png`;
+  const brandLabel = brandMatthew ? "Matthew Cawood" : "The Practice Room";
 
   const P = (html) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.62;color:#42382e">${html}</p>`;
   const bodyRows =
@@ -371,7 +373,7 @@ export function renderEmailHTML(content, ctx = {}) {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #ece5db;border-radius:18px;overflow:hidden">
         <tr><td style="padding:30px 36px 18px;text-align:center">
           <img src="${esc(logo)}" width="46" height="46" alt="" style="display:inline-block;border-radius:12px">
-          <div style="margin-top:10px;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#a99d8c">The Practice Room</div>
+          <div style="margin-top:10px;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#a99d8c">${esc(brandLabel)}</div>
         </td></tr>
         ${eyebrow}
         <tr><td style="padding:18px 38px 4px">
