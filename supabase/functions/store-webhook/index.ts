@@ -12,6 +12,7 @@ const SUPABASE_URL   = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY    = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const BRAND      = "https://matthewcawood.com";
+const BRAND_APP  = "https://app.matthewcawood.com";
 const FROM       = "store@matthewcawood.com";
 const REPLY_TO   = "enquiries@matthewcawood.com";
 const NOTIFY_TO  = "matthew@matthewcawood.com";
@@ -75,8 +76,9 @@ Deno.serve(async (req) => {
   const token = order.access_token;
 
   // ── Deliver to the buyer ──
-  const isCourse = item.type === "course";
-  const ctaHref  = isCourse ? `${BRAND}/store/learn/?t=${token}` : `${FN_BASE}/store-access?token=${token}`;
+  const isCourse   = item.type === "course";
+  const ctaHref    = isCourse ? `${BRAND}/store/learn/?t=${token}` : `${FN_BASE}/store-access?token=${token}`;
+  const reviewHref = `${BRAND}/store/${slug}/#reviews`;
   const paid = `${((session.amount_total || 0) / 100).toFixed(2)} ${(session.currency || "gbp").toUpperCase()}`;
   await sendEmail({
     apiKey: RESEND_API_KEY, from: FROM, to: email, replyTo: REPLY_TO,
@@ -84,14 +86,18 @@ Deno.serve(async (req) => {
     html: brandedEmail({
       eyebrow: isCourse ? "Course Access" : "Your Download",
       heading: isCourse ? "You're in. Let's begin." : "Thanks for your order",
-      paragraphs: isCourse
+      paragraphs: (isCourse
         ? [`Thank you for buying <strong>${item.title}</strong>. Your access is ready, watch online anytime from any device.`,
            `Tap below to open the course. Keep this email, the link is yours to return to whenever you like.`]
         : [`Thank you for buying <strong>${item.title}</strong>. Your download is ready below.`,
-           `The link is personal to you. If it ever expires, just reopen this email and tap it again for a fresh copy.`],
+           `The link is personal to you. If it ever expires, just reopen this email and tap it again for a fresh copy.`])
+        .concat([`When you've had a look, a quick review really helps other pianists — <a href="${reviewHref}" style="color:#b4881a">leave one here</a>.`,
+                 `And if you want to keep going, everything in these resources is taught in depth inside <strong>The Practice Room</strong> — structured practice, a pieces library, theory guides and a community.`]),
       detail: `${ic(isCourse ? "music" : "clip")}<strong>${item.title}</strong>`,
       ctaText: isCourse ? "Start the course →" : "Download your PDF →",
       ctaHref,
+      cta2Text: "Explore The Practice Room →",
+      cta2Href: `${BRAND_APP}/signup`,
       footerNote: "Matthew Cawood · Store",
     }),
   });

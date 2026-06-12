@@ -71,10 +71,13 @@ Deno.serve(async (req) => {
         paragraphs: [
           `Thanks for grabbing <strong>${item.title}</strong>. Tap below to download it, the link works for 7 days.`,
           `You're now on Monday Music Tips too, one short, useful idea about playing every Monday. Unsubscribe anytime.`,
+          `If you'd like to go further, <strong>The Practice Room</strong> turns ideas like these into a structured way to practise — tracking, a pieces library, theory guides and a community.`,
         ],
         detail: `${ic("clip")}<strong>${item.title}</strong>`,
         ctaText: "Download your PDF →",
         ctaHref: url,
+        cta2Text: "Explore The Practice Room →",
+        cta2Href: "https://app.matthewcawood.com/signup",
         footerNote: "Matthew Cawood · Store",
       }),
     });

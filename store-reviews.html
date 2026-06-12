@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Store Reviews — Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--card2:#27364b;--bd:#334155;--tx:#e2e8f0;--mut:#94a3b8;--gold:#f5c518;--green:#22c55e;--red:#ef4444}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 22px;border-bottom:1px solid var(--bd);position:sticky;top:0;background:var(--bg);z-index:5}
+  header h1{font-size:1.05rem;margin:0}
+  header .em{color:var(--mut);font-size:.8rem;font-weight:500;margin-left:8px}
+  main{max-width:860px;margin:0 auto;padding:22px}
+  .auth{max-width:360px;margin:80px auto;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:26px}
+  .auth h2{margin:0 0 14px;font-size:1.1rem}
+  .auth input{width:100%;margin-bottom:10px;padding:11px 13px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:9px;font-size:1rem}
+  .btn{background:var(--gold);color:#1a1410;border:none;border-radius:9px;padding:10px 16px;font-weight:700;font-size:.9rem;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+  .btn.green{background:var(--green);color:#04210f}
+  .btn.red{background:transparent;color:var(--red);border:1px solid #5b2330}
+  .btn:disabled{opacity:.5;cursor:default}
+  .err{color:#fca5a5;font-size:.85rem;margin-top:8px;display:none}
+  .grp{margin-bottom:30px}
+  .grp h3{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);border-bottom:1px solid var(--bd);padding-bottom:8px;margin:0 0 12px}
+  .rev{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+  .rev .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px}
+  .stars{color:var(--gold);letter-spacing:1px}
+  .stars .off{color:#475569}
+  .rev .name{font-weight:700}
+  .rev .slug{color:var(--mut);font-size:.8rem}
+  .rev .date{color:var(--mut);font-size:.78rem;margin-left:auto}
+  .rev .body{margin:0 0 12px;line-height:1.55;color:#cbd5e1}
+  .rev .acts{display:flex;gap:8px;flex-wrap:wrap}
+  .muted{color:var(--mut)}
+  .empty{color:var(--mut);text-align:center;padding:40px}
+</style>
+</head>
+<body>
+<div id="auth" class="auth" style="display:none">
+  <h2>Admin sign in</h2>
+  <input id="em" type="email" placeholder="Email" autocomplete="email">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button class="btn" id="login">Sign in</button>
+  <div class="err" id="autherr"></div>
+</div>
+
+<div id="app" style="display:none">
+  <header><h1>Store Reviews <span class="em" id="who"></span></h1>
+    <div><button class="btn ghost" id="refresh">Refresh</button> <button class="btn ghost" id="logout">Log out</button></div>
+  </header>
+  <main id="list"><p class="empty">Loading…</p></main>
+</div>
+
+<script>
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const OWNER_EMAIL   = "matthew@matthewcawood.com";
+const FN = SUPABASE_URL + "/functions/v1/store-reviews-admin";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function stars(n){ let s=""; for(let i=1;i<=5;i++){ s+= i<=n ? "★" : '<span class="off">★</span>'; } return s; }
+function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }catch(_){ return ""; } }
+
+async function token(){ const { data:{ session } } = await db.auth.getSession(); return session ? session.access_token : null; }
+
+async function boot(){
+  const { data:{ session } } = await db.auth.getSession();
+  if(!session){ $("auth").style.display="block"; return; }
+  if(session.user.email !== OWNER_EMAIL){ await db.auth.signOut(); $("auth").style.display="block"; $("autherr").textContent="Admin access only."; $("autherr").style.display="block"; return; }
+  $("who").textContent = session.user.email;
+  $("app").style.display="block"; $("auth").style.display="none";
+  load();
+}
+
+$("login").addEventListener("click", async ()=>{
+  $("autherr").style.display="none";
+  const { error } = await db.auth.signInWithPassword({ email:$("em").value.trim(), password:$("pw").value });
+  if(error){ $("autherr").textContent=error.message; $("autherr").style.display="block"; return; }
+  boot();
+});
+$("logout").addEventListener("click", async ()=>{ await db.auth.signOut(); location.reload(); });
+$("refresh").addEventListener("click", load);
+
+async function load(){
+  $("list").innerHTML = '<p class="empty">Loading…</p>';
+  const t = await token();
+  const r = await fetch(FN+"?action=list", { headers:{ Authorization:"Bearer "+t, apikey:SUPABASE_ANON } });
+  if(!r.ok){ $("list").innerHTML = '<p class="empty">Could not load ('+r.status+').</p>'; return; }
+  const { reviews } = await r.json();
+  render(reviews||[]);
+}
+
+function group(reviews, status){ return reviews.filter(x=>x.status===status); }
+
+function card(rv){
+  const acts = [];
+  if(rv.status!=="approved") acts.push('<button class="btn green" data-id="'+rv.id+'" data-set="approved">Approve</button>');
+  if(rv.status==="approved") acts.push('<button class="btn ghost" data-id="'+rv.id+'" data-set="pending">Unapprove</button>');
+  if(rv.status!=="hidden")   acts.push('<button class="btn red" data-id="'+rv.id+'" data-set="hidden">Hide</button>');
+  if(rv.status==="hidden")   acts.push('<button class="btn ghost" data-id="'+rv.id+'" data-set="pending">Restore</button>');
+  return '<div class="rev"><div class="top"><span class="stars">'+stars(rv.rating)+'</span>'+
+    '<span class="name">'+esc(rv.name)+'</span><span class="slug">'+esc(rv.slug)+(rv.email?' · '+esc(rv.email):'')+'</span>'+
+    '<span class="date">'+fmtDate(rv.created_at)+'</span></div>'+
+    '<p class="body">'+esc(rv.body)+'</p><div class="acts">'+acts.join("")+'</div></div>';
+}
+
+function render(reviews){
+  const sec = (title, rows)=> '<div class="grp"><h3>'+title+' ('+rows.length+')</h3>'+(rows.length?rows.map(card).join(""):'<p class="muted">None.</p>')+'</div>';
+  if(!reviews.length){ $("list").innerHTML='<p class="empty">No reviews yet.</p>'; return; }
+  $("list").innerHTML = sec("Pending", group(reviews,"pending")) + sec("Approved", group(reviews,"approved")) + sec("Hidden", group(reviews,"hidden"));
+  $("list").querySelectorAll("[data-set]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      btn.disabled=true;
+      const t = await token();
+      const r = await fetch(FN+"?action=set", { method:"POST", headers:{ Authorization:"Bearer "+t, apikey:SUPABASE_ANON, "Content-Type":"application/json" }, body: JSON.stringify({ id:Number(btn.dataset.id), status:btn.dataset.set }) });
+      if(r.ok) load(); else { btn.disabled=false; alert("Failed: "+r.status); }
+    });
+  });
+}
+
+boot();
+</script>
+</body>
+</html>
