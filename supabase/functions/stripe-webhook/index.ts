@@ -57,6 +57,14 @@ Deno.serve(async (req) => {
     const customerId = typeof session.customer === "string" ? session.customer : null;
     const subId      = typeof session.subscription === "string" ? session.subscription : null;
 
+    // Membership is the ONLY subscription product (Stripe Payment Links). Booking,
+    // package and store checkouts are one-time payments — Stripe fans this event out
+    // to every endpoint, so ignore non-subscriptions here or they'd wrongly be
+    // granted app membership + an onboarding invite.
+    if (session.mode !== "subscription" && !subId) {
+      return new Response(JSON.stringify({ ignored: "non-subscription" }), { headers: { "Content-Type": "application/json" } });
+    }
+
     if (!email) {
       console.error("No email found in session", session.id);
       return new Response("No email", { status: 400 });

@@ -297,6 +297,13 @@ Deno.serve(async (req) => {
 
     console.log("Session metadata:", JSON.stringify(meta));
 
+    // Membership subscriptions (stripe-webhook) and store sales (store-webhook) also
+    // arrive here via Stripe's fan-out. Ignore them with a 200 (not a 400) so Stripe
+    // doesn't keep retrying a "failed" delivery on this endpoint.
+    if (session.mode === "subscription" || meta.type === "store") {
+      return new Response(JSON.stringify({ ignored: session.mode === "subscription" ? "subscription" : "store" }), { headers: { "Content-Type": "application/json" } });
+    }
+
     // Package purchase → grant credits, no Cal.com booking yet.
     if (meta.type === "package") {
       await grantPackageCredits(meta, session);

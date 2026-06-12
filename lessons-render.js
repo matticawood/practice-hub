@@ -21,6 +21,16 @@
       .replace(/"/g, "&quot;");
   }
 
+  // Lazy-load the Mux player web component the first time a video block renders.
+  let _muxLoading = false;
+  function ensureMux() {
+    if (_muxLoading || (window.customElements && customElements.get("mux-player"))) return;
+    _muxLoading = true;
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/@mux/mux-player@3";
+    document.head.appendChild(s);
+  }
+
   // ── Minimal, safe markdown → HTML (bold, italic, code, links, lists) ──
   function inline(t) {
     t = esc(t);
@@ -106,6 +116,22 @@
           ${b.share ? `<button type="button" class="lr-task-share" data-share="1">Share to community</button>` : ""}</div>`;
       case "divider":
         return `<hr class="lr-divider">`;
+      case "video": {
+        if (!b.playbackId) return `<div class="lr-video lr-video-poster"><div class="lr-video-badge">▶ Video</div><div class="lr-video-id">Add a Mux Playback ID</div></div>`;
+        // With a signed token (store delivery) render the live player; otherwise show
+        // a labelled poster so signed videos don't show a broken player in previews.
+        if (b.token || b.public) {
+          ensureMux();
+          const tok = b.token ? ` playback-token="${esc(b.token)}"` : "";
+          return `<div class="lr-video"><mux-player playback-id="${esc(b.playbackId)}"${tok} accent-color="#f5c518" style="width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;display:block;--controls:flex"></mux-player>${b.caption ? `<div class="lr-cap">${esc(b.caption)}</div>` : ""}</div>`;
+        }
+        return `<div class="lr-video lr-video-poster"><div class="lr-video-badge">▶ Video</div><div class="lr-video-id">Mux &middot; ${esc(b.playbackId)}</div>${b.caption ? `<div class="lr-cap">${esc(b.caption)}</div>` : ""}</div>`;
+      }
+      case "download": {
+        const href = b.url ? esc(b.url) : "#";
+        const dl = b.url ? ' target="_blank" rel="noopener" download' : ' data-download-pending="1"';
+        return `<div class="lr-download"><a class="lr-download-btn" href="${href}"${dl}><span class="lr-dl-ico">&#x2913;</span><span>${esc(b.label || "Download")}</span></a>${b.note ? `<div class="lr-cap">${esc(b.note)}</div>` : ""}</div>`;
+      }
       case "questions": {
         const items = (b.items || []).map((q, qi) => renderQuestion(q, qi, bi)).join("");
         if (b.mode === "quiz") {
@@ -226,6 +252,15 @@
     .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
     .lr-task-share{margin-top:10px;background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
     .lr-divider{border:none;border-top:1px solid var(--border,#e3e1e6);margin:24px 0}
+    .lr-video{margin:18px 0}
+    .lr-cap{font-size:.82rem;color:var(--text-muted,#8a7868);margin-top:7px;text-align:center}
+    .lr-video-poster{aspect-ratio:16/9;border:1.5px dashed var(--border,#e3e1e6);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--surface-2,#f5f2ee);color:var(--text-muted,#8a7868)}
+    .lr-video-badge{font-weight:800;font-size:1.05rem;color:var(--accent-dark,#9a6f12)}
+    .lr-video-id{font-size:.8rem}
+    .lr-download{margin:16px 0}
+    .lr-download-btn{display:inline-flex;align-items:center;gap:9px;background:var(--surface,#fff);border:1.5px solid var(--accent,#f5c518);border-radius:10px;padding:11px 16px;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);text-decoration:none;cursor:pointer}
+    .lr-download-btn:hover{background:linear-gradient(180deg,rgba(245,197,24,.1),transparent)}
+    .lr-dl-ico{font-size:1.05rem;color:var(--accent-dark,#9a6f12)}
     .lr-questions,.lr-quiz{margin:18px 0}
     .lr-questions-title,.lr-quiz-title{font-weight:700;margin-bottom:10px}
     .lr-q{border:1px solid var(--border,#e3e1e6);border-radius:12px;padding:14px 16px;margin:10px 0;background:var(--surface,#fff)}
