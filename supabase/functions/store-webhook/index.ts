@@ -75,6 +75,19 @@ Deno.serve(async (req) => {
   const order = rows[0];
   const token = order.access_token;
 
+  // ── Add the buyer to the contacts list, Monday Music Tips and Customers ──
+  const listHdr = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" };
+  await fetch(`${SUPABASE_URL}/rest/v1/email_contacts`, {
+    method: "POST", headers: { ...listHdr, Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({ email, name: session.customer_details?.name || null }),
+  }).catch(() => {});
+  for (const slug of ["monday-music-tips", "customers"]) {
+    await fetch(`${SUPABASE_URL}/rest/v1/email_list_subscriptions`, {
+      method: "POST", headers: { ...listHdr, Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ email, list_slug: slug, opted_out: false }),
+    }).catch(() => {});
+  }
+
   // ── Deliver to the buyer ──
   const isCourse   = item.type === "course";
   const ctaHref    = isCourse ? `${BRAND}/store/learn/?t=${token}` : `${FN_BASE}/store-access?token=${token}`;
