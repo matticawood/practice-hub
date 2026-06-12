@@ -51,11 +51,17 @@ Deno.serve(async (req) => {
       body: JSON.stringify({ email: em, slug }),
     }).catch(() => {});
 
-    // Add to the newsletter list (idempotent on email PK).
-    await fetch(`${SUPABASE_URL}/rest/v1/newsletter_subscribers`, {
+    // Add to email_contacts + the Monday Music Tips list (the campaign system).
+    const ch = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" };
+    await fetch(`${SUPABASE_URL}/rest/v1/email_contacts`, {
       method: "POST",
-      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
-      body: JSON.stringify({ email: em, source: `store:${slug}` }),
+      headers: { ...ch, Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({ email: em, notes: `store:${slug}` }),
+    }).catch(() => {});
+    await fetch(`${SUPABASE_URL}/rest/v1/email_list_subscriptions`, {
+      method: "POST",
+      headers: { ...ch, Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ email: em, list_slug: "monday-music-tips", opted_out: false }),
     }).catch(() => {});
 
     const url = await signedUrl(slug);
