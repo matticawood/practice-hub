@@ -42,6 +42,24 @@ async function signPdf(slug: string): Promise<string | null> {
   return signedURL ? `${SUPABASE_URL}/storage/v1${signedURL}` : null;
 }
 
+// Sign an arbitrary store-files path (used by gated download blocks in a course).
+async function signStorePath(path: string): Promise<string | null> {
+  const clean = String(path).replace(/^\/+/, "");
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/store-files/${clean}`, {
+    method: "POST",
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn: 6 * 60 * 60 }),
+  });
+  if (!res.ok) return null;
+  const { signedURL } = await res.json();
+  return signedURL ? `${SUPABASE_URL}/storage/v1${signedURL}` : null;
+}
+
+// Per-course module names (level → label) for bespoke store courses.
+const SECTION_NAMES: Record<string, Record<number, string>> = {
+  "the-art-of-understanding-music": { 1: "Intro", 2: "Chapter 1", 3: "Chapter 2", 4: "Chapter 3", 5: "Chapter 4", 6: "Outro" },
+};
+
 // ── Mux signed playback JWT (RS256) ──
 const b64url = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -60,10 +78,10 @@ async function muxKey(): Promise<CryptoKey | null> {
     return _muxKey;
   } catch (e: any) { console.error("mux key import failed:", e.message); return null; }
 }
-async function muxToken(playbackId: string, key: CryptoKey): Promise<string> {
+async function muxToken(playbackId: string, key: CryptoKey, aud = "v"): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header  = b64urlStr(JSON.stringify({ alg: "RS256", typ: "JWT", kid: MUX_KEY_ID }));
-  const payload = b64urlStr(JSON.stringify({ sub: playbackId, aud: "v", exp: now + MUX_TTL, kid: MUX_KEY_ID }));
+  const payload = b64urlStr(JSON.stringify({ sub: playbackId, aud, exp: now + MUX_TTL, kid: MUX_KEY_ID }));
   const input = `${header}.${payload}`;
   const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(input));
   return `${input}.${b64url(new Uint8Array(sig))}`;
@@ -95,24 +113,52 @@ Deno.serve(async (req) => {
   // ── Course: the player page fetches JSON; a bare hit bounces to the player ──
   if (!wantJson) return Response.redirect(`${BRAND}/store/learn/?t=${token}`, 302);
 
+  // Resolve the course key from the product slug, then read its published lessons.
+  const courseRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/courses?store_slug=eq.${encodeURIComponent(order.slug)}&select=key,title,level_label&limit=1`,
+    { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
+  const course = courseRes.ok ? (await courseRes.json())[0] : null;
+  const courseKey  = course?.key || order.slug;
+  const levelLabel = course?.level_label || "Chapter";
+
   const lessonsRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/store_lessons?product_slug=eq.${encodeURIComponent(order.slug)}&order=sort.asc&select=id,chapter,chapter_title,title,mux_playback_id,duration_sec,free_preview`,
+    `${SUPABASE_URL}/rest/v1/lessons?course=eq.${encodeURIComponent(courseKey)}&status=eq.published&order=level.asc,sort_order.asc&select=id,level,title,summary,est_minutes,blocks`,
     { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
   const rawLessons = lessonsRes.ok ? await lessonsRes.json() : [];
   const key = await muxKey();
 
-  const lessons = [];
-  for (const l of (Array.isArray(rawLessons) ? rawLessons : [])) {
-    let playback: string | null = null;
-    if (l.mux_playback_id && key) {
-      try { playback = await muxToken(l.mux_playback_id, key); } catch (_) { playback = null; }
+  // Inject signed Mux tokens into video blocks + signed URLs into gated downloads.
+  async function hydrate(blocks: any[]): Promise<any[]> {
+    const out = [];
+    for (const b of (Array.isArray(blocks) ? blocks : [])) {
+      const nb = { ...b };
+      if (b?.type === "video" && b.playbackId && key) {
+        try {
+          nb.token           = await muxToken(b.playbackId, key, "v"); // playback
+          nb.thumbToken      = await muxToken(b.playbackId, key, "t"); // poster
+          nb.storyboardToken = await muxToken(b.playbackId, key, "s"); // scrub previews
+        } catch (_) { /* leave poster */ }
+      }
+      if (b?.type === "download" && b.path && !b.url) {
+        const u = await signStorePath(b.path);
+        if (u) nb.url = u;
+      }
+      out.push(nb);
     }
-    lessons.push({
-      id: l.id, chapter: l.chapter, chapterTitle: l.chapter_title, title: l.title,
-      durationSec: l.duration_sec, freePreview: !!l.free_preview,
-      playbackId: l.mux_playback_id || null, token: playback,
-    });
+    return out;
   }
 
-  return json({ ok: true, kind: "course", title, slug: order.slug, muxConfigured: !!key, lessons });
+  // Group lessons into modules by level.
+  const names = SECTION_NAMES[order.slug] || {};
+  const modMap = new Map<number, any>();
+  for (const l of (Array.isArray(rawLessons) ? rawLessons : [])) {
+    if (!modMap.has(l.level)) modMap.set(l.level, { level: l.level, title: names[l.level] || `${levelLabel} ${l.level}`, lessons: [] });
+    modMap.get(l.level).lessons.push({
+      id: l.id, title: l.title, summary: l.summary || null, estMinutes: l.est_minutes || null,
+      blocks: await hydrate(l.blocks),
+    });
+  }
+  const modules = [...modMap.values()].sort((a, b) => a.level - b.level);
+
+  return json({ ok: true, kind: "course", title, slug: order.slug, muxConfigured: !!key, modules });
 });

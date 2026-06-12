@@ -123,7 +123,9 @@
         if (b.token || b.public) {
           ensureMux();
           const tok = b.token ? ` playback-token="${esc(b.token)}"` : "";
-          return `<div class="lr-video"><mux-player playback-id="${esc(b.playbackId)}"${tok} accent-color="#f5c518" style="width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;display:block;--controls:flex"></mux-player>${b.caption ? `<div class="lr-cap">${esc(b.caption)}</div>` : ""}</div>`;
+          const tt = b.thumbToken ? ` thumbnail-token="${esc(b.thumbToken)}"` : "";
+          const st = b.storyboardToken ? ` storyboard-token="${esc(b.storyboardToken)}"` : "";
+          return `<div class="lr-video"><mux-player playback-id="${esc(b.playbackId)}"${tok}${tt}${st} accent-color="#f5c518" style="width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;display:block;--controls:flex"></mux-player>${b.caption ? `<div class="lr-cap">${esc(b.caption)}</div>` : ""}</div>`;
         }
         return `<div class="lr-video lr-video-poster"><div class="lr-video-badge">▶ Video</div><div class="lr-video-id">Mux &middot; ${esc(b.playbackId)}</div>${b.caption ? `<div class="lr-cap">${esc(b.caption)}</div>` : ""}</div>`;
       }
