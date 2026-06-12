@@ -83,6 +83,57 @@
 
 <main id="app-main">
   <p class="intro">Every automated email, exactly as it sends. Edit the words and the preview updates live — what you save here is what goes out (there's no copy hidden anywhere else). Send a test to yourself before anything reaches a member.</p>
+
+  <style>
+    #compose{background:#161616;border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:30px}
+    #compose .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    #compose label{display:block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:12px 0 5px}
+    #compose input,#compose select,#compose textarea{width:100%;box-sizing:border-box;background:#141414;border:1px solid var(--border);border-radius:8px;color:var(--ink);padding:9px 11px;font-size:.9rem;font-family:inherit}
+    #compose textarea{line-height:1.6;resize:vertical}
+    #compose input:focus,#compose select:focus,#compose textarea:focus{outline:none;border-color:var(--gold,#f5c518)}
+    @media(max-width:620px){#compose .row{grid-template-columns:1fr}}
+  </style>
+  <section id="compose">
+    <div class="group-h" style="margin-top:0">Compose a custom email</div>
+    <p class="intro" style="margin:4px 0 6px">Write a one-off email and send it to a list, all members, or a single person.</p>
+    <div class="row">
+      <div>
+        <label for="cmp-aud">To</label>
+        <select id="cmp-aud">
+          <option value="list:monday-music-tips">Monday Music Tips</option>
+          <option value="list:customers">Customers (emailable)</option>
+          <option value="list:waitlist">The Practice Room Waiting List</option>
+          <option value="members">All members</option>
+          <option value="single">A specific person…</option>
+        </select>
+      </div>
+      <div id="cmp-person-wrap" style="display:none">
+        <label for="cmp-email">Their email</label>
+        <input id="cmp-email" list="cmp-contacts" placeholder="name@email.com" autocomplete="off">
+        <datalist id="cmp-contacts"></datalist>
+      </div>
+    </div>
+    <label for="cmp-subject">Subject</label>
+    <input id="cmp-subject" placeholder="e.g. Sight Reading Book Two is here">
+    <label for="cmp-eyebrow">Label (optional, small pill at the top)</label>
+    <input id="cmp-eyebrow" placeholder="e.g. New release">
+    <label for="cmp-body">Message</label>
+    <textarea id="cmp-body" rows="7" placeholder="Write your message. Leave a blank line between paragraphs. You can use {firstName}."></textarea>
+    <div class="row">
+      <div><label for="cmp-cta-text">Button text (optional)</label><input id="cmp-cta-text" placeholder="e.g. Get the book"></div>
+      <div><label for="cmp-cta-href">Button link (optional)</label><input id="cmp-cta-href" placeholder="https://matthewcawood.com/store/…"></div>
+    </div>
+    <div class="preview-wrap" style="margin-top:16px">
+      <div class="preview-bar"><span style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)">Live preview</span></div>
+      <div class="frame-pad"><iframe id="cmp-preview" scrolling="no" style="min-height:200px"></iframe></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px">
+      <button class="btn" onclick="composeTest()">Send test to me</button>
+      <button class="btn btn-gold" onclick="composeSend()">Send…</button>
+      <span id="cmp-note" style="font-size:.84rem;color:var(--mut)"></span>
+    </div>
+  </section>
+
   <div id="studio-tabs" class="tabbar"></div>
   <div id="studio-subtabs" class="subtabbar"></div>
   <div id="studio-group-banner"></div>
@@ -165,7 +216,88 @@ async function boot() {
   if (!etReady) await new Promise(r => window.addEventListener("et-ready", r, { once: true }));
   await loadStudio();
   renderAutomations();
+  initCompose();
 }
+
+// ── Compose: custom one-off emails ────────────────────────────
+let cmpCampaignId = null;
+function composeContent() {
+  const body = (document.getElementById("cmp-body").value || "").trim();
+  const paragraphs = body.split(/\n\s*\n/).map(s => s.replace(/\n/g, "<br>").trim()).filter(Boolean);
+  return {
+    subject:  (document.getElementById("cmp-subject").value || "").trim(),
+    eyebrow:  (document.getElementById("cmp-eyebrow").value || "").trim(),
+    paragraphs,
+    ctaText:  (document.getElementById("cmp-cta-text").value || "").trim(),
+    ctaHref:  (document.getElementById("cmp-cta-href").value || "").trim(),
+  };
+}
+function composeAudience() {
+  const v = document.getElementById("cmp-aud").value;
+  if (v === "members") return { type: "members" };
+  if (v === "single")  return { type: "single", email: (document.getElementById("cmp-email").value || "").trim().toLowerCase() };
+  return { type: "list", listSlug: v.replace(/^list:/, "") };
+}
+function composePreview() {
+  const f = document.getElementById("cmp-preview");
+  f.onload = () => { try { f.style.height = (f.contentWindow.document.body.scrollHeight + 4) + "px"; } catch (e) {} };
+  f.srcdoc = window.ET.renderEmailHTML(composeContent(), { firstName: "Alex", site: SITE, unsub: "#", footerReason: "You'll get an unsubscribe link here.", unsubText: "Unsubscribe" });
+}
+let cmpAcTimer = null;
+async function composeAutocomplete(q) {
+  q = q.trim();
+  if (q.length < 2) return;
+  const { data } = await db.from("email_contacts").select("email,name").ilike("email", q + "%").limit(8);
+  const dl = document.getElementById("cmp-contacts");
+  dl.innerHTML = (data || []).map(c => `<option value="${c.email}">${c.name ? c.name.replace(/"/g, "") : ""}</option>`).join("");
+}
+function initCompose() {
+  const fields = ["cmp-subject", "cmp-eyebrow", "cmp-body", "cmp-cta-text", "cmp-cta-href"];
+  fields.forEach(id => document.getElementById(id).addEventListener("input", composePreview));
+  const aud = document.getElementById("cmp-aud");
+  aud.addEventListener("change", () => {
+    document.getElementById("cmp-person-wrap").style.display = aud.value === "single" ? "" : "none";
+  });
+  const em = document.getElementById("cmp-email");
+  em.addEventListener("input", () => { clearTimeout(cmpAcTimer); cmpAcTimer = setTimeout(() => composeAutocomplete(em.value), 200); });
+  composePreview();
+}
+async function composeCall(mode) {
+  if (!cmpCampaignId) cmpCampaignId = "adhoc-" + Date.now();
+  const { data: { session } } = await db.auth.getSession();
+  const res = await fetch("/.netlify/functions/send-campaign", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ adhoc: true, campaignId: cmpCampaignId, content: composeContent(), audience: composeAudience(), mode }),
+  });
+  return { ok: res.ok, body: await res.json().catch(() => ({})) };
+}
+async function composeTest() {
+  const note = document.getElementById("cmp-note");
+  const c = composeContent();
+  if (!c.subject || !c.paragraphs.length) { note.textContent = "Add a subject and a message first."; return; }
+  note.textContent = "Sending test…";
+  const { ok, body } = await composeCall("test");
+  note.textContent = ok ? `Test sent to ${OWNER_EMAIL}.` : `Error: ${body.error || "failed"}`;
+}
+async function composeSend() {
+  const note = document.getElementById("cmp-note");
+  const c = composeContent(), aud = composeAudience();
+  if (!c.subject || !c.paragraphs.length) { note.textContent = "Add a subject and a message first."; return; }
+  if (aud.type === "single" && !aud.email) { note.textContent = "Enter the recipient's email."; return; }
+  note.textContent = "Checking recipients…";
+  const pre = await composeCall("preview");
+  if (!pre.ok) { note.textContent = `Error: ${pre.body.error || "failed"}`; return; }
+  const n = pre.body.eligibleCount || 0;
+  if (!n) { note.textContent = "No eligible recipients (all opted out / already sent)."; return; }
+  const who = aud.type === "single" ? aud.email : (aud.type === "members" ? "all members" : document.getElementById("cmp-aud").selectedOptions[0].text);
+  if (!confirm(`Send this email to ${n} recipient${n > 1 ? "s" : ""} (${who})?\n\nThis cannot be undone.`)) { note.textContent = "Cancelled."; return; }
+  note.textContent = `Sending to ${n}…`;
+  const { ok, body } = await composeCall("live");
+  if (ok) { note.textContent = `Sent to ${body.sent || 0}${body.failed ? `, ${body.failed} failed` : ""}.`; cmpCampaignId = null; renderAutomations(); }
+  else note.textContent = `Error: ${body.error || "failed"}`;
+}
+window.composeTest = composeTest; window.composeSend = composeSend;
 
 // ── Studio ────────────────────────────────────────────────────
 const SITE = location.origin;          // so the preview loads the real logo image

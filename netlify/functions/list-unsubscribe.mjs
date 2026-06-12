@@ -45,6 +45,20 @@ export default async (req) => {
   const contact = cRes.ok ? (await cRes.json())[0] : null;
   if (!contact) return page("Invalid link", `<p style="font-size:15px;color:#516170">This unsubscribe link looks invalid or has expired.</p>`);
 
+  // 'all' = global opt-out, used by one-off custom sends not tied to a single list.
+  if (slug === "all") {
+    const upd = await sb(`email_contacts?email=eq.${encodeURIComponent(contact.email)}`,
+      { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ global_opt_out: true }) });
+    if (!upd.ok) { console.error("list-unsubscribe(all): patch failed", await upd.text());
+      return page("Error", `<p style="font-size:15px;color:#516170">Couldn't update your preferences. Please try again later.</p>`); }
+    const c0 = url.searchParams.get("c");
+    if (c0 && /^[a-z0-9_-]+$/i.test(c0)) {
+      await sb(`email_log?email=eq.${encodeURIComponent(contact.email)}&campaign=eq.${encodeURIComponent(c0)}&status=eq.sent`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ unsubscribed_at: new Date().toISOString() }) }).catch(() => {});
+    }
+    return page("Unsubscribed", `<p style="font-size:16px;line-height:1.5;margin:0 0 6px">You've been unsubscribed. You won't receive further emails from us.</p>`);
+  }
+
   // Friendly list name for the confirmation.
   const lRes = await sb(`email_lists?slug=eq.${encodeURIComponent(slug)}&select=name`);
   const listName = (lRes.ok ? (await lRes.json())[0]?.name : null) || "this list";
@@ -61,7 +75,7 @@ export default async (req) => {
 
   // Attribute the unsubscribe to the email that drove it (Studio analytics).
   const campaign = url.searchParams.get("c");
-  if (campaign && /^[a-z0-9_]+$/i.test(campaign)) {
+  if (campaign && /^[a-z0-9_-]+$/i.test(campaign)) {
     await sb(`email_log?email=eq.${encodeURIComponent(contact.email)}&campaign=eq.${encodeURIComponent(campaign)}&status=eq.sent`, {
       method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ unsubscribed_at: new Date().toISOString() }),
     }).catch(() => {});

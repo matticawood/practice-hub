@@ -73,17 +73,30 @@ export default async (req) => {
   // ── Inputs ───────────────────────────────────────────────────────────────
   let body = {};
   try { body = await req.json(); } catch { /* empty */ }
-  const campaign = String(body.campaign || "");
   const mode = ["preview", "test", "live"].includes(body.mode) ? body.mode : "preview";
   const requested = Array.isArray(body.recipients)
     ? [...new Set(body.recipients.map((e) => String(e || "").trim().toLowerCase()).filter(Boolean))]
     : [];
+  const normEmail = (e) => { e = String(e || "").trim().toLowerCase(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) ? e : ""; };
 
-  if (!EMAIL_DEFAULTS[campaign]) return json(400, { error: `unknown campaign '${campaign}'` });
-  // A campaign either targets the Members audience (allowed_emails) or a contact
-  // LIST (email_lists), declared via CAMPAIGN_META[campaign].list.
-  const listSlug = CAMPAIGN_META[campaign]?.list || null;
-  const isList = !!listSlug;
+  // Ad-hoc (custom) email from the Studio Compose panel: inline content + a chosen
+  // audience (a list, all members, or one person) instead of a predefined campaign.
+  const adhoc = body.adhoc ? {
+    campaign: String(body.campaignId || `adhoc-${Date.now()}`).slice(0, 80),
+    content: {
+      subject:   String(body.content?.subject   || "").slice(0, 200),
+      preheader: String(body.content?.preheader || "").slice(0, 200),
+      eyebrow:   String(body.content?.eyebrow   || "").slice(0, 60),
+      paragraphs: Array.isArray(body.content?.paragraphs)
+        ? body.content.paragraphs.map((p) => String(p || "")).filter((p) => p.trim()).slice(0, 60) : [],
+      ctaText:   String(body.content?.ctaText   || "").slice(0, 80),
+      ctaHref:   String(body.content?.ctaHref   || "").slice(0, 500),
+    },
+    audience: body.audience || {},
+  } : null;
+  if (adhoc && (!adhoc.content.subject || !adhoc.content.paragraphs.length))
+    return json(400, { error: "A custom email needs a subject and a message." });
+  let campaign = adhoc ? adhoc.campaign : String(body.campaign || "");
 
   const sb = (path, opts = {}) =>
     fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -94,93 +107,134 @@ export default async (req) => {
       },
     });
 
-  // Editable copy: DB override (Studio) merged over defaults.
-  let dbRow = null;
-  const tRes = await sb(`email_templates?campaign=eq.${encodeURIComponent(campaign)}&select=*`);
-  if (tRes.ok) dbRow = (await tRes.json())[0] || null;
-  const content = contentForCampaign(campaign, dbRow);
-
-  // Audience-specific footer + unsubscribe routing. For a list, name it from
-  // email_lists so the footer reads "...signed up to <List Name>".
-  let footerReason = MEMBER_FOOTER;
-  let unsubText = "Unsubscribe from emails";
+  let content, isList = false, listSlug = null;
+  let footerReason = MEMBER_FOOTER, unsubText = "Unsubscribe from emails";
   let unsubBase = `${SITE}/.netlify/functions/email-unsubscribe?t=`;
-  if (isList) {
-    const nRes = await sb(`email_lists?slug=eq.${encodeURIComponent(listSlug)}&select=name`);
-    const listName = (nRes.ok ? (await nRes.json())[0]?.name : null) || "this list";
-    footerReason = `You're getting this because you signed up to ${listName}.`;
-    unsubText = `Unsubscribe from ${listName}`;
-    unsubBase = `${SITE}/.netlify/functions/list-unsubscribe?l=${encodeURIComponent(listSlug)}&t=`;
-  }
+  const eligible = [], skipped = [];
 
-  // Already-sent (successful) for this campaign → skip.
+  // Already-sent (successful) for this campaign → skip (a double-send is impossible).
   const alreadySent = new Set();
   const lr = await sb(`email_log?select=email&campaign=eq.${encodeURIComponent(campaign)}&status=eq.sent`);
   if (lr.ok) for (const row of await lr.json()) alreadySent.add((row.email || "").toLowerCase());
 
-  // ── Resolve recipients ─────────────────────────────────────────────────────
-  const eligible = [], skipped = [];
-
-  if (isList) {
-    // Whole list, minus per-list opt-outs, global opt-outs, and already-sent.
-    // Ignores `requested`. Embeds the contact for name + unsubscribe token.
-    const r = await sb(`email_list_subscriptions?list_slug=eq.${encodeURIComponent(listSlug)}&select=email,opted_out,email_contacts(name,unsubscribe_token,global_opt_out)`);
-    if (!r.ok) return json(502, { error: "list lookup failed", detail: await r.text() });
-    for (const s of await r.json()) {
-      const e = (s.email || "").toLowerCase();
-      const c = s.email_contacts || {};
-      if (!e) continue;
-      if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
-      if (s.opted_out || c.global_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
-      if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
-      eligible.push({ email: s.email, name: c.name, unsubscribe_token: c.unsubscribe_token });
+  if (adhoc) {
+    content = adhoc.content;
+    const type = adhoc.audience.type;
+    if (type === "list") {
+      listSlug = String(adhoc.audience.listSlug || ""); isList = true;
+      const nRes = await sb(`email_lists?slug=eq.${encodeURIComponent(listSlug)}&select=name`);
+      const listName = (nRes.ok ? (await nRes.json())[0]?.name : null);
+      if (!listName) return json(400, { error: `unknown list '${listSlug}'` });
+      footerReason = `You're getting this because you signed up to ${listName}.`;
+      unsubText = `Unsubscribe from ${listName}`;
+      unsubBase = `${SITE}/.netlify/functions/list-unsubscribe?l=${encodeURIComponent(listSlug)}&t=`;
+      const r = await sb(`email_list_subscriptions?list_slug=eq.${encodeURIComponent(listSlug)}&select=email,opted_out,email_contacts(name,unsubscribe_token,global_opt_out)`);
+      if (!r.ok) return json(502, { error: "list lookup failed", detail: await r.text() });
+      for (const s of await r.json()) {
+        const e = (s.email || "").toLowerCase(); const c = s.email_contacts || {};
+        if (!e) continue;
+        if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
+        if (s.opted_out || c.global_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
+        if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
+        eligible.push({ email: s.email, name: c.name, unsubscribe_token: c.unsubscribe_token });
+      }
+    } else if (type === "members") {
+      const r = await sb(`allowed_emails?select=email,name,unsubscribe_token,email_opt_out`);
+      if (!r.ok) return json(502, { error: "member lookup failed", detail: await r.text() });
+      for (const m of await r.json()) {
+        const e = (m.email || "").toLowerCase();
+        if (!e) continue;
+        if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
+        if (m.email_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
+        if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
+        eligible.push({ email: m.email, name: m.name, unsubscribe_token: m.unsubscribe_token });
+      }
+    } else { // single person
+      const e = normEmail(adhoc.audience.email);
+      if (!e) return json(400, { error: "Enter a valid email address." });
+      await sb(`email_contacts`, { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ email: e }) }).catch(() => {});
+      const cRes = await sb(`email_contacts?email=eq.${encodeURIComponent(e)}&select=name,unsubscribe_token,global_opt_out`);
+      const c = (cRes.ok ? (await cRes.json())[0] : null) || {};
+      footerReason = "You're receiving this from Matthew Cawood.";
+      unsubText = "Unsubscribe";
+      unsubBase = `${SITE}/.netlify/functions/list-unsubscribe?l=all&t=`;
+      if (EXCLUDED.has(e)) skipped.push({ email: e, reason: "excluded account" });
+      else if (c.global_opt_out) skipped.push({ email: e, reason: "unsubscribed" });
+      else if (alreadySent.has(e)) skipped.push({ email: e, reason: "already sent" });
+      else eligible.push({ email: e, name: c.name, unsubscribe_token: c.unsubscribe_token });
     }
   } else {
-    // Member campaigns: validate the panel's explicit list against the roster.
-    const wanted = requested.filter((e) => !EXCLUDED.has(e));
-    let members = [];
-    if (wanted.length) {
-      const inList = wanted.map((e) => `"${e.replace(/"/g, "")}"`).join(",");
-      let r = await sb(`allowed_emails?select=email,name,unsubscribe_token,email_opt_out&email=in.(${inList})`);
-      if (!r.ok) {
-        r = await sb(`allowed_emails?select=email,name,unsubscribe_token&email=in.(${inList})`);
-        if (!r.ok) return json(502, { error: "member lookup failed", detail: await r.text() });
-      }
-      members = await r.json();
-    }
-    const byEmail = {};
-    for (const m of members) byEmail[(m.email || "").toLowerCase()] = m;
-    for (const e of requested) {
-      if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
-      const m = byEmail[e];
-      if (!m) { skipped.push({ email: e, reason: "not a current member" }); continue; }
-      if (m.email_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
-      if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
-      eligible.push({ email: m.email, name: m.name, unsubscribe_token: m.unsubscribe_token });
-    }
-  }
+    if (!EMAIL_DEFAULTS[campaign]) return json(400, { error: `unknown campaign '${campaign}'` });
+    // A campaign either targets the Members audience (allowed_emails) or a contact
+    // LIST (email_lists), declared via CAMPAIGN_META[campaign].list.
+    listSlug = CAMPAIGN_META[campaign]?.list || null;
+    isList = !!listSlug;
 
-  // ── Exclude anyone who is or was a member (list campaigns that opt in) ──────
-  // e.g. the waitlist: a "come and join" email shouldn't reach current or former
-  // members. Checks both the live roster (allowed_emails) and full Stripe history
-  // (everSubscriberEmails — any status, incl. cancelled).
-  if (isList && CAMPAIGN_META[campaign]?.excludeMembers && eligible.length) {
-    const memberSet = new Set();
-    const mr = await sb(`allowed_emails?select=email`);
-    if (mr.ok) for (const r of await mr.json()) memberSet.add((r.email || "").toLowerCase());
-    let everSet = new Set();
-    const STRIPE = process.env.STRIPE_SECRET_KEY;
-    if (STRIPE) {
-      try { everSet = await everSubscriberEmails(STRIPE); }
-      catch (e) { console.error("send-campaign: ever-member check failed", e.message); }
+    // Editable copy: DB override (Studio) merged over defaults.
+    let dbRow = null;
+    const tRes = await sb(`email_templates?campaign=eq.${encodeURIComponent(campaign)}&select=*`);
+    if (tRes.ok) dbRow = (await tRes.json())[0] || null;
+    content = contentForCampaign(campaign, dbRow);
+
+    if (isList) {
+      const nRes = await sb(`email_lists?slug=eq.${encodeURIComponent(listSlug)}&select=name`);
+      const listName = (nRes.ok ? (await nRes.json())[0]?.name : null) || "this list";
+      footerReason = `You're getting this because you signed up to ${listName}.`;
+      unsubText = `Unsubscribe from ${listName}`;
+      unsubBase = `${SITE}/.netlify/functions/list-unsubscribe?l=${encodeURIComponent(listSlug)}&t=`;
+      const r = await sb(`email_list_subscriptions?list_slug=eq.${encodeURIComponent(listSlug)}&select=email,opted_out,email_contacts(name,unsubscribe_token,global_opt_out)`);
+      if (!r.ok) return json(502, { error: "list lookup failed", detail: await r.text() });
+      for (const s of await r.json()) {
+        const e = (s.email || "").toLowerCase(); const c = s.email_contacts || {};
+        if (!e) continue;
+        if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
+        if (s.opted_out || c.global_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
+        if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
+        eligible.push({ email: s.email, name: c.name, unsubscribe_token: c.unsubscribe_token });
+      }
+    } else {
+      const wanted = requested.filter((e) => !EXCLUDED.has(e));
+      let members = [];
+      if (wanted.length) {
+        const inList = wanted.map((e) => `"${e.replace(/"/g, "")}"`).join(",");
+        let r = await sb(`allowed_emails?select=email,name,unsubscribe_token,email_opt_out&email=in.(${inList})`);
+        if (!r.ok) {
+          r = await sb(`allowed_emails?select=email,name,unsubscribe_token&email=in.(${inList})`);
+          if (!r.ok) return json(502, { error: "member lookup failed", detail: await r.text() });
+        }
+        members = await r.json();
+      }
+      const byEmail = {};
+      for (const m of members) byEmail[(m.email || "").toLowerCase()] = m;
+      for (const e of requested) {
+        if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
+        const m = byEmail[e];
+        if (!m) { skipped.push({ email: e, reason: "not a current member" }); continue; }
+        if (m.email_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
+        if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
+        eligible.push({ email: m.email, name: m.name, unsubscribe_token: m.unsubscribe_token });
+      }
     }
-    const kept = [];
-    for (const m of eligible) {
-      const e = m.email.toLowerCase();
-      if (memberSet.has(e) || everSet.has(e)) skipped.push({ email: e, reason: "is or was a member" });
-      else kept.push(m);
+
+    // Exclude current/former members for opt-in list campaigns (e.g. waitlist).
+    if (isList && CAMPAIGN_META[campaign]?.excludeMembers && eligible.length) {
+      const memberSet = new Set();
+      const mr = await sb(`allowed_emails?select=email`);
+      if (mr.ok) for (const r of await mr.json()) memberSet.add((r.email || "").toLowerCase());
+      let everSet = new Set();
+      const STRIPE = process.env.STRIPE_SECRET_KEY;
+      if (STRIPE) {
+        try { everSet = await everSubscriberEmails(STRIPE); }
+        catch (e) { console.error("send-campaign: ever-member check failed", e.message); }
+      }
+      const kept = [];
+      for (const m of eligible) {
+        const e = m.email.toLowerCase();
+        if (memberSet.has(e) || everSet.has(e)) skipped.push({ email: e, reason: "is or was a member" });
+        else kept.push(m);
+      }
+      eligible.length = 0; eligible.push(...kept);
     }
-    eligible.length = 0; eligible.push(...kept);
   }
 
   // ── PREVIEW ────────────────────────────────────────────────────────────────
