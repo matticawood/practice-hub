@@ -174,6 +174,9 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
 
 const NOTIFY_TO   = "matthew@matthewcawood.com";
 const NOTIFY_FROM = "bookings@matthewcawood.com";
+// Cal.com's standard attendee emails are sent here (a void) so the customer only
+// ever gets our branded emails. We send the customer their email ourselves.
+const MASK_EMAIL  = "noreply@matthewcawood.com";
 
 // ── Stripe signature verification (HMAC-SHA256) ───────────────
 async function verifyStripeSignature(payload: string, sigHeader: string, secret: string): Promise<boolean> {
@@ -315,18 +318,23 @@ Deno.serve(async (req) => {
     if (meta.notes) noteParts.push(meta.notes);
     const combinedNotes = noteParts.join("\n\n") || undefined;
 
+    // Mask the attendee email so Cal.com's standard emails go to a void inbox —
+    // the customer only ever receives OUR branded emails. Real email is kept in
+    // metadata (read back by cal-webhook for cancellations / reschedules).
     const bookingBody: Record<string, unknown> = {
       eventTypeId: Number(meta.eventTypeId),
       start: meta.startTime,
       attendee: {
         name:     meta.attendeeName || "Student",
-        email:    meta.attendeeEmail,
+        email:    MASK_EMAIL,
         timeZone: meta.attendeeTimeZone || "Europe/London",
         language: "en",
       },
       metadata: {
         stripeSessionId: session.id,
         paid: paidStr,
+        customerEmail: meta.attendeeEmail,
+        customerName: meta.attendeeName || "Student",
         ...(combinedNotes ? { notes: combinedNotes }  : {}),
         ...(meta.fileUrl  ? { attachmentUrl: meta.fileUrl } : {}),
       },

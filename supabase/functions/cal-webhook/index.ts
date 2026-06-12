@@ -97,8 +97,9 @@ Deno.serve(async (req) => {
   console.log("Cal webhook:", trigger, p.uid);
 
   const attendee = (p.attendees && p.attendees[0]) || {};
-  const to   = attendee.email;
-  const name = attendee.name || "there";
+  // Attendee email is masked (noreply@) — the real customer email lives in metadata.
+  const to   = p.metadata?.customerEmail || attendee.email;
+  const name = p.metadata?.customerName || attendee.name || "there";
   const tz   = attendee.timeZone || p.organizer?.timeZone || "Europe/London";
   const lengthMin = Number(p.length) || Math.round((new Date(p.endTime).getTime() - new Date(p.startTime).getTime()) / 60000) || 60;
   const label = labelFor(lengthMin);

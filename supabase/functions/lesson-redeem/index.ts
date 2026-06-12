@@ -8,6 +8,8 @@ const CAL_API_KEY  = Deno.env.get("CAL_API_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const NOTIFY_TO   = "matthew@matthewcawood.com";
 const NOTIFY_FROM = "bookings@matthewcawood.com";
+// Cal.com's standard attendee emails go here (a void) — the customer only gets ours.
+const MASK_EMAIL  = "noreply@matthewcawood.com";
 
 // ── Branded email shell (matches The Practice Room transactional style) ──
 const BRAND_LOGO = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/logo.png";
@@ -101,11 +103,13 @@ Deno.serve(async (req) => {
     const credit = rows[0];
 
     // Book the Cal.com lesson (mirrors clinic-webhook booking call)
+    // Masked attendee email → Cal's standard emails go to a void; we email the
+    // customer ourselves. Real email kept in metadata for cal-webhook.
     const bookingBody: Record<string, unknown> = {
       eventTypeId: Number(eventTypeId),
       start: startTime,
-      attendee: { name: name || "Student", email, timeZone: timeZone || "Europe/London", language: "en" },
-      metadata: { source: "package-credit", ...(notes ? { notes: String(notes).slice(0, 490) } : {}), ...(fileUrl ? { attachmentUrl: String(fileUrl).slice(0, 500) } : {}) },
+      attendee: { name: name || "Student", email: MASK_EMAIL, timeZone: timeZone || "Europe/London", language: "en" },
+      metadata: { source: "package-credit", customerEmail: email, customerName: name || "Student", ...(notes ? { notes: String(notes).slice(0, 490) } : {}), ...(fileUrl ? { attachmentUrl: String(fileUrl).slice(0, 500) } : {}) },
     };
     const calRes = await fetch("https://api.cal.com/v2/bookings", {
       method: "POST",
