@@ -55,7 +55,8 @@ export default async (req) => {
 
   const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const RESEND  = process.env.RESEND_API_KEY;
-  const FROM    = process.env.REMINDER_FROM || "The Practice Room <noreply@matthewcawood.com>";
+  const FROM_PR = process.env.REMINDER_FROM || "The Practice Room <noreply@matthewcawood.com>";
+  const FROM_MC = process.env.MATTHEW_FROM || "Matthew Cawood <noreply@matthewcawood.com>";
   const REPLY_TO = process.env.REPLY_TO || "matthew@matthewcawood.com";  // replies reach a real inbox
   const SITE    = (process.env.SITE_URL || "https://app.matthewcawood.com").replace(/\/$/, "");
   if (!SERVICE || !RESEND) return json(500, { error: "missing env (SERVICE/RESEND)" });
@@ -126,6 +127,7 @@ export default async (req) => {
   let footerReason = MEMBER_FOOTER, unsubText = "Unsubscribe from emails";
   let unsubBase = `${SITE}/.netlify/functions/email-unsubscribe?t=`;
   let renderH = renderEmailHTML, renderS = renderSubject;   // swapped for the MMT template
+  let FROM = FROM_PR;   // "Matthew Cawood" for MMT + Matthew-branded custom; "The Practice Room" otherwise
   const eligible = [], skipped = [];
 
   // Already-sent (successful) for this campaign → skip (a double-send is impossible).
@@ -136,6 +138,7 @@ export default async (req) => {
   if (adhoc) {
     content = adhoc.content;
     if (adhoc.template === "mmt") { renderH = renderMMTHTML; renderS = renderMMTSubject; }
+    if (adhoc.template === "mmt" || adhoc.brand === "matthew") FROM = FROM_MC;
     const type = adhoc.audience.type;
     if (type === "list") {
       listSlug = String(adhoc.audience.listSlug || ""); isList = true;

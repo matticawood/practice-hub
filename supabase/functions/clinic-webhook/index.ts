@@ -173,7 +173,7 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
 }
 
 const NOTIFY_TO   = "matthew@matthewcawood.com";
-const NOTIFY_FROM = "bookings@matthewcawood.com";
+const NOTIFY_FROM = "Matthew Cawood <bookings@matthewcawood.com>";
 // Cal.com's standard attendee emails are sent here (a void) so the customer only
 // ever gets our branded emails. We send the customer their email ourselves.
 const MASK_EMAIL  = "bookings-noreply@matthewcawood.com";

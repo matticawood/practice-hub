@@ -8,7 +8,7 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL   = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY    = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-const FROM     = "store@matthewcawood.com";
+const FROM     = "Matthew Cawood <store@matthewcawood.com>";
 const REPLY_TO = "enquiries@matthewcawood.com";
 const SIGN_TTL = 7 * 24 * 60 * 60; // 7 days
 

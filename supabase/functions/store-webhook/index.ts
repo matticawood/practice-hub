@@ -13,7 +13,7 @@ const SERVICE_KEY    = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const BRAND      = "https://matthewcawood.com";
 const BRAND_APP  = "https://app.matthewcawood.com";
-const FROM       = "store@matthewcawood.com";
+const FROM       = "Matthew Cawood <store@matthewcawood.com>";
 const REPLY_TO   = "enquiries@matthewcawood.com";
 const NOTIFY_TO  = "matthew@matthewcawood.com";
 const FN_BASE    = `${SUPABASE_URL}/functions/v1`;
