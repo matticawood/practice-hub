@@ -1460,9 +1460,11 @@ function _shInitials(name) {
 let _shPresenceDb = null;
 let _shPresenceEmail = null;
 let _shHeartbeatTimer = null;
+let _shLastBeatAt = 0;   // ms timestamp of the last presence write (for interaction throttling)
 async function _shHeartbeat() {
   if (!_shPresenceDb || !_shPresenceEmail) return;
   if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+  _shLastBeatAt = Date.now();
   try {
     // Pages may expose `window._shPageDetail` (e.g. the Hub's current sub-tab) so
     // presence can show exactly where someone is, not just the file. Appended as a
@@ -1560,6 +1562,13 @@ window._shStartPresence = function(db, email) {
   });
   // Best-effort flush when the tab is closed/navigated away.
   window.addEventListener("pagehide", () => { _shFlushUsage(); });
+  // Interaction-driven heartbeat: mobile/PWA webviews throttle or freeze the
+  // setInterval while backgrounded, so an actively-used app (e.g. someone logging
+  // a practice) could still read as "last seen hours ago". Any real interaction
+  // refreshes presence, throttled to at most once per ~50s to avoid write spam.
+  const _shOnInteract = () => { if (Date.now() - _shLastBeatAt > 50_000) _shHeartbeat(); };
+  ["pointerdown", "keydown", "touchstart"].forEach(ev =>
+    document.addEventListener(ev, _shOnInteract, { passive: true, capture: true }));
 };
 
 let _shPresenceRefreshTimer = null;
