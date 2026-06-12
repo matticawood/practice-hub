@@ -9,7 +9,7 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const NOTIFY_TO   = "matthew@matthewcawood.com";
 const NOTIFY_FROM = "bookings@matthewcawood.com";
 // Cal.com's standard attendee emails go here (a void) — the customer only gets ours.
-const MASK_EMAIL  = "noreply@matthewcawood.com";
+const MASK_EMAIL  = "bookings-noreply@matthewcawood.com";
 
 // ── Branded email shell (matches The Practice Room transactional style) ──
 const BRAND_LOGO = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/logo.png";
@@ -198,7 +198,7 @@ Deno.serve(async (req) => {
         icsAttachment),
     ]);
 
-    return json({ ok: true, remaining });
+    return json({ ok: true, remaining, uid: data.uid || null });
   } catch (e: any) {
     console.error("lesson-redeem error:", e.message);
     return json({ error: "Something went wrong." }, 500);

@@ -176,7 +176,7 @@ const NOTIFY_TO   = "matthew@matthewcawood.com";
 const NOTIFY_FROM = "bookings@matthewcawood.com";
 // Cal.com's standard attendee emails are sent here (a void) so the customer only
 // ever gets our branded emails. We send the customer their email ourselves.
-const MASK_EMAIL  = "noreply@matthewcawood.com";
+const MASK_EMAIL  = "bookings-noreply@matthewcawood.com";
 
 // ── Stripe signature verification (HMAC-SHA256) ───────────────
 async function verifyStripeSignature(payload: string, sigHeader: string, secret: string): Promise<boolean> {
