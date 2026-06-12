@@ -1461,9 +1461,12 @@ let _shPresenceDb = null;
 let _shPresenceEmail = null;
 let _shHeartbeatTimer = null;
 let _shLastBeatAt = 0;   // ms timestamp of the last presence write (for interaction throttling)
-async function _shHeartbeat() {
+async function _shHeartbeat(force) {
   if (!_shPresenceDb || !_shPresenceEmail) return;
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+  // The background timer respects visibility (don't beat for hidden tabs). But a
+  // `force` beat comes from a real interaction or an explicit save/ping — proof the
+  // user is present — so it writes even if a webview misreports visibility as hidden.
+  if (!force && typeof document !== "undefined" && document.visibilityState === "hidden") return;
   _shLastBeatAt = Date.now();
   try {
     // Pages may expose `window._shPageDetail` (e.g. the Hub's current sub-tab) so
@@ -1544,7 +1547,7 @@ async function _shFlushUsage() {
 }
 // Pages call this after changing `window._shPageDetail` to push the new view
 // immediately, instead of waiting up to 60s for the next heartbeat.
-window._shPing = function() { _shHeartbeat(); };
+window._shPing = function() { _shHeartbeat(true); };
 window._shStartPresence = function(db, email) {
   if (!db || !email) return;
   _shPresenceDb = db;
@@ -1566,7 +1569,7 @@ window._shStartPresence = function(db, email) {
   // setInterval while backgrounded, so an actively-used app (e.g. someone logging
   // a practice) could still read as "last seen hours ago". Any real interaction
   // refreshes presence, throttled to at most once per ~50s to avoid write spam.
-  const _shOnInteract = () => { if (Date.now() - _shLastBeatAt > 50_000) _shHeartbeat(); };
+  const _shOnInteract = () => { if (Date.now() - _shLastBeatAt > 50_000) _shHeartbeat(true); };
   ["pointerdown", "keydown", "touchstart"].forEach(ev =>
     document.addEventListener(ev, _shOnInteract, { passive: true, capture: true }));
 };
