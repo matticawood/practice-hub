@@ -85,15 +85,18 @@
   <p class="intro">Every automated email, exactly as it sends. Edit the words and the preview updates live — what you save here is what goes out (there's no copy hidden anywhere else). Send a test to yourself before anything reaches a member.</p>
 
   <style>
-    #compose{background:#161616;border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:30px}
-    #compose .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    #compose label{display:block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:12px 0 5px}
-    #compose input,#compose select,#compose textarea{width:100%;box-sizing:border-box;background:#141414;border:1px solid var(--border);border-radius:8px;color:var(--ink);padding:9px 11px;font-size:.9rem;font-family:inherit}
-    #compose textarea{line-height:1.6;resize:vertical}
-    #compose input:focus,#compose select:focus,#compose textarea:focus{outline:none;border-color:var(--gold,#f5c518)}
-    @media(max-width:620px){#compose .row{grid-template-columns:1fr}}
+    #compose,#mmt-composer{background:#161616;border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:30px}
+    #compose .row,#mmt-composer .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    #compose label,#mmt-composer label{display:block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:12px 0 5px}
+    #compose input,#compose select,#compose textarea,#mmt-composer input,#mmt-composer select,#mmt-composer textarea{width:100%;box-sizing:border-box;background:#141414;border:1px solid var(--border);border-radius:8px;color:var(--ink);padding:9px 11px;font-size:.9rem;font-family:inherit}
+    #compose textarea,#mmt-composer textarea{line-height:1.6;resize:vertical}
+    #compose input:focus,#compose select:focus,#compose textarea:focus,#mmt-composer input:focus,#mmt-composer select:focus,#mmt-composer textarea:focus{outline:none;border-color:var(--gold,#f5c518)}
+    @media(max-width:620px){#compose .row,#mmt-composer .row{grid-template-columns:1fr}}
   </style>
-  <section id="compose">
+  <div id="studio-tabs" class="tabbar"></div>
+  <div id="studio-subtabs" class="subtabbar"></div>
+  <div id="studio-group-banner"></div>
+  <section id="compose" style="display:none">
     <div class="group-h" style="margin-top:0">Compose a custom email</div>
     <p class="intro" style="margin:4px 0 6px">Write a one-off email and send it to a list, all members, or a single person.</p>
     <div class="row">
@@ -134,9 +137,40 @@
     </div>
   </section>
 
-  <div id="studio-tabs" class="tabbar"></div>
-  <div id="studio-subtabs" class="subtabbar"></div>
-  <div id="studio-group-banner"></div>
+  <section id="mmt-composer" style="display:none">
+    <div class="group-h" style="margin-top:0">Monday Music Tips — weekly email</div>
+    <p class="intro" style="margin:4px 0 6px">Pick this week's article, add your intro, quote and key points, then send to the Monday Music Tips list. From you (M logo), not The Practice Room.</p>
+    <div class="row">
+      <div>
+        <label for="mmt-article">This week's article</label>
+        <select id="mmt-article"><option value="">Loading…</option></select>
+      </div>
+      <div>
+        <label for="mmt-issue">Issue #</label>
+        <input id="mmt-issue" placeholder="116">
+      </div>
+    </div>
+    <label for="mmt-subject">Subject (defaults to the article title)</label>
+    <input id="mmt-subject" placeholder="">
+    <label for="mmt-intro">Intro — a sentence or two (blank line = new paragraph)</label>
+    <textarea id="mmt-intro" rows="4" placeholder="I hope it's a great start to the week for you. This week's Monday Music Tip is all about…"></textarea>
+    <div class="row">
+      <div><label for="mmt-quote">Quote of the week (optional)</label><input id="mmt-quote" placeholder="The quote…"></div>
+      <div><label for="mmt-quote-author">Quote author</label><input id="mmt-quote-author" placeholder="e.g. Steve Jobs"></div>
+    </div>
+    <label for="mmt-bullets">"In this issue I explore" — one point per line</label>
+    <textarea id="mmt-bullets" rows="3" placeholder="First point&#10;Second point&#10;Third point"></textarea>
+    <div class="preview-wrap" style="margin-top:16px">
+      <div class="preview-bar"><span style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)">Live preview</span></div>
+      <div class="frame-pad"><iframe id="mmt-preview" scrolling="no" style="min-height:200px"></iframe></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px">
+      <button class="btn" onclick="mmtTest()">Send test to me</button>
+      <button class="btn btn-gold" onclick="mmtSend()">Send to Monday Music Tips…</button>
+      <span id="mmt-note" style="font-size:.84rem;color:var(--mut)"></span>
+    </div>
+  </section>
+
   <div id="cards"></div>
 
   <div class="group-h" style="margin-top:34px">Activity log</div>
@@ -162,7 +196,7 @@
 </div>
 
 <script type="module">
-  import * as ET from "./email-templates.mjs?v=5";
+  import * as ET from "./email-templates.mjs?v=6";
   window.ET = ET;
   window.dispatchEvent(new Event("et-ready"));
 </script>
@@ -217,6 +251,7 @@ async function boot() {
   await loadStudio();
   renderAutomations();
   initCompose();
+  mmtInit();
 }
 
 // ── Compose: custom one-off emails ────────────────────────────
@@ -299,6 +334,87 @@ async function composeSend() {
 }
 window.composeTest = composeTest; window.composeSend = composeSend;
 
+// ── Monday Music Tips composer ────────────────────────────────
+let mmtCampaignId = null, mmtArticleList = [], mmtTotal = 0;
+async function mmtInit() {
+  const sel = document.getElementById("mmt-article");
+  try {
+    const { count } = await db.from("mmt_articles").select("slug", { count: "exact", head: true }).eq("status", "published");
+    mmtTotal = count || 0;
+    const { data } = await db.from("mmt_articles").select("slug,title,published_at").eq("status", "published").order("published_at", { ascending: false }).limit(40);
+    mmtArticleList = data || [];
+  } catch (e) { mmtArticleList = []; }
+  sel.innerHTML = mmtArticleList.length
+    ? mmtArticleList.map((a, i) => `<option value="${i}">${esc(a.title)}</option>`).join("")
+    : `<option value="">No published articles</option>`;
+  sel.addEventListener("change", mmtOnArticle);
+  ["mmt-issue", "mmt-subject", "mmt-intro", "mmt-quote", "mmt-quote-author", "mmt-bullets"].forEach(id => document.getElementById(id).addEventListener("input", mmtPreview));
+  mmtOnArticle();
+}
+function mmtOnArticle() {
+  const i = parseInt(document.getElementById("mmt-article").value, 10);
+  const a = mmtArticleList[i];
+  if (a) {
+    document.getElementById("mmt-issue").value = Math.max(1, mmtTotal - i);
+    document.getElementById("mmt-subject").value = a.title;
+  }
+  mmtPreview();
+}
+function mmtContent() {
+  const i = parseInt(document.getElementById("mmt-article").value, 10);
+  const a = mmtArticleList[i];
+  const intro = (document.getElementById("mmt-intro").value || "").trim().split(/\n\s*\n/).map(s => s.replace(/\n/g, " ").trim()).filter(Boolean);
+  const bullets = (document.getElementById("mmt-bullets").value || "").split("\n").map(s => s.trim()).filter(Boolean);
+  const subj = (document.getElementById("mmt-subject").value || "").trim();
+  return {
+    issue: (document.getElementById("mmt-issue").value || "").trim(),
+    subject: subj || (a ? a.title : ""),
+    articleTitle: a ? a.title : subj,
+    articleUrl: a ? `https://matthewcawood.com/monday-music-tips/${a.slug}/` : "https://matthewcawood.com/monday-music-tips/",
+    intro,
+    quote: (document.getElementById("mmt-quote").value || "").trim(),
+    quoteAuthor: (document.getElementById("mmt-quote-author").value || "").trim(),
+    bullets,
+  };
+}
+function mmtPreview() {
+  const f = document.getElementById("mmt-preview");
+  f.onload = () => { try { f.style.height = (f.contentWindow.document.body.scrollHeight + 4) + "px"; } catch (e) {} };
+  f.srcdoc = window.ET.renderMMTHTML(mmtContent(), { firstName: "Alex", site: SITE, unsub: "#" });
+}
+async function mmtCall(mode) {
+  if (!mmtCampaignId) mmtCampaignId = "adhoc-mmt-" + Date.now();
+  const { data: { session } } = await db.auth.getSession();
+  const res = await fetch("/.netlify/functions/send-campaign", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ adhoc: true, template: "mmt", campaignId: mmtCampaignId, content: mmtContent(), audience: { type: "list", listSlug: "monday-music-tips" }, mode }),
+  });
+  return { ok: res.ok, body: await res.json().catch(() => ({})) };
+}
+async function mmtTest() {
+  const note = document.getElementById("mmt-note"), c = mmtContent();
+  if (!c.articleTitle || (!c.intro.length && !c.bullets.length)) { note.textContent = "Pick an article and add some content first."; return; }
+  note.textContent = "Sending test…";
+  const { ok, body } = await mmtCall("test");
+  note.textContent = ok ? `Test sent to ${OWNER_EMAIL}.` : `Error: ${body.error || "failed"}`;
+}
+async function mmtSend() {
+  const note = document.getElementById("mmt-note"), c = mmtContent();
+  if (!c.articleTitle || (!c.intro.length && !c.bullets.length)) { note.textContent = "Pick an article and add some content first."; return; }
+  note.textContent = "Checking recipients…";
+  const pre = await mmtCall("preview");
+  if (!pre.ok) { note.textContent = `Error: ${pre.body.error || "failed"}`; return; }
+  const n = pre.body.eligibleCount || 0;
+  if (!n) { note.textContent = "No eligible recipients."; return; }
+  if (!confirm(`Send Monday Music Tips #${c.issue || ""} to ${n} subscriber${n > 1 ? "s" : ""}?\n\nThis cannot be undone.`)) { note.textContent = "Cancelled."; return; }
+  note.textContent = `Sending to ${n}…`;
+  const { ok, body } = await mmtCall("live");
+  if (ok) { note.textContent = `Sent to ${body.sent || 0}${body.failed ? `, ${body.failed} failed` : ""}.`; mmtCampaignId = null; renderAutomations(); }
+  else note.textContent = `Error: ${body.error || "failed"}`;
+}
+window.mmtTest = mmtTest; window.mmtSend = mmtSend;
+
 // ── Studio ────────────────────────────────────────────────────
 const SITE = location.origin;          // so the preview loads the real logo image
 const previewWidth = {};               // campaign -> px
@@ -335,11 +451,28 @@ async function loadStudio() {
   document.getElementById("cards").innerHTML = html;
   for (const camp of Object.keys(META)) wireCard(camp);
 
-  // Group tabs.
+  // Tabs: Compose + Monday Music Tips first, then the campaign groups.
   const groupNames = Object.keys(STUDIO_GROUPS);
-  document.getElementById("studio-tabs").innerHTML = groupNames.map(g =>
+  const specialTabs =
+    `<button id="gtab-compose" onclick="showSpecial('compose')">Compose</button>` +
+    `<button id="gtab-mmt" onclick="showSpecial('mmt')">Monday Music Tips</button>`;
+  document.getElementById("studio-tabs").innerHTML = specialTabs + groupNames.map(g =>
     `<button id="gtab-${slug(g)}" onclick="showGroup('${g.replace(/'/g, "\\'")}')">${esc(g)}</button>`).join("");
-  showGroup(groupNames[0]);
+  showSpecial("compose");
+}
+
+function showSpecial(which) {
+  activeGroup = null;
+  document.querySelectorAll("#studio-tabs button").forEach(b => b.classList.remove("on"));
+  const tab = document.getElementById(which === "compose" ? "gtab-compose" : "gtab-mmt");
+  if (tab) tab.classList.add("on");
+  document.getElementById("studio-subtabs").innerHTML = "";
+  document.getElementById("studio-group-banner").innerHTML = "";
+  for (const c of Object.keys(window.ET.CAMPAIGN_META)) { const w = document.getElementById(`wrap-${c}`); if (w) w.style.display = "none"; }
+  document.getElementById("compose").style.display = which === "compose" ? "block" : "none";
+  document.getElementById("mmt-composer").style.display = which === "mmt" ? "block" : "none";
+  if (which === "compose") composePreview();
+  if (which === "mmt") mmtPreview();
 }
 
 let STUDIO_GROUPS = {};
@@ -349,6 +482,10 @@ const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 function showGroup(group) {
   activeGroup = group;
+  // Leaving the Compose / Monday Music Tips special tabs.
+  document.getElementById("compose").style.display = "none";
+  document.getElementById("mmt-composer").style.display = "none";
+  ["gtab-compose", "gtab-mmt"].forEach(id => { const b = document.getElementById(id); if (b) b.classList.remove("on"); });
   for (const g of Object.keys(STUDIO_GROUPS)) {
     const t = document.getElementById(`gtab-${slug(g)}`);
     if (t) t.classList.toggle("on", g === group);

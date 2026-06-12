@@ -20,7 +20,7 @@
 //   mode 'test'    → sends ONLY to the owner (logged 'test')
 //   mode 'live'    → sends to the eligible recipients; logs 'sent' / 'failed'
 
-import { EMAIL_DEFAULTS, CAMPAIGN_META, renderEmailHTML, renderSubject, contentForCampaign } from "../../email-templates.mjs";
+import { EMAIL_DEFAULTS, CAMPAIGN_META, renderEmailHTML, renderSubject, contentForCampaign, renderMMTHTML, renderMMTSubject } from "../../email-templates.mjs";
 import { everSubscriberEmails } from "../../stripe-history.mjs";
 
 const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
@@ -81,9 +81,20 @@ export default async (req) => {
 
   // Ad-hoc (custom) email from the Studio Compose panel: inline content + a chosen
   // audience (a list, all members, or one person) instead of a predefined campaign.
+  const adhocTemplate = body.template === "mmt" ? "mmt" : "default";
   const adhoc = body.adhoc ? {
     campaign: String(body.campaignId || `adhoc-${Date.now()}`).slice(0, 80),
-    content: {
+    template: adhocTemplate,
+    content: adhocTemplate === "mmt" ? {
+      issue:        String(body.content?.issue || "").slice(0, 10),
+      subject:      String(body.content?.subject || body.content?.articleTitle || "").slice(0, 200),
+      articleTitle: String(body.content?.articleTitle || "").slice(0, 200),
+      articleUrl:   String(body.content?.articleUrl || "").slice(0, 500),
+      intro:        Array.isArray(body.content?.intro) ? body.content.intro.map((p) => String(p || "")).filter((p) => p.trim()).slice(0, 20) : [],
+      quote:        String(body.content?.quote || "").slice(0, 400),
+      quoteAuthor:  String(body.content?.quoteAuthor || "").slice(0, 80),
+      bullets:      Array.isArray(body.content?.bullets) ? body.content.bullets.map((b) => String(b || "")).filter((b) => b.trim()).slice(0, 12) : [],
+    } : {
       subject:   String(body.content?.subject   || "").slice(0, 200),
       preheader: String(body.content?.preheader || "").slice(0, 200),
       eyebrow:   String(body.content?.eyebrow   || "").slice(0, 60),
@@ -94,7 +105,9 @@ export default async (req) => {
     },
     audience: body.audience || {},
   } : null;
-  if (adhoc && (!adhoc.content.subject || !adhoc.content.paragraphs.length))
+  if (adhoc && adhoc.template === "mmt" && (!adhoc.content.articleTitle || (!adhoc.content.intro.length && !adhoc.content.bullets.length)))
+    return json(400, { error: "The Monday Music Tips email needs an article and some content." });
+  if (adhoc && adhoc.template !== "mmt" && (!adhoc.content.subject || !adhoc.content.paragraphs.length))
     return json(400, { error: "A custom email needs a subject and a message." });
   let campaign = adhoc ? adhoc.campaign : String(body.campaign || "");
 
@@ -110,6 +123,7 @@ export default async (req) => {
   let content, isList = false, listSlug = null;
   let footerReason = MEMBER_FOOTER, unsubText = "Unsubscribe from emails";
   let unsubBase = `${SITE}/.netlify/functions/email-unsubscribe?t=`;
+  let renderH = renderEmailHTML, renderS = renderSubject;   // swapped for the MMT template
   const eligible = [], skipped = [];
 
   // Already-sent (successful) for this campaign → skip (a double-send is impossible).
@@ -119,6 +133,7 @@ export default async (req) => {
 
   if (adhoc) {
     content = adhoc.content;
+    if (adhoc.template === "mmt") { renderH = renderMMTHTML; renderS = renderMMTSubject; }
     const type = adhoc.audience.type;
     if (type === "list") {
       listSlug = String(adhoc.audience.listSlug || ""); isList = true;
@@ -244,7 +259,7 @@ export default async (req) => {
       eligibleCount: eligible.length,
       eligible: eligible.map((m) => ({ email: m.email, name: m.name || "", firstName: firstName(m.name) })),
       skipped,
-      sampleSubject: renderSubject(content, firstName(eligible[0]?.name)),
+      sampleSubject: renderS(content, firstName(eligible[0]?.name)),
     });
   }
 
@@ -254,9 +269,9 @@ export default async (req) => {
     const fn = "Matt";
     const msg = {
       from: FROM, reply_to: REPLY_TO, to: [OWNER_EMAIL],
-      subject: `[TEST] ${renderSubject(content, fn)}`,
+      subject: `[TEST] ${renderS(content, fn)}`,
       headers: { "List-Unsubscribe": `<${unsub}>` },
-      html: renderEmailHTML(content, { firstName: fn, timeIn: "about ten days", site: SITE, unsub, footerReason, unsubText }),
+      html: renderH(content, { firstName: fn, timeIn: "about ten days", site: SITE, unsub, footerReason, unsubText }),
     };
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -287,9 +302,9 @@ export default async (req) => {
       const unsub = `${unsubBase}${m.unsubscribe_token}&c=${campaign}`;
       return {
         from: FROM, reply_to: REPLY_TO, to: [m.email],
-        subject: renderSubject(content, firstName(m.name)),
+        subject: renderS(content, firstName(m.name)),
         headers: { "List-Unsubscribe": `<${unsub}>` },
-        html: renderEmailHTML(content, { firstName: firstName(m.name), site: SITE, unsub, footerReason, unsubText }),
+        html: renderH(content, { firstName: firstName(m.name), site: SITE, unsub, footerReason, unsubText }),
       };
     });
     const res = await fetch("https://api.resend.com/emails/batch", {

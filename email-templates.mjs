@@ -625,3 +625,112 @@ export function renderStoreHTML(key) {
   });
   return "<p style='font-family:sans-serif;padding:24px'>Unknown store email.</p>";
 }
+
+// ── Monday Music Tips weekly email ──────────────────────────────────────────
+// From Matthew (M logo + "Monday Music Tips"), NOT The Practice Room. Cream/gold
+// shell coherent with the store emails. content: { issue, subject?, intro:[..],
+// quote, quoteAuthor, articleTitle, bullets:[..], articleUrl, suggestUrl? }.
+const MC_LOGO = "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/email-assets/logo.png";
+export function renderMMTSubject(content, firstName) {
+  const s = content?.subject || content?.articleTitle || "This week's Monday Music Tip";
+  return fill(s, { firstName: firstName || "there" });
+}
+export function renderMMTHTML(content, ctx = {}) {
+  const c = content || {};
+  const BRAND = "https://matthewcawood.com", APP = "https://app.matthewcawood.com";
+  const fn = ctx.firstName || "there";
+  const unsub = ctx.unsub || "#";
+  const unsubText = ctx.unsubText || "Unsubscribe";
+  const tokens = { firstName: fn };
+  const articleUrl = c.articleUrl || `${BRAND}/monday-music-tips/`;
+  const suggestUrl = c.suggestUrl || "mailto:enquiries@matthewcawood.com?subject=Monday%20Music%20Tip%20suggestion";
+  const intro = (Array.isArray(c.intro) ? c.intro : (c.intro ? [c.intro] : [])).filter(Boolean);
+  const bullets = (Array.isArray(c.bullets) ? c.bullets : []).filter(Boolean);
+
+  const P = (h) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.62;color:#42382e">${fill(h, tokens)}</p>`;
+  const rule = `<tr><td style="padding:6px 40px"><div style="height:1px;background:#ece5db"></div></td></tr>`;
+  const gbtn = (text, href) => `<a href="${esc(href)}" style="display:inline-block;background:#F5C518;color:#1a1410;text-decoration:none;font-weight:800;font-size:14px;letter-spacing:.02em;padding:14px 32px;border-radius:11px">${esc(text)}</a>`;
+
+  const quoteBlock = c.quote ? `
+    <tr><td style="padding:16px 40px 4px;text-align:center">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#b89b3a;margin-bottom:8px">Quote of the week</div>
+      <p style="margin:0;font-size:16px;line-height:1.5;color:#42382e;font-style:italic">"${esc(c.quote)}"</p>
+      ${c.quoteAuthor ? `<p style="margin:7px 0 0;font-size:14px;color:#8a7d6b;font-weight:700">— ${esc(c.quoteAuthor)}</p>` : ""}
+    </td></tr>` : "";
+
+  const bulletsHtml = bullets.length ? `
+    <tr><td style="padding:6px 40px 0">
+      <ul style="margin:6px 0 0;padding-left:20px;color:#42382e">
+        ${bullets.map((b) => `<li style="font-size:15px;line-height:1.55;margin-bottom:7px">${esc(b)}</li>`).join("")}
+      </ul>
+    </td></tr>` : "";
+
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;padding:0;background:#faf7f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1a1410;-webkit-font-smoothing:antialiased">
+  <span style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(intro[0] || c.articleTitle || "This week's Monday Music Tip")}</span>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf7f3;padding:32px 16px"><tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #ece5db;border-radius:18px;overflow:hidden">
+
+      <tr><td style="padding:30px 40px 6px;text-align:center">
+        <img src="${MC_LOGO}" width="46" height="46" alt="" style="display:inline-block;border-radius:12px">
+      </td></tr>
+      <tr><td style="padding:8px 40px 0">
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="font-size:14px;font-weight:800;color:#42382e;letter-spacing:.01em">Monday Music Tips</td>
+          <td style="text-align:right;font-size:12px;font-weight:700;color:#a99d8c">Issue #${esc(c.issue || "")}</td>
+        </tr></table>
+      </td></tr>
+
+      <tr><td style="padding:18px 40px 2px;text-align:center">
+        <h1 style="margin:0;font-size:26px;line-height:1.2;color:#1a1410;font-weight:800;letter-spacing:-.01em">This week…</h1>
+      </td></tr>
+
+      <tr><td style="padding:16px 40px 2px">
+        ${P(`Happy Monday, ${esc(fn)}.`)}
+        ${intro.map(P).join("")}
+      </td></tr>
+
+      ${quoteBlock ? rule + quoteBlock + rule : ""}
+
+      <tr><td style="padding:14px 40px 0">
+        ${c.articleTitle ? `<p style="margin:0 0 10px;font-size:15px;color:#42382e">This week's tip: <strong>${esc(c.articleTitle)}</strong></p>` : ""}
+        <p style="margin:0;font-size:15px;color:#42382e">In this issue I explore:</p>
+      </td></tr>
+      ${bulletsHtml}
+      <tr><td style="padding:20px 40px 6px;text-align:center">${gbtn("Read the full article →", articleUrl)}</td></tr>
+
+      ${rule}
+
+      <tr><td style="padding:10px 40px 0">
+        <div style="background:#15140f;border-radius:14px;padding:22px 22px 20px;text-align:center">
+          <div style="font-size:19px;font-weight:900;letter-spacing:.02em;color:#F5C518;line-height:1.1">THE PRACTICE ROOM</div>
+          <div style="font-size:12px;color:#cfc6b6;margin-top:5px">The piano platform built for how you <strong style="color:#fff">actually</strong> learn.</div>
+        </div>
+      </td></tr>
+      <tr><td style="padding:16px 40px 0">
+        ${P("Set goals, track your practice, build your repertoire, sharpen your note and chord recognition, join live clinics, and connect with other pianists working toward the same thing.")}
+        ${P("Everything in one place — built specifically for piano players.")}
+      </td></tr>
+      <tr><td style="padding:8px 40px 4px;text-align:center">${gbtn("Explore The Practice Room →", `${APP}/signup`)}</td></tr>
+
+      ${rule}
+
+      <tr><td style="padding:10px 40px 0;text-align:center">
+        <p style="margin:0;font-size:14px;color:#8a7d6b">Have a suggestion for a future Monday Music Tip? <a href="${esc(suggestUrl)}" style="color:#b4881a;font-weight:600">Let me know</a>.</p>
+      </td></tr>
+
+      <tr><td style="padding:22px 40px 26px;border-top:1px solid #f0ebe3;text-align:center">
+        <div style="font-size:13px;font-weight:800;color:#42382e;margin-bottom:8px">Monday Music Tips</div>
+        <div style="font-size:12px;line-height:1.7;color:#a99d8c">
+          Matthew Cawood, BMus (Hons) ATCL<br>
+          <a href="mailto:enquiries@matthewcawood.com" style="color:#a99d8c;text-decoration:none">enquiries@matthewcawood.com</a> ·
+          <a href="${BRAND}" style="color:#a99d8c;text-decoration:none">matthewcawood.com</a> ·
+          <a href="https://www.instagram.com/matticawood" style="color:#a99d8c;text-decoration:none">@matticawood</a>
+        </div>
+        <div style="margin-top:12px"><a href="${esc(unsub)}" style="color:#bcb2a2;text-decoration:underline;font-size:12px">${esc(unsubText)}</a></div>
+      </td></tr>
+
+    </table>
+  </td></tr></table>
+</body></html>`;
+}
