@@ -39,7 +39,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const H = { apikey: SK, Authorization: `Bearer ${SK}`, "Content-Type": "application/json" };
 
 // Pull the 4 migrated lessons, group by student email.
-const r = await fetch(`${SUPABASE_URL}/rest/v1/bookings?select=email,attendee_name,start_time,meeting_url&stripe_session_id=like.acuity-booking-*&order=start_time.asc`, { headers: H });
+const r = await fetch(`${SUPABASE_URL}/rest/v1/bookings?select=email,attendee_name,start_time,meeting_url,cal_uid&stripe_session_id=like.acuity-booking-*&order=start_time.asc`, { headers: H });
 const rows = await r.json();
 if (!Array.isArray(rows) || !rows.length) { console.error("No migrated lessons found."); process.exit(1); }
 const byEmail = {};
@@ -53,7 +53,7 @@ try {
 } catch {}
 
 function buildEmail(name, lessons) {
-  const items = lessons.map((l) => ({ whenLabel: `${fmtDate(l.start_time)} at ${fmtTime(l.start_time)} (UK time)`, link: l.meeting_url }));
+  const items = lessons.map((l) => ({ whenLabel: `${fmtDate(l.start_time)} at ${fmtTime(l.start_time)} (UK time)`, link: l.meeting_url, calUid: l.cal_uid }));
   return renderLessonLinkEmail({ firstName: firstName(name), lessons: items });
 }
 
