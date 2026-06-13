@@ -162,6 +162,9 @@
 
     /* ── Top pieces table ── */
     .top-pieces { margin-bottom: 36px; }
+    .top-pieces > summary { cursor: pointer; list-style: none; }
+    .top-pieces > summary::-webkit-details-marker { display: none; }
+    .top-pieces:not([open]) > summary { margin-bottom: 0; }
     .top-piece-row {
       display: flex;
       align-items: center;
@@ -919,7 +922,7 @@ async function renderFunnels() {
   const safe = async (p) => { try { return (await p).data || []; } catch (e) { console.warn("funnel load failed:", e); return []; } };
   const [se, ordersRaw, leadsRaw, bookingsRaw, elog, eclicks] = await Promise.all([
     safe(db.from("site_events").select("event,vid,path,dur_ms,device,country,referrer,utm_source,scroll_pct,slug,value_minor,currency,ts")),
-    safe(db.from("store_orders").select("slug,kind,amount_minor,currency,vid,created_at,email")),
+    safe(db.from("store_orders").select("slug,kind,amount_minor,currency,vid,created_at,email,stripe_session_id")),
     safe(db.from("store_leads").select("slug,created_at,email")),
     safe(db.from("bookings").select("kind,amount_minor,currency,vid,created_at,email")),
     safe(db.from("email_log").select("campaign,status,delivered_at,opened_at,clicked_at,bounced_at,complained_at")),
@@ -931,6 +934,12 @@ async function renderFunnels() {
   const orders = ordersRaw.filter(notOwner);
   const leads = leadsRaw.filter(notOwner);
   const bookings = bookingsRaw.filter(notOwner);
+
+  // Real sales only: drop Tevello backfill (migrated access) + test rows. `within` windows by recency.
+  const isBackfillOrTest = (o) => { const s = (o.stripe_session_id || "").toLowerCase(); return s.startsWith("backfill") || s.startsWith("test_") || s.startsWith("test-"); };
+  const realOrders = orders.filter(o => !isBackfillOrTest(o));
+  const migratedOrders = orders.length - realOrders.length;
+  const within = (days) => (o) => { const t = new Date(o.created_at).getTime(); return !!t && (Date.now() - t) <= days * 86400000; };
 
   const esc = s => String(s == null ? "" : s).replace(/</g, "&lt;");
   const pct = (n, d) => d ? Math.round(n / d * 100) : 0;
@@ -985,18 +994,23 @@ async function renderFunnels() {
   h += `<h2 class="section-header" style="margin-top:30px">${ico('bars','#4ade80')}Store funnel <span class="section-meta">view → checkout → purchase</span></h2>`;
   const pv = se.filter(e => e.event === "product_view");
   const cc = se.filter(e => e.event === "checkout_click");
-  const slugSet = new Set([...pv, ...cc].map(e=>e.slug).concat(orders.map(o=>o.slug), leads.map(l=>l.slug)).filter(Boolean));
+  const revOf = (arr) => { const m={}; for (const o of arr){ const c=(o.currency||"gbp").toUpperCase(); m[c]=(m[c]||0)+(o.amount_minor||0);} return m; };
+  const ordersWeek = realOrders.filter(within(7));
+  const ordersMonth = realOrders.filter(within(30));
+  const slugSet = new Set([...pv, ...cc].map(e=>e.slug).concat(realOrders.map(o=>o.slug), leads.map(l=>l.slug)).filter(Boolean));
   const perSlug = {}; for (const s of slugSet) perSlug[s] = { views:0, checkouts:0, orders:0, leads:0, rev:{} };
   for (const e of pv) if (e.slug && perSlug[e.slug]) perSlug[e.slug].views++;
   for (const e of cc) if (e.slug && perSlug[e.slug]) perSlug[e.slug].checkouts++;
-  for (const o of orders) if (o.slug && perSlug[o.slug]) { perSlug[o.slug].orders++; const c=(o.currency||"gbp").toUpperCase(); perSlug[o.slug].rev[c]=(perSlug[o.slug].rev[c]||0)+(o.amount_minor||0); }
+  for (const o of realOrders) if (o.slug && perSlug[o.slug]) { perSlug[o.slug].orders++; const c=(o.currency||"gbp").toUpperCase(); perSlug[o.slug].rev[c]=(perSlug[o.slug].rev[c]||0)+(o.amount_minor||0); }
   for (const l of leads) if (l.slug && perSlug[l.slug]) perSlug[l.slug].leads++;
-  const totalRev = {}; for (const o of orders) { const c=(o.currency||"gbp").toUpperCase(); totalRev[c]=(totalRev[c]||0)+(o.amount_minor||0); }
-  metrics.store = { orders: orders.length, leads: leads.length, productViews: pv.length, checkoutClicks: cc.length, revenue: totalRev, perProduct: {} };
+  const totalRev = revOf(realOrders);
+  metrics.store = { orders: realOrders.length, ordersThisWeek: ordersWeek.length, ordersThisMonth: ordersMonth.length, soldPreviouslyTevello: migratedOrders, leads: leads.length, productViews: pv.length, checkoutClicks: cc.length, revenue: totalRev, revenueThisMonth: revOf(ordersMonth), perProduct: {} };
   if (!slugSet.size) {
     h += `<div style="color:#64748b;font-size:.9rem;margin:8px 0 20px">No store activity yet.</div>`;
   } else {
-    h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(pv.length,"product views")}${statCard(cc.length,"checkout clicks")}${statCard(orders.length,"orders")}${statCard(revStr(totalRev),"revenue")}</div>`;
+    h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(pv.length,"product views")}${statCard(cc.length,"checkout clicks")}${statCard(realOrders.length,"orders all-time")}${statCard(revStr(totalRev),"revenue all-time")}</div>`;
+    h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:0 0 8px">${statCard(ordersMonth.length,"orders this month")}${statCard(ordersWeek.length,"orders this week")}${statCard(revStr(revOf(ordersMonth)),"revenue this month")}</div>`;
+    if (migratedOrders) h += `<div style="font-size:.75rem;color:#64748b;margin:0 0 8px">${migratedOrders} sold previously via Tevello (pre-migration, not new sales)</div>`;
     h += tableOpen(["Product","Views","Checkout","Orders","Conv","Revenue","Free"]);
     for (const [s,d] of Object.entries(perSlug).sort((a,b)=>b[1].views-a[1].views)) {
       metrics.store.perProduct[s] = { views:d.views, checkouts:d.checkouts, orders:d.orders, conv:pct(d.orders,d.views), revenue:d.rev, leads:d.leads };
@@ -1530,13 +1544,14 @@ function renderInsights2(d) {
   const members = new Set((d.aeRows || []).map(r => low(r.email)).filter(e => e && !EX.has(e)));
 
   // Per-member: practice days, cross-app active days, last-active
-  const pDays = {}, aDays = {}, lastA = {};
-  const addAct = (e, ds) => { e = low(e); if (!e || EX.has(e) || !ds) return; const day = String(ds).slice(0, 10); (aDays[e] = aDays[e] || new Set()).add(day); const x = dAgo(day); if (lastA[e] == null || x < lastA[e]) lastA[e] = x; };
-  sessions.forEach(s => { const e = low(s.email); (pDays[e] = pDays[e] || new Set()).add(String(s.session_date).slice(0, 10)); addAct(e, s.session_date); members.add(e); });
-  (d.usageRows || []).forEach(u => addAct(u.email, u.day));
-  [...(d.posts || []), ...(d.comments || []), ...(d.likes || []), ...(d.actComments || []), ...(d.cfComments || [])].forEach(r => addAct(r.email, r.created_at));
-  [...(d.allGames || []), ...(d.noteScores || []), ...(d.chordScores || [])].forEach(g => addAct(g.email, g.created_at));
-  (d.attendance || []).forEach(a => addAct(a.email, a.joined_at));
+  const pDays = {}, aDays = {}, lastA = {}, lastReal = {};
+  // real = deliberate activity (practice / posts / games / events). feature_usage views are passive "browsing": counted in lastA but NOT lastReal, so we can tell engaged members from content-only browsers.
+  const addAct = (e, ds, real) => { e = low(e); if (!e || EX.has(e) || !ds) return; const day = String(ds).slice(0, 10); (aDays[e] = aDays[e] || new Set()).add(day); const x = dAgo(day); if (lastA[e] == null || x < lastA[e]) lastA[e] = x; if (real && (lastReal[e] == null || x < lastReal[e])) lastReal[e] = x; };
+  sessions.forEach(s => { const e = low(s.email); (pDays[e] = pDays[e] || new Set()).add(String(s.session_date).slice(0, 10)); addAct(e, s.session_date, true); members.add(e); });
+  (d.usageRows || []).forEach(u => addAct(u.email, u.day, false));
+  [...(d.posts || []), ...(d.comments || []), ...(d.likes || []), ...(d.actComments || []), ...(d.cfComments || [])].forEach(r => addAct(r.email, r.created_at, true));
+  [...(d.allGames || []), ...(d.noteScores || []), ...(d.chordScores || [])].forEach(g => addAct(g.email, g.created_at, true));
+  (d.attendance || []).forEach(a => addAct(a.email, a.joined_at, true));
 
   // North star: Weekly Active Practitioners
   const pracIn = (a, b) => new Set(sessions.filter(s => { const x = dAgo(s.session_date); return x >= a && x < b; }).map(s => low(s.email)));
@@ -1565,11 +1580,12 @@ function renderInsights2(d) {
   const breaking = [...members].map(e => ({ e, s: calcStreak(e), today: pDays[e] && [...pDays[e]].some(d => dAgo(d) === 0) })).filter(x => x.s >= 5 && !x.today).sort((a, b) => b.s - a.s);
 
   // Migration-aware lifecycle
-  let nActive = 0, nSlip = 0; const reactList = [], slipList = [];
-  for (const e of members) { const la = lastA[e];
+  let nActive = 0, nSlip = 0, nBrowse = 0; const reactList = [], slipList = [];
+  for (const e of members) { const la = lastA[e], lr = lastReal[e];
     if (la == null || la > REACT_DAYS) reactList.push({ e, la });
     else if (la > 7) { nSlip++; slipList.push({ e, la }); }
-    else nActive++; }
+    else if (lr != null && lr <= 7) nActive++;
+    else nBrowse++; }
   reactList.sort((a, b) => (a.la == null ? 1e9 : a.la) - (b.la == null ? 1e9 : b.la));
   slipList.sort((a, b) => a.la - b.la);
   const churnedN = d.churnedCount || 0;
@@ -1659,7 +1675,7 @@ function renderInsights2(d) {
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">${funnel.map(f => `<div style="display:flex;align-items:center;gap:10px;font-size:.84rem"><div style="flex:0 0 240px;color:#cbd5e1">${f.n}</div><div style="flex:1;background:#0d1525;border-radius:5px;overflow:hidden;height:18px"><div style="width:${Math.max(2, Math.round(f.v / fMax * 100))}%;height:100%;background:${f.c}"></div></div><div style="flex:0 0 30px;text-align:right;color:#cbd5e1;font-weight:700">${f.v}</div></div>`).join("")}</div>
     <p style="font-size:.72rem;color:#64748b;margin-bottom:28px">Activation = a forming habit (≥3 practice days within 2 weeks of first showing up). The first 1–2 weeks is where retention is won — protect it. Fills out as post-migration cohorts mature.</p>`;
 
-  const segs = [{ n: "Active (≤7d)", v: nActive, c: "#4ade80" }, { n: "Slipping (8–14d)", v: nSlip, c: "#f59e0b" }, { n: "Reactivate (paying, 14d+)", v: reactList.length, c: "#3b82f6" }, { n: "Churned (cancelled)", v: churnedN, c: "#7f1d1d" }];
+  const segs = [{ n: "Active (≤7d, practising)", v: nActive, c: "#4ade80" }, { n: "Browsing (≤7d, passive)", v: nBrowse, c: "#64748b" }, { n: "Slipping (8–14d)", v: nSlip, c: "#f59e0b" }, { n: "Reactivate (paying, 14d+)", v: reactList.length, c: "#3b82f6" }, { n: "Churned (cancelled)", v: churnedN, c: "#7f1d1d" }];
   const segTot = segs.reduce((s, x) => s + x.v, 0) || 1;
   h += `<h2 class="section-header">${ico('refresh')}Member lifecycle <span class="section-meta">${members.size} paying · ${churnedN} cancelled</span></h2>
     <div style="display:flex;height:30px;border-radius:8px;overflow:hidden;margin-bottom:10px">${segs.map(s => s.v ? `<div title="${s.n}: ${s.v}" style="width:${s.v / segTot * 100}%;background:${s.c};min-width:2px"></div>` : "").join("")}</div>
@@ -1706,8 +1722,8 @@ function renderInsights2(d) {
   const postsMap = {}; [...(d.posts || []), ...(d.comments || [])].forEach(p => { const e = low(p.email); if (!EX.has(e)) postsMap[e] = (postsMap[e] || 0) + 1; });
   const goalsMap = {}; (d.pieceGoals || []).forEach(g => { const e = low(g.email); if (!EX.has(e)) goalsMap[e] = (goalsMap[e] || 0) + 1; });
   const lvlOf = hrs => { let l = 0; for (let i = 0; i < TH.length; i++) if (hrs >= TH[i]) l = i; return l; };
-  const segOf = la => la == null || la > REACT_DAYS ? { t: "reactivate", c: "#3b82f6" } : la > 7 ? { t: "slipping", c: "#f59e0b" } : { t: "active", c: "#4ade80" };
-  const mrows = [...members].map(e => { const la = lastA[e], hrs = ((minsBy[e] || 0) + (baseMap[e] || 0)) / 60; return { e, la, seg: segOf(la), sess: pDays[e] ? pDays[e].size : 0, hrs, w28: aDays[e] ? [...aDays[e]].filter(day => dAgo(day) < 28).length : 0, streak: calcStreak(e), lvl: lvlOf(hrs), games: gamesMap[e] || 0, posts: postsMap[e] || 0, goals: goalsMap[e] || 0 }; }).sort((a, b) => (a.la == null ? 1e9 : a.la) - (b.la == null ? 1e9 : b.la));
+  const segOf = (la, lr) => (la == null || la > REACT_DAYS) ? { t: "reactivate", c: "#3b82f6" } : la > 7 ? { t: "slipping", c: "#f59e0b" } : (lr != null && lr <= 7) ? { t: "active", c: "#4ade80" } : { t: "browsing", c: "#64748b" };
+  const mrows = [...members].map(e => { const la = lastA[e], hrs = ((minsBy[e] || 0) + (baseMap[e] || 0)) / 60; return { e, la, seg: segOf(la, lastReal[e]), sess: pDays[e] ? pDays[e].size : 0, hrs, w28: aDays[e] ? [...aDays[e]].filter(day => dAgo(day) < 28).length : 0, streak: calcStreak(e), lvl: lvlOf(hrs), games: gamesMap[e] || 0, posts: postsMap[e] || 0, goals: goalsMap[e] || 0 }; }).sort((a, b) => (a.la == null ? 1e9 : a.la) - (b.la == null ? 1e9 : b.la));
   const cell = (v, ex = "") => `<td style="padding:5px 7px;text-align:right;${ex}">${v}</td>`;
 
   // ── Where members use it: platform breakdown (forward-looking) ──
@@ -2200,10 +2216,10 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
   // Two column: top pieces + pending requests
   html += `<div class="two-col">`;
 
-  // Top pieces
+  // Top pieces (collapsible — low priority for day-to-day running)
   html += `
-  <div class="top-pieces">
-    <h2 class="section-header">${ico('music')}Most practised pieces</h2>`;
+  <details class="top-pieces">
+    <summary><h2 class="section-header" style="margin:0">${ico('music')}Most practised pieces <span class="section-meta" style="font-weight:400">tap to expand</span></h2></summary>`;
   if (topPieces.length === 0) {
     html += `<p style="color:var(--text-muted);font-size:0.85rem">No piece data yet.</p>`;
   } else {
@@ -2223,7 +2239,7 @@ function render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics
       </div>`;
     });
   }
-  html += `</div>`;
+  html += `</details>`;
 
   // Pending requests
   html += `
