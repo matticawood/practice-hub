@@ -912,14 +912,20 @@ async function renderFunnels() {
   const el = document.getElementById("analytics-content");
   if (!el) return;
   const safe = async (p) => { try { return (await p).data || []; } catch (e) { console.warn("funnel load failed:", e); return []; } };
-  const [se, orders, leads, bookings, elog, eclicks] = await Promise.all([
+  const [se, ordersRaw, leadsRaw, bookingsRaw, elog, eclicks] = await Promise.all([
     safe(db.from("site_events").select("event,vid,path,dur_ms,device,country,referrer,utm_source,scroll_pct,slug,value_minor,currency,ts")),
-    safe(db.from("store_orders").select("slug,kind,amount_minor,currency,vid,created_at")),
-    safe(db.from("store_leads").select("slug,created_at")),
-    safe(db.from("bookings").select("kind,amount_minor,currency,vid,created_at")),
+    safe(db.from("store_orders").select("slug,kind,amount_minor,currency,vid,created_at,email")),
+    safe(db.from("store_leads").select("slug,created_at,email")),
+    safe(db.from("bookings").select("kind,amount_minor,currency,vid,created_at,email")),
     safe(db.from("email_log").select("campaign,status,delivered_at,opened_at,clicked_at,bounced_at,complained_at")),
     safe(db.from("email_clicks").select("campaign,link")),
   ]);
+  // Exclude the owner's own test purchases / downloads / bookings from the funnels.
+  const OWNER_EMAILS = new Set(["matthew@matthewcawood.com", "enquiries@matthewcawood.com", "mondaymusictips@matthewcawood.com", "store@matthewcawood.com", "mattycawoods@hotmail.com"]);
+  const notOwner = (r) => !OWNER_EMAILS.has((r.email || "").toLowerCase());
+  const orders = ordersRaw.filter(notOwner);
+  const leads = leadsRaw.filter(notOwner);
+  const bookings = bookingsRaw.filter(notOwner);
 
   const esc = s => String(s == null ? "" : s).replace(/</g, "&lt;");
   const pct = (n, d) => d ? Math.round(n / d * 100) : 0;
