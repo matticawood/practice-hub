@@ -546,7 +546,7 @@ export function renderLessonLinkEmail({ firstName, lessons } = {}) {
     paragraphs: [
       `Hi ${fn}, I've just moved my lesson booking over to a new system. ${multi ? "Your lessons are" : "Your lesson is"} still booked for the same time, but the Zoom link has changed, so please use ${multi ? "these new links" : "this new link"} on the day as your previous ${multi ? "links" : "link"} will stop working.`,
       `You'll also always find ${multi ? "your lessons" : "your lesson"} and join ${multi ? "links" : "link"} in your account, shown in your own timezone.`,
-      `Need to move or cancel? You can do that yourself from your account, or just reply to this email and I'll help.`,
+      `If you need to move or cancel, you can do that from your account or just reply to this email and I'll help.`,
     ],
     detail,
     ctaText: "Open my account",
