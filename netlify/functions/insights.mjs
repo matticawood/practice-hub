@@ -1,13 +1,13 @@
 /* ──────────────────────────────────────────────────────────────────────────
-   insights — Claude-backed plain-English readout for Admin Analytics.
+   insights — Claude-backed structured readout for Admin Analytics.
 
-   The admin page computes all the metrics client-side and POSTs them here as a
-   compact JSON object (aggregates only, no raw PII). Claude turns them into a
-   short, specific readout: what's working, what's not, the biggest opportunity,
-   and a couple of concrete next actions. Button-triggered (cost control).
+   The admin page computes all metrics client-side and POSTs them here as a
+   compact JSON object (aggregates only, no raw PII). Each metric is labelled,
+   and email campaigns carry a "what" description so the model knows what each
+   send was and who it went to. Claude returns STRUCTURED insights (headline +
+   grouped sections + concrete actions), forced through a tool call.
 
-   Owner-gated (verifies the caller's Supabase JWT). Requires ANTHROPIC_API_KEY
-   in the Netlify site env.
+   Owner-gated (verifies the caller's Supabase JWT). Requires ANTHROPIC_API_KEY.
 ─────────────────────────────────────────────────────────────────────────── */
 
 const MODEL = "claude-opus-4-8";
@@ -19,27 +19,68 @@ const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const OWNER_EMAIL   = "matthew@matthewcawood.com";
 
 const SYSTEM = [
-  "You are a sharp, practical growth analyst for Matthew Cawood, a concert pianist who runs an online piano business:",
-  "a brand site, a Stripe store (PDF books, guides, and a course), one-to-one lessons + clinics booked through the site,",
-  "a weekly email called Monday Music Tips, and a membership app called The Practice Room.",
+  "You are a sharp, sceptical analyst for Matthew Cawood, a concert pianist running an online piano business:",
+  "a brand site, a Stripe store (PDF books/guides + a course), one-to-one lessons and clinics booked on the site,",
+  "a weekly email (Monday Music Tips), a pre-launch waitlist, and a membership app (The Practice Room).",
   "",
-  "You will be given a JSON object of aggregated analytics covering the WHOLE business: site traffic, the store",
-  "funnel, the lesson/booking funnel, email performance, the /signup acquisition funnel, and membership health",
-  "(member count, active members, community activity). Write a concise readout for the owner that joins these up,",
-  "for example, traffic that is not converting to store sales, or members who sign up but do not stay active.",
+  "You receive a labelled JSON object of aggregated metrics. Produce INSIGHTS, not a description of the numbers.",
   "",
-  "Structure your answer in short labelled sections with these headings exactly:",
-  "What's working, What's underperforming, Biggest opportunity, Do next.",
-  "Under 'Do next', give 2 to 4 specific, concrete actions tied to the numbers (not generic advice).",
+  "WHAT AN INSIGHT IS: an interpretation that tells Matthew something he could act on. Every point must say what a",
+  "number MEANS or what to DO about it. Never simply restate a figure. 'Waitlist had 56% open' is not an insight;",
+  "'the waitlist is warm, so it is the right audience to push the next paid launch to' is.",
   "",
-  "Hard rules:",
-  "- Be specific and quote the actual numbers from the data. No vague filler.",
-  "- If the data is too thin to judge something, say so plainly rather than inventing a trend.",
-  "- Plain English. No jargon. No hype.",
-  "- NEVER use em dashes. Use commas, full stops, or 'and'.",
-  "- No emojis.",
-  "- Keep it tight despite the breadth: roughly 220 to 420 words. Prioritise the few things that matter most.",
+  "HARD RULES ON STATISTICS (this matters most):",
+  "- Treat any rate (open %, click %, conversion %, active %) computed from FEWER THAN 30 people as statistically",
+  "  meaningless. Do NOT analyse it, do NOT call it 'above/below typical', do NOT infer a trend or a problem from it.",
+  "  At most, note the raw count exists. A 0% or 100% on 2 to 4 people is noise, say nothing about it.",
+  "- Only the waitlist-sized sends (dozens to hundreds) are worth rate analysis. Onboarding/transactional sends with",
+  "  a handful of recipients are not.",
+  "",
+  "USE THE LABELS, DO NOT INVENT DATA:",
+  "- Each email campaign includes a 'what' field describing what it is and who it went to. Use it. Do not guess.",
+  "- The membership 'active' figures are labelled as a FLOOR: members with ANY recorded app activity in the window.",
+  "  Members who only browsed may not be counted, so a low 'active' number is NOT proof of churn or dormancy.",
+  "  Do not claim members are 'paying for nothing' or 'dormant' from this. Flag it as 'worth checking', not a fact.",
+  "- If a figure is not in the data, do not assert it. Say it is not measured.",
+  "- The site funnels (traffic, store views, booking steps) only started recording very recently, so low counts there",
+  "  mean 'not enough data yet', not 'poor performance'.",
+  "",
+  "Return ONLY by calling emit_insights. Keep each point to 1 to 2 sentences. Plain English. No em dashes. No emojis.",
 ].join("\n");
+
+const TOOL = {
+  name: "emit_insights",
+  description: "Return the structured business readout.",
+  input_schema: {
+    type: "object",
+    properties: {
+      headline: { type: "string", description: "One sentence: the single most important, well-supported takeaway right now. If data is too thin overall, say so here." },
+      sections: {
+        type: "array",
+        description: "2 to 5 grouped insights, ordered by importance. Skip any area where the data is too thin to judge rather than padding.",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Short label, e.g. 'Strength: email to warm lists', 'Watch: membership activity', 'Too early to tell: store funnel'." },
+            points: { type: "array", items: { type: "string" }, description: "1 to 3 interpretive points. Each says what it means or what to do." },
+          },
+          required: ["title", "points"],
+        },
+      },
+      actions: {
+        type: "array",
+        description: "2 to 4 concrete next actions tied to the actual numbers. Only suggest actions the data supports.",
+        items: {
+          type: "object",
+          properties: { action: { type: "string" }, why: { type: "string", description: "The number/insight that motivates it." } },
+          required: ["action", "why"],
+        },
+      },
+      caveats: { type: "array", items: { type: "string" }, description: "Data that is too thin to judge, or metrics that should not be over-read. Be explicit here rather than guessing in the sections." },
+    },
+    required: ["headline", "sections", "actions"],
+  },
+};
 
 function jsonResponse(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
@@ -52,7 +93,6 @@ export default async function handler(req) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return jsonResponse({ error: "ANTHROPIC_API_KEY is not set on the server." }, 500);
 
-  // ── Owner-only: this endpoint spends Claude tokens, so verify the caller ──
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token) return jsonResponse({ error: "Unauthorised" }, 401);
   let caller;
@@ -70,14 +110,13 @@ export default async function handler(req) {
   const metrics = body && body.metrics;
   if (!metrics) return jsonResponse({ error: "Missing metrics." }, 400);
 
-  const windowLabel = (body.window || "the selected period").toString().slice(0, 60);
   const userText = [
-    `Time window: ${windowLabel}.`,
-    "Here is the aggregated analytics JSON:",
+    `Time window: ${(body.window || "all time").toString().slice(0, 60)}.`,
+    "Labelled aggregated metrics (read the labels; do not analyse rates on samples under 30):",
     "```json",
     JSON.stringify(metrics).slice(0, 24000),
     "```",
-    "Write the readout now.",
+    "Now call emit_insights with real insights, respecting the statistical rules.",
   ].join("\n");
 
   let upstream;
@@ -87,9 +126,11 @@ export default async function handler(req) {
       headers: { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 3000,
+        max_tokens: 4000,
         thinking: { type: "adaptive" },
         system: SYSTEM,
+        tools: [TOOL],
+        tool_choice: { type: "tool", name: "emit_insights" },
         messages: [{ role: "user", content: userText }],
       }),
     });
@@ -104,10 +145,8 @@ export default async function handler(req) {
 
   let data;
   try { data = await upstream.json(); } catch { return jsonResponse({ error: "Bad response from Claude." }, 502); }
-  const text = Array.isArray(data.content)
-    ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim()
-    : "";
-  if (!text) return jsonResponse({ error: "No insight produced." }, 502);
+  const tool = Array.isArray(data.content) ? data.content.find((b) => b.type === "tool_use" && b.name === "emit_insights") : null;
+  if (!tool || !tool.input) return jsonResponse({ error: "No insight produced." }, 502);
 
-  return jsonResponse({ text });
+  return jsonResponse({ insights: tool.input });
 }
