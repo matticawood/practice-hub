@@ -538,12 +538,19 @@ export function renderLessonLinkEmail({ firstName, lessons } = {}) {
   const ls = Array.isArray(lessons) ? lessons : [];
   const multi = ls.length > 1;
   const detail = ls.map((l) => {
-    const cal = l.gcal ? `<br><a href="${esc(l.gcal)}" style="color:#9a6f12;font-weight:600">Add to calendar &rarr;</a>` : "";
-    const manage = l.calUid
-      ? `<br><a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>`
+    const cal = l.gcal
+      ? `<a href="${esc(l.gcal)}" style="color:#9a6f12;font-weight:600;text-decoration:none;white-space:nowrap"><img src="${BOOKING_ICONS}/calendar.png" width="14" height="14" alt="" style="vertical-align:-2px;margin-right:5px">Add to calendar</a>`
       : "";
-    return `<strong>${esc(l.whenLabel)}</strong><br><a href="${esc(l.link)}" style="color:#9a6f12;font-weight:700">Join your lesson on Zoom &rarr;</a>${cal}${manage}`;
-  }).join(`<br><br><span style="display:inline-block;width:100%;border-top:1px solid #ece5db"></span><br>`);
+    const manage = l.calUid
+      ? `<tr><td colspan="2" style="padding-top:7px;font-size:13px;color:#9a8f7e"><a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=reschedule" style="color:#9a6f12;font-weight:600;text-decoration:none">Reschedule</a> or <a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=cancel" style="color:#9a6f12;font-weight:600;text-decoration:none">cancel</a></td></tr>`
+      : "";
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#42382e">`
+      + `<tr><td colspan="2" style="padding-bottom:5px"><strong>${esc(l.whenLabel)}</strong></td></tr>`
+      + `<tr><td align="left" style="vertical-align:top"><a href="${esc(l.link)}" style="color:#9a6f12;font-weight:700;text-decoration:none">Join your lesson on Zoom &rarr;</a></td>`
+      + `<td align="right" style="vertical-align:top">${cal}</td></tr>`
+      + manage
+      + `</table>`;
+  }).join(`<div style="border-top:1px solid #ece5db;margin:14px 0"></div>`);
   const html = renderBookingEmail({
     eyebrow: "Your Lessons",
     heading: multi ? "Your lessons have a new link" : "Your lesson has a new link",
