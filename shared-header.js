@@ -2543,7 +2543,24 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       // Achievement notifications carry a pre-rendered badge SVG in metadata
       // so the bell panel can show the same coloured badge as the activity
       // feed / toast (no need to duplicate the SVG generator in this file).
-      const badgeSvg = (n.type === "achievement" && n.metadata?.badge_svg) ? n.metadata.badge_svg : null;
+      // Achievement badge. Regenerate it LIVE from the achievement id rather than
+      // trusting the SVG stored at insert time: the stored SVG has a stale glyph
+      // (pre-icon-map fix) and, worse, its gradient ids (g1/s1…) collide with the
+      // current page's freshly-rendered badges because _bdgUID resets per page load
+      // — that collision is what re-colours the hexagons. Live regen gives the right
+      // glyph + category colour and fresh, page-unique gradient ids. Fallback (pages
+      // without the achievements module, e.g. the dashboard): uniquify the stored
+      // SVG's gradient ids so stacked notification badges can't share a paint server.
+      let badgeSvg = null;
+      if (n.type === "achievement") {
+        const achId = n.metadata?.achievement_id;
+        const ach = (achId && typeof ACHIEVEMENTS !== "undefined") ? ACHIEVEMENTS.find(a => a.id === achId) : null;
+        if (ach && typeof achBadgeSVG === "function") {
+          badgeSvg = achBadgeSVG(ach, true, 40);
+        } else if (n.metadata?.badge_svg) {
+          badgeSvg = String(n.metadata.badge_svg).replace(/(id="|url\(#)(g\d+|s\d+)/g, `$1$2_n${n.id}`);
+        }
+      }
       // Monthly Champions notifications get the same gold trophy as the card.
       const isChamp = (n.type === "monthly_champions" || n.type === "champion_placed");
       // Achievement badges render in the same glowing medallion disc as Stats / the feed.
