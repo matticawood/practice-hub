@@ -297,6 +297,28 @@ export const EMAIL_DEFAULTS = {
   },
 };
 
+// Ready-made starting points for the Compose tool. Picking one fills in the
+// subject / eyebrow / body / button (and which logo sits at the top); you then
+// choose who it goes to and can edit every word before sending. `body` is plain
+// text, one paragraph per blank line, and {firstName} is filled per recipient.
+export const COMPOSE_TEMPLATES = [
+  {
+    id: "lesson_package_migration",
+    label: "Lesson package moved over (Acuity → new booking)",
+    brand: "matthew",
+    subject: "Your remaining piano lessons have a new home",
+    eyebrow: "Your Lessons",
+    body: [
+      "Hi {firstName}, I'm moving my lesson booking over to a new system, and I've carried your remaining lessons across so nothing is lost.",
+      "To book your next one, head to my booking page and choose \"Already bought a package? Book a lesson\". Enter the email address this was sent to and you'll see exactly how many lessons you have left, then pick a time that suits you.",
+      "You'll get a confirmation straight away with the Zoom link. Book each remaining lesson the same way until they're all used up.",
+      "If anything looks off, or you have any trouble booking, just reply to this email and I'll sort it out for you.",
+    ].join("\n\n"),
+    ctaText: "Book a lesson",
+    ctaHref: "https://matthewcawood.com/book-a-lesson/",
+  },
+];
+
 // ── Rendering ────────────────────────────────────────────────────────────────
 
 export function esc(s) {
