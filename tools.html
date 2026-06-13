@@ -3956,21 +3956,42 @@ function etChordMidi(root, qk){
   const base = 60 + (root.st <= 5 ? root.st : root.st - 12);   // C-octave base (correct pitch class), roots kept in a tight central register
   return ET_QUALITIES[qk].semitones.map(iv => base + iv);
 }
+// A piano-ish timbre via additive synthesis: a fixed harmonic spectrum (PeriodicWave)
+// plus a struck-string envelope (fast attack, long exponential decay, no sustain).
+let _etPianoWave = null;
+function etGetPianoWave(){
+  if (_etPianoWave || !audioCtx) return _etPianoWave;
+  const harm = [0, 1, 0.62, 0.42, 0.28, 0.18, 0.12, 0.08, 0.05, 0.035, 0.02]; // partial amplitudes (index 0 = DC)
+  const real = new Float32Array(harm.length);   // cosine terms (0)
+  const imag = new Float32Array(harm.length);   // sine terms = our partials
+  for (let i = 0; i < harm.length; i++) imag[i] = harm[i];
+  _etPianoWave = audioCtx.createPeriodicWave(real, imag, { disableNormalization: false });
+  return _etPianoWave;
+}
 function etPlayChord(midiArr){
   try {
     if (typeof _ensureIOSAudio === "function") _ensureIOSAudio();
     if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
-    const t0 = audioCtx.currentTime + 0.02, dur = 1.7;
-    const peak = 0.17 / Math.sqrt(midiArr.length);
-    midiArr.forEach(m => {
+    const wave = etGetPianoWave();
+    const t0 = audioCtx.currentTime + 0.02;
+    const master = audioCtx.createGain();
+    master.gain.value = 0.85 / Math.sqrt(midiArr.length);
+    const lp = audioCtx.createBiquadFilter();      // soften the top like a real piano
+    lp.type = "lowpass"; lp.frequency.value = 4200; lp.Q.value = 0.4;
+    master.connect(lp); lp.connect(audioCtx.destination);
+    midiArr.forEach((m, i) => {
       const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
-      osc.type = "triangle"; osc.frequency.value = etNoteFreq(m);
-      osc.connect(g); g.connect(audioCtx.destination);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      osc.start(t0); osc.stop(t0 + dur + 0.05);
+      if (wave) osc.setPeriodicWave(wave); else osc.type = "triangle";
+      osc.frequency.value = etNoteFreq(m);
+      osc.connect(g); g.connect(master);
+      const on = t0 + i * 0.007;       // tiny roll so the chord blooms naturally
+      const dur = 2.4;
+      g.gain.setValueAtTime(0.0001, on);
+      g.gain.exponentialRampToValueAtTime(0.5, on + 0.006);   // sharp hammer attack
+      g.gain.exponentialRampToValueAtTime(0.12, on + 0.35);   // quick initial drop
+      g.gain.exponentialRampToValueAtTime(0.0001, on + dur);  // long tail
+      osc.start(on); osc.stop(on + dur + 0.05);
     });
   } catch(e){ console.warn("etPlayChord", e); }
 }
