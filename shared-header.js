@@ -43,6 +43,7 @@ const SH_SUBNAV = {
     { label: "Metronome", href: "/tools.html?section=metro" },
     { label: "Note Recognition", href: "/tools.html?section=note" },
     { label: "Chord Recognition", href: "/tools.html?section=chord" },
+    { label: "Chord Ear Training", href: "/tools.html?section=ear" },
   ],
   studio: [
     { label: "Weekly Focus", href: "/focus.html" },
