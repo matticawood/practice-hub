@@ -539,7 +539,7 @@ export function renderLessonLinkEmail({ firstName, lessons } = {}) {
   const multi = ls.length > 1;
   const detail = ls.map((l) => {
     const manage = l.calUid
-      ? `<br><a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> (free up to 24h before) or <a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>`
+      ? `<br><a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>`
       : "";
     return `<strong>${esc(l.whenLabel)}</strong><br><a href="${esc(l.link)}" style="color:#9a6f12;font-weight:700">Join your lesson on Zoom &rarr;</a>${manage}`;
   }).join(`<br><br><span style="display:inline-block;width:100%;border-top:1px solid #ece5db"></span><br>`);
