@@ -3973,6 +3973,25 @@ function etGetPianoWave(){
 // Real recorded acoustic-grand samples (soundfont) — lazy-loaded. Until they
 // arrive (or if blocked) we fall back to the synth voice below.
 let etPiano = null, etPianoLoading = false;
+let etSynthVoices = [];   // oscillator/gain handles for the synth-fallback chord, so it can be cut
+
+// Silence whatever chord is currently sounding (real piano or synth fallback) so a
+// new chord never rings over the previous one. Uses a short gain ramp to avoid clicks.
+function etStopChord(){
+  try { if (etPiano && typeof etPiano.stop === "function") etPiano.stop(); } catch(e){}
+  if (audioCtx) {
+    const now = audioCtx.currentTime;
+    etSynthVoices.forEach(({ osc, gain }) => {
+      try {
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+        osc.stop(now + 0.06);
+      } catch(e){}
+    });
+  }
+  etSynthVoices = [];
+}
 function etLoadScript(src){
   return new Promise((res, rej) => {
     if (document.querySelector('script[data-src="'+src+'"]')) return res();
@@ -3999,6 +4018,7 @@ function etPlayChord(midiArr){
     if (typeof _ensureIOSAudio === "function") _ensureIOSAudio();
     if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
+    etStopChord();           // cut the previous chord so they never overlap
     if (etPiano) {
       const t0 = audioCtx.currentTime + 0.02;
       midiArr.forEach((m, i) => etPiano.play(m, t0 + i * 0.012, { gain: 1.7, duration: 2.8 }));
@@ -4029,6 +4049,7 @@ function etSynthChord(midiArr){
       g.gain.exponentialRampToValueAtTime(0.12, on + 0.35);
       g.gain.exponentialRampToValueAtTime(0.0001, on + dur);
       osc.start(on); osc.stop(on + dur + 0.05);
+      etSynthVoices.push({ osc, gain: g });
     });
   } catch(e){ console.warn("etSynthChord", e); }
 }
@@ -4253,7 +4274,7 @@ function etAnswer(btn){
   }
 }
 function etEndGame(){
-  clearInterval(etTimerInt); etShowScreen("results");
+  clearInterval(etTimerInt); etStopChord(); etShowScreen("results");
   const rn=document.getElementById("et-results-num"); if(rn)rn.textContent=etScore;
   const rm=document.getElementById("et-results-meta"); if(rm)rm.textContent=etTotal+" attempts · "+Math.round(etScore/Math.max(etTotal,1)*100)+"% accuracy";
   etSaveScore(); etRefreshLeaderboards();
