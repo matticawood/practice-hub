@@ -1056,34 +1056,48 @@ async function renderFunnels() {
   // ── Extra business context so the AI readout covers the WHOLE dashboard ──
   // (membership health, community, and the /signup acquisition funnel, alongside
   //  the traffic/store/booking/email metrics already gathered above).
-  const [members, psessions, cposts, ccomments, fusage, sev, sconv] = await Promise.all([
+  const [members, psessions, cposts, ccomments, fusage, presence, sev, sconv] = await Promise.all([
     safe(db.from("allowed_emails").select("email")),
     safe(db.from("practice_sessions").select("email,session_date")),
     safe(db.from("community_posts").select("email,created_at")),
     safe(db.from("community_post_comments").select("email,created_at")),
-    safe(db.from("feature_usage").select("email,day")),
+    safe(db.from("feature_usage").select("email,day,seconds")),
+    safe(db.from("user_presence").select("email,last_seen_at")),
     safe(db.from("signup_events").select("vid,event")),
     safe(db.from("signup_conversions").select("vid")),
   ]);
   const excl = (e) => { e = (e||"").toLowerCase(); return !e || (typeof EXCLUDED_EMAILS !== "undefined" && EXCLUDED_EMAILS.has(e)); };
   const memberEmails = new Set(members.map(m => (m.email||"").toLowerCase()).filter(e => e && !excl(e)));
   const now = Date.now(), dayAgo = n => now - n*86400000;
-  // "active" = ANY recorded app activity (a practice session, a tracked feature-usage day, or a
-  // community post/comment) in the window. A FLOOR, not precise retention: browsing-only members
-  // generate no row and are not counted, so do not read a low number as proven churn.
+  // "active" = seen via the app heartbeat (user_presence.last_seen_at, upserted ~every 60s while a
+  // member has a tab open) OR any other recorded app activity (practice, feature use, community).
   const active7 = new Set(), active30 = new Set();
   const markActive = (email, tMs) => { const e=(email||"").toLowerCase(); if(!memberEmails.has(e)||!tMs)return; if(tMs>=dayAgo(7))active7.add(e); if(tMs>=dayAgo(30))active30.add(e); };
+  for (const p of presence)   markActive(p.email, new Date(p.last_seen_at).getTime());
   for (const s of psessions)  markActive(s.email, new Date(s.session_date).getTime());
   for (const u of fusage)     if (u.day) markActive(u.email, new Date(u.day).getTime());
   for (const p of cposts)     markActive(p.email, new Date(p.created_at).getTime());
   for (const c of ccomments)  markActive(c.email, new Date(c.created_at).getTime());
+  const onlineNow = new Set(presence.filter(p => now - new Date(p.last_seen_at).getTime() < 5*60000).map(p => (p.email||"").toLowerCase()).filter(e => memberEmails.has(e)));
+  // How long members spend: tracked active seconds from feature_usage (per view/day).
+  let secs30 = 0; const memSecs30 = {};
+  for (const u of fusage) { const e=(u.email||"").toLowerCase(); if (!memberEmails.has(e)) continue; if (new Date(u.day).getTime() >= dayAgo(30)) { secs30 += (u.seconds||0); memSecs30[e] = (memSecs30[e]||0) + (u.seconds||0); } }
+  const withTime = Object.keys(memSecs30).length;
+  const avgMin30 = withTime ? Math.round((secs30/60)/withTime) : 0;
+  const hours30 = Math.round(secs30/3600*10)/10;
   const posters30 = new Set(cposts.filter(p => new Date(p.created_at).getTime()>=dayAgo(30)).map(p => (p.email||"").toLowerCase()).filter(e => !excl(e)));
   const community30 = cposts.filter(p => new Date(p.created_at).getTime()>=dayAgo(30)).length + ccomments.filter(c => new Date(c.created_at).getTime()>=dayAgo(30)).length;
   metrics.membership = {
-    members: memberEmails.size, activeLast7: active7.size, activeLast30: active30.size,
+    members: memberEmails.size, onlineNow: onlineNow.size,
+    activeLast7: active7.size, activeLast30: active30.size,
+    totalActiveHoursLast30: hours30, avgActiveMinutesPerActiveMemberLast30: avgMin30,
     postersLast30: posters30.size, communityItemsLast30: community30,
-    _note: "active = members with ANY recorded app activity (practice, feature use, or community) in the window; a FLOOR, not precise retention. Browsing-only members are not counted, so a low number is not proof of churn.",
+    _note: "active = members seen via the app heartbeat (last_seen_at, fires ~every 60s while signed in with a tab open) or other recorded app activity in the window. A member with no heartbeat for 30 days genuinely has not opened the app, so this is a usable engagement signal. Active-time figures are from tracked feature-usage seconds.",
   };
+
+  // Visible Membership strip (heartbeat-based).
+  h += `<h2 class="section-header" style="margin-top:30px">${ico('users','#a78bfa')}Membership activity <span class="section-meta">from the app heartbeat</span></h2>`;
+  h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(memberEmails.size,"members")}${statCard(onlineNow.size,"online now")}${statCard(active7.size,"active 7d")}${statCard(active30.size,"active 30d")}${statCard(hours30+"h","active time 30d")}${statCard(avgMin30+"m","avg / active member")}</div>`;
   const sViews = new Set(sev.filter(e => e.event==="view").map(e => e.vid));
   const sConvV = new Set(sconv.map(c => c.vid));
   metrics.acquisition = { signupVisitors: sViews.size, signupConversions: sConvV.size, signupConvRate: pct(sConvV.size, sViews.size) };
