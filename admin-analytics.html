@@ -356,8 +356,8 @@
 <main id="app-main" style="display:none">
   <div class="analytics-wrap">
     <div id="analytics-loading" class="loading-msg">Loading analytics…</div>
-    <div id="mmt-suggestions"></div>
     <div id="analytics-content" style="display:none"></div>
+    <div id="mmt-suggestions"></div>
   </div>
 </main>
 
@@ -626,15 +626,17 @@ async function loadAnalytics() {
     churnedSet.forEach(e => EXCLUDED_EMAILS.add(e)); // drop churned from every section
   }
 
-  render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);
+  // Order top-to-bottom: whole-business summary first, then acquisition, then the
+  // deeper membership/engagement detail, then the granular per-student breakdown last.
+  try { await renderFunnels(); }        // Smart insights + Membership + Traffic + Store + Booking + Email
+  catch (e) { console.error("renderFunnels failed:", e); }
+  try { await renderAcquisition(); }    // /signup landing-page funnel
+  catch (e) { console.error("renderAcquisition failed:", e); }
   try { renderInsights2({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows, emailLog, emailClicks }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
   catch (e) { console.error("renderFeatureUsage failed:", e); }
-  try { await renderAcquisition(); }
-  catch (e) { console.error("renderAcquisition failed:", e); }
-  try { await renderFunnels(); }
-  catch (e) { console.error("renderFunnels failed:", e); }
+  render(allSessions, allStreaks, allRequests, piecesMap, upcomingClinics, allGames);  // granular per-student detail, last
 }
 
 // ── Feature usage: total active time per view, most-used first ─────────────────
@@ -1095,15 +1097,15 @@ async function renderFunnels() {
     _note: "active = members seen via the app heartbeat (last_seen_at, fires ~every 60s while signed in with a tab open) or other recorded app activity in the window. A member with no heartbeat for 30 days genuinely has not opened the app, so this is a usable engagement signal. Active-time figures are from tracked feature-usage seconds.",
   };
 
-  // Visible Membership strip (heartbeat-based).
-  h += `<h2 class="section-header" style="margin-top:30px">${ico('users','#a78bfa')}Membership activity <span class="section-meta">from the app heartbeat</span></h2>`;
-  h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(memberEmails.size,"members")}${statCard(onlineNow.size,"online now")}${statCard(active7.size,"active 7d")}${statCard(active30.size,"active 30d")}${statCard(hours30+"h","active time 30d")}${statCard(avgMin30+"m","avg / active member")}</div>`;
+  // Membership strip (heartbeat-based) — assembled here, rendered near the top (below Smart insights).
+  const memberStrip = `<h2 class="section-header" style="margin-top:30px">${ico('users','#a78bfa')}Membership activity <span class="section-meta">from the app heartbeat</span></h2>`
+    + `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(memberEmails.size,"members")}${statCard(onlineNow.size,"online now")}${statCard(active7.size,"active 7d")}${statCard(active30.size,"active 30d")}${statCard(hours30+"h","active time 30d")}${statCard(avgMin30+"m","avg / active member")}</div>`;
   const sViews = new Set(sev.filter(e => e.event==="view").map(e => e.vid));
   const sConvV = new Set(sconv.map(c => c.vid));
   metrics.acquisition = { signupVisitors: sViews.size, signupConversions: sConvV.size, signupConvRate: pct(sConvV.size, sViews.size) };
 
-  // ── 5. SMART INSIGHTS (computed highlights + on-demand AI, whole dashboard) ──
-  h += `<h2 class="section-header" style="margin-top:30px">${ico('warn','#f5c518')}Smart insights <span class="section-meta">whole-business read</span></h2>`;
+  // ── SMART INSIGHTS (computed highlights + on-demand AI, whole dashboard) — rendered FIRST ──
+  let insightsHtml = `<h2 class="section-header" style="margin-top:8px">${ico('warn','#f5c518')}Smart insights <span class="section-meta">whole-business read</span></h2>`;
   const hi = [];
   if (metrics.traffic) {
     const tp = metrics.traffic.topPages[0]; if (tp) hi.push(`Most-visited page: <b>${esc(tp[0])}</b> with ${tp[1]} views.`);
@@ -1124,10 +1126,11 @@ async function renderFunnels() {
   if (metrics.acquisition && metrics.acquisition.signupVisitors) {
     hi.push(`Signup page converts <b>${metrics.acquisition.signupConvRate}%</b> of ${metrics.acquisition.signupVisitors} visitors.`);
   }
-  h += `<ul style="font-size:.88rem;color:#cbd5e1;line-height:1.7;margin:6px 0 14px;padding-left:18px">${hi.length ? hi.map(x=>`<li>${x}</li>`).join("") : "<li>Not enough data yet for highlights.</li>"}</ul>`;
-  h += `<button id="gen-insights" style="background:#f5c518;color:#1a1410;border:none;border-radius:9px;padding:10px 18px;font-weight:800;font-size:.86rem;cursor:pointer">Generate AI insights</button><div id="ai-insights" style="margin-top:14px"></div>`;
+  insightsHtml += `<ul style="font-size:.88rem;color:#cbd5e1;line-height:1.7;margin:6px 0 14px;padding-left:18px">${hi.length ? hi.map(x=>`<li>${x}</li>`).join("") : "<li>Not enough data yet for highlights.</li>"}</ul>`;
+  insightsHtml += `<button id="gen-insights" style="background:#f5c518;color:#1a1410;border:none;border-radius:9px;padding:10px 18px;font-weight:800;font-size:.86rem;cursor:pointer">Generate AI insights</button><div id="ai-insights" style="margin-top:14px"></div>`;
 
-  el.insertAdjacentHTML("beforeend", h);
+  // Assemble top-to-bottom: Smart insights, then Membership, then the traffic/store/booking/email funnels.
+  el.insertAdjacentHTML("beforeend", insightsHtml + memberStrip + h);
 
   const btn = document.getElementById("gen-insights");
   if (btn) btn.addEventListener("click", async () => {
