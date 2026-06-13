@@ -128,7 +128,6 @@ export default async function handler(req) {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 4000,
-        thinking: { type: "adaptive" },
         system: SYSTEM,
         tools: [TOOL],
         tool_choice: { type: "tool", name: "emit_insights" },
