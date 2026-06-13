@@ -32,8 +32,9 @@ if (!SK) { console.error("SUPABASE_SERVICE_KEY missing"); process.exit(1); }
 if (send && !RESEND) { console.error("RESEND_API missing"); process.exit(1); }
 
 const firstName = (n) => { const r = String(n || "").trim().split(/\s+/)[0]; return r ? r[0].toUpperCase() + r.slice(1) : "there"; };
-const fmtDate = (iso) => new Date(iso).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: TZ });
-const fmtTime = (iso) => new Date(iso).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ }).replace(" ", "").toLowerCase();
+const fmtDate = (iso, tz = TZ) => new Date(iso).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: tz });
+const fmtTime = (iso, tz = TZ) => new Date(iso).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: tz }).replace(" ", "").toLowerCase();
+const tzShort = (iso, tz = TZ) => { const p = new Intl.DateTimeFormat("en-GB", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date(iso)); return (p.find((x) => x.type === "timeZoneName") || {}).value || tz; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // ── Calendar helpers (mirror the booking edge functions) ──
@@ -55,7 +56,7 @@ function gcalLink(start, end, zoom) {
 const H = { apikey: SK, Authorization: `Bearer ${SK}`, "Content-Type": "application/json" };
 
 // Pull the 4 migrated lessons, group by student email.
-const r = await fetch(`${SUPABASE_URL}/rest/v1/bookings?select=email,attendee_name,start_time,meeting_url,cal_uid&stripe_session_id=like.acuity-booking-*&order=start_time.asc`, { headers: H });
+const r = await fetch(`${SUPABASE_URL}/rest/v1/bookings?select=email,attendee_name,start_time,meeting_url,cal_uid,attendee_timezone&stripe_session_id=like.acuity-booking-*&order=start_time.asc`, { headers: H });
 const rows = await r.json();
 if (!Array.isArray(rows) || !rows.length) { console.error("No migrated lessons found."); process.exit(1); }
 const byEmail = {};
@@ -75,7 +76,8 @@ function buildEmail(name, lessons) {
     const endISO = new Date(new Date(l.start_time).getTime() + 60 * 60 * 1000).toISOString();
     const uid = `${l.cal_uid || `${l.start_time}-${l.email || ""}`}@matthewcawood.com`;
     attachments.push({ filename: multi ? `lesson-${i + 1}.ics` : "lesson.ics", content: Buffer.from(buildICS(uid, l.start_time, endISO, l.meeting_url), "utf8").toString("base64"), content_type: "text/calendar; method=PUBLISH" });
-    return { whenLabel: `${fmtDate(l.start_time)} at ${fmtTime(l.start_time)} (UK time)`, link: l.meeting_url, calUid: l.cal_uid, gcal: gcalLink(l.start_time, endISO, l.meeting_url) };
+    const tz = l.attendee_timezone || TZ;
+    return { whenLabel: `${fmtDate(l.start_time, tz)} at ${fmtTime(l.start_time, tz)} (${tzShort(l.start_time, tz)})`, link: l.meeting_url, calUid: l.cal_uid, gcal: gcalLink(l.start_time, endISO, l.meeting_url) };
   });
   const { subject, html } = renderLessonLinkEmail({ firstName: firstName(name), lessons: items });
   return { subject, html, attachments };
@@ -89,7 +91,7 @@ for (const [email, { name, lessons }] of Object.entries(byEmail)) {
     const path = `/tmp/lesson-link-${tag}.html`;
     writeFileSync(path, html);
     console.log(`${email}: "${subject}" — ${lessons.length} lesson(s), ${attachments.length} .ics — preview: ${path}`);
-    lessons.forEach((l) => console.log(`    ${fmtDate(l.start_time)} ${fmtTime(l.start_time)}  ${l.meeting_url.slice(0, 40)}...`));
+    lessons.forEach((l) => { const tz = l.attendee_timezone || TZ; console.log(`    ${fmtDate(l.start_time, tz)} ${fmtTime(l.start_time, tz)} (${tzShort(l.start_time, tz)})  ${l.meeting_url.slice(0, 38)}...`); });
     continue;
   }
   if (already.has(email.toLowerCase())) { console.log(`skip (already sent): ${email}`); continue; }
