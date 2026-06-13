@@ -807,7 +807,7 @@ export function renderMMTHTML(content, ctx = {}) {
       </td></tr>
 
       <tr><td style="padding:18px 40px 2px">
-        ${P(`Happy Monday, ${esc(fn)}.`)}
+        ${P((fn && fn.toLowerCase() !== "there") ? `Happy Monday, ${esc(fn)}.` : "Happy Monday.")}
         ${intro.map(P).join("")}
       </td></tr>
 
