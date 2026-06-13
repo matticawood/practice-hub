@@ -202,6 +202,7 @@ const ACH_COLOURS = {
   variety:     ["rgba(34,197,94,.13)",   "rgba(34,197,94,.35)",   "#22c55e"],
   saves:       ["rgba(168,85,247,.13)",  "rgba(168,85,247,.35)",  "#a855f7"],
   chordrec:    ["rgba(217,70,239,.13)",  "rgba(217,70,239,.35)",  "#d946ef"],
+  earrec:      ["rgba(6,182,212,.13)",   "rgba(6,182,212,.35)",   "#06b6d4"],
   community:   ["rgba(2,132,199,.13)",   "rgba(2,132,199,.35)",   "#0284c7"],
   live:        ["rgba(225,29,72,.13)",   "rgba(225,29,72,.35)",   "#e11d48"],
   roadmap:     ["rgba(240,165,0,.15)",   "rgba(240,165,0,.40)",   "#f0a500"],
@@ -365,7 +366,7 @@ const _BADGE_CAT_SHAPE = {
   scales:'hex', sightread:'circle', improv:'star', theorycat:'circle',
   eartraining:'hex', depth:'star', books:'circle', variety:'star',
   saves:'shield', reading:'shield', community:'circle', game:'hex',
-  library:'diamond', noterec:'star', chordrec:'diamond', live:'star',
+  library:'diamond', noterec:'star', chordrec:'diamond', earrec:'hex', live:'star',
   roadmap:'circle',
 };
 // Colour palette per category [light, mid, dark] — interpolated by tier
@@ -389,6 +390,7 @@ const _BADGE_PALETTE = {
   library:     ['#f9a8d4','#be185d','#9d174d'],  // soft pink → vivid rose → deep rose
   noterec:     ['#d9f99d','#65a30d','#3f6212'],  // light lime → vivid → deep green
   chordrec:    ['#f0abfc','#c026d3','#86198f'],  // light fuchsia → vivid → deep magenta
+  earrec:      ['#a5f3fc','#06b6d4','#0e7490'],  // light cyan → vivid → deep cyan
   live:        ['#fda4af','#e11d48','#9f1239'],  // soft rose → vivid → deep crimson
   roadmap:     ['#fde68a','#f0a500','#9a6a00'],  // pale gold → trophy gold → deep bronze
 };
@@ -657,6 +659,19 @@ const ACHIEVEMENTS = [
   { id:"crtreb",cat:"chordrec", icon:"🎹", name:"Treble Chords",    desc:"Score 10 correct in the treble clef",                  check:(s,x)=>(x.crBestTreble||0)>=10,   prog:(s,x)=>[(x.crBestTreble||0),10]   },
   { id:"crbass",cat:"chordrec", icon:"🎹", name:"Bass Chords",      desc:"Score 10 correct in the bass clef",                    check:(s,x)=>(x.crBestBass||0)>=10,     prog:(s,x)=>[(x.crBestBass||0),10]     },
   { id:"crkey", cat:"chordrec", icon:"🎹", name:"Key Aware",        desc:"Score 10 correct in key-signature mode",               check:(s,x)=>(x.crBestKey||0)>=10,      prog:(s,x)=>[(x.crBestKey||0),10]      },
+
+  // Chord Ear Training Game — games played
+  { id:"earg1",  cat:"earrec", icon:"👂", name:"First Ear",       desc:"Play your first chord ear-training game",          check:(s,x)=>(x.earGamesPlayed||0)>=1,  prog:(s,x)=>[(x.earGamesPlayed||0),1]  },
+  { id:"earg10", cat:"earrec", icon:"👂", name:"Ear Trainer",     desc:"Play 10 chord ear-training games",                 check:(s,x)=>(x.earGamesPlayed||0)>=10, prog:(s,x)=>[(x.earGamesPlayed||0),10] },
+  { id:"earg50", cat:"earrec", icon:"👂", name:"Dedicated Ear",   desc:"Play 50 chord ear-training games",                 check:(s,x)=>(x.earGamesPlayed||0)>=50, prog:(s,x)=>[(x.earGamesPlayed||0),50] },
+  // Chord Ear Training Game — best score
+  { id:"ears10", cat:"earrec", icon:"👂", name:"Ear Spotter",     desc:"Score 10 correct in a single ear-training game",   check:(s,x)=>(x.earBestScore||0)>=10,   prog:(s,x)=>[(x.earBestScore||0),10]   },
+  { id:"ears20", cat:"earrec", icon:"👂", name:"Sharp Listener",  desc:"Score 20 correct in a single ear-training game",   check:(s,x)=>(x.earBestScore||0)>=20,   prog:(s,x)=>[(x.earBestScore||0),20]   },
+  { id:"ears30", cat:"earrec", icon:"👂", name:"Ear Master",      desc:"Score 30 correct in a single ear-training game",   check:(s,x)=>(x.earBestScore||0)>=30,   prog:(s,x)=>[(x.earBestScore||0),30]   },
+  // Chord Ear Training Game — modes
+  { id:"earex",  cat:"earrec", icon:"👂", name:"Name That Chord", desc:"Score 10 identifying the exact chord by ear",      check:(s,x)=>(x.earBestExact||0)>=10,   prog:(s,x)=>[(x.earBestExact||0),10]   },
+  { id:"earkey", cat:"earrec", icon:"👂", name:"Diatonic Ear",    desc:"Score 10 in a key by ear",                         check:(s,x)=>(x.earBestKey||0)>=10,     prog:(s,x)=>[(x.earBestKey||0),10]     },
+  { id:"earext", cat:"earrec", icon:"👂", name:"Extended Ear",    desc:"Score 10 on the extensions set by ear",            check:(s,x)=>(x.earBestExt||0)>=10,     prog:(s,x)=>[(x.earBestExt||0),10]     },
   // Community — posts
   { id:"cmp1",  cat:"community", icon:"📣", name:"First Post",       desc:"Share your first post with the community",             check:(s,x)=>(x.postCount||0)>=1,       prog:(s,x)=>[(x.postCount||0),1]       },
   { id:"cmp10", cat:"community", icon:"📣", name:"Contributor",      desc:"Share 10 posts with the community",                    check:(s,x)=>(x.postCount||0)>=10,      prog:(s,x)=>[(x.postCount||0),10]      },
@@ -698,6 +713,7 @@ let _achExtras = {
   gamesTotal:0, gamesCleared:0, gamesPerfect:0, maxGameLevel:0, uniquePassages:0,
   nrGamesPlayed:0, nrBestScore:0, nrBestTreble:0, nrBestBass:0, nrBestMixed:0, nrBestAcc:0, nrBestKey:0, nrKeysPlayed:0,
   crGamesPlayed:0, crBestScore:0, crBestTreble:0, crBestBass:0, crBestKey:0,
+  earGamesPlayed:0, earBestScore:0, earBestExact:0, earBestKey:0, earBestExt:0,
   postCount:0, commentCount:0, reactionCount:0, liveAttended:0,
   maxPostComments:0, hasAvatar:false, baselineMins:0,
 };
@@ -706,7 +722,7 @@ async function loadAchievementExtras() {
   const email = (typeof viewingEmail !== "undefined" && viewingEmail) || myEmail;
   const isOwn = email === myEmail;
 
-  const [readResult, gamesResult, colResult, nrResult, crResult] = await Promise.all([
+  const [readResult, gamesResult, colResult, nrResult, crResult, earResult] = await Promise.all([
     isOwn
       ? db.from("reading_list").select("status").eq("email", email)
       : db.rpc("get_user_reading_list", { p_email: email }),
@@ -718,7 +734,8 @@ async function loadAchievementExtras() {
       : db.rpc("get_user_collection", { p_email: email }),
     db.from("note_game_scores").select("score,clef,accidentals,key_signature").eq("email", email),
     // Chord game scores are stored with a lowercased email and are world-readable.
-    db.from("chord_game_scores").select("score,clef,mode").eq("email", (email || "").toLowerCase())
+    db.from("chord_game_scores").select("score,clef,mode").eq("email", (email || "").toLowerCase()),
+    db.from("ear_game_scores").select("score,answer_type,chord_set,key_signature").eq("email", (email || "").toLowerCase())
   ]);
 
   const readRows  = readResult.data  || [];
@@ -726,6 +743,7 @@ async function loadAchievementExtras() {
   const colRows   = colResult.data   || [];
   const nrRows    = nrResult.data    || [];
   const crRows    = crResult.data    || [];
+  const earRows   = earResult.data   || [];
 
   _achExtras.savedCount     = readRows.length;
   _achExtras.readCount      = readRows.filter(r => r.status === "read").length;
@@ -757,6 +775,13 @@ async function loadAchievementExtras() {
   _achExtras.crBestTreble   = crRows.filter(r => r.clef === "treble").reduce((m, r) => Math.max(m, r.score || 0), 0);
   _achExtras.crBestBass     = crRows.filter(r => r.clef === "bass").reduce((m, r) => Math.max(m, r.score || 0), 0);
   _achExtras.crBestKey      = crRows.filter(r => r.mode === "key").reduce((m, r) => Math.max(m, r.score || 0), 0);
+
+  // Chord ear-training game
+  _achExtras.earGamesPlayed = earRows.length;
+  _achExtras.earBestScore   = earRows.reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.earBestExact   = earRows.filter(r => r.answer_type === "exact").reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.earBestKey     = earRows.filter(r => r.key_signature).reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.earBestExt     = earRows.filter(r => r.chord_set === "extensions").reduce((m, r) => Math.max(m, r.score || 0), 0);
 
   // Community engagement + live attendance. These span several tables, so we
   // sum cheap head-only count queries. Each is wrapped so a missing table or a
