@@ -304,18 +304,18 @@ export const EMAIL_DEFAULTS = {
 export const COMPOSE_TEMPLATES = [
   {
     id: "lesson_package_migration",
-    label: "Lesson package moved over (Acuity → new booking)",
+    label: "Lessons moved to your account (Acuity students)",
     brand: "matthew",
-    subject: "Your remaining piano lessons have a new home",
+    subject: "Your piano lessons are now in your account",
     eyebrow: "Your Lessons",
     body: [
-      "Hi {firstName}, I'm moving my lesson booking over to a new system, and I've carried your remaining lessons across so nothing is lost.",
-      "To book your next one, head to my booking page and choose \"Already bought a package? Book a lesson\". Enter the email address this was sent to and you'll see exactly how many lessons you have left, then pick a time that suits you.",
-      "You'll get a confirmation straight away with the Zoom link. Book each remaining lesson the same way until they're all used up.",
-      "If anything looks off, or you have any trouble booking, just reply to this email and I'll sort it out for you.",
+      "Hi {firstName}, I've moved my lessons over to a new system, and everything is now in one place in your account.",
+      "Sign in with the email address this was sent to and you'll see any lessons you've already booked, each with its join link and the time shown in your own timezone, plus any lessons you still have left to book.",
+      "It's a quick passwordless sign-in: enter your email, I'll send you a short code, and you're in.",
+      "If anything looks off, just reply to this email and I'll sort it out for you.",
     ].join("\n\n"),
-    ctaText: "Book a lesson",
-    ctaHref: "https://matthewcawood.com/book-a-lesson/",
+    ctaText: "Open my account",
+    ctaHref: "https://matthewcawood.com/account/",
   },
 ];
 
