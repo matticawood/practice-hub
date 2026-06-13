@@ -107,12 +107,13 @@
           <option value="list:customers">Customers (emailable)</option>
           <option value="list:waitlist">The Practice Room Waiting List</option>
           <option value="members">All members</option>
-          <option value="single">A specific person…</option>
+          <option value="people">Specific people…</option>
         </select>
       </div>
       <div id="cmp-person-wrap" style="display:none">
-        <label for="cmp-email">Their email</label>
-        <input id="cmp-email" list="cmp-contacts" placeholder="name@email.com" autocomplete="off">
+        <label for="cmp-email">Their emails (type one and press Enter to add)</label>
+        <div id="cmp-pills" style="display:none;flex-wrap:wrap;margin:0 0 8px"></div>
+        <input id="cmp-email" list="cmp-contacts" placeholder="name@email.com — press Enter to add" autocomplete="off">
         <datalist id="cmp-contacts"></datalist>
       </div>
     </div>
@@ -275,10 +276,28 @@ function composeContent() {
     ctaHref:  (document.getElementById("cmp-cta-href").value || "").trim(),
   };
 }
+// Multi-recipient pills for the "Specific people" audience.
+let cmpPeople = [];
+function renderCmpPills() {
+  const box = document.getElementById("cmp-pills");
+  box.style.display = cmpPeople.length ? "flex" : "none";
+  box.innerHTML = cmpPeople.map((e, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:7px;background:#23232a;border:1px solid #3a3a44;border-radius:999px;padding:4px 8px 4px 12px;font-size:.83rem;color:#e8e8ec;margin:0 7px 7px 0">${e.replace(/[<&]/g, c => ({ "<": "&lt;", "&": "&amp;" }[c]))}<button type="button" title="Remove" onclick="cmpRemovePerson(${i})" style="background:none;border:none;color:#9a9aa2;cursor:pointer;font-size:1.05rem;line-height:1;padding:0">&times;</button></span>`
+  ).join("");
+}
+function cmpAddPeopleFromInput() {
+  const em = document.getElementById("cmp-email");
+  const parts = (em.value || "").toLowerCase().split(/[,;\s]+/).filter(Boolean);
+  let added = false;
+  for (const p of parts) if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p) && !cmpPeople.includes(p)) { cmpPeople.push(p); added = true; }
+  if (added) { em.value = ""; renderCmpPills(); }
+}
+function cmpRemovePerson(i) { cmpPeople.splice(i, 1); renderCmpPills(); }
+window.cmpRemovePerson = cmpRemovePerson;
 function composeAudience() {
   const v = document.getElementById("cmp-aud").value;
   if (v === "members") return { type: "members" };
-  if (v === "single")  return { type: "single", email: (document.getElementById("cmp-email").value || "").trim().toLowerCase() };
+  if (v === "people")  return { type: "people", emails: cmpPeople.slice() };
   return { type: "list", listSlug: v.replace(/^list:/, "") };
 }
 // Size a preview iframe to its content, re-measuring after images (e.g. the
@@ -312,10 +331,12 @@ function initCompose() {
   document.getElementById("cmp-brand").addEventListener("change", composePreview);
   const aud = document.getElementById("cmp-aud");
   aud.addEventListener("change", () => {
-    document.getElementById("cmp-person-wrap").style.display = aud.value === "single" ? "" : "none";
+    document.getElementById("cmp-person-wrap").style.display = aud.value === "people" ? "" : "none";
   });
   const em = document.getElementById("cmp-email");
   em.addEventListener("input", () => { clearTimeout(cmpAcTimer); cmpAcTimer = setTimeout(() => composeAutocomplete(em.value), 200); });
+  em.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); cmpAddPeopleFromInput(); } });
+  em.addEventListener("blur", cmpAddPeopleFromInput);
   loadAudienceCounts();
   composePreview();
 }
@@ -354,13 +375,13 @@ async function composeSend() {
   const note = document.getElementById("cmp-note");
   const c = composeContent(), aud = composeAudience();
   if (!c.subject || !c.paragraphs.length) { note.textContent = "Add a subject and a message first."; return; }
-  if (aud.type === "single" && !aud.email) { note.textContent = "Enter the recipient's email."; return; }
+  if (aud.type === "people" && !aud.emails.length) { note.textContent = "Add at least one recipient (type an email and press Enter)."; return; }
   note.textContent = "Checking recipients…";
   const pre = await composeCall("preview");
   if (!pre.ok) { note.textContent = `Error: ${sendErr(pre.body)}`; return; }
   const n = pre.body.eligibleCount || 0;
   if (!n) { note.textContent = "No eligible recipients (all opted out / already sent)."; return; }
-  const who = aud.type === "single" ? aud.email : (aud.type === "members" ? "all members" : document.getElementById("cmp-aud").selectedOptions[0].text);
+  const who = aud.type === "people" ? `${aud.emails.length} selected` : (aud.type === "members" ? "all members" : document.getElementById("cmp-aud").selectedOptions[0].text);
   if (!confirm(`Send this email to ${n} recipient${n > 1 ? "s" : ""} (${who})?\n\nThis cannot be undone.`)) { note.textContent = "Cancelled."; return; }
   note.textContent = `Sending to ${n}…`;
   const { ok, body } = await composeCall("live");

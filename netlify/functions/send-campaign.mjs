@@ -169,19 +169,23 @@ export default async (req) => {
         if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
         eligible.push({ email: m.email, name: m.name, unsubscribe_token: m.unsubscribe_token });
       }
-    } else { // single person
-      const e = normEmail(adhoc.audience.email);
-      if (!e) return json(400, { error: "Enter a valid email address." });
-      await sb(`email_contacts`, { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ email: e }) }).catch(() => {});
-      const cRes = await sb(`email_contacts?email=eq.${encodeURIComponent(e)}&select=name,unsubscribe_token,global_opt_out`);
-      const c = (cRes.ok ? (await cRes.json())[0] : null) || {};
+    } else { // specific people (one or more hand-picked emails)
+      const list = type === "people"
+        ? [...new Set((adhoc.audience.emails || []).map(normEmail).filter(Boolean))]
+        : [normEmail(adhoc.audience.email)].filter(Boolean);
+      if (!list.length) return json(400, { error: "Enter at least one valid email address." });
       footerReason = "You're receiving this from Matthew Cawood.";
       unsubText = "Unsubscribe";
       unsubBase = `${SITE}/.netlify/functions/list-unsubscribe?l=all&t=`;
-      if (EXCLUDED.has(e)) skipped.push({ email: e, reason: "excluded account" });
-      else if (c.global_opt_out) skipped.push({ email: e, reason: "unsubscribed" });
-      else if (alreadySent.has(e)) skipped.push({ email: e, reason: "already sent" });
-      else eligible.push({ email: e, name: c.name, unsubscribe_token: c.unsubscribe_token });
+      for (const e of list) {
+        await sb(`email_contacts`, { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ email: e }) }).catch(() => {});
+        const cRes = await sb(`email_contacts?email=eq.${encodeURIComponent(e)}&select=name,unsubscribe_token,global_opt_out`);
+        const c = (cRes.ok ? (await cRes.json())[0] : null) || {};
+        if (EXCLUDED.has(e)) skipped.push({ email: e, reason: "excluded account" });
+        else if (c.global_opt_out) skipped.push({ email: e, reason: "unsubscribed" });
+        else if (alreadySent.has(e)) skipped.push({ email: e, reason: "already sent" });
+        else eligible.push({ email: e, name: c.name, unsubscribe_token: c.unsubscribe_token });
+      }
     }
   } else {
     if (!EMAIL_DEFAULTS[campaign]) return json(400, { error: `unknown campaign '${campaign}'` });
