@@ -544,8 +544,8 @@ export function renderLessonLinkEmail({ firstName, lessons } = {}) {
     eyebrow: "Your Lessons",
     heading: multi ? "Your lessons have a new link" : "Your lesson has a new link",
     paragraphs: [
-      `Hi ${fn}, I've just moved my lesson booking over to a new system. ${multi ? "Your lessons are" : "Your lesson is"} still booked for the same time, but the Zoom link has changed, so please use the new ${multi ? "links" : "link"} below.`,
-      `Please use ${multi ? "these new links" : "this new link"} on the day. Your previous link will stop working. You'll also always find ${multi ? "your lessons" : "your lesson"} and join ${multi ? "links" : "link"} in your account, shown in your own timezone.`,
+      `Hi ${fn}, I've just moved my lesson booking over to a new system. ${multi ? "Your lessons are" : "Your lesson is"} still booked for the same time, but the Zoom link has changed, so please use ${multi ? "these new links" : "this new link"} on the day as your previous ${multi ? "links" : "link"} will stop working.`,
+      `You'll also always find ${multi ? "your lessons" : "your lesson"} and join ${multi ? "links" : "link"} in your account, shown in your own timezone.`,
       `Need to move or cancel? You can do that yourself from your account, or just reply to this email and I'll help.`,
     ],
     detail,
