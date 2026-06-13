@@ -125,6 +125,15 @@ export const CAMPAIGN_META = {
     readOnly: true, booking: "rescheduled",
     readOnlyNote: "Subject: “Your clinic/lesson has been moved”. Sent by the cal-webhook function when a booking is rescheduled, with the new time, a fresh .ics + calendar button, and change links. Shown with sample details.",
   },
+  booking_lesson_link_migration: {
+    title: "Lesson moved, new link (one-time)",
+    group: "Booking emails",
+    audience: "Students whose existing lessons were moved from Acuity into the new booking system",
+    trigger: "Manual — one-time migration send (scripts/email-acuity-lesson-links.mjs)",
+    status: "live",
+    readOnly: true, booking: "lesson_link_migration",
+    readOnlyNote: "Subject: “Your upcoming piano lesson(s), and your new Zoom link”. Sent once to each student whose booked lesson(s) moved across, giving them the new Cal.com Zoom link and the time, and pointing them to My Account to manage it. A student with two lessons gets both in one email. Personalised per recipient; shown here with sample details.",
+  },
   booking_new_booking_notif: {
     title: "New booking (your copy)",
     group: "Booking emails",
@@ -519,8 +528,44 @@ ${dt}${cta}
 </table></td></tr></table></body></html>`;
 }
 
+// Lesson-link migration email. The Studio preview AND the real send
+// (scripts/email-acuity-lesson-links.mjs) both render through here, so what you
+// preview is what goes out. `lessons` is an array of { whenLabel, link } where
+// whenLabel is already formatted (e.g. "Thursday 18 June at 2:00pm (UK time)").
+// A student with two lessons gets both. Returns { subject, html }.
+export function renderLessonLinkEmail({ firstName, lessons } = {}) {
+  const fn = esc(firstName || "there");
+  const ls = Array.isArray(lessons) ? lessons : [];
+  const multi = ls.length > 1;
+  const detail = ls.map((l) =>
+    `<strong>${esc(l.whenLabel)}</strong><br><a href="${esc(l.link)}" style="color:#9a6f12;font-weight:700">Join your lesson on Zoom &rarr;</a>`
+  ).join(`<br><br><span style="display:inline-block;width:100%;border-top:1px solid #ece5db"></span><br>`);
+  const html = renderBookingEmail({
+    eyebrow: "Your Lessons",
+    heading: multi ? "Your lessons have a new link" : "Your lesson has a new link",
+    paragraphs: [
+      `Hi ${fn}, I've just moved my lesson booking over to a new system. ${multi ? "Your lessons are" : "Your lesson is"} still booked for the same time, but the Zoom link has changed, so please use the new ${multi ? "links" : "link"} below.`,
+      `Please use ${multi ? "these new links" : "this new link"} on the day. Your previous link will stop working. You'll also always find ${multi ? "your lessons" : "your lesson"} and join ${multi ? "links" : "link"} in your account, shown in your own timezone.`,
+      `Need to move or cancel? You can do that yourself from your account, or just reply to this email and I'll help.`,
+    ],
+    detail,
+    ctaText: "Open my account",
+    ctaHref: "https://matthewcawood.com/account/",
+    footerNote: "Matthew Cawood · Online Piano Lessons",
+  });
+  const subject = multi ? "Your upcoming piano lessons, and your new Zoom links" : "Your upcoming piano lesson, and your new Zoom link";
+  return { subject, html };
+}
+
 // Preview-only sample renders for the four booking emails, keyed by CAMPAIGN_META.booking.
 export function renderBookingHTML(key) {
+  if (key === "lesson_link_migration") return renderLessonLinkEmail({
+    firstName: "David",
+    lessons: [
+      { whenLabel: "Thursday 18 June at 2:00pm (UK time)", link: "https://us06web.zoom.us/j/00000000000?pwd=sample" },
+      { whenLabel: "Thursday 25 June at 12:00pm (UK time)", link: "https://us06web.zoom.us/j/11111111111?pwd=sample" },
+    ],
+  }).html;
   const ZOOM = "https://zoom.us/j/9876543210";
   const gcal = "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Piano+Lesson+with+Matthew+Cawood&dates=20260616T140000Z/20260616T150000Z&location=" + encodeURIComponent(ZOOM);
   if (key === "package_buyer") return renderBookingEmail({
