@@ -3925,6 +3925,7 @@ async function crLoadLeaderboard(rowsElId) {
 // Mirrors Chord Recognition, but plays the chord as audio (stacked oscillators)
 // instead of drawing notation, and the wizard is answer-type / chord-set / scope.
 const ET_EXTRA_QUALITIES = {
+  hdim7:{ label:"Half-diminished", abbr:"half-dim", semitones:[0,3,6,10] },   // override CR's "ø7" naming for this game
   six:  { label:"Major 6th",    abbr:"6",    semitones:[0,4,7,9]     },
   min6: { label:"Minor 6th",    abbr:"m6",   semitones:[0,3,7,9]     },
   dom9: { label:"Dominant 9th", abbr:"9",    semitones:[0,4,7,10,14] },
@@ -3969,16 +3970,52 @@ function etGetPianoWave(){
   _etPianoWave = audioCtx.createPeriodicWave(real, imag, { disableNormalization: false });
   return _etPianoWave;
 }
+// Real recorded acoustic-grand samples (soundfont) — lazy-loaded. Until they
+// arrive (or if blocked) we fall back to the synth voice below.
+let etPiano = null, etPianoLoading = false;
+function etLoadScript(src){
+  return new Promise((res, rej) => {
+    if (document.querySelector('script[data-src="'+src+'"]')) return res();
+    const s = document.createElement("script");
+    s.src = src; s.dataset.src = src;
+    s.onload = () => res(); s.onerror = () => rej(new Error("load "+src));
+    document.head.appendChild(s);
+  });
+}
+function etLoadPiano(){
+  if (etPiano || etPianoLoading) return;
+  etPianoLoading = true;
+  etLoadScript("https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js")
+    .then(() => {
+      if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      return window.Soundfont.instrument(audioCtx, "acoustic_grand_piano", { soundfont: "MusyngKite" });
+    })
+    .then(inst => { etPiano = inst; })
+    .catch(e => console.warn("piano soundfont load failed, using synth fallback:", e))
+    .finally(() => { etPianoLoading = false; });
+}
 function etPlayChord(midiArr){
   try {
     if (typeof _ensureIOSAudio === "function") _ensureIOSAudio();
     if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
+    if (etPiano) {
+      const t0 = audioCtx.currentTime + 0.02;
+      midiArr.forEach((m, i) => etPiano.play(m, t0 + i * 0.012, { gain: 1.7, duration: 2.8 }));
+      return;
+    }
+    etLoadPiano();            // start fetching the real piano if we haven't
+    etSynthChord(midiArr);    // synth meanwhile so the round isn't silent
+  } catch(e){ console.warn("etPlayChord", e); }
+}
+function etSynthChord(midiArr){
+  try {
+    if (!audioCtx) return;
     const wave = etGetPianoWave();
     const t0 = audioCtx.currentTime + 0.02;
     const master = audioCtx.createGain();
     master.gain.value = 0.85 / Math.sqrt(midiArr.length);
-    const lp = audioCtx.createBiquadFilter();      // soften the top like a real piano
+    const lp = audioCtx.createBiquadFilter();
     lp.type = "lowpass"; lp.frequency.value = 4200; lp.Q.value = 0.4;
     master.connect(lp); lp.connect(audioCtx.destination);
     midiArr.forEach((m, i) => {
@@ -3986,15 +4023,14 @@ function etPlayChord(midiArr){
       if (wave) osc.setPeriodicWave(wave); else osc.type = "triangle";
       osc.frequency.value = etNoteFreq(m);
       osc.connect(g); g.connect(master);
-      const on = t0 + i * 0.007;       // tiny roll so the chord blooms naturally
-      const dur = 2.4;
+      const on = t0 + i * 0.007, dur = 2.4;
       g.gain.setValueAtTime(0.0001, on);
-      g.gain.exponentialRampToValueAtTime(0.5, on + 0.006);   // sharp hammer attack
-      g.gain.exponentialRampToValueAtTime(0.12, on + 0.35);   // quick initial drop
-      g.gain.exponentialRampToValueAtTime(0.0001, on + dur);  // long tail
+      g.gain.exponentialRampToValueAtTime(0.5, on + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.12, on + 0.35);
+      g.gain.exponentialRampToValueAtTime(0.0001, on + dur);
       osc.start(on); osc.stop(on + dur + 0.05);
     });
-  } catch(e){ console.warn("etPlayChord", e); }
+  } catch(e){ console.warn("etSynthChord", e); }
 }
 
 // ── Chord naming for computed (diatonic) chords, by interval signature ──
@@ -4006,15 +4042,16 @@ const ET_SIG_NAMES = {
   "0,4,7,11":   {qual:"maj7",   label:"Major 7th",      abbr:"maj7"},
   "0,4,7,10":   {qual:"dom7",   label:"Dominant 7th",   abbr:"7"},
   "0,3,7,10":   {qual:"min7",   label:"Minor 7th",      abbr:"m7"},
-  "0,3,6,10":   {qual:"hdim7",  label:"Half-dim 7th",   abbr:"m7♭5"},
+  "0,3,6,10":   {qual:"hdim7",  label:"Half-diminished",abbr:"half-dim"},
   "0,3,6,9":    {qual:"dim7",   label:"Diminished 7th", abbr:"dim7"},
   "0,4,7,11,14":{qual:"maj9",   label:"Major 9th",      abbr:"maj9"},
   "0,4,7,10,14":{qual:"dom9",   label:"Dominant 9th",   abbr:"9"},
+  "0,4,7,10,13":{qual:"dom7b9", label:"Dominant 7 ♭9",  abbr:"7♭9"},
   "0,3,7,10,14":{qual:"min9",   label:"Minor 9th",      abbr:"m9"},
   "0,3,7,10,13":{qual:"min7b9", label:"Minor 7 ♭9",     abbr:"m7♭9"},
   "0,4,7,11,13":{qual:"maj7b9", label:"Major 7 ♭9",     abbr:"maj7♭9"},
-  "0,3,6,10,14":{qual:"hdim9",  label:"Half-dim ♮9",    abbr:"m7♭5(9)"},
-  "0,3,6,10,13":{qual:"hdim7b9",label:"Half-dim ♭9",    abbr:"m7♭5(♭9)"},
+  "0,3,6,10,14":{qual:"hdim9",  label:"Half-dim add9",  abbr:"half-dim 9"},
+  "0,3,6,10,13":{qual:"hdim7b9",label:"Half-dim ♭9",    abbr:"half-dim ♭9"},
 };
 function etRootStr(root){ return root.letter + (root.acc==="#"?"♯":root.acc==="b"?"♭":""); }
 function etNameFromAbbr(root, abbr){
@@ -4072,10 +4109,13 @@ function etGetPool(){
 function etBuildKeyPool(){
   const key = NR_KEYS.find(k => k.id === etKeyId);
   if (!key) return etGetPool();
-  const scale = etKeyScale(key);
+  const natural = etKeyScale(key);
+  // Minor keys: raise the 7th degree (harmonic minor) when building the V chord only, so the dominant is major / V7 / V7♭9.
+  const harmonic = key.minor ? natural.map((s,i)=> i===6 ? { ...s, st:(s.st+1)%12 } : s) : natural;
   const density = etChordSet==="sevenths" ? 4 : etChordSet==="extensions" ? 5 : 3;   // triads / major_minor = 3
   let pool = [];
   for (let d=0; d<7; d++){
+    const scale = (key.minor && d===4) ? harmonic : natural;   // degree 4 = V uses harmonic minor
     const ch = etDiatonicChord(scale, d, density);
     const named = etNameChord(ch.root, ch.intervals);
     pool.push({ root:ch.root, intervals:ch.intervals, qual:named.qual, label:named.label, name:named.name });
@@ -4156,7 +4196,7 @@ function etInitKeyPicker(){
 }
 function etShowScreen(name){ ["setup","playing","results"].forEach(s=>{const el=document.getElementById("et-screen-"+s); if(el)el.style.display = s===name ? "" : "none";}); }
 function etShowSetup(){ etShowScreen("setup"); etWizGoTo(1); }
-function etInit(){ etInitKeyPicker(); etShowScreen("setup"); etWizGoTo(1); etLoadLeaderboard("et-sidebar-lb-rows"); }
+function etInit(){ etInitKeyPicker(); etShowScreen("setup"); etWizGoTo(1); etLoadLeaderboard("et-sidebar-lb-rows"); etLoadPiano(); }
 
 // ── Game flow ──
 function etStartWithCountdown(){
