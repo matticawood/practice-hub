@@ -16,6 +16,21 @@ const CAL_V = "2024-08-13";
 const RESCHEDULE_CUTOFF_MS = 24 * 60 * 60 * 1000;
 const calHeaders = () => ({ "Authorization": `Bearer ${CAL_API_KEY}`, "cal-api-version": CAL_V });
 
+// Keep the bookings table (what My Account reads) in step with Cal.com when a
+// customer cancels or reschedules here. Best-effort: a DB hiccup must never fail
+// the customer's action, Cal.com is the source of truth either way.
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+async function sbPatchBooking(calUid: string, patch: Record<string, unknown>) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/bookings?cal_uid=eq.${encodeURIComponent(calUid)}`, {
+      method: "PATCH",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify(patch),
+    });
+  } catch (e) { console.error("bookings sync failed", (e as Error).message); }
+}
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -93,6 +108,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ cancellationReason: "Cancelled by attendee" }),
         });
         if (!r.ok) { console.error("cancel failed", r.status, await r.text()); return json({ ok: false, error: "cancel_failed" }, 502); }
+        await sbPatchBooking(uid, { status: "cancelled" });   // hide from My Account
         return json({ ok: true });   // Cal fires BOOKING_CANCELLED → branded email
       } catch (e: any) { console.error("cancel error", e.message); return json({ ok: false, error: "error" }, 500); }
     }
@@ -112,7 +128,11 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ start, reschedulingReason: "Rescheduled by attendee" }),
         });
         if (!r.ok) { console.error("reschedule failed", r.status, await r.text()); return json({ ok: false, error: "reschedule_failed" }, 502); }
-        const nu = (await r.json()).data?.uid || null;
+        const rd = (await r.json()).data || {};
+        const nu = rd.uid || null;   // reschedule mints a NEW uid
+        const newZoom = rd.meetingUrl || rd.videoCallData?.url || null;
+        // Move the My Account row to the new uid + time (and link if it changed).
+        await sbPatchBooking(uid, { cal_uid: nu || uid, start_time: rd.start || start, ...(newZoom ? { meeting_url: newZoom } : {}) });
         return json({ ok: true, uid: nu });   // Cal fires BOOKING_RESCHEDULED → branded email
       } catch (e: any) { console.error("reschedule error", e.message); return json({ ok: false, error: "error" }, 500); }
     }
