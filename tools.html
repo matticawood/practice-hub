@@ -1395,7 +1395,7 @@
                     <div class="nr-option-card-desc">6ths &middot; 9ths &middot; add9</div>
                   </button>
                 </div>
-                <div id="et-set-keynote" style="display:none;font-size:.72rem;color:rgba(210,200,185,.5);margin-top:10px;text-align:center">In a key you hear the diatonic chords, choose triads or sevenths.</div>
+                <div id="et-set-keynote" style="display:none;font-size:.72rem;color:rgba(210,200,185,.5);margin-top:10px;text-align:center">In a key you only hear chords that belong to it: Major/Minor drops the diminished; Sevenths and Extensions use the key's own qualities.</div>
               </div>
 
               <div class="nr-wiz-nav">
@@ -3953,9 +3953,9 @@ function etQualityLabel(qk){ return ET_QUALITIES[qk]?.label ?? qk; }
 
 // ── Audio ──
 function etNoteFreq(midi){ return 440 * Math.pow(2,(midi-69)/12); }
-function etChordMidi(root, qk){
+function etChordMidi(root, intervals){
   const base = 60 + (root.st <= 5 ? root.st : root.st - 12);   // C-octave base (correct pitch class), roots kept in a tight central register
-  return ET_QUALITIES[qk].semitones.map(iv => base + iv);
+  return intervals.map(iv => base + iv);
 }
 // A piano-ish timbre via additive synthesis: a fixed harmonic spectrum (PeriodicWave)
 // plus a struck-string envelope (fast attack, long exponential decay, no sustain).
@@ -3997,60 +3997,119 @@ function etPlayChord(midiArr){
   } catch(e){ console.warn("etPlayChord", e); }
 }
 
-// ── Pool ──
-function etGetPool(){
-  if (etScope === "key") return etBuildKeyPool();
-  const qs = ET_SETS[etChordSet], pool = [];
-  CR_ROOTS.forEach(root => qs.forEach(qk => pool.push({root, qualKey:qk})));
-  return pool;
+// ── Chord naming for computed (diatonic) chords, by interval signature ──
+const ET_SIG_NAMES = {
+  "0,4,7":      {qual:"maj",    label:"Major",          abbr:""},
+  "0,3,7":      {qual:"min",    label:"Minor",          abbr:"m"},
+  "0,3,6":      {qual:"dim",    label:"Diminished",     abbr:"dim"},
+  "0,4,8":      {qual:"aug",    label:"Augmented",      abbr:"aug"},
+  "0,4,7,11":   {qual:"maj7",   label:"Major 7th",      abbr:"maj7"},
+  "0,4,7,10":   {qual:"dom7",   label:"Dominant 7th",   abbr:"7"},
+  "0,3,7,10":   {qual:"min7",   label:"Minor 7th",      abbr:"m7"},
+  "0,3,6,10":   {qual:"hdim7",  label:"Half-dim 7th",   abbr:"m7♭5"},
+  "0,3,6,9":    {qual:"dim7",   label:"Diminished 7th", abbr:"dim7"},
+  "0,4,7,11,14":{qual:"maj9",   label:"Major 9th",      abbr:"maj9"},
+  "0,4,7,10,14":{qual:"dom9",   label:"Dominant 9th",   abbr:"9"},
+  "0,3,7,10,14":{qual:"min9",   label:"Minor 9th",      abbr:"m9"},
+  "0,3,7,10,13":{qual:"min7b9", label:"Minor 7 ♭9",     abbr:"m7♭9"},
+  "0,4,7,11,13":{qual:"maj7b9", label:"Major 7 ♭9",     abbr:"maj7♭9"},
+  "0,3,6,10,14":{qual:"hdim9",  label:"Half-dim ♮9",    abbr:"m7♭5(9)"},
+  "0,3,6,10,13":{qual:"hdim7b9",label:"Half-dim ♭9",    abbr:"m7♭5(♭9)"},
+};
+function etRootStr(root){ return root.letter + (root.acc==="#"?"♯":root.acc==="b"?"♭":""); }
+function etNameFromAbbr(root, abbr){
+  const r = etRootStr(root);
+  if (abbr==="") return r;
+  if (/^[0-9]/.test(abbr)) return r + abbr;
+  if (abbr==="m") return r + "m";
+  return r + " " + abbr;
 }
-function etBuildKeyPool(){
-  const key = NR_KEYS.find(k => k.id === etKeyId);
-  if (!key) return etGetPool();
-  const sevenths = (etChordSet==="sevenths" || etChordSet==="extensions");
-  const major7=["maj7","min7","min7","maj7","dom7","min7","hdim7"];
-  const minor7=["min7","hdim7","maj7","min7","min7","maj7","dom7"];
-  const majorT=["maj","min","min","maj","maj","min","dim"];
-  const minorT=["min","dim","maj","min","min","maj","maj"];
-  const deg = sevenths ? (key.minor?minor7:major7) : (key.minor?minorT:majorT);
+function etNameChord(root, intervals){
+  const sig = intervals.join(",");
+  let m = ET_SIG_NAMES[sig];
+  if (!m && intervals.length===5){
+    const core = ET_SIG_NAMES[intervals.slice(0,4).join(",")];
+    if (core) m = { qual: core.qual+"9", label: core.label.replace(/7th|7/, "9"), abbr: core.abbr + "(9)" };
+  }
+  if (!m) m = { qual:"chord", label:"Chord", abbr:"" };
+  return { qual:m.qual, label:m.label, name: etNameFromAbbr(root, m.abbr) };
+}
+
+// ── Diatonic scale + chord building: stacks the key's own scale notes, so only key-correct notes ever appear ──
+function etKeyScale(key){
   const tonicId = key.id.replace(/m$/,""), tonicLetter = tonicId.charAt(0);
-  const tonicIdx = CR_LETTERS.indexOf(tonicLetter), pool=[];
+  const tonicIdx = CR_LETTERS.indexOf(tonicLetter), scale=[];
   for (let d=0; d<7; d++){
     const letter = CR_LETTERS[(tonicIdx+d)%7];
     let acc=null;
     if (key.sharps.includes(letter)) acc="#"; else if (key.flats.includes(letter)) acc="b";
     const st = ((CR_NATURAL_ST[letter] + (acc=="#"?1:acc=="b"?-1:0))+12)%12;
-    const qk = deg[d];
-    if (!ET_QUALITIES[qk]) continue;
-    pool.push({root:{letter,acc,st}, qualKey:qk});
+    scale.push({ letter, acc, st });
   }
+  return scale;
+}
+function etDiatonicChord(scale, degree, density){
+  const root = scale[degree];
+  let intervals=[0], prev=root.st, cum=0;
+  for (let i=1; i<density; i++){
+    const t = scale[(degree + i*2) % 7];
+    let diff = (t.st - prev + 12) % 12; if (diff===0) diff = 12;
+    cum += diff; intervals.push(cum); prev = t.st;
+  }
+  return { root, intervals };
+}
+
+// ── Pool (unified items: {root, intervals, qual, label, name}) ──
+function etPoolItem(root, qk){
+  return { root, intervals: ET_QUALITIES[qk].semitones, qual:qk, label: ET_QUALITIES[qk].label, name: etChordName(root, qk) };
+}
+function etGetPool(){
+  if (etScope === "key") return etBuildKeyPool();
+  const qs = ET_SETS[etChordSet], pool = [];
+  CR_ROOTS.forEach(root => qs.forEach(qk => pool.push(etPoolItem(root, qk))));
+  return pool;
+}
+function etBuildKeyPool(){
+  const key = NR_KEYS.find(k => k.id === etKeyId);
+  if (!key) return etGetPool();
+  const scale = etKeyScale(key);
+  const density = etChordSet==="sevenths" ? 4 : etChordSet==="extensions" ? 5 : 3;   // triads / major_minor = 3
+  let pool = [];
+  for (let d=0; d<7; d++){
+    const ch = etDiatonicChord(scale, d, density);
+    const named = etNameChord(ch.root, ch.intervals);
+    pool.push({ root:ch.root, intervals:ch.intervals, qual:named.qual, label:named.label, name:named.name });
+  }
+  // "Major / Minor" in a key = only the diatonic major and minor chords (drops the dim/aug degrees).
+  if (etChordSet === "major_minor") pool = pool.filter(p => p.qual==="maj" || p.qual==="min");
   return pool;
 }
 function etGenAnswersExact(pick, pool){
-  const correctName = etChordName(pick.root, pick.qualKey);
-  const seen = new Set([correctName]);
-  const cands = pool.filter(p => etChordName(p.root,p.qualKey)!==correctName).sort(()=>Math.random()-0.5);
+  const seen = new Set([pick.name]);
+  const cands = pool.filter(p => p.name !== pick.name).sort(()=>Math.random()-0.5);
   const wrongs=[];
-  for (const c of cands){ if(wrongs.length>=3)break; const n=etChordName(c.root,c.qualKey); if(!seen.has(n)){seen.add(n); wrongs.push({root:c.root,qualKey:c.qualKey,correct:false});} }
+  for (const c of cands){ if(wrongs.length>=3)break; if(!seen.has(c.name)){seen.add(c.name); wrongs.push({name:c.name,correct:false});} }
   let guard=0;
-  while (wrongs.length<3 && guard++<200){
-    const r=CR_ROOTS[Math.floor(Math.random()*CR_ROOTS.length)];
-    const setQs=ET_SETS[etChordSet]; const qk=setQs[Math.floor(Math.random()*setQs.length)];
-    const n=etChordName(r,qk); if(!seen.has(n)){seen.add(n); wrongs.push({root:r,qualKey:qk,correct:false});}
+  while (wrongs.length<3 && guard++<300){
+    const r = CR_ROOTS[Math.floor(Math.random()*CR_ROOTS.length)];
+    const setQs = ET_SETS[etChordSet] || ET_SETS.triads;
+    const qk = setQs[Math.floor(Math.random()*setQs.length)];
+    const nm = etChordName(r, qk);
+    if(!seen.has(nm)){ seen.add(nm); wrongs.push({name:nm,correct:false}); }
   }
-  return [{root:pick.root,qualKey:pick.qualKey,correct:true}, ...wrongs].sort(()=>Math.random()-0.5);
+  return [{name:pick.name,correct:true}, ...wrongs].sort(()=>Math.random()-0.5);
 }
 function etRenderAnswers(pick, pool){
   const wrap = document.getElementById("et-answers");
   if (!wrap) return;
   let opts;
   if (etAnswerType === "quality") {
-    let quals = etScope==="key" ? [...new Set(pool.map(p=>p.qualKey))] : ET_SETS[etChordSet].slice();
-    if (!quals.includes(pick.qualKey)) quals.unshift(pick.qualKey);
-    opts = quals.map(qk => ({ label: etQualityLabel(qk), correct: qk===pick.qualKey }))
-               .sort(()=>Math.random()-0.5);
+    const byQual = {};
+    pool.forEach(p => { if(!byQual[p.qual]) byQual[p.qual]=p.label; });
+    if (!byQual[pick.qual]) byQual[pick.qual]=pick.label;
+    opts = Object.keys(byQual).map(q => ({ label: byQual[q], correct: q===pick.qual })).sort(()=>Math.random()-0.5);
   } else {
-    opts = etGenAnswersExact(pick, pool).map(a => ({ label: etChordName(a.root, a.qualKey), correct: a.correct }));
+    opts = etGenAnswersExact(pick, pool).map(a => ({ label: a.name, correct: a.correct }));
   }
   wrap.innerHTML = opts.map(o => `<button class="cr-answer-btn" data-correct="${o.correct?1:0}">${escHtml(o.label)}</button>`).join("");
   [...wrap.children].forEach(btn => btn.onclick = () => etAnswer(btn));
@@ -4077,13 +4136,7 @@ function etWizPickScope(v){
   etScope=v;
   document.querySelectorAll("#et-wiz-2 .nr-option-card").forEach(c=>c.classList.toggle("active", c.dataset.scope===v));
   const kp=document.getElementById("et-key-picker-wrap"); if(kp) kp.style.display = v==="key" ? "" : "none";
-  // In a key the qualities are fixed by the key, so only triads/sevenths make sense — hide the others.
-  document.querySelectorAll("#et-wiz-3 [data-anyonly]").forEach(c => c.style.display = v==="key" ? "none" : "");
   const note=document.getElementById("et-set-keynote"); if(note) note.style.display = v==="key" ? "" : "none";
-  if (v==="key" && (etChordSet==="major_minor" || etChordSet==="extensions")) {
-    etChordSet="triads";
-    document.querySelectorAll("#et-wiz-3 .nr-option-card").forEach(c=>c.classList.toggle("active", c.dataset.set==="triads"));
-  }
 }
 function etPickKey(id){ etKeyId=id; document.querySelectorAll("#et-key-picker .nr-pill").forEach(p=>p.classList.toggle("active", p.dataset.key===id)); }
 function etInitKeyPicker(){
@@ -4134,7 +4187,7 @@ function etNextChord(){
   const pool = etGetPool();
   if (!pool.length) return;
   const pick = pool[Math.floor(Math.random()*pool.length)];
-  etCurrent = { root:pick.root, qualKey:pick.qualKey, midi: etChordMidi(pick.root, pick.qualKey) };
+  etCurrent = { ...pick, midi: etChordMidi(pick.root, pick.intervals) };
   etPlayChord(etCurrent.midi);
   etRenderAnswers(pick, pool);
   const fb=document.getElementById("et-feedback"); if(fb){fb.textContent=""; fb.className="nr-feedback-msg";}
@@ -4152,7 +4205,7 @@ function etAnswer(btn){
   } else {
     btn.classList.add("cr-wrong");
     if(wrap)[...wrap.children].forEach(b=>{ if(b.dataset.correct==="1") b.classList.add("cr-correct"); });
-    const ans = etAnswerType==="quality" ? etQualityLabel(etCurrent.qualKey) : etChordName(etCurrent.root, etCurrent.qualKey);
+    const ans = etAnswerType==="quality" ? etCurrent.label : etCurrent.name;
     const fb=document.getElementById("et-feedback"); if(fb){fb.textContent="✗  "+ans; fb.className="nr-feedback-msg wrong";}
     setTimeout(()=>{etLocked=false; etNextChord();}, 1100);
   }
