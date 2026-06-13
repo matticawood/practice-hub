@@ -23,8 +23,10 @@ const SYSTEM = [
   "a brand site, a Stripe store (PDF books, guides, and a course), one-to-one lessons + clinics booked through the site,",
   "a weekly email called Monday Music Tips, and a membership app called The Practice Room.",
   "",
-  "You will be given a JSON object of aggregated analytics for a chosen time window (site traffic, store funnel,",
-  "lesson/booking funnel, and email performance). Write a concise readout for the owner.",
+  "You will be given a JSON object of aggregated analytics covering the WHOLE business: site traffic, the store",
+  "funnel, the lesson/booking funnel, email performance, the /signup acquisition funnel, and membership health",
+  "(member count, active members, community activity). Write a concise readout for the owner that joins these up,",
+  "for example, traffic that is not converting to store sales, or members who sign up but do not stay active.",
   "",
   "Structure your answer in short labelled sections with these headings exactly:",
   "What's working, What's underperforming, Biggest opportunity, Do next.",
@@ -36,7 +38,7 @@ const SYSTEM = [
   "- Plain English. No jargon. No hype.",
   "- NEVER use em dashes. Use commas, full stops, or 'and'.",
   "- No emojis.",
-  "- Keep the whole thing tight: roughly 180 to 320 words.",
+  "- Keep it tight despite the breadth: roughly 220 to 420 words. Prioritise the few things that matter most.",
 ].join("\n");
 
 function jsonResponse(obj, status = 200) {

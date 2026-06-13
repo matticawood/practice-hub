@@ -1036,8 +1036,31 @@ async function renderFunnels() {
     if (topLinks.length) h += `<h3 ${sub}>Most-clicked links</h3><div style="max-width:640px">${topLinks.map(([l,c])=>bar(l.replace(/^https?:\/\//,""),c,topLinks[0][1])).join("")}</div>`;
   }
 
-  // ── 5. SMART INSIGHTS (computed highlights + on-demand AI) ──
-  h += `<h2 class="section-header" style="margin-top:30px">${ico('warn','#f5c518')}Smart insights</h2>`;
+  // ── Extra business context so the AI readout covers the WHOLE dashboard ──
+  // (membership health, community, and the /signup acquisition funnel, alongside
+  //  the traffic/store/booking/email metrics already gathered above).
+  const [members, psessions, cposts, ccomments, sev, sconv] = await Promise.all([
+    safe(db.from("allowed_emails").select("email")),
+    safe(db.from("practice_sessions").select("email,session_date")),
+    safe(db.from("community_posts").select("email,created_at")),
+    safe(db.from("community_post_comments").select("email,created_at")),
+    safe(db.from("signup_events").select("vid,event")),
+    safe(db.from("signup_conversions").select("vid")),
+  ]);
+  const excl = (e) => { e = (e||"").toLowerCase(); return !e || (typeof EXCLUDED_EMAILS !== "undefined" && EXCLUDED_EMAILS.has(e)); };
+  const memberEmails = new Set(members.map(m => (m.email||"").toLowerCase()).filter(e => e && !excl(e)));
+  const now = Date.now(), dayAgo = n => now - n*86400000;
+  const active7 = new Set(), active30 = new Set();
+  for (const s of psessions) { const e=(s.email||"").toLowerCase(); if (!memberEmails.has(e)) continue; const t=new Date(s.session_date).getTime(); if (t>=dayAgo(7)) active7.add(e); if (t>=dayAgo(30)) active30.add(e); }
+  const posters30 = new Set(cposts.filter(p => new Date(p.created_at).getTime()>=dayAgo(30)).map(p => (p.email||"").toLowerCase()).filter(e => !excl(e)));
+  const community30 = cposts.filter(p => new Date(p.created_at).getTime()>=dayAgo(30)).length + ccomments.filter(c => new Date(c.created_at).getTime()>=dayAgo(30)).length;
+  metrics.membership = { members: memberEmails.size, activeLast7: active7.size, activeLast30: active30.size, postersLast30: posters30.size, communityItemsLast30: community30 };
+  const sViews = new Set(sev.filter(e => e.event==="view").map(e => e.vid));
+  const sConvV = new Set(sconv.map(c => c.vid));
+  metrics.acquisition = { signupVisitors: sViews.size, signupConversions: sConvV.size, signupConvRate: pct(sConvV.size, sViews.size) };
+
+  // ── 5. SMART INSIGHTS (computed highlights + on-demand AI, whole dashboard) ──
+  h += `<h2 class="section-header" style="margin-top:30px">${ico('warn','#f5c518')}Smart insights <span class="section-meta">whole-business read</span></h2>`;
   const hi = [];
   if (metrics.traffic) {
     const tp = metrics.traffic.topPages[0]; if (tp) hi.push(`Most-visited page: <b>${esc(tp[0])}</b> with ${tp[1]} views.`);
@@ -1051,6 +1074,12 @@ async function renderFunnels() {
   if (metrics.email && Object.keys(metrics.email.campaigns).length) {
     const be = Object.entries(metrics.email.campaigns).filter(([,d])=>d.sent>=5).sort((a,b)=>b[1].openRate-a[1].openRate)[0];
     if (be) hi.push(`Best email open rate: <b>${esc(be[0])}</b> at ${be[1].openRate}%.`);
+  }
+  if (metrics.membership && metrics.membership.members) {
+    hi.push(`Membership: <b>${metrics.membership.members}</b> members, <b>${metrics.membership.activeLast7}</b> active in the last 7 days (${pct(metrics.membership.activeLast7, metrics.membership.members)}%).`);
+  }
+  if (metrics.acquisition && metrics.acquisition.signupVisitors) {
+    hi.push(`Signup page converts <b>${metrics.acquisition.signupConvRate}%</b> of ${metrics.acquisition.signupVisitors} visitors.`);
   }
   h += `<ul style="font-size:.88rem;color:#cbd5e1;line-height:1.7;margin:6px 0 14px;padding-left:18px">${hi.length ? hi.map(x=>`<li>${x}</li>`).join("") : "<li>Not enough data yet for highlights.</li>"}</ul>`;
   h += `<button id="gen-insights" style="background:#f5c518;color:#1a1410;border:none;border-radius:9px;padding:10px 18px;font-weight:800;font-size:.86rem;cursor:pointer">Generate AI insights</button><div id="ai-insights" style="margin-top:14px"></div>`;
