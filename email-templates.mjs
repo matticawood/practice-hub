@@ -18,11 +18,12 @@ export const OWNER_EMAIL = "matthew@matthewcawood.com";
 export const CAMPAIGN_META = {
   relaunch: {
     title: "Relaunch (migration win-back)",
-    group: "Win-back",
+    group: "Retired",
     audience: "The ~26 members who lived through the migration and have been silent 14+ days",
     trigger: "Manual — one-time, from the Automations panel",
     status: "ready",
     oneShot: true,
+    readOnlyNote: "One-time win-back sent (or planned) around the migration. Kept here for reference; it isn't sent from this page.",
   },
   reactivation: {
     title: "Reactivation (evergreen)",
@@ -61,12 +62,13 @@ export const CAMPAIGN_META = {
   },
   waitlist: {
     title: "Waitlist launch",
-    group: "Acquisition",
+    group: "Retired",
     audience: "≈200 waitlist sign-ups who never joined",
     trigger: "Manual — one-time launch announcement",
     status: "ready",
     list: "waitlist",      // sends to the 'waitlist' email list (contacts), not members
     excludeMembers: true,  // skip anyone who is or has ever been a member (current + cancelled)
+    readOnlyNote: "One-time launch announcement to the waiting list. Kept here for reference; it isn't sent from this page.",
   },
   livestream_reminder: {
     title: "Live clinic reminder",
@@ -74,7 +76,7 @@ export const CAMPAIGN_META = {
     audience: "Every member with reminders on, ~1 hour before each clinic",
     trigger: "Automatic — sent by the scheduler before each scheduled clinic",
     status: "live",
-    readOnly: true,   // dynamic content (clinic title + each member's local time)
+    readOnly: true, livestream: true,   // dynamic content (clinic title + each member's local time)
   },
 
   // ── Booking / lesson emails (transactional, sent by the clinic-webhook and
@@ -136,7 +138,7 @@ export const CAMPAIGN_META = {
   },
   booking_lesson_link_migration: {
     title: "Lesson moved, new link (one-time)",
-    group: "Booking emails",
+    group: "Retired",
     audience: "Students whose existing lessons were moved from Acuity into the new booking system",
     trigger: "Manual — one-time migration send (scripts/email-acuity-lesson-links.mjs)",
     status: "live",

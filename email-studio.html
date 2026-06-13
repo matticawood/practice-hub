@@ -25,6 +25,11 @@
   .tabbar button { background:transparent; border:none; color:var(--mut); padding:10px 18px; font-size:.92rem; font-weight:600; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; }
   .tabbar button:hover { color:#cccccc; }
   .tabbar button.on { color:#fff; border-bottom-color:var(--gold); }
+  .tabbar { align-items:flex-end; }
+  .tab-zone { display:flex; flex-direction:column; }
+  .tab-zone .zone-label { font-size:.58rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--mut); padding:0 12px 3px; }
+  .tab-zone .zone-btns { display:flex; flex-wrap:wrap; }
+  .zone-sep { width:1px; align-self:stretch; background:var(--border); margin:0 5px; }
   .subtabbar { display:flex; gap:8px; flex-wrap:wrap; margin:16px 0 18px; }
   .subtabbar button { background:#1a1a1a; border:1px solid var(--border); color:var(--mut); padding:6px 13px; border-radius:999px; font-size:.78rem; font-weight:600; cursor:pointer; }
   .subtabbar button:hover { border-color:#3a3a3a; color:#cccccc; }
@@ -208,7 +213,7 @@
 </div>
 
 <script type="module">
-  import * as ET from "./email-templates.mjs?v=25";
+  import * as ET from "./email-templates.mjs?v=26";
   window.ET = ET;
   window.dispatchEvent(new Event("et-ready"));
 </script>
@@ -545,6 +550,7 @@ async function loadStudio() {
     tableMissing = true;
   }
   const byCamp = {}; for (const r of rows) byCamp[r.campaign] = r;
+  STUDIO_DB = byCamp;
   if (tableMissing) {
     document.getElementById("cards").insertAdjacentHTML("beforebegin",
       `<div style="background:#3a2f12;color:#fbbf24;border:1px solid #5b4a1a;border-radius:10px;padding:11px 14px;font-size:.8rem;margin-bottom:16px">Previews below use the built-in defaults. Run <code>20260609_email_templates.sql</code> to enable saving your edits.</div>`);
@@ -564,13 +570,17 @@ async function loadStudio() {
   document.getElementById("cards").innerHTML = html;
   for (const camp of Object.keys(META)) wireCard(camp);
 
-  // Tabs: Compose + Monday Music Tips first, then the campaign groups.
-  const groupNames = Object.keys(STUDIO_GROUPS);
-  const specialTabs =
-    `<button id="gtab-compose" onclick="showSpecial('compose')">Compose</button>` +
-    `<button id="gtab-mmt" onclick="showSpecial('mmt')">Monday Music Tips</button>`;
-  document.getElementById("studio-tabs").innerHTML = specialTabs + groupNames.map(g =>
-    `<button id="gtab-${slug(g)}" onclick="showGroup('${g.replace(/'/g, "\\'")}')">${esc(g)}</button>`).join("");
+  // Tabs grouped into three zones: what you Send, what's Automatic, and Retired.
+  const GROUP_LABEL = { "Booking emails": "Booking & lessons", "Store emails": "Store" };
+  const gbtn = (g) => `<button id="gtab-${slug(g)}" onclick="showGroup('${g.replace(/'/g, "\\'")}')">${esc(GROUP_LABEL[g] || g)}</button>`;
+  const zone = (label, inner) => inner ? `<div class="tab-zone"><span class="zone-label">${label}</span><div class="zone-btns">${inner}</div></div>` : "";
+  const autoGroups = ["New-member sequence", "Win-back", "Live clinics", "Booking emails", "Store emails"].filter(g => STUDIO_GROUPS[g]);
+  const zones = [
+    zone("Send", `<button id="gtab-compose" onclick="showSpecial('compose')">Compose</button><button id="gtab-mmt" onclick="showSpecial('mmt')">Monday Music Tips</button>`),
+    zone("Automatic", autoGroups.map(gbtn).join("")),
+    zone("Retired", STUDIO_GROUPS["Retired"] ? gbtn("Retired") : ""),
+  ].filter(Boolean);
+  document.getElementById("studio-tabs").innerHTML = zones.join('<span class="zone-sep"></span>');
   showSpecial("compose");
 }
 
@@ -589,6 +599,7 @@ function showSpecial(which) {
 }
 
 let STUDIO_GROUPS = {};
+let STUDIO_DB = {};   // campaign -> saved DB override row (for retired previews)
 let activeGroup = null;
 const studioLastCamp = {};   // remember last-viewed email per group
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -606,7 +617,7 @@ function showGroup(group) {
   const list = STUDIO_GROUPS[group] || [];
   // Sub-tabs for this group's emails.
   document.getElementById("studio-subtabs").innerHTML = list.map(([camp, m]) => {
-    const dot = m.status === "ready" ? "#4ade80" : m.status === "live" ? "#4ade80" : "#fbbf24";
+    const dot = m.group === "Retired" ? "#6c6c74" : m.status === "ready" ? "#4ade80" : m.status === "live" ? "#4ade80" : "#fbbf24";
     return `<button id="stab-${camp}" onclick="showCampaign('${camp}')"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dot};margin-right:6px;vertical-align:1px"></span>${esc(m.title)}</button>`;
   }).join("");
   // Group-level automation banner (the welcome sequence is managed as a whole).
@@ -623,7 +634,14 @@ function showGroup(group) {
       <div id="ca-result-welcome" style="margin-top:10px;font-size:.78rem;color:var(--mut)"></div>
     </div>`;
   } else {
-    banner.innerHTML = "";
+    const GROUP_DESC = {
+      "Win-back": "Automatic win-back for members who go quiet.",
+      "Live clinics": "Sent automatically before each live clinic.",
+      "Booking emails": "Sent automatically around lesson and clinic bookings.",
+      "Store emails": "Sent automatically when someone buys from the store.",
+      "Retired": "One-off sends that are done. Shown here for reference, not sent from this page.",
+    };
+    banner.innerHTML = GROUP_DESC[group] ? `<p class="intro" style="margin:2px 0 14px">${esc(GROUP_DESC[group])}</p>` : "";
   }
   showCampaign(studioLastCamp[group] || list[0]?.[0]);
 }
@@ -655,6 +673,7 @@ function statusBadge(status) {
 // Per-email send / automation controls, shown at the bottom of each card so you
 // manage everything from the email's own tab.
 function cardActionsHTML(camp, m) {
+  if (m.group === "Retired") return "";
   if (camp === "livestream_reminder") {
     return `<div class="send-bar"><div class="send-status" id="sendstatus-${camp}">Sent automatically before each clinic.</div></div>`;
   }
@@ -691,7 +710,7 @@ function readOnlyCardHTML(camp, m) {
   <div class="card" id="card-${camp}">
     <div class="card-head">
       <div>
-        <div class="ttl-row"><span class="name">${esc(m.title)}</span>${statusBadge(m.status)}</div>
+        <div class="ttl-row"><span class="name">${esc(m.title)}</span>${m.group === "Retired" ? '<span class="badge" style="background:#26262b;color:#9a9aa2">Retired</span>' : statusBadge(m.status)}</div>
         <div class="meta"><b>To:</b> ${esc(m.audience)}<br><b>When:</b> ${esc(m.trigger)}</div>
       </div>
     </div>
@@ -707,7 +726,7 @@ function readOnlyCardHTML(camp, m) {
 }
 
 function cardHTML(camp, m, dbRow) {
-  if (m.readOnly) return readOnlyCardHTML(camp, m);
+  if (m.readOnly || m.group === "Retired") return readOnlyCardHTML(camp, m);
   const c = window.ET.contentForCampaign(camp, dbRow);
   const badge = statusBadge(m.status);
   const bodyText = (c.paragraphs || []).join("\n\n");
@@ -785,9 +804,14 @@ function renderPreview(camp) {
     iframe.srcdoc = window.ET.renderStoreHTML(meta.store);
     return;
   }
-  if (meta && meta.readOnly) {
+  if (meta && meta.livestream) {
     // Dynamic email (livestream reminder) — render a faithful sample, no editing.
     iframe.srcdoc = window.ET.renderLivestreamReminderHTML({ ...window.ET.LIVESTREAM_SAMPLE, site: SITE, unsub: "#" });
+    return;
+  }
+  if (meta && (meta.readOnly || meta.group === "Retired")) {
+    // Retired one-off (relaunch / waitlist) — preview from its saved/default content, no editor.
+    iframe.srcdoc = window.ET.renderEmailHTML(window.ET.contentForCampaign(camp, STUDIO_DB[camp]) || {}, { firstName: "Alex", site: SITE, unsub: "#" });
     return;
   }
   const content = readFields(camp);
@@ -814,7 +838,7 @@ function wireCard(camp) {
   document.getElementById(`dt-${camp}`).onclick = () => setW(0, `dt-${camp}`, `mb-${camp}`);
   document.getElementById(`mb-${camp}`).onclick = () => setW(390, `mb-${camp}`, `dt-${camp}`);
 
-  if (meta && meta.readOnly) { renderPreview(camp); return; }  // no editor on read-only cards
+  if (meta && (meta.readOnly || meta.group === "Retired")) { renderPreview(camp); return; }  // no editor on read-only / retired cards
 
   ["subject","eyebrow","preheader","body","signature","ctaText","ctaHref"].forEach(f => {
     const el = document.getElementById(`f-${camp}-${f}`);
