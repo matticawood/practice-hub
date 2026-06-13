@@ -29,8 +29,8 @@ export const CAMPAIGN_META = {
     title: "Reactivation (evergreen)",
     group: "Win-back",
     audience: "Any member who goes 14+ days silent, on an ongoing basis",
-    trigger: "Auto — 14 days after a member goes quiet (trigger not yet wired)",
-    status: "draft",
+    trigger: "Automatic — runs daily; emails a member once when they've been 14+ days silent",
+    status: "live",
   },
   welcome_d0: {
     title: "Welcome · Day 0",
