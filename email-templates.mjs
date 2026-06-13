@@ -125,6 +125,15 @@ export const CAMPAIGN_META = {
     readOnly: true, booking: "rescheduled",
     readOnlyNote: "Subject: “Your clinic/lesson has been moved”. Sent by the cal-webhook function when a booking is rescheduled, with the new time, a fresh .ics + calendar button, and change links. Shown with sample details.",
   },
+  booking_lesson_reminder: {
+    title: "Lesson reminder (1 hour before)",
+    group: "Booking emails",
+    audience: "The student, about an hour before each booked lesson",
+    trigger: "Automatic — the lesson-reminders job sends it ~1 hour before the lesson",
+    status: "live",
+    readOnly: true, booking: "lesson_reminder",
+    readOnlyNote: "Subject: “Your lesson with Matthew starts in about an hour”. Sent automatically about an hour before each booked lesson, with the Zoom join link, the time in the student's timezone, and reschedule/cancel. Shown here with sample details; copy lives in email-templates.mjs.",
+  },
   booking_lesson_link_migration: {
     title: "Lesson moved, new link (one-time)",
     group: "Booking emails",
@@ -568,8 +577,30 @@ export function renderLessonLinkEmail({ firstName, lessons } = {}) {
   return { subject, html };
 }
 
+// 1-hour-before lesson reminder. Rendered by the lesson-reminders scheduled
+// function AND the Studio preview. `o`: { firstName, dateStr, timeStr, tz, zoom, calUid }.
+export function renderLessonReminderEmail(o = {}) {
+  const manage = o.calUid
+    ? `<br><a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(o.calUid)}&a=reschedule" style="color:#9a6f12;font-weight:600;text-decoration:none">Reschedule</a> or <a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(o.calUid)}&a=cancel" style="color:#9a6f12;font-weight:600;text-decoration:none">cancel</a>`
+    : "";
+  return renderBookingEmail({
+    eyebrow: "Starting Soon",
+    heading: "Your lesson is in about an hour",
+    paragraphs: [
+      `Hi ${esc(o.firstName || "there")}, this is a quick reminder that your 1-hour lesson with Matthew starts in about an hour.`,
+      `Use the button below to join when it's time. See you soon.`,
+    ],
+    detail: `${bIc("calendar")}<strong>${esc(o.dateStr)}</strong><br>${bIc("clock")}${esc(o.timeStr)} (${esc(o.tz)})`
+      + (o.zoom ? `<br>${bIc("link")}<a href="${esc(o.zoom)}" style="color:#9a6f12;font-weight:600">Join the Zoom call</a>` : "") + manage,
+    ctaText: o.zoom ? "Join the Zoom call →" : undefined,
+    ctaHref: o.zoom || undefined,
+    footerNote: "Matthew Cawood · Online Piano Lessons",
+  });
+}
+
 // Preview-only sample renders for the four booking emails, keyed by CAMPAIGN_META.booking.
 export function renderBookingHTML(key) {
+  if (key === "lesson_reminder") return renderLessonReminderEmail({ firstName: "Alex", dateStr: "Thursday, 18 June 2026", timeStr: "14:00", tz: "Europe/London", zoom: "https://us06web.zoom.us/j/0000000000?pwd=sample", calUid: "sample-uid" });
   if (key === "lesson_link_migration") return renderLessonLinkEmail({
     firstName: "David",
     lessons: [
