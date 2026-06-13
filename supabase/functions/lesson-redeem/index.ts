@@ -90,115 +90,135 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const { email: rawEmail, eventTypeId, startTime, name, timeZone, notes, fileUrl } = await req.json();
+    const reqBody = await req.json();
+    const { email: rawEmail, eventTypeId, name, timeZone, notes, fileUrl } = reqBody;
     const email = String(rawEmail || "").trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Invalid email" }, 400);
-    if (!eventTypeId || !startTime) return json({ error: "Missing slot" }, 400);
-
-    // Credits expire 12 months after purchase. Spend the oldest still-valid one first.
-    const yearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-    const cr = await sb(`lesson_credits?select=id,remaining&email=eq.${encodeURIComponent(email)}&remaining=gt.0&created_at=gt.${encodeURIComponent(yearAgo)}&order=created_at.asc&limit=1`);
-    const rows = cr.ok ? await cr.json() : [];
-    if (!rows.length) return json({ error: "No valid lessons remaining for this email." }, 402);
-    const credit = rows[0];
-
-    // Book the Cal.com lesson (mirrors clinic-webhook booking call)
-    // Masked attendee email → Cal's standard emails go to a void; we email the
-    // customer ourselves. Real email kept in metadata for cal-webhook.
-    const bookingBody: Record<string, unknown> = {
-      eventTypeId: Number(eventTypeId),
-      start: startTime,
-      attendee: { name: name || "Student", email: MASK_EMAIL, timeZone: timeZone || "Europe/London", language: "en" },
-      metadata: { source: "package-credit", customerEmail: email, customerName: name || "Student", ...(notes ? { notes: String(notes).slice(0, 490) } : {}), ...(fileUrl ? { attachmentUrl: String(fileUrl).slice(0, 500) } : {}) },
-    };
-    const calRes = await fetch("https://api.cal.com/v2/bookings", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-08-13", "Content-Type": "application/json" },
-      body: JSON.stringify(bookingBody),
-    });
-    const booking = await calRes.json();
-    if (booking.status !== "success") {
-      console.error("Cal.com booking failed:", JSON.stringify(booking));
-      return json({ error: "That slot is no longer available. Please pick another." }, 409);
-    }
-
-    // Decrement the credit only after a successful booking.
-    await sb(`lesson_credits?id=eq.${credit.id}`, {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ remaining: Number(credit.remaining) - 1, updated_at: new Date().toISOString() }),
-    });
-
-    // Remaining after this redemption (only still-valid credits)
-    const after = await sb(`lesson_credits?select=remaining&email=eq.${encodeURIComponent(email)}&created_at=gt.${encodeURIComponent(yearAgo)}`);
-    const remaining = after.ok ? (await after.json()).reduce((s: number, r: any) => s + (Number(r.remaining) || 0), 0) : 0;
-
-    // Emails (best-effort)
-    const data = booking.data || {};
-    const zoomUrl = data.meetingUrl || data.videoCallData?.url || null;
-    const startISO = data.start || startTime;
+    // Accept a list of slots (book several at once) or a single startTime (legacy).
+    const rawSlots: string[] = Array.isArray(reqBody.slots) && reqBody.slots.length
+      ? reqBody.slots.map((s: unknown) => String(s))
+      : (reqBody.startTime ? [String(reqBody.startTime)] : []);
+    if (!eventTypeId || !rawSlots.length) return json({ error: "Missing slot" }, 400);
+    const slots = [...new Set(rawSlots)].sort();
     const tz = timeZone || "Europe/London";
-    const dateStr = new Date(startISO).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: tz });
-    const timeStr = new Date(startISO).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: tz });
-    const send = (to: string, subject: string, html: string, attachments?: unknown[]) =>
-      fetch("https://api.resend.com/emails", { method: "POST", headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: NOTIFY_FROM, to: [to], subject, html, ...(attachments ? { attachments } : {}) }) }).catch(() => {});
 
-    // Calendar invite: end = start + 60 min; reuse Cal.com's UID so the .ics
-    // merges with (rather than duplicates) Cal.com's own invite in the diary.
-    const endISO = new Date(new Date(startISO).getTime() + 60 * 60 * 1000).toISOString();
-    const calSummary = "Piano Lesson with Matthew Cawood";
-    const calDesc = `Your 1-hour online piano lesson with Matthew Cawood.${zoomUrl ? `\n\nJoin: ${zoomUrl}` : ""}${notes ? `\n\nNotes: ${String(notes)}` : ""}`;
-    const calLoc = zoomUrl || "Online (Zoom)";
-    const calUid = `${data.uid || `${startISO}-${email}`}@matthewcawood.com`;
-    const ics = buildICS({ uid: calUid, start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
-    const gcal = gcalLink({ start: startISO, end: endISO, summary: calSummary, description: calDesc, location: calLoc });
-    const icsAttachment = [{ filename: "lesson.ics", content: b64(ics), content_type: "text/calendar; method=PUBLISH" }];
+    // Credits expire 12 months after purchase. Need at least as many valid
+    // credits as slots requested; we spend the oldest first.
+    const yearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+    const cr = await sb(`lesson_credits?select=id,remaining&email=eq.${encodeURIComponent(email)}&remaining=gt.0&created_at=gt.${encodeURIComponent(yearAgo)}&order=created_at.asc`);
+    const creditRows: any[] = cr.ok ? await cr.json() : [];
+    const totalRemaining = creditRows.reduce((s: number, r: any) => s + (Number(r.remaining) || 0), 0);
+    if (totalRemaining <= 0) return json({ error: "No valid lessons remaining for this email." }, 402);
+    if (slots.length > totalRemaining) return json({ error: `You have ${totalRemaining} lesson${totalRemaining === 1 ? "" : "s"} left but tried to book ${slots.length}.` }, 402);
+
+    // Book each slot in Cal.com. Masked attendee → Cal's standard emails go to a
+    // void; we email the customer ourselves. A slot that's just been taken is
+    // skipped, not fatal — we book the rest and report it.
+    const booked: { startISO: string; uid: string | null; zoomUrl: string | null }[] = [];
+    const failed: string[] = [];
+    for (const slot of slots) {
+      const bookingBody: Record<string, unknown> = {
+        eventTypeId: Number(eventTypeId),
+        start: slot,
+        attendee: { name: name || "Student", email: MASK_EMAIL, timeZone: tz, language: "en" },
+        metadata: { source: "package-credit", customerEmail: email, customerName: name || "Student", ...(notes ? { notes: String(notes).slice(0, 490) } : {}), ...(fileUrl ? { attachmentUrl: String(fileUrl).slice(0, 500) } : {}) },
+      };
+      try {
+        const calRes = await fetch("https://api.cal.com/v2/bookings", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-08-13", "Content-Type": "application/json" },
+          body: JSON.stringify(bookingBody),
+        });
+        const booking = await calRes.json();
+        if (booking.status !== "success") { console.error("Cal.com booking failed:", JSON.stringify(booking)); failed.push(slot); continue; }
+        const data = booking.data || {};
+        const zoomUrl = data.meetingUrl || data.videoCallData?.url || null;
+        const startISO = data.start || slot;
+        await sb("bookings", {
+          method: "POST",
+          headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+          body: JSON.stringify({
+            email, kind: "60min", amount_minor: 0, currency: null,
+            cal_uid: data.uid || null, start_time: startISO,
+            meeting_url: zoomUrl, status: "accepted", event_type_id: String(eventTypeId),
+            attendee_timezone: tz, attendee_name: name || "Student",
+          }),
+        }).catch(() => {});
+        booked.push({ startISO, uid: data.uid || null, zoomUrl });
+      } catch (_) { failed.push(slot); }
+    }
+    if (!booked.length) return json({ error: "Those times are no longer available. Please pick another." }, 409);
+
+    // Spend one credit per successful booking, oldest credit row first.
+    let toSpend = booked.length;
+    for (const row of creditRows) {
+      if (toSpend <= 0) break;
+      const take = Math.min(toSpend, Number(row.remaining) || 0);
+      if (take <= 0) continue;
+      await sb(`lesson_credits?id=eq.${row.id}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ remaining: (Number(row.remaining) || 0) - take, updated_at: new Date().toISOString() }),
+      });
+      toSpend -= take;
+    }
+    const remaining = Math.max(0, totalRemaining - booked.length);
+
+    // ── One customer email covering every lesson just booked ──
+    const fmtD = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: tz });
+    const fmtT = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: tz });
+    const multi = booked.length > 1;
+    const rule = `<div style="border-top:1px solid #ece5db;margin:12px 0"></div>`;
+    const attachments: unknown[] = [];
+    const blocks = booked.map((b, i) => {
+      const endISO = new Date(new Date(b.startISO).getTime() + 60 * 60 * 1000).toISOString();
+      const calDesc = `Your 1-hour online piano lesson with Matthew Cawood.${b.zoomUrl ? `\n\nJoin: ${b.zoomUrl}` : ""}`;
+      const calUid = `${b.uid || `${b.startISO}-${email}`}@matthewcawood.com`;
+      const ics = buildICS({ uid: calUid, start: b.startISO, end: endISO, summary: "Piano Lesson with Matthew Cawood", description: calDesc, location: b.zoomUrl || "Online (Zoom)" });
+      attachments.push({ filename: multi ? `lesson-${i + 1}.ics` : "lesson.ics", content: b64(ics), content_type: "text/calendar; method=PUBLISH" });
+      const manage = b.uid ? `<br><a href="https://matthewcawood.com/manage/?uid=${b.uid}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://matthewcawood.com/manage/?uid=${b.uid}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>` : "";
+      return `${ic("calendar")}<strong>${fmtD(b.startISO)}</strong><br>${ic("clock")}${fmtT(b.startISO)} (${tz})` +
+        (b.zoomUrl ? `<br>${ic("link")}<a href="${b.zoomUrl}" style="color:#9a6f12;font-weight:600">Join the Zoom call</a>` : "") + manage;
+    });
+    const detail = blocks.join(rule) + `${rule}${ic("ticket")}${remaining} lesson${remaining === 1 ? "" : "s"} remaining in your package`;
+    const firstZoom = booked[0].zoomUrl;
+    const gcal0 = gcalLink({ start: booked[0].startISO, end: new Date(new Date(booked[0].startISO).getTime() + 3600000).toISOString(), summary: "Piano Lesson with Matthew Cawood", description: `Your 1-hour online piano lesson with Matthew Cawood.${firstZoom ? `\n\nJoin: ${firstZoom}` : ""}`, location: firstZoom || "Online (Zoom)" });
+    const failNote = failed.length ? ` (${failed.length} time${failed.length === 1 ? "" : "s"} you picked had just been taken, so ${failed.length === 1 ? "it was" : "they were"} skipped)` : "";
+
+    const send = (to: string, subject: string, html: string, atts?: unknown[]) =>
+      fetch("https://api.resend.com/emails", { method: "POST", headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: NOTIFY_FROM, to: [to], subject, html, ...(atts ? { attachments: atts } : {}) }) }).catch(() => {});
+
     await Promise.all([
-      send(NOTIFY_TO, `Package lesson booked: ${name || email} · ${dateStr}`,
+      send(NOTIFY_TO, `Package lesson${multi ? "s" : ""} booked: ${name || email} · ${booked.length}`,
         brandedEmail({
-          eyebrow: "Package Lesson",
-          heading: "Package lesson booked",
-          paragraphs: [`<strong>${name || "n/a"}</strong> (${email}) booked a 1-hour lesson using a package credit.`].concat(
+          eyebrow: "Package Lesson" + (multi ? "s" : ""),
+          heading: multi ? `${booked.length} package lessons booked` : "Package lesson booked",
+          paragraphs: [`<strong>${name || "n/a"}</strong> (${email}) booked ${booked.length} lesson${multi ? "s" : ""} using package credits.`].concat(
             notes ? [`<span style="color:#a99d8c;font-size:13px;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Notes</span><br>${String(notes).replace(/\n/g, "<br>")}`] : []
           ),
-          detail: [
-            `${ic("calendar")}${dateStr}`,
-            `${ic("clock")}${timeStr} (${tz})`,
-            zoomUrl ? `${ic("link")}<a href="${zoomUrl}" style="color:#9a6f12;font-weight:600">Join the Zoom call</a>` : "",
-            `${ic("ticket")}${remaining} credit${remaining === 1 ? "" : "s"} remaining`,
-          ].filter(Boolean).join("<br>"),
-          ctaText: zoomUrl ? "Join the Zoom call →" : undefined,
-          ctaHref: zoomUrl || undefined,
+          detail,
           footerNote: "Internal notification · matthewcawood.com",
         })),
-      send(email, `Your lesson is booked`,
+      send(email, multi ? `Your ${booked.length} lessons are booked` : `Your lesson is booked`,
         brandedEmail({
-          eyebrow: "Lesson Confirmed",
-          heading: "You're booked in",
+          eyebrow: multi ? "Lessons Confirmed" : "Lesson Confirmed",
+          heading: multi ? "You're all booked in" : "You're booked in",
           paragraphs: [
-            zoomUrl
-              ? `Your 1-hour lesson with Matthew is confirmed. The details are below, and the same link works on the day.`
-              : `Your 1-hour lesson with Matthew is confirmed. You'll receive your meeting link by email shortly.`,
-            `Add it to your calendar with the button below, or open the attached <strong>lesson.ics</strong> file.`,
-            (data.uid
-              ? `Need to change your plans? <a href="https://matthewcawood.com/manage/?uid=${data.uid}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> (free up to 24h before) or <a href="https://matthewcawood.com/manage/?uid=${data.uid}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>.`
-              : ""),
-          ].filter(Boolean),
-          detail: [
-            `${ic("calendar")}<strong>${dateStr}</strong>`,
-            `${ic("clock")}${timeStr} (${tz})`,
-            `${ic("ticket")}${remaining} lesson${remaining === 1 ? "" : "s"} remaining in your package`,
-          ].join("<br>"),
-          ctaText: zoomUrl ? "Join the Zoom call →" : undefined,
-          ctaHref: zoomUrl || undefined,
-          cta2Text: "Add to Google Calendar",
-          cta2Href: gcal,
+            multi
+              ? `Your ${booked.length} lessons with Matthew are confirmed${failNote}. The details are below, and each link works on the day.`
+              : (firstZoom ? `Your 1-hour lesson with Matthew is confirmed. The details are below, and the same link works on the day.` : `Your 1-hour lesson with Matthew is confirmed. You'll receive your meeting link by email shortly.`),
+            `Add ${multi ? "them" : "it"} to your calendar with the attached <strong>.ics</strong> file${multi ? "s" : ""}, and you can manage everything anytime in your account.`,
+          ],
+          detail,
+          ctaText: multi ? "Open my account" : (firstZoom ? "Join the Zoom call →" : undefined),
+          ctaHref: multi ? "https://matthewcawood.com/account/" : (firstZoom || undefined),
+          cta2Text: multi ? undefined : "Add to Google Calendar",
+          cta2Href: multi ? undefined : gcal0,
           footerNote: "Matthew Cawood · Online Piano Lessons",
         }),
-        icsAttachment),
+        attachments),
     ]);
 
-    return json({ ok: true, remaining, uid: data.uid || null });
+    return json({ ok: true, booked: booked.length, failed: failed.length, remaining, uid: booked[0].uid || null });
   } catch (e: any) {
     console.error("lesson-redeem error:", e.message);
     return json({ error: "Something went wrong." }, 500);
