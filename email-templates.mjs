@@ -90,13 +90,13 @@ export const CAMPAIGN_META = {
     readOnlyNote: "Subject: “Your 6-lesson package is ready”. Sent automatically by the booking system when someone buys a lesson package — tells them how to book each lesson. Shown with sample details; copy lives in the clinic-webhook function.",
   },
   booking_lesson_confirmed: {
-    title: "Lesson booked (customer)",
+    title: "Lessons booked (customer)",
     group: "Booking emails",
-    audience: "The student, after they redeem a package credit for a lesson",
-    trigger: "Automatic — when a package lesson is booked",
+    audience: "The student, after they redeem package credits for one or more lessons",
+    trigger: "Automatic — when one or more package lessons are booked",
     status: "live",
     readOnly: true, booking: "lesson_confirmed",
-    readOnlyNote: "Subject: “Your lesson is booked”. Sent automatically when a package credit is redeemed. Carries a calendar (.ics) attachment plus the two buttons below. Shown with sample details; copy lives in the lesson-redeem function.",
+    readOnlyNote: "Subject: “Your lesson is booked”, or “Your N lessons are booked” when several are booked at once. Booking multiple lessons in one go produces ONE combined email listing every lesson, each with its join link, reschedule/cancel, and its own .ics attachment (shown here with 3 sample lessons). A single booking uses the same format with one lesson. Sent automatically when package credits are redeemed; copy lives in the lesson-redeem function.",
   },
   booking_single_confirmation: {
     title: "Booking confirmed (customer)",
@@ -620,17 +620,28 @@ export function renderBookingHTML(key) {
     ctaText: "Book your first lesson →", ctaHref: "https://matthewcawood.com/book-a-lesson/",
     footerNote: "Matthew Cawood · Online Piano Lessons",
   });
-  if (key === "lesson_confirmed") return renderBookingEmail({
-    eyebrow: "Lesson Confirmed", heading: "You're booked in",
-    paragraphs: [
-      "Your 1-hour lesson with Matthew is confirmed. The details are below, and the same link works on the day.",
-      "Add it to your calendar with the button below, or open the attached <strong>lesson.ics</strong> file.",
-    ],
-    detail: `${bIc("calendar")}<strong>Monday, 16 June 2026</strong><br>${bIc("clock")}10:00 (America/Toronto)<br>${bIc("ticket")}5 lessons remaining in your package`,
-    ctaText: "Join the Zoom call →", ctaHref: ZOOM,
-    cta2Text: "Add to Google Calendar", cta2Href: gcal,
-    footerNote: "Matthew Cawood · Online Piano Lessons",
-  });
+  if (key === "lesson_confirmed") {
+    const rule = `<div style="border-top:1px solid #ece5db;margin:12px 0"></div>`;
+    const GATE = "https://matthewcawood.com/manage/?uid=sample-uid";
+    const block = (d, t, tz) => `${bIc("calendar")}<strong>${d}</strong><br>${bIc("clock")}${t} (${tz})<br>${bIc("link")}<a href="${ZOOM}" style="color:#9a6f12;font-weight:600">Join the Zoom call</a><br><a href="${GATE}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="${GATE}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>`;
+    const detail = [
+      block("Monday, 16 June 2026", "10:00", "Europe/London"),
+      block("Monday, 23 June 2026", "10:00", "Europe/London"),
+      block("Monday, 30 June 2026", "10:00", "Europe/London"),
+    ].join(rule) + `${rule}${bIc("ticket")}3 lessons remaining in your package`;
+    return renderBookingEmail({
+      eyebrow: "Lessons Confirmed",
+      heading: "You're all booked in",
+      paragraphs: [
+        "Your 3 lessons with Matthew are confirmed. The details are below, and each link works on the day.",
+        "Add them to your calendar with the attached <strong>.ics</strong> files, and you can manage everything anytime in your account.",
+      ],
+      detail,
+      ctaText: "Open my account",
+      ctaHref: "https://matthewcawood.com/account/",
+      footerNote: "Matthew Cawood · Online Piano Lessons",
+    });
+  }
   if (key === "single_confirmation") return renderBookingEmail({
     eyebrow: "Booking Confirmed", heading: "You're booked in",
     paragraphs: [
