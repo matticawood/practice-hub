@@ -633,6 +633,8 @@ async function loadAnalytics() {
   catch (e) { console.error("renderFeatureUsage failed:", e); }
   try { await renderAcquisition(); }
   catch (e) { console.error("renderAcquisition failed:", e); }
+  try { await renderFunnels(); }
+  catch (e) { console.error("renderFunnels failed:", e); }
 }
 
 // ── Feature usage: total active time per view, most-used first ─────────────────
@@ -905,6 +907,175 @@ async function renderAcquisition() {
 // TOP of the page. Lifecycle/cohorts anchor on first-session ACTIVATION (members
 // have no signup date). Renders above everything else via afterbegin.
 // ══════════════════════════════════════════════════════════════════════════════
+// ── Whole-site traffic + store/booking funnels + email + smart insights ────────
+async function renderFunnels() {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+  const safe = async (p) => { try { return (await p).data || []; } catch (e) { console.warn("funnel load failed:", e); return []; } };
+  const [se, orders, leads, bookings, elog, eclicks] = await Promise.all([
+    safe(db.from("site_events").select("event,vid,path,dur_ms,device,country,referrer,utm_source,scroll_pct,slug,value_minor,currency,ts")),
+    safe(db.from("store_orders").select("slug,kind,amount_minor,currency,vid,created_at")),
+    safe(db.from("store_leads").select("slug,created_at")),
+    safe(db.from("bookings").select("kind,amount_minor,currency,vid,created_at")),
+    safe(db.from("email_log").select("campaign,status,delivered_at,opened_at,clicked_at,bounced_at,complained_at")),
+    safe(db.from("email_clicks").select("campaign,link")),
+  ]);
+
+  const esc = s => String(s == null ? "" : s).replace(/</g, "&lt;");
+  const pct = (n, d) => d ? Math.round(n / d * 100) : 0;
+  const fmtDur = ms => { const s = Math.round((ms || 0) / 1000); return s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`; };
+  const SYM = { GBP:"£", USD:"$", EUR:"€", CAD:"$", AUD:"$", NZD:"$", SEK:"kr", NOK:"kr", DKK:"kr", SGD:"$" };
+  const money = (minor, cur) => (SYM[(cur||"GBP").toUpperCase()] || "") + ((minor||0)/100).toFixed(2);
+  const revStr = (map) => { const p = Object.entries(map||{}).filter(([,v]) => v > 0).map(([c,v]) => money(v,c) + " " + c); return p.length ? p.join(" · ") : "—"; };
+  const statCard = (v,l) => `<div style="background:#0f1b30;border:1px solid #1e2d4a;border-radius:10px;padding:12px 16px;min-width:90px"><div style="font-size:1.5rem;font-weight:800;color:#f5c518;line-height:1">${v}</div><div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-top:4px">${l}</div></div>`;
+  const sub = `style="font-size:.82rem;color:#cbd5e1;margin:14px 0 6px;font-weight:700"`;
+  const bar = (label, val, max, subTxt) => { const w = max ? Math.round(val/max*100) : 0; return `<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;font-size:.82rem;color:#cbd5e1;gap:10px"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span><span style="color:#94a3b8;flex:none">${subTxt != null ? subTxt : val}</span></div><div style="height:7px;background:#1e293b;border-radius:4px;overflow:hidden;margin-top:3px"><div style="height:100%;width:${w}%;background:#f5c518"></div></div></div>`; };
+  const tableOpen = (cols) => `<table style="width:100%;border-collapse:collapse;font-size:.84rem;margin-top:6px"><thead><tr style="color:#94a3b8;text-align:right">${cols.map((c,i)=>`<th style="padding:6px 8px;${i===0?'text-align:left':''}">${c}</th>`).join("")}</tr></thead><tbody>`;
+
+  const metrics = {};
+  let h = "";
+
+  // ── 1. SITE TRAFFIC ──
+  const views = se.filter(e => e.event === "view");
+  const visitors = new Set(views.map(e => e.vid));
+  const N = visitors.size;
+  h += `<h2 class="section-header" style="border-top:2px solid #1e2d4a;padding-top:24px;margin-top:32px">${ico('share','#60a5fa')}Site traffic <span class="section-meta">whole brand site</span></h2>`;
+  if (!N) {
+    h += `<div style="color:#64748b;font-size:.9rem;margin:8px 0 28px">No site visits recorded yet. Once the new tracker is live and the site gets traffic, this fills in.</div>`;
+  } else {
+    const pageviews = views.length;
+    const vidDur = {}; for (const e of se) if (e.event === "leave") vidDur[e.vid] = Math.max(vidDur[e.vid]||0, e.dur_ms||0);
+    const durs = Object.values(vidDur).sort((a,b)=>a-b); const medDur = durs.length ? durs[Math.floor(durs.length/2)] : 0;
+    const pageCount = {}; for (const e of views) pageCount[e.path||"/"] = (pageCount[e.path||"/"]||0)+1;
+    const topPages = Object.entries(pageCount).sort((a,b)=>b[1]-a[1]);
+    const vidDevice = {}; for (const e of views) if (vidDevice[e.vid]===undefined) vidDevice[e.vid]=e.device||"?";
+    const dev = {}; for (const v of visitors) { const d=vidDevice[v]; dev[d]=(dev[d]||0)+1; }
+    const vidCountry = {}; for (const e of views) if (vidCountry[e.vid]===undefined && e.country) vidCountry[e.vid]=e.country;
+    const ctry = {}; for (const v of visitors) { const c=vidCountry[v]||"?"; ctry[c]=(ctry[c]||0)+1; }
+    const topCtry = Object.entries(ctry).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    const refDomain = r => { try { return new URL(r).hostname.replace(/^www\./,""); } catch { return ""; } };
+    const vidSrc = {}; for (const e of views) if (vidSrc[e.vid]===undefined) vidSrc[e.vid]=e.utm_source||refDomain(e.referrer)||"direct";
+    const src = {}; for (const v of visitors) { const s=vidSrc[v]; src[s]=(src[s]||0)+1; }
+    const topSrc = Object.entries(src).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    const maxScroll = {}; for (const e of se) if (e.event==="scroll") maxScroll[e.vid]=Math.max(maxScroll[e.vid]||0, e.scroll_pct||0);
+    const bounced = [...visitors].filter(v => (maxScroll[v]||0) < 50).length;
+    const bounceRate = pct(bounced, N);
+    metrics.traffic = { visitors:N, pageviews, medianTimeSec:Math.round(medDur/1000), bounceRate, topPages: topPages.slice(0,6), devices: dev, topCountries: topCtry.slice(0,5), topSources: topSrc.slice(0,5) };
+    h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(N,"visitors")}${statCard(pageviews,"pageviews")}${statCard(fmtDur(medDur),"median time")}${statCard(bounceRate+"%","bounce")}</div>`;
+    h += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 26px">`;
+    h += `<div><h3 ${sub}>Top pages</h3>${topPages.slice(0,8).map(([p,c])=>bar(p,c,topPages[0][1])).join("")}</div>`;
+    h += `<div><h3 ${sub}>Top sources</h3>${topSrc.map(([s,c])=>bar(s,c,topSrc[0][1])).join("")}</div>`;
+    h += `<div><h3 ${sub}>Devices</h3>${Object.entries(dev).sort((a,b)=>b[1]-a[1]).map(([d,c])=>bar(d,c,N,`${c} · ${pct(c,N)}%`)).join("")}</div>`;
+    h += `<div><h3 ${sub}>Countries</h3>${topCtry.map(([c,n])=>bar(c,n,topCtry[0][1])).join("")}</div>`;
+    h += `</div>`;
+  }
+
+  // ── 2. STORE FUNNEL ──
+  h += `<h2 class="section-header" style="margin-top:30px">${ico('bars','#4ade80')}Store funnel <span class="section-meta">view → checkout → purchase</span></h2>`;
+  const pv = se.filter(e => e.event === "product_view");
+  const cc = se.filter(e => e.event === "checkout_click");
+  const slugSet = new Set([...pv, ...cc].map(e=>e.slug).concat(orders.map(o=>o.slug), leads.map(l=>l.slug)).filter(Boolean));
+  const perSlug = {}; for (const s of slugSet) perSlug[s] = { views:0, checkouts:0, orders:0, leads:0, rev:{} };
+  for (const e of pv) if (e.slug && perSlug[e.slug]) perSlug[e.slug].views++;
+  for (const e of cc) if (e.slug && perSlug[e.slug]) perSlug[e.slug].checkouts++;
+  for (const o of orders) if (o.slug && perSlug[o.slug]) { perSlug[o.slug].orders++; const c=(o.currency||"gbp").toUpperCase(); perSlug[o.slug].rev[c]=(perSlug[o.slug].rev[c]||0)+(o.amount_minor||0); }
+  for (const l of leads) if (l.slug && perSlug[l.slug]) perSlug[l.slug].leads++;
+  const totalRev = {}; for (const o of orders) { const c=(o.currency||"gbp").toUpperCase(); totalRev[c]=(totalRev[c]||0)+(o.amount_minor||0); }
+  metrics.store = { orders: orders.length, leads: leads.length, productViews: pv.length, checkoutClicks: cc.length, revenue: totalRev, perProduct: {} };
+  if (!slugSet.size) {
+    h += `<div style="color:#64748b;font-size:.9rem;margin:8px 0 20px">No store activity yet.</div>`;
+  } else {
+    h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(pv.length,"product views")}${statCard(cc.length,"checkout clicks")}${statCard(orders.length,"orders")}${statCard(revStr(totalRev),"revenue")}</div>`;
+    h += tableOpen(["Product","Views","Checkout","Orders","Conv","Revenue","Free"]);
+    for (const [s,d] of Object.entries(perSlug).sort((a,b)=>b[1].views-a[1].views)) {
+      metrics.store.perProduct[s] = { views:d.views, checkouts:d.checkouts, orders:d.orders, conv:pct(d.orders,d.views), revenue:d.rev, leads:d.leads };
+      h += `<tr style="border-top:1px solid #1e2d4a;text-align:right"><td style="padding:6px 8px;color:#e2e8f0;text-align:left">${esc(s)}</td><td>${d.views}</td><td>${d.checkouts}</td><td>${d.orders}</td><td>${pct(d.orders,d.views)}%</td><td>${revStr(d.rev)}</td><td>${d.leads}</td></tr>`;
+    }
+    h += `</tbody></table>`;
+  }
+
+  // ── 3. LESSONS / BOOKING FUNNEL ──
+  h += `<h2 class="section-header" style="margin-top:30px">${ico('calendar','#a78bfa')}Lessons &amp; clinics funnel <span class="section-meta">book-a-lesson journey</span></h2>`;
+  const lvVisitors = new Set(se.filter(e => e.event === "view" && (e.path||"").indexOf("/book-a-lesson") === 0).map(e=>e.vid));
+  const lsel = new Set(se.filter(e=>e.event==="lesson_select").map(e=>e.vid));
+  const lslot = new Set(se.filter(e=>e.event==="slot_select").map(e=>e.vid));
+  const lcc = new Set(se.filter(e=>e.event==="lesson_checkout_click").map(e=>e.vid));
+  const bookRev = {}; for (const b of bookings) { const c=(b.currency||"gbp").toUpperCase(); bookRev[c]=(bookRev[c]||0)+(b.amount_minor||0); }
+  const byKind = {}; for (const b of bookings) byKind[b.kind||"?"] = (byKind[b.kind||"?"]||0)+1;
+  metrics.booking = { pageVisitors:lvVisitors.size, selected:lsel.size, slotPicked:lslot.size, checkoutClicked:lcc.size, bookings: bookings.length, revenue: bookRev, byKind };
+  h += `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(lvVisitors.size,"page visitors")}${statCard(lcc.size,"checkout clicks")}${statCard(bookings.length,"bookings")}${statCard(revStr(bookRev),"revenue")}</div>`;
+  const steps = [["Visited the page",lvVisitors.size],["Picked an option",lsel.size],["Selected a slot",lslot.size],["Hit checkout",lcc.size],["Booked &amp; paid",bookings.length]];
+  const sMax = steps[0][1] || 1;
+  h += `<div style="max-width:560px">${steps.map(([l,v])=>bar(l,v,sMax,`${v} · ${pct(v,sMax)}%`)).join("")}</div>`;
+  if (Object.keys(byKind).length) h += `<h3 ${sub}>By type</h3><div style="max-width:560px">${Object.entries(byKind).sort((a,b)=>b[1]-a[1]).map(([k,c])=>bar(k,c,bookings.length||1)).join("")}</div>`;
+
+  // ── 4. EMAIL PERFORMANCE ──
+  h += `<h2 class="section-header" style="margin-top:30px">${ico('trend','#f5c518')}Email performance <span class="section-meta">all campaigns &amp; Monday Music Tips</span></h2>`;
+  const camp = {};
+  for (const r of elog) {
+    if (r.status !== "sent") continue;
+    const c = r.campaign || "(none)";
+    const o = camp[c] = camp[c] || { sent:0, delivered:0, opened:0, clicked:0, bounced:0, complained:0 };
+    o.sent++; if (r.delivered_at) o.delivered++; if (r.opened_at) o.opened++; if (r.clicked_at) o.clicked++; if (r.bounced_at) o.bounced++; if (r.complained_at) o.complained++;
+  }
+  metrics.email = { campaigns: {} };
+  const campRows = Object.entries(camp).sort((a,b)=>b[1].sent-a[1].sent);
+  if (!campRows.length) {
+    h += `<div style="color:#64748b;font-size:.9rem;margin:8px 0 20px">No emails logged yet.</div>`;
+  } else {
+    const anyEngagement = campRows.some(([,o]) => o.opened || o.clicked || o.delivered);
+    if (!anyEngagement) h += `<div style="color:#f59e0b;font-size:.82rem;margin:4px 0 8px">Open and click rates read 0. Turn on Open &amp; Click tracking in Resend and add the resend-webhook endpoint to start capturing engagement.</div>`;
+    h += tableOpen(["Campaign","Sent","Deliv","Open","Click","Bounce","Spam"]);
+    for (const [c,o] of campRows) {
+      metrics.email.campaigns[c] = { sent:o.sent, openRate:pct(o.opened,o.sent), clickRate:pct(o.clicked,o.sent), bounceRate:pct(o.bounced,o.sent), complaintRate:pct(o.complained,o.sent) };
+      h += `<tr style="border-top:1px solid #1e2d4a;text-align:right"><td style="padding:6px 8px;color:#e2e8f0;text-align:left">${esc(c)}</td><td>${o.sent}</td><td>${pct(o.delivered,o.sent)}%</td><td>${pct(o.opened,o.sent)}%</td><td>${pct(o.clicked,o.sent)}%</td><td>${pct(o.bounced,o.sent)}%</td><td>${pct(o.complained,o.sent)}%</td></tr>`;
+    }
+    h += `</tbody></table>`;
+    const linkCount = {}; for (const c of eclicks) { const k=c.link||"?"; linkCount[k]=(linkCount[k]||0)+1; }
+    const topLinks = Object.entries(linkCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    if (topLinks.length) h += `<h3 ${sub}>Most-clicked links</h3><div style="max-width:640px">${topLinks.map(([l,c])=>bar(l.replace(/^https?:\/\//,""),c,topLinks[0][1])).join("")}</div>`;
+  }
+
+  // ── 5. SMART INSIGHTS (computed highlights + on-demand AI) ──
+  h += `<h2 class="section-header" style="margin-top:30px">${ico('warn','#f5c518')}Smart insights</h2>`;
+  const hi = [];
+  if (metrics.traffic) {
+    const tp = metrics.traffic.topPages[0]; if (tp) hi.push(`Most-visited page: <b>${esc(tp[0])}</b> with ${tp[1]} views.`);
+    hi.push(`Bounce rate is <b>${metrics.traffic.bounceRate}%</b> across ${metrics.traffic.visitors} visitors.`);
+  }
+  if (metrics.store && Object.keys(metrics.store.perProduct).length) {
+    const best = Object.entries(metrics.store.perProduct).filter(([,d])=>d.views>=5).sort((a,b)=>b[1].conv-a[1].conv)[0];
+    if (best) hi.push(`Best-converting product: <b>${esc(best[0])}</b> at ${best[1].conv}% (${best[1].orders} of ${best[1].views} views).`);
+    if (metrics.store.checkoutClicks && metrics.store.orders < metrics.store.checkoutClicks) hi.push(`<b>${metrics.store.checkoutClicks - metrics.store.orders}</b> checkout click(s) did not finish paying.`);
+  }
+  if (metrics.email && Object.keys(metrics.email.campaigns).length) {
+    const be = Object.entries(metrics.email.campaigns).filter(([,d])=>d.sent>=5).sort((a,b)=>b[1].openRate-a[1].openRate)[0];
+    if (be) hi.push(`Best email open rate: <b>${esc(be[0])}</b> at ${be[1].openRate}%.`);
+  }
+  h += `<ul style="font-size:.88rem;color:#cbd5e1;line-height:1.7;margin:6px 0 14px;padding-left:18px">${hi.length ? hi.map(x=>`<li>${x}</li>`).join("") : "<li>Not enough data yet for highlights.</li>"}</ul>`;
+  h += `<button id="gen-insights" style="background:#f5c518;color:#1a1410;border:none;border-radius:9px;padding:10px 18px;font-weight:800;font-size:.86rem;cursor:pointer">Generate AI insights</button><div id="ai-insights" style="margin-top:14px"></div>`;
+
+  el.insertAdjacentHTML("beforeend", h);
+
+  const btn = document.getElementById("gen-insights");
+  if (btn) btn.addEventListener("click", async () => {
+    const out = document.getElementById("ai-insights");
+    btn.disabled = true; btn.textContent = "Thinking…"; out.innerHTML = "";
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const r = await fetch("/.netlify/functions/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ window: "all time", metrics }),
+      });
+      const j = await r.json();
+      if (j.text) out.innerHTML = `<div style="background:#0f1b30;border:1px solid #1e2d4a;border-radius:12px;padding:16px 18px;font-size:.9rem;line-height:1.65;color:#e2e8f0;white-space:pre-wrap">${esc(j.text)}</div>`;
+      else out.innerHTML = `<div style="color:#f87171;font-size:.85rem">${esc(j.error || "No insight produced.")}</div>`;
+    } catch (e) { out.innerHTML = `<div style="color:#f87171;font-size:.85rem">Failed: ${esc(e.message)}</div>`; }
+    btn.disabled = false; btn.textContent = "Regenerate AI insights";
+  });
+}
+
 function renderInsights(d) {
   const el = document.getElementById("analytics-content");
   if (!el) return;
