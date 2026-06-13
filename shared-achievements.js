@@ -325,6 +325,10 @@ const ACH_ICON_MAP = {
   crg1:_AI.PIANO, crg10:_AI.LAYERS, crg50:_AI.STAGE,
   crs10:_AI.TARGET, crs20:_AI.BINOS, crs30:_AI.STARF,
   crtreb:_AI.EYE, crbass:_AI.WAVE, crkey:_AI.STEPS,
+  // Chord Ear Training Game
+  earg1:_AI.HEADPH, earg10:_AI.WAVE, earg50:_AI.STAGE,
+  ears10:_AI.TARGET, ears20:_AI.BINOS, ears30:_AI.STARF,
+  earex:_AI.PIANO, earkey:_AI.STEPS, earext:_AI.LAYERS,
   // Community — posts
   cmp1:_AI.SPARKLE, cmp10:_AI.NOTES2, cmp25:_AI.AWARD, cmp50:_AI.CROWN,
   // Community — comments
