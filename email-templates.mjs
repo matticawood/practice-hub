@@ -538,10 +538,11 @@ export function renderLessonLinkEmail({ firstName, lessons } = {}) {
   const ls = Array.isArray(lessons) ? lessons : [];
   const multi = ls.length > 1;
   const detail = ls.map((l) => {
+    const cal = l.gcal ? `<br><a href="${esc(l.gcal)}" style="color:#9a6f12;font-weight:600">Add to calendar &rarr;</a>` : "";
     const manage = l.calUid
       ? `<br><a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=reschedule" style="color:#9a6f12;font-weight:600">Reschedule</a> or <a href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(l.calUid)}&a=cancel" style="color:#9a6f12;font-weight:600">cancel</a>`
       : "";
-    return `<strong>${esc(l.whenLabel)}</strong><br><a href="${esc(l.link)}" style="color:#9a6f12;font-weight:700">Join your lesson on Zoom &rarr;</a>${manage}`;
+    return `<strong>${esc(l.whenLabel)}</strong><br><a href="${esc(l.link)}" style="color:#9a6f12;font-weight:700">Join your lesson on Zoom &rarr;</a>${cal}${manage}`;
   }).join(`<br><br><span style="display:inline-block;width:100%;border-top:1px solid #ece5db"></span><br>`);
   const html = renderBookingEmail({
     eyebrow: "Your Lessons",
@@ -565,8 +566,8 @@ export function renderBookingHTML(key) {
   if (key === "lesson_link_migration") return renderLessonLinkEmail({
     firstName: "David",
     lessons: [
-      { whenLabel: "Thursday 18 June at 2:00pm (UK time)", link: "https://us06web.zoom.us/j/00000000000?pwd=sample", calUid: "sample-uid-1" },
-      { whenLabel: "Thursday 25 June at 12:00pm (UK time)", link: "https://us06web.zoom.us/j/11111111111?pwd=sample", calUid: "sample-uid-2" },
+      { whenLabel: "Thursday 18 June at 2:00pm (UK time)", link: "https://us06web.zoom.us/j/00000000000?pwd=sample", calUid: "sample-uid-1", gcal: "https://calendar.google.com/calendar/render?action=TEMPLATE" },
+      { whenLabel: "Thursday 25 June at 12:00pm (UK time)", link: "https://us06web.zoom.us/j/11111111111?pwd=sample", calUid: "sample-uid-2", gcal: "https://calendar.google.com/calendar/render?action=TEMPLATE" },
     ],
   }).html;
   const ZOOM = "https://zoom.us/j/9876543210";
