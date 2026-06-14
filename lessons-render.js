@@ -425,8 +425,9 @@
     .lr-key-b.lr-key-hi{background:linear-gradient(#e0aa00,#9a7400)}
     .lr-kbd-live .lr-key{cursor:pointer}
     .lr-key-press{filter:brightness(1.22)}
-    .lr-notation{margin:18px 0;text-align:center;overflow-x:auto}
-    .lr-notation svg{display:inline-block;max-width:100%;height:auto}
+    .lr-notation{margin:18px 0;overflow-x:auto}
+    .lr-abc-out{display:flex;justify-content:center}
+    .lr-notation svg{max-width:100%;height:auto}
     .lr-abc-err{font-size:.85rem;color:var(--text-muted,#8a7868);border:1px dashed var(--border,#e3e1e6);border-radius:8px;padding:10px}
     .lr-task{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
     .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
