@@ -24,7 +24,11 @@
    read .env.local). Owner-gated: verifies the caller's Supabase JWT.
 ─────────────────────────────────────────────────────────────────────────── */
 
-const MODEL = "claude-opus-4-8";
+// Sonnet (not Opus) for drafting: each call must finish inside Netlify's function
+// wall-clock cap (~26s). Opus is too slow to first token and too slow per token to
+// complete a multi-thousand-token section in that window, which is what caused the
+// 504s. Sonnet is fast and plenty capable for these human-reviewed beginner drafts.
+const MODEL = "claude-sonnet-4-6";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -216,35 +220,42 @@ export default async function handler(req) {
   const payload = buildRequest(body);
   if (!payload) return jsonError(400, "mode must be one of: outline, section, quiz, block.");
 
-  let upstream;
-  try {
-    upstream = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-  } catch (e) {
-    return jsonError(502, "Could not reach the Claude API: " + (e?.message || e));
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    const detail = await upstream.text().catch(() => "");
-    return jsonError(upstream.status || 502, "Claude API error: " + detail.slice(0, 500));
-  }
-
-  // Stream the tool-call input JSON back to the browser as it is produced.
-  const reader = upstream.body.getReader();
+  // Return the streaming response IMMEDIATELY (200 + headers), then make the
+  // slow Claude call inside the stream. This guarantees Netlify never sees the
+  // function as "no response yet" and so can never return a 504 — any upstream
+  // failure is reported inline as an __ERROR__ marker the client already handles.
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
-      let buf = "";
+      const fail = (msg) => controller.enqueue(encoder.encode("\n__ERROR__" + msg));
       try {
+        let upstream;
+        try {
+          upstream = await fetch(ANTHROPIC_URL, {
+            method: "POST",
+            headers: {
+              "x-api-key": apiKey,
+              "anthropic-version": ANTHROPIC_VERSION,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          });
+        } catch (e) {
+          fail("Could not reach the Claude API: " + (e?.message || e));
+          return;
+        }
+
+        if (!upstream.ok || !upstream.body) {
+          const detail = await upstream.text().catch(() => "");
+          fail("Claude API error (" + (upstream.status || "?") + "): " + detail.slice(0, 300));
+          return;
+        }
+
+        // Stream the tool-call input JSON back to the browser as it is produced.
+        const reader = upstream.body.getReader();
+        let buf = "";
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -264,13 +275,13 @@ export default async function handler(req) {
                   evt.delta.partial_json) {
                 controller.enqueue(encoder.encode(evt.delta.partial_json));
               } else if (evt.type === "error") {
-                controller.enqueue(encoder.encode("\n__ERROR__" + (evt.error?.message || "generation error")));
+                fail(evt.error?.message || "generation error");
               }
             }
           }
         }
       } catch (e) {
-        controller.enqueue(encoder.encode("\n__ERROR__" + (e?.message || "stream error")));
+        fail(e?.message || "stream error");
       } finally {
         controller.close();
       }
