@@ -3912,14 +3912,16 @@ async function crLoadLeaderboard(rowsElId) {
   if (!el) return;
   el.innerHTML='<div class="nr-lb-empty">Loading…</div>';
   try {
-    const {data,error} = await db.from("chord_game_scores")
+    // Filter server-side so the 500-row limit applies to THIS board, not the global top
+    // scores (a sparse board would otherwise be truncated below the cutoff and show empty).
+    let q = db.from("chord_game_scores")
       .select("email,name,score,clef,tier,mode,key_signature,attempts")
-      .eq("tier",crGetTier()).order("score",{ascending:false}).limit(500);
+      .eq("tier",crGetTier()).eq("clef",crClef).eq("mode",crMode);
+    if (crMode==="key") q = q.eq("key_signature",crKeyId);
+    const {data,error} = await q.order("score",{ascending:false}).limit(500);
     if (error||!data){el.innerHTML='<div class="nr-lb-empty">Unable to load</div>'; return;}
-    const filtered = data.filter(r => r.clef===crClef && r.mode===crMode
-      && (crMode!=="key"||r.key_signature===crKeyId));
     const best={};
-    filtered.forEach(r=>{if(!best[r.email]||r.score>best[r.email].score)best[r.email]=r;});
+    data.forEach(r=>{if(!best[r.email]||r.score>best[r.email].score)best[r.email]=r;});
     const rows=Object.values(best).sort((a,b)=>b.score-a.score).slice(0,10);
     if(!rows.length){el.innerHTML='<div class="nr-lb-empty">No scores yet — be first!</div>'; return;}
     el.innerHTML=rows.map((r,i)=>{
@@ -4333,13 +4335,15 @@ async function etLoadLeaderboard(rowsElId){
   const hadRows = !!el.querySelector(".nr-lb-row");
   if(!hadRows) el.innerHTML='<div class="nr-lb-empty">Loading…</div>';   // only blank to "Loading" when nothing is shown yet
   try{
-    const {data,error}=await db.from("ear_game_scores")
+    // Filter server-side (incl. scope/key) so the 500-row limit applies to THIS board,
+    // not the global top scores — otherwise a sparse board is truncated and shows empty.
+    let q=db.from("ear_game_scores")
       .select("email,name,score,answer_type,chord_set,key_signature,attempts")
-      .eq("answer_type",etAnswerType).eq("chord_set",etChordSet)
-      .order("score",{ascending:false}).limit(500);
+      .eq("answer_type",etAnswerType).eq("chord_set",etChordSet);
+    q = etScope==="key" ? q.eq("key_signature",etKeyId) : q.is("key_signature",null);
+    const {data,error}=await q.order("score",{ascending:false}).limit(500);
     if(error||!data){ if(!hadRows) el.innerHTML='<div class="nr-lb-empty">Unable to load</div>'; return; }
-    const filtered=data.filter(r => etScope!=="key" ? !r.key_signature : r.key_signature===etKeyId);
-    const best={}; filtered.forEach(r=>{ if(!best[r.email]||r.score>best[r.email].score) best[r.email]=r; });
+    const best={}; data.forEach(r=>{ if(!best[r.email]||r.score>best[r.email].score) best[r.email]=r; });
     const rows=Object.values(best).sort((a,b)=>b.score-a.score).slice(0,10);
     el.innerHTML = rows.length
       ? rows.map((r,i)=>{ const mine=r.email===myEmail.toLowerCase(); return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||r.email.split("@")[0])}</span><span class="nr-lb-score">${r.score}</span></div>`; }).join("")
