@@ -2556,23 +2556,22 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
   const el = document.getElementById(rowsElId);
   if (!el) return;
 
-  const { data: rawAll, error: lbErr } = await db
-    .from("note_game_scores")
-    .select("email, name, score, clef, accidentals, key_signature, attempts, created_at")
-    .order("score", { ascending: false })
-    .limit(500);
+  // Filter SERVER-SIDE so the row limit applies to the relevant subset, not the global
+  // top scores. Previously this fetched the global top 500 by score and filtered in the
+  // browser, so a sparse board (e.g. a single key in key mode, whose scores are low)
+  // was truncated below the global top 500 and never fetched — which is why a key that
+  // had been played showed no scores at all.
+  let q = db.from("note_game_scores")
+    .select("email, name, score, clef, accidentals, key_signature, attempts, created_at");
+  if (filterKey !== null) {
+    q = q.eq("key_signature", filterKey);                  // key mode: one board per key (clef-independent)
+  } else {
+    q = q.is("key_signature", null);                       // normal mode: exclude key-mode scores
+    if (filterClef !== null) q = q.eq("clef", filterClef);
+    if (filterAcc  !== null) q = q.eq("accidentals", filterAcc);
+  }
+  const { data: rawData, error: lbErr } = await q.order("score", { ascending: false }).limit(500);
   if (lbErr) console.warn("nrLoadLeaderboard query error:", lbErr);
-  const rawData = (rawAll || []).filter(function(r) {
-    if (filterKey !== null) {
-      // Key mode: match key_signature, exclude normal-mode scores
-      return r.key_signature === filterKey &&
-             (filterClef === null || r.clef === filterClef);
-    }
-    // Normal mode: exclude key mode scores
-    return (r.key_signature === null || r.key_signature === undefined) &&
-           (filterClef === null || r.clef === filterClef) &&
-           (filterAcc  === null || r.accidentals === filterAcc);
-  });
 
   const bestByEmail = new Map();
   (rawData || []).forEach(function(r) {
@@ -2589,8 +2588,7 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
   var formatLabel;
   if (filterKey !== null) {
     const keyEntry = NR_KEYS.find(function(k){return k.id===filterKey;});
-    const keyLabel = keyEntry ? keyEntry.label : filterKey;
-    formatLabel = (clefLabel ? clefLabel + " \xb7 " : "") + keyLabel;
+    formatLabel = keyEntry ? keyEntry.label : filterKey;   // key mode = one board per key
   } else {
     formatLabel = clefLabel ? (clefLabel + (filterAcc ? " + ♯♭" : "")) : null;
   }
