@@ -92,6 +92,7 @@ Write for a complete beginner adult learner. Hard rules:
 - Short sentences. Warm, encouraging, plain English. No unexplained jargon.
 - Use concrete, at-the-piano examples ("play C, then the next white note up...").
 - NEVER use em dashes. Use commas, full stops, or "and".
+- NEVER use emojis anywhere (no decorative symbols in headings, callouts, or body).
 - This is a draft for human review; accuracy matters more than length.
 `.trim();
 
