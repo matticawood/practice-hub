@@ -47,6 +47,17 @@ field and type-specific fields. These are the ONLY allowed block types:
 - example:   { "type":"example", "title":"...", "md":"..." } // worked example; title optional
 - task:      { "type":"task", "md":"...", "share":false }    // a practice task to do at the piano
 - divider:   { "type":"divider" }
+- play:      { "type":"play", "label":"A perfect fifth: C to G", "notes":["C4","G4"], "style":"chord" }
+             //   Sounds the notes on a real piano in the lesson. Note names are
+             //   scientific pitch: C4 = middle C, sharps "#", flats "b" (e.g. "F#4","Bb3").
+             //   style "chord" = all together; "sequence" = one after another (scales, melodies, intervals heard melodically).
+             //   USE THIS generously whenever the learner should HEAR something:
+             //   intervals, chords, scales, "listen to the difference between...". It needs no audio file.
+- keyboard:  { "type":"keyboard", "label":"C major triad", "highlight":["C4","E4","G4"], "from":"C4", "to":"C6" }
+             //   An interactive piano: highlighted keys are coloured and the learner can
+             //   click ANY key to hear it, plus a Play button sounds the highlighted notes.
+             //   USE THIS to SHOW where notes sit, or the shape of a chord/scale on the keys.
+             //   "from"/"to" are optional (a tidy range around the highlights is chosen automatically).
 - questions: { "type":"questions", "mode":"inline", "title":"...", "items":[ <question>, ... ] }
              //   mode "inline" = each question checked as you go; "quiz" = scored at the end.
 
@@ -57,9 +68,11 @@ Each question object in "items":
 - short:     { "kind":"short", "prompt":"...", "accept":["sol","so"], "explain":"why" }
 - reflect:   { "kind":"reflect", "prompt":"..." }            // open reflection, not graded.
 
-Do NOT emit "image" or "audio" blocks. If a concept needs a picture or a played
-example, write a callout (style "note") telling the author what media to add,
-e.g. "note: add an audio clip of a perfect 5th here".
+For sound, USE "play" and "keyboard" blocks (they need no files and are musically
+exact). Do NOT emit "image" or "audio" blocks: those need an uploaded file you
+cannot produce. When a real photo, recording, or video genuinely helps (e.g. a
+hand-position photo), write a callout (style "note") telling the author what to add,
+e.g. "note: add a photo of the hand crossing here".
 `.trim();
 
 const STYLE_RULES = `

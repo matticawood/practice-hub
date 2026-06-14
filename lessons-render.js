@@ -9,8 +9,10 @@
                                          opts.onQuizScore(score, total) optional
      LessonRender.injectStyles()      -> add the base stylesheet once (auto-called)
 
-   Block types: heading | text | callout | example | image | audio | task |
-                divider | questions   (see 20260610_lessons.sql for the shape)
+   Block types: heading | text | callout | example | image | audio | play |
+                keyboard | task | divider | questions
+                (play = sound notes on a piano; keyboard = interactive piano with
+                 highlighted keys; see 20260610_lessons.sql for the stored shape)
 ─────────────────────────────────────────────────────────────────────────── */
 (function () {
   "use strict";
@@ -29,6 +31,99 @@
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/@mux/mux-player@3";
     document.head.appendChild(s);
+  }
+
+  // ── Piano audio + interactive keyboard (powers the play & keyboard blocks) ──
+  // Same sampled acoustic-grand soundfont as the ear-training game, lazy-loaded
+  // on first use, with a synth fallback so a click is never silent.
+  let _audioCtx = null, _piano = null, _pianoLoading = false;
+  function audioCtx() {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === "suspended") _audioCtx.resume();
+    return _audioCtx;
+  }
+  function loadScriptOnce(src) {
+    return new Promise((res, rej) => {
+      if (document.querySelector('script[data-src="' + src + '"]')) return res();
+      const s = document.createElement("script");
+      s.src = src; s.dataset.src = src;
+      s.onload = () => res(); s.onerror = () => rej(new Error("load " + src));
+      document.head.appendChild(s);
+    });
+  }
+  function loadPiano() {
+    if (_piano || _pianoLoading) return;
+    _pianoLoading = true;
+    loadScriptOnce("https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js")
+      .then(() => window.Soundfont.instrument(audioCtx(), "acoustic_grand_piano", { soundfont: "MusyngKite" }))
+      .then(inst => { _piano = inst; })
+      .catch(() => { /* synth fallback handles it */ })
+      .finally(() => { _pianoLoading = false; });
+  }
+  const _PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const _BLACK = { 1: 1, 3: 1, 6: 1, 8: 1, 10: 1 };
+  function noteToMidi(n) {
+    if (typeof n === "number") return n;
+    const m = String(n).trim().match(/^([A-Ga-g])([#b]*)(-?\d+)$/);
+    if (!m) return null;
+    let v = _PC[m[1].toUpperCase()];
+    for (const ch of m[2]) v += ch === "#" ? 1 : -1;
+    return v + (parseInt(m[3], 10) + 1) * 12;
+  }
+  function synthNote(ctx, midi, t0, dur) {
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+    osc.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.start(t0); osc.stop(t0 + dur + 0.05);
+  }
+  function playMidis(notes, opts) {
+    opts = opts || {};
+    const midis = (notes || []).map(noteToMidi).filter(m => m != null);
+    if (!midis.length) return;
+    const ctx = audioCtx();
+    loadPiano();
+    const seq = !!opts.sequence, gap = opts.gap || 0.55, dur = seq ? 0.7 : 2.4;
+    midis.forEach((m, i) => {
+      const when = ctx.currentTime + 0.03 + (seq ? i * gap : 0);
+      if (_piano) { try { _piano.play(m, when, { gain: 2.2, duration: dur }); return; } catch (e) {} }
+      synthNote(ctx, m, when, dur);
+    });
+  }
+  function pcMod(m) { return ((m % 12) + 12) % 12; }
+  // Build an interactive HTML piano. opts: { highlight:[notes], from, to, playable }.
+  // Keys are positioned by percentage so the whole keyboard always fits its width.
+  function buildKeyboard(opts) {
+    const hi = (opts.highlight || []).map(noteToMidi).filter(m => m != null);
+    let lo = opts.from != null ? noteToMidi(opts.from) : null;
+    let hiEnd = opts.to != null ? noteToMidi(opts.to) : null;
+    if (lo == null) lo = (hi.length ? Math.min.apply(null, hi) : 60) - 2;
+    if (hiEnd == null) hiEnd = (hi.length ? Math.max.apply(null, hi) : 71) + 2;
+    while (_BLACK[pcMod(lo)]) lo--;
+    while (pcMod(lo) !== 0) lo--;               // start the keyboard on a C
+    while (_BLACK[pcMod(hiEnd)]) hiEnd++;        // end on a white key
+    if (hiEnd - lo < 12) hiEnd = lo + 12;
+    if (hiEnd - lo > 48) hiEnd = lo + 24;        // clamp to 2 octaves so keys never get too thin
+    const hiSet = {}; hi.forEach(m => { hiSet[m] = 1; });
+    const whites = [];
+    for (let m = lo; m <= hiEnd; m++) if (!_BLACK[pcMod(m)]) whites.push(m);
+    const ww = 100 / whites.length;
+    let html = "";
+    whites.forEach((m, i) => {
+      html += `<div class="lr-key lr-key-w${hiSet[m] ? " lr-key-hi" : ""}" data-midi="${m}" style="left:${(i * ww).toFixed(4)}%;width:${ww.toFixed(4)}%"></div>`;
+    });
+    for (let m = lo; m <= hiEnd; m++) {
+      if (!_BLACK[pcMod(m)]) continue;
+      const wi = whites.indexOf(m - 1);
+      if (wi < 0) continue;
+      const left = (wi + 1) * ww;
+      html += `<div class="lr-key lr-key-b${hiSet[m] ? " lr-key-hi" : ""}" data-midi="${m}" style="left:calc(${left.toFixed(4)}% - ${(ww * 0.32).toFixed(4)}%);width:${(ww * 0.64).toFixed(4)}%"></div>`;
+    }
+    return `<div class="lr-kbd-keys">${html}</div>`;
   }
 
   // ── Minimal, safe markdown → HTML (bold, italic, code, links, lists) ──
@@ -110,6 +205,20 @@
       case "audio":
         return `<div class="lr-audio">${b.caption ? `<div class="lr-audio-cap">${esc(b.caption)}</div>` : ""}
           <audio controls preload="none" src="${esc(b.url)}"></audio></div>`;
+      case "play": {
+        const notes = Array.isArray(b.notes) ? b.notes : [];
+        const seq = b.style === "sequence" || b.style === "melody" || b.style === "scale";
+        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}">
+          <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
+      }
+      case "keyboard": {
+        const live = b.playable === false ? "" : " lr-kbd-live";
+        const notesJson = esc(JSON.stringify(b.highlight || []));
+        const head = (b.label || (b.highlight && b.highlight.length))
+          ? `<div class="lr-kbd-head">${b.label ? `<span class="lr-kbd-label">${esc(b.label)}</span>` : ""}${(b.highlight && b.highlight.length) ? `<button type="button" class="lr-kbd-play" data-notes="${notesJson}"><span class="lr-play-ico">&#9654;</span> Play</button>` : ""}</div>`
+          : "";
+        return `<figure class="lr-kbd${live}">${head}${buildKeyboard(b)}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
+      }
       case "task":
         return `<div class="lr-task"><div class="lr-task-label">Your task</div>
           <div class="lr-text">${mdToHtml(b.md)}</div>
@@ -228,6 +337,23 @@
     // task share hook (page supplies behaviour)
     root.querySelectorAll(".lr-task-share").forEach(b =>
       b.addEventListener("click", () => { if (opts.onShare) opts.onShare(b.closest(".lr-task")); }));
+
+    // ── Audio blocks: play buttons + interactive keyboards ──
+    const parseNotes = el => { try { return JSON.parse(el.dataset.notes || "[]"); } catch (e) { return []; } };
+    root.querySelectorAll(".lr-play-btn").forEach(btn =>
+      btn.addEventListener("click", () => playMidis(parseNotes(btn), { sequence: btn.dataset.seq === "1" })));
+    root.querySelectorAll(".lr-kbd-play").forEach(btn =>
+      btn.addEventListener("click", () => playMidis(parseNotes(btn), { sequence: false })));
+    root.querySelectorAll(".lr-kbd-live .lr-key").forEach(key =>
+      key.addEventListener("pointerdown", () => {
+        const m = parseInt(key.dataset.midi, 10);
+        if (isNaN(m)) return;
+        playMidis([m], {});
+        key.classList.add("lr-key-press");
+        setTimeout(() => key.classList.remove("lr-key-press"), 160);
+      }));
+    // Warm up the soundfont if this lesson has any audio so the first note is instant.
+    if (root.querySelector(".lr-play-btn, .lr-kbd-play, .lr-kbd-live")) loadPiano();
   }
 
   let _styled = false;
@@ -250,6 +376,24 @@
     .lr-img{max-width:100%;height:auto;border-radius:10px;display:block;margin:4px 0}
     .lr-figure{margin:16px 0}.lr-figure figcaption{font-size:.8rem;color:var(--text-muted,#8a7868);margin-top:6px;text-align:center}
     .lr-audio{margin:16px 0}.lr-audio-cap{font-size:.85rem;color:var(--text-muted,#8a7868);margin-bottom:6px}.lr-audio audio{width:100%}
+    .lr-play{margin:16px 0}
+    .lr-play-btn{display:inline-flex;align-items:center;gap:9px;background:var(--surface,#fff);border:1.5px solid var(--accent,#f5c518);border-radius:10px;padding:10px 16px;font:inherit;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);cursor:pointer}
+    .lr-play-btn:hover{background:linear-gradient(180deg,rgba(245,197,24,.12),transparent)}
+    .lr-play-btn:active{transform:translateY(1px)}
+    .lr-play-ico{color:var(--accent-dark,#9a6f12);font-size:.85rem}
+    .lr-kbd{margin:18px 0}
+    .lr-kbd-head{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+    .lr-kbd-label{font-weight:700;font-size:.92rem}
+    .lr-kbd-play{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2,#f5f2ee);border:1.5px solid var(--border,#e3e1e6);border-radius:8px;padding:5px 11px;font:inherit;font-size:.8rem;font-weight:700;color:var(--text,#1a1410);cursor:pointer}
+    .lr-kbd-play:hover{border-color:var(--accent,#f5c518)}
+    .lr-kbd-keys{position:relative;height:124px;border-radius:9px;background:linear-gradient(#2a2520,#1c1813);box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
+    .lr-key{position:absolute;top:0;box-sizing:border-box}
+    .lr-key-w{height:100%;background:linear-gradient(#fff,#f1ece2);border:1px solid #c8c1b2;border-radius:0 0 5px 5px}
+    .lr-key-b{height:62%;background:linear-gradient(#403930,#16120d);border:1px solid #000;border-radius:0 0 4px 4px;z-index:2;box-shadow:0 2px 3px rgba(0,0,0,.4)}
+    .lr-key-w.lr-key-hi{background:linear-gradient(#ffe9a0,#f5c518)}
+    .lr-key-b.lr-key-hi{background:linear-gradient(#e0aa00,#9a7400)}
+    .lr-kbd-live .lr-key{cursor:pointer}
+    .lr-key-press{filter:brightness(1.22)}
     .lr-task{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
     .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
     .lr-task-share{margin-top:10px;background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
