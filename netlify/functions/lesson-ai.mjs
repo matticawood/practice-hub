@@ -58,6 +58,16 @@ field and type-specific fields. These are the ONLY allowed block types:
              //   click ANY key to hear it, plus a Play button sounds the highlighted notes.
              //   USE THIS to SHOW where notes sit, or the shape of a chord/scale on the keys.
              //   "from"/"to" are optional (a tidy range around the highlights is chosen automatically).
+- notation:  { "type":"notation", "abc":"X:1\\nM:4/4\\nL:1/4\\nK:C\\nC D E F | G2 A2 | c4 |]", "caption":"..." }
+             //   Printed staff notation, rendered from ABC notation. USE THIS whenever the
+             //   learner must READ something on a stave: note values, rests, clefs, ledger
+             //   lines, key signatures, time signatures, beaming, scales/intervals written out.
+             //   ABC essentials: "M:" time signature, "L:" default note length (use 1/4),
+             //   "K:" key (e.g. "K:G", "K:F", or "K:G clef=bass" for bass clef). Notes A-G;
+             //   lower octave "C,", higher octave "c"; sharp "^C", flat "_B", natural "=F";
+             //   length multipliers after the note ("C2" = twice L:, "C4" = four times);
+             //   bar lines "|", final bar "|]". Keep snippets short (1 to 2 bars). Always
+             //   include M:, L: and K:. This is the most important block for theory reading.
 - questions: { "type":"questions", "mode":"inline", "title":"...", "items":[ <question>, ... ] }
              //   mode "inline" = each question checked as you go; "quiz" = scored at the end.
 
@@ -85,6 +95,21 @@ Write for a complete beginner adult learner. Hard rules:
 - This is a draft for human review; accuracy matters more than length.
 `.trim();
 
+// The house lesson shape (ABRSM-aligned, playing-focused). Every lesson follows it:
+//   objectives -> teaching content -> playing connection -> key terms -> summary -> quiz.
+// The opening "objectives" and the closing "playing connection / key terms / summary"
+// are produced outside the per-section calls (the outline supplies objectives; the
+// "wrap" mode supplies the closers). Each section here is part of "teaching content".
+const SKELETON_NOTE = `
+This lesson is part of a structured course and follows a fixed shape: learning
+objectives, then teaching content, then a playing connection, key terms, and a
+summary, then a quiz. You are writing the TEACHING CONTENT sections only.
+Teach with concrete examples: use "notation" blocks to show anything read on a
+stave (note values, key signatures, clefs, intervals written out), "play" blocks
+so the learner can hear it, and "keyboard" blocks to show it on the keys. Reach
+for these rather than describing sound or notation in words alone.
+`.trim();
+
 const COURSE_LABEL = { theory: "Music Theory", ear: "Ear Training", improv: "Improvisation" };
 
 // ── Tools ──
@@ -96,6 +121,7 @@ const OUTLINE_TOOL = {
     properties: {
       title:       { type: "string", description: "A clear, specific lesson title." },
       summary:     { type: "string", description: "One sentence on what the learner can do after this lesson." },
+      objectives:  { type: "array", description: "1 to 3 plain-language learning objectives, each phrased as something the learner can DO by the end (e.g. 'Name any note on the treble stave').", items: { type: "string" } },
       est_minutes: { type: "integer", description: "Rough minutes to complete, 5 to 30." },
       sections: {
         type: "array",
@@ -110,7 +136,7 @@ const OUTLINE_TOOL = {
         }
       }
     },
-    required: ["title", "summary", "est_minutes", "sections"]
+    required: ["title", "summary", "objectives", "est_minutes", "sections"]
   }
 };
 
@@ -170,7 +196,7 @@ function buildRequest(body) {
       ? `\n\nFor context, the full lesson is structured as these sections (do NOT cover the others, only yours): ${body.outline.map((s, i) => `${i + 1}. ${s.heading || s}`).join("; ")}.`
       : "";
     const system = baseSystem(course, level, body.priorConcepts) + arc +
-      `\n\n${BLOCK_SCHEMA_DOC}\n\nWrite ONLY the blocks for one section. Start with a heading block (size 2) for the section title. Then teach it thoroughly with a few text, callout, and example blocks, and where useful a task block. Include exactly ONE inline questions block (mode "inline", 2 or 3 questions) that checks just this section. Do not write a whole-lesson quiz. Do not repeat other sections. Return ONLY by calling emit_blocks.`;
+      `\n\n${SKELETON_NOTE}\n\n${BLOCK_SCHEMA_DOC}\n\nWrite ONLY the blocks for one section. Start with a heading block (size 2) for the section title. Then teach it thoroughly with a few text, callout, and example blocks, plus notation / play / keyboard blocks wherever the learner should see, hear, or read the idea, and where useful a task block. Include exactly ONE inline questions block (mode "inline", 2 or 3 questions) that checks just this section. Do not write a whole-lesson quiz. Do not repeat other sections. Return ONLY by calling emit_blocks.`;
     const user = `Lesson title: "${body.title || ""}". Write the section titled "${sec.heading || ""}". What it must teach: ${sec.focus || sec.heading || ""}.`;
     return { model: MODEL, max_tokens: 3500, stream: true, system, tools: [BLOCKS_TOOL],
       tool_choice: { type: "tool", name: "emit_blocks" }, messages: [{ role: "user", content: user }] };
@@ -184,6 +210,21 @@ function buildRequest(body) {
       `\n\n${BLOCK_SCHEMA_DOC}\n\nReturn ONLY by calling emit_blocks with a SINGLE block: a "questions" block with "mode":"quiz", a short title like "Check yourself", and 5 questions that test the whole lesson. Mix mcq, truefalse and short kinds. Give every question an "explain". Keep questions answerable from the lesson.`;
     const user = `Write the end-of-lesson quiz for the lesson titled "${body.title || ""}".${arc}`;
     return { model: MODEL, max_tokens: 2500, stream: true, system, tools: [BLOCKS_TOOL],
+      tool_choice: { type: "tool", name: "emit_blocks" }, messages: [{ role: "user", content: user }] };
+  }
+
+  if (body.mode === "wrap") {
+    const arc = Array.isArray(body.outline) && body.outline.length
+      ? ` The lesson covered: ${body.outline.map(s => s.heading || s).join("; ")}.`
+      : "";
+    const system = baseSystem(course, level, body.priorConcepts) +
+      `\n\n${BLOCK_SCHEMA_DOC}\n\nReturn ONLY by calling emit_blocks with the lesson's CLOSING blocks, in this exact order:\n` +
+      `1. A heading (size 2) "Playing connection", then ONE short text block on where this shows up at the keyboard or in real repertoire.\n` +
+      `2. A heading (size 2) "Key terms", then ONE text block listing each new term as a markdown list, "- **term**: plain-language definition".\n` +
+      `3. A heading (size 2) "Summary", then ONE text block with a short markdown bullet list recapping the must-know points.\n` +
+      `Do NOT include a quiz here. Do NOT re-teach. Keep it tight.`;
+    const user = `Write the closing Playing connection, Key terms and Summary for the lesson titled "${body.title || ""}".${arc}`;
+    return { model: MODEL, max_tokens: 1800, stream: true, system, tools: [BLOCKS_TOOL],
       tool_choice: { type: "tool", name: "emit_blocks" }, messages: [{ role: "user", content: user }] };
   }
 
@@ -231,7 +272,7 @@ export default async function handler(req) {
   try { body = await req.json(); } catch { return jsonError(400, "Invalid JSON body."); }
 
   const payload = buildRequest(body);
-  if (!payload) return jsonError(400, "mode must be one of: outline, section, quiz, block.");
+  if (!payload) return jsonError(400, "mode must be one of: outline, section, wrap, quiz, block.");
 
   // Return the streaming response IMMEDIATELY (200 + headers), then make the
   // slow Claude call inside the stream. This guarantees Netlify never sees the

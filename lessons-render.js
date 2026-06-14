@@ -10,9 +10,10 @@
      LessonRender.injectStyles()      -> add the base stylesheet once (auto-called)
 
    Block types: heading | text | callout | example | image | audio | play |
-                keyboard | task | divider | questions
+                keyboard | notation | task | divider | questions
                 (play = sound notes on a piano; keyboard = interactive piano with
-                 highlighted keys; see 20260610_lessons.sql for the stored shape)
+                 highlighted keys; notation = printed staves from ABC notation via
+                 abcjs; see 20260610_lessons.sql for the stored shape)
 ─────────────────────────────────────────────────────────────────────────── */
 (function () {
   "use strict";
@@ -59,6 +60,14 @@
       .then(inst => { _piano = inst; })
       .catch(() => { /* synth fallback handles it */ })
       .finally(() => { _pianoLoading = false; });
+  }
+  // abcjs renders ABC-notation text into printed staff notation (SVG). Lazy-loaded.
+  let _abcjsLoading = null;
+  function loadAbcjs() {
+    if (window.ABCJS) return Promise.resolve();
+    if (_abcjsLoading) return _abcjsLoading;
+    _abcjsLoading = loadScriptOnce("https://cdn.jsdelivr.net/npm/abcjs@6.4.4/dist/abcjs-basic-min.js");
+    return _abcjsLoading;
   }
   const _PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
   const _BLACK = { 1: 1, 3: 1, 6: 1, 8: 1, 10: 1 };
@@ -219,6 +228,8 @@
           : "";
         return `<figure class="lr-kbd${live}">${head}${buildKeyboard(b)}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
+      case "notation":
+        return `<figure class="lr-notation"><div class="lr-abc-src" style="display:none">${esc(b.abc || "")}</div><div class="lr-abc-out"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       case "task":
         return `<div class="lr-task"><div class="lr-task-label">Your task</div>
           <div class="lr-text">${mdToHtml(b.md)}</div>
@@ -354,6 +365,20 @@
       }));
     // Warm up the soundfont if this lesson has any audio so the first note is instant.
     if (root.querySelector(".lr-play-btn, .lr-kbd-play, .lr-kbd-live")) loadPiano();
+
+    // ── Notation blocks: render the ABC into printed staves via abcjs ──
+    root.querySelectorAll(".lr-notation").forEach(fig => {
+      const src = fig.querySelector(".lr-abc-src"), out = fig.querySelector(".lr-abc-out");
+      if (!src || !out || out.dataset.done) return;
+      const abc = (src.textContent || "").trim();
+      if (!abc) return;
+      loadAbcjs().then(() => {
+        try {
+          window.ABCJS.renderAbc(out, abc, { responsive: "resize", paddingtop: 4, paddingbottom: 4, staffwidth: 540 });
+          out.dataset.done = "1";
+        } catch (e) { out.innerHTML = '<div class="lr-abc-err">This notation could not be rendered.</div>'; }
+      }).catch(() => { out.innerHTML = '<div class="lr-abc-err">The notation library failed to load.</div>'; });
+    });
   }
 
   let _styled = false;
@@ -394,6 +419,9 @@
     .lr-key-b.lr-key-hi{background:linear-gradient(#e0aa00,#9a7400)}
     .lr-kbd-live .lr-key{cursor:pointer}
     .lr-key-press{filter:brightness(1.22)}
+    .lr-notation{margin:18px 0;overflow-x:auto}
+    .lr-notation svg{max-width:100%;height:auto}
+    .lr-abc-err{font-size:.85rem;color:var(--text-muted,#8a7868);border:1px dashed var(--border,#e3e1e6);border-radius:8px;padding:10px}
     .lr-task{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
     .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
     .lr-task-share{margin-top:10px;background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}

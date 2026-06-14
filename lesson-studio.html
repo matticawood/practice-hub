@@ -300,6 +300,7 @@ function blockDefault(type) {
     case "divider":   return { type };
     case "play":      return { type, label: "", notes: [], style: "chord" };
     case "keyboard":  return { type, label: "", highlight: [], from: "", to: "", caption: "" };
+    case "notation":  return { type, abc: "", caption: "" };
     case "questions": return { type, mode: "inline", title: "", items: [] };
     default:          return { type: "text", md: "" };
   }
@@ -312,7 +313,7 @@ function questionDefault(kind) {
     default:          return { kind: "reflect", prompt: "" };
   }
 }
-const BLOCK_TYPES = ["heading","text","callout","example","image","audio","play","keyboard","video","download","task","divider","questions"];
+const BLOCK_TYPES = ["heading","text","callout","example","image","audio","play","keyboard","notation","video","download","task","divider","questions"];
 function normalizeBlocks(blocks) {
   if (!Array.isArray(blocks)) return [];
   return blocks.filter(b => b && BLOCK_TYPES.includes(b.type)).map(b => {
@@ -414,6 +415,7 @@ function renderEditor() {
             <option value="audio">Audio</option>
             <option value="play">Play (piano sound)</option>
             <option value="keyboard">Interactive keyboard</option>
+            <option value="notation">Notation (stave)</option>
             <option value="video">Video (Mux)</option>
             <option value="download">Download</option>
             <option value="task">Task</option>
@@ -514,6 +516,10 @@ function renderBlockEditor(b, i) {
       <div><input type="text" class="js-bf" data-i="${i}" data-f="to" placeholder="To (optional), e.g. C6" value="${escapeAttr(b.to || "")}"></div></div>
       <input type="text" class="js-bf" data-i="${i}" data-f="caption" placeholder="Caption (optional)" value="${escapeAttr(b.caption || "")}">
       <div class="hint">An interactive piano. Highlighted keys are coloured; learners can click any key to hear it.</div>`;
+  } else if (b.type === "notation") {
+    fields = `<textarea class="js-bf" data-i="${i}" data-f="abc" rows="4" placeholder="ABC notation, e.g.&#10;X:1&#10;M:4/4&#10;L:1/4&#10;K:C&#10;C D E F | G2 A2 | c4 |]" style="font-family:ui-monospace,monospace;font-size:.82rem">${escapeHtml(b.abc || "")}</textarea>
+      <input type="text" class="js-bf" data-i="${i}" data-f="caption" placeholder="Caption (optional)" value="${escapeAttr(b.caption || "")}">
+      <div class="hint">Printed stave from ABC notation. K: sets the key (e.g. "K:G" or "K:G clef=bass"), M: the time signature, L: the default note length. Renders live in the preview.</div>`;
   } else if (b.type === "video") {
     fields = `<input type="text" class="js-bf" data-i="${i}" data-f="playbackId" placeholder="Mux Playback ID (from the uploaded asset)" value="${escapeAttr(b.playbackId || "")}">
       <input type="text" class="js-bf" data-i="${i}" data-f="caption" placeholder="Caption (optional)" value="${escapeAttr(b.caption || "")}">
@@ -806,12 +812,26 @@ async function aiDraftLesson() {
     const headings = sections.map(s => ({ heading: s.heading }));
 
     const blocks = [];
+    // Open with the learning objectives (the lesson skeleton's first beat).
+    const objectives = Array.isArray(outline.objectives) ? outline.objectives.filter(Boolean) : [];
+    if (objectives.length) {
+      blocks.push({ type: "heading", text: "What you'll learn", size: 2 });
+      blocks.push({ type: "callout", style: "key", md: objectives.map(o => "- " + o).join("\n") });
+    }
     for (let i = 0; i < sections.length; i++) {
       setAiStatus(`Writing section ${i + 1} of ${sections.length}: ${sections[i].heading}…`);
       const out = await aiStream({ mode: "section", course: L.course, level: L.level, title: L.title, section: sections[i], outline: headings, priorConcepts });
       if (out && Array.isArray(out.blocks)) blocks.push(...out.blocks);
       L.blocks = normalizeBlocks(blocks); refreshPreview();   // show progress in the live preview
     }
+    // Closing skeleton: playing connection, key terms, summary.
+    setAiStatus("Writing the playing connection, key terms and summary…");
+    try {
+      const w = await aiStream({ mode: "wrap", course: L.course, level: L.level, title: L.title, outline: headings, priorConcepts });
+      if (w && Array.isArray(w.blocks)) blocks.push(...w.blocks);
+      L.blocks = normalizeBlocks(blocks); refreshPreview();
+    } catch (e) { /* closers are optional; don't fail the whole draft over it */ }
+
     setAiStatus("Writing the end quiz…");
     try {
       const q = await aiStream({ mode: "quiz", course: L.course, level: L.level, title: L.title, outline: headings });
