@@ -374,7 +374,13 @@
       if (!abc) return;
       loadAbcjs().then(() => {
         try {
-          window.ABCJS.renderAbc(out, abc, { responsive: "resize", paddingtop: 4, paddingbottom: 4, staffwidth: 540 });
+          // Size the stave to its content so a short example is not stretched sparse
+          // and a long line is not crammed. Width scales with bar count, capped to the
+          // column; the figure is centred via CSS. (No responsive:"resize" — that
+          // forces the SVG to fill the container, which is the stretching we don't want.)
+          const bars = (abc.match(/\|/g) || []).length || 1;
+          const staffwidth = Math.max(240, Math.min(640, bars * 130 + 190));
+          window.ABCJS.renderAbc(out, abc, { paddingtop: 4, paddingbottom: 4, staffwidth });
           out.dataset.done = "1";
         } catch (e) { out.innerHTML = '<div class="lr-abc-err">This notation could not be rendered.</div>'; }
       }).catch(() => { out.innerHTML = '<div class="lr-abc-err">The notation library failed to load.</div>'; });
@@ -419,8 +425,8 @@
     .lr-key-b.lr-key-hi{background:linear-gradient(#e0aa00,#9a7400)}
     .lr-kbd-live .lr-key{cursor:pointer}
     .lr-key-press{filter:brightness(1.22)}
-    .lr-notation{margin:18px 0;overflow-x:auto}
-    .lr-notation svg{max-width:100%;height:auto}
+    .lr-notation{margin:18px 0;text-align:center;overflow-x:auto}
+    .lr-notation svg{display:inline-block;max-width:100%;height:auto}
     .lr-abc-err{font-size:.85rem;color:var(--text-muted,#8a7868);border:1px dashed var(--border,#e3e1e6);border-radius:8px;padding:10px}
     .lr-task{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
     .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
