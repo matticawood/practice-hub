@@ -61,7 +61,11 @@ field and type-specific fields. These are the ONLY allowed block types:
              //   lower octave "C,", higher octave "c"; sharp "^C", flat "_B", natural "=F";
              //   length multipliers after the note ("C2" = twice L:, "C4" = four times);
              //   bar lines "|", final bar "|]". Keep snippets short (1 to 2 bars). Always
-             //   include M:, L: and K:. This is the most important block for theory reading.
+             //   include K: (it sets the clef and key). Include M: and L: only when you write
+             //   real notes; for a BLANK or illustrative stave (e.g. "count the lines and
+             //   spaces") omit M: and fill a bar with INVISIBLE rests "x" so the empty stave
+             //   still draws, with no time signature or visible rest, e.g. "X:1\\nK:C\\nx8 |]".
+             //   This is the most important block for theory reading.
 - questions: { "type":"questions", "mode":"inline", "title":"...", "items":[ <question>, ... ] }
              //   mode "inline" = each question checked as you go; "quiz" = scored at the end.
 
