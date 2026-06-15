@@ -177,6 +177,12 @@
         <input id="mmt-issue" placeholder="116">
       </div>
     </div>
+    <label for="mmt-from">Send from</label>
+    <select id="mmt-from">
+      <option value="mmt-matthew">Matthew Cawood &lt;mondaymusictips@matthewcawood.com&gt;</option>
+      <option value="mmt-name">Monday Music Tips &lt;mondaymusictips@matthewcawood.com&gt;</option>
+      <option value="matthew">Matthew Cawood &lt;matthew@matthewcawood.com&gt;</option>
+    </select>
     <label for="mmt-subject">Subject (defaults to the article title)</label>
     <input id="mmt-subject" placeholder="">
     <label for="mmt-intro">Intro, a sentence or two (blank line = new paragraph)</label>
@@ -194,10 +200,15 @@
       <div class="preview-bar"><span style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)">Live preview</span></div>
       <div class="frame-pad"><iframe id="mmt-preview" scrolling="no" style="min-height:200px"></iframe></div>
     </div>
+    <label for="mmt-only">Send to specific people only (optional)</label>
+    <textarea id="mmt-only" rows="2" placeholder="name@example.com, another@example.com — leave blank to send to the whole Monday Music Tips list"></textarea>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px">
       <button class="btn" onclick="mmtTest()">Send test to me</button>
       <button class="btn btn-gold" onclick="mmtSend()">Send to Monday Music Tips…</button>
+      <button class="btn" onclick="mmtSaveDraft(true)">Save draft</button>
+      <button class="btn" onclick="mmtDiscardDraft()">Discard draft</button>
       <span id="mmt-note" style="font-size:.84rem;color:var(--mut)"></span>
+      <span id="mmt-draft-note" style="font-size:.78rem;color:var(--mut);margin-left:auto"></span>
     </div>
   </section>
 
@@ -229,7 +240,7 @@
 </div>
 
 <script type="module">
-  import * as ET from "./email-templates.mjs?v=29";
+  import * as ET from "./email-templates.mjs?v=30";
   window.ET = ET;
   window.dispatchEvent(new Event("et-ready"));
 </script>
@@ -408,6 +419,20 @@ async function composeCall(mode) {
   return { ok: res.ok, body: await res.json().catch(() => ({})) };
 }
 function sendErr(b) { return (b && (b.detail?.message || b.detail?.error || b.error)) || "failed"; }
+// A live send runs in waves: the server caps each call (well under the function
+// timeout) and skips already-sent recipients, so we keep calling "live" until it
+// reports nothing left. onProgress(total) updates the UI between waves.
+async function sendLiveLoop(callFn, onProgress) {
+  let total = 0, failed = 0;
+  for (;;) {
+    const { ok, body } = await callFn("live");
+    if (!ok) return { ok: false, body, total };
+    total += body.sent || 0; failed += body.failed || 0;
+    if (onProgress) onProgress(total, body);
+    if (!body.more) return { ok: true, total, failed };
+    if (!body.sent) return { ok: true, total, failed, stalled: true };  // no progress this wave → stop, don't loop forever
+  }
+}
 async function composeTest() {
   const note = document.getElementById("cmp-note");
   const c = composeContent();
@@ -429,9 +454,9 @@ async function composeSend() {
   const who = aud.type === "people" ? `${aud.emails.length} selected` : (aud.type === "members" ? "all members" : document.getElementById("cmp-aud").selectedOptions[0].text);
   if (!confirm(`Send this email to ${n} recipient${n > 1 ? "s" : ""} (${who})?\n\nThis cannot be undone.`)) { note.textContent = "Cancelled."; return; }
   note.textContent = `Sending to ${n}…`;
-  const { ok, body } = await composeCall("live");
-  if (ok) { note.textContent = `Sent to ${body.sent || 0}${body.failed ? `, ${body.failed} failed` : ""}.`; cmpCampaignId = null; renderAutomations(); }
-  else note.textContent = `Error: ${sendErr(body)}`;
+  const r = await sendLiveLoop(composeCall, (t) => { note.textContent = `Sending… ${t} of ${n} sent`; });
+  if (r.ok) { note.textContent = `Sent to ${r.total}${r.failed ? `, ${r.failed} failed` : ""}${r.stalled ? " (stopped early, try again to finish)" : ""}.`; cmpCampaignId = null; renderAutomations(); }
+  else note.textContent = `Error after ${r.total} sent: ${sendErr(r.body)}`;
 }
 window.composeTest = composeTest; window.composeSend = composeSend;
 
@@ -449,10 +474,48 @@ async function mmtInit() {
     ? mmtArticleList.map((a, i) => `<option value="${i}">${esc(a.title)}</option>`).join("")
     : `<option value="">No published articles</option>`;
   sel.addEventListener("change", mmtOnArticle);
-  ["mmt-issue", "mmt-subject", "mmt-intro", "mmt-quote", "mmt-quote-author", "mmt-bullets", "mmt-hook"].forEach(id => document.getElementById(id).addEventListener("input", mmtPreview));
+  sel.addEventListener("change", mmtAutoSave);
+  ["mmt-issue", "mmt-subject", "mmt-intro", "mmt-quote", "mmt-quote-author", "mmt-bullets", "mmt-hook"].forEach(id => document.getElementById(id).addEventListener("input", () => { mmtPreview(); mmtAutoSave(); }));
+  document.getElementById("mmt-from").addEventListener("change", mmtAutoSave);
   mmtOnArticle();
-  buildHookSuggestions();
+  await buildHookSuggestions();
+  mmtRestoreDraft();   // bring back any in-progress draft, overriding the article defaults
 }
+
+// ── Draft (localStorage; owner-only single user, no DB needed) ──
+const MMT_DRAFT_KEY = "mmt-draft-v1";
+const MMT_DRAFT_FIELDS = ["mmt-issue", "mmt-subject", "mmt-from", "mmt-intro", "mmt-quote", "mmt-quote-author", "mmt-bullets", "mmt-hook"];
+let mmtDraftTimer = null;
+function mmtCurrentDraft() {
+  const a = mmtArticleList[parseInt(document.getElementById("mmt-article").value, 10)];
+  const d = { articleSlug: a ? a.slug : "" };
+  MMT_DRAFT_FIELDS.forEach(id => { const el = document.getElementById(id); if (el) d[id] = el.value; });
+  return d;
+}
+function mmtSaveDraft(explicit) {
+  try {
+    const d = mmtCurrentDraft(); d.savedAt = Date.now();
+    localStorage.setItem(MMT_DRAFT_KEY, JSON.stringify(d));
+    const n = document.getElementById("mmt-draft-note");
+    if (n) n.textContent = (explicit ? "Draft saved " : "Saved ") + new Date(d.savedAt).toLocaleTimeString();
+  } catch (e) {}
+}
+function mmtAutoSave() { clearTimeout(mmtDraftTimer); mmtDraftTimer = setTimeout(() => mmtSaveDraft(false), 600); }
+function mmtRestoreDraft() {
+  let d = null; try { d = JSON.parse(localStorage.getItem(MMT_DRAFT_KEY) || "null"); } catch (e) {}
+  if (!d) return false;
+  if (d.articleSlug) { const idx = mmtArticleList.findIndex(a => a.slug === d.articleSlug); if (idx >= 0) document.getElementById("mmt-article").value = String(idx); }
+  MMT_DRAFT_FIELDS.forEach(id => { const el = document.getElementById(id); if (el && d[id] != null) el.value = d[id]; });
+  const n = document.getElementById("mmt-draft-note");
+  if (n && d.savedAt) n.textContent = "Draft restored from " + new Date(d.savedAt).toLocaleString();
+  mmtPreview();
+  return true;
+}
+function mmtDiscardDraft() {
+  try { localStorage.removeItem(MMT_DRAFT_KEY); } catch (e) {}
+  const n = document.getElementById("mmt-draft-note"); if (n) n.textContent = "Draft discarded.";
+}
+window.mmtSaveDraft = mmtSaveDraft; window.mmtDiscardDraft = mmtDiscardDraft;
 
 // Intro-line presets for the Practice Room block. Timely options (recent and
 // upcoming live clinics) are pulled from real data; the rest are evergreen angles
@@ -480,7 +543,7 @@ async function buildHookSuggestions() {
   window._mmtHookOpts = opts;
   const hs = document.getElementById("mmt-hook-suggest");
   hs.innerHTML = opts.map((o, i) => `<option value="${i}">${esc(o.label)}</option>`).join("");
-  hs.addEventListener("change", () => { const t = window._mmtHookOpts[hs.value].text; const ta = document.getElementById("mmt-hook"); if (window._mmtHookOpts[hs.value].label.indexOf("Custom") !== 0) ta.value = t; ta.focus(); mmtPreview(); });
+  hs.addEventListener("change", () => { const t = window._mmtHookOpts[hs.value].text; const ta = document.getElementById("mmt-hook"); if (window._mmtHookOpts[hs.value].label.indexOf("Custom") !== 0) ta.value = t; ta.focus(); mmtPreview(); mmtAutoSave(); });
   document.getElementById("mmt-hook").value = opts[0].text;
   mmtPreview();
 }
@@ -518,11 +581,15 @@ function mmtPreview() {
 }
 async function mmtCall(mode) {
   if (!mmtCampaignId) mmtCampaignId = "adhoc-mmt-" + Date.now();
+  // Optional: send to a hand-picked set instead of the whole list (e.g. resend to
+  // people a previous send missed). Blank = the full Monday Music Tips list.
+  const only = (document.getElementById("mmt-only").value || "").split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const audience = only.length ? { type: "people", emails: only } : { type: "list", listSlug: "monday-music-tips" };
   const { data: { session } } = await db.auth.getSession();
   const res = await fetch("/.netlify/functions/send-campaign", {
     method: "POST",
     headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ adhoc: true, template: "mmt", campaignId: mmtCampaignId, content: mmtContent(), audience: { type: "list", listSlug: "monday-music-tips" }, mode }),
+    body: JSON.stringify({ adhoc: true, template: "mmt", from: document.getElementById("mmt-from").value, campaignId: mmtCampaignId, content: mmtContent(), audience, mode }),
   });
   return { ok: res.ok, body: await res.json().catch(() => ({})) };
 }
@@ -543,9 +610,12 @@ async function mmtSend() {
   if (!n) { note.textContent = "No eligible recipients."; return; }
   if (!confirm(`Send Monday Music Tips #${c.issue || ""} to ${n} subscriber${n > 1 ? "s" : ""}?\n\nThis cannot be undone.`)) { note.textContent = "Cancelled."; return; }
   note.textContent = `Sending to ${n}…`;
-  const { ok, body } = await mmtCall("live");
-  if (ok) { note.textContent = `Sent to ${body.sent || 0}${body.failed ? `, ${body.failed} failed` : ""}.`; mmtCampaignId = null; renderAutomations(); }
-  else note.textContent = `Error: ${sendErr(body)}`;
+  const r = await sendLiveLoop(mmtCall, (t) => { note.textContent = `Sending… ${t} of ${n} sent`; });
+  if (r.ok) {
+    note.textContent = `Sent to ${r.total}${r.failed ? `, ${r.failed} failed` : ""}${r.stalled ? " (stopped early, click send again to finish)" : ""}.`;
+    if (!r.stalled) { mmtCampaignId = null; try { localStorage.removeItem(MMT_DRAFT_KEY); } catch (e) {} document.getElementById("mmt-draft-note").textContent = ""; }
+    renderAutomations();
+  } else note.textContent = `Error after ${r.total} sent: ${sendErr(r.body)}`;
 }
 window.mmtTest = mmtTest; window.mmtSend = mmtSend;
 
@@ -926,12 +996,17 @@ async function renderAutomations() {
   const el = document.getElementById("automations");
   if (!el) return;
 
-  // Email history.
+  // Email history. Supabase caps a response at 1000 rows, so page through with
+  // .range() — otherwise a single big send (2000+ recipients) is undercounted.
   let logRows = [];
   try {
-    const { data, error } = await db.from("email_log").select("email,campaign,status,sent_at,resend_id,delivered_at,opened_at,clicked_at,bounced_at,complained_at,unsubscribed_at").order("sent_at", { ascending: false }).limit(2000);
-    if (error) throw error;
-    logRows = data || [];
+    const cols = "email,campaign,status,sent_at,resend_id,delivered_at,opened_at,clicked_at,bounced_at,complained_at,unsubscribed_at";
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await db.from("email_log").select(cols).order("sent_at", { ascending: false }).range(from, from + 999);
+      if (error) throw error;
+      logRows = logRows.concat(data || []);
+      if (!data || data.length < 1000 || from >= 50000) break;   // 50k safety cap
+    }
   } catch (e) {
     el.innerHTML = `<div class="err">Couldn't load email_log (${esc(e.message || e)}). Has its migration been run?</div>`; return;
   }
@@ -982,13 +1057,14 @@ async function renderAutomations() {
   // Live-clinic reminders now log per-recipient to email_log (going forward), so
   // they flow into byCamp like everything else — exact counts + engagement. Past
   // clinics (before logging) simply won't appear here; the card shows their context.
-  const camps = Object.keys(byCamp).sort();
   const pct = (n,d) => d ? ` <span style="color:#888888">(${Math.round(n/d*100)}%)</span>` : "";
-  el.innerHTML = (camps.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
-    <thead><tr style="color:var(--mut);text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid var(--border)">
-      <th style="padding:4px 7px;text-align:left">Email</th><th style="padding:4px 7px;text-align:right">Sent</th><th style="padding:4px 7px;text-align:right">Delivered</th><th style="padding:4px 7px;text-align:right">Opened</th><th style="padding:4px 7px;text-align:right">Clicked</th><th style="padding:4px 7px;text-align:right">Bounced</th><th style="padding:4px 7px;text-align:right">Unsub</th><th style="padding:4px 7px;text-align:right">Spam</th><th style="padding:4px 7px;text-align:right">Last</th><th></th></tr></thead><tbody>
-    ${camps.map(c=>{const v=byCamp[c];const denom=v.delivered||(typeof v.sent==="number"?v.sent:0);return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:5px 7px;color:#cccccc">${esc(STUDIO_LBL[c]||c)}</td>
+  // Friendly label: known campaigns use STUDIO_LBL; one-off adhoc sends get a clean name
+  // (the exact date is in the Last column, so each MMT issue is distinguishable by date).
+  const labelFor = c => STUDIO_LBL[c] ? STUDIO_LBL[c] : c.startsWith("adhoc-mmt") ? "Monday Music Tips" : c.startsWith("adhoc") ? "Custom email" : c;
+  const THEAD = `<thead><tr style="color:var(--mut);text-transform:uppercase;font-size:.6rem;letter-spacing:.05em;border-bottom:1px solid var(--border)">
+      <th style="padding:4px 7px;text-align:left">Email</th><th style="padding:4px 7px;text-align:right">Sent</th><th style="padding:4px 7px;text-align:right">Delivered</th><th style="padding:4px 7px;text-align:right">Opened</th><th style="padding:4px 7px;text-align:right">Clicked</th><th style="padding:4px 7px;text-align:right">Bounced</th><th style="padding:4px 7px;text-align:right">Unsub</th><th style="padding:4px 7px;text-align:right">Spam</th><th style="padding:4px 7px;text-align:right">Last</th><th></th></tr></thead>`;
+  const rowFor = c => { const v=byCamp[c]; const denom=v.delivered||(typeof v.sent==="number"?v.sent:0); return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:5px 7px;color:#cccccc">${esc(labelFor(c))}</td>
       <td style="padding:5px 7px;text-align:right;color:#4ade80;font-weight:600">${v.sent||"-"}</td>
       <td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.delivered||"-"}</td>
       <td style="padding:5px 7px;text-align:right;color:var(--mut)">${v.opened?`${v.opened}${pct(v.opened,denom)}`:"-"}</td>
@@ -998,8 +1074,17 @@ async function renderAutomations() {
       <td style="padding:5px 7px;text-align:right;color:${v.complained?"#f87171":"var(--mut)"}">${v.complained||"-"}</td>
       <td style="padding:5px 7px;text-align:right;color:var(--mut)">${when(v.last)}</td>
       <td style="padding:5px 7px;text-align:right"><button class="btn btn-sm" style="padding:3px 9px;font-size:.7rem" onclick="caRecipients('${c}')">Recipients</button></td>
-    </tr>`;}).join("")}
-    </tbody></table></div>` : `<div style="color:var(--mut);font-size:.78rem">No emails sent yet.</div>`)
+    </tr>`; };
+  const tableFor = (title, subtitle, list) => list.length ? `<div class="group-h" style="margin-top:24px;font-size:1rem">${title}</div><p class="intro" style="margin:2px 0 9px">${subtitle}</p><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">${THEAD}<tbody>${list.map(rowFor).join("")}</tbody></table></div>` : "";
+  const allCamps = Object.keys(byCamp);
+  // Recurring/automated (welcome sequence, reactivation, waitlist, reminders, transactional)
+  // vs one-off manual sends (MMT issues + custom compose). One-offs sorted newest-first.
+  const recurring = allCamps.filter(c => !c.startsWith("adhoc")).sort();
+  const oneoff = allCamps.filter(c => c.startsWith("adhoc")).sort((a,b) => (byCamp[b].last||"").localeCompare(byCamp[a].last||""));
+  el.innerHTML = (allCamps.length
+      ? tableFor("Recurring &amp; scheduled", "Ongoing automated and transactional emails. Stats keep accumulating here.", recurring)
+        + tableFor("One-off sends", "Monday Music Tips issues and custom emails, newest first.", oneoff)
+      : `<div style="color:var(--mut);font-size:.78rem">No emails sent yet.</div>`)
     + `<div id="recipients-detail" style="margin-top:14px"></div>`;
 }
 
@@ -1135,9 +1220,9 @@ async function caLive(campaign) {
   if (!n) return caMsg(campaign, `<span style="color:#fbbf24">No eligible recipients, nothing to send.</span>`);
   if (!confirm(`Send this email to ${n} recipient(s)?\n\nReal send. Unsubscribed, already-sent${campaign==="waitlist"?", and current/past members":""} are skipped automatically.`)) return caMsg(campaign, "Cancelled.");
   caMsg(campaign, "Sending…");
-  const { ok, body } = await caSend(campaign, "live");
-  if (!ok) return caMsg(campaign, `<span class="err">Error: ${esc(body.error||"failed")}</span>`);
-  caMsg(campaign, `<span class="ok">Sent ${body.sent}. Skipped ${body.skipped||0}. Failed ${body.failed||0}.</span>`);
+  const r = await sendLiveLoop((mode) => caSend(campaign, mode), (t) => caMsg(campaign, `<span class="ok">Sending… ${t} of ${n} sent</span>`));
+  if (!r.ok) return caMsg(campaign, `<span class="err">Error after ${r.total} sent: ${esc(sendErr(r.body))}</span>`);
+  caMsg(campaign, `<span class="ok">Sent ${r.total}.${r.failed ? ` Failed ${r.failed}.` : ""}${r.stalled ? " Stopped early, click send again to finish." : ""}</span>`);
   setTimeout(renderAutomations, 1200);
 }
 

@@ -58,6 +58,16 @@ export default async (req) => {
   const FROM_PR = process.env.REMINDER_FROM || "The Practice Room <noreply@matthewcawood.com>";
   const FROM_MC = process.env.MATTHEW_FROM || "Matthew Cawood <noreply@matthewcawood.com>";
   const REPLY_TO = process.env.REPLY_TO || "matthew@matthewcawood.com";  // replies reach a real inbox
+  // Allowed "from" identities the composer can pick. Server-side whitelist so the
+  // client can never inject an arbitrary sender. All on the verified matthewcawood.com
+  // domain, so any address here works without per-address verification in Resend.
+  const SENDERS = {
+    "mmt-name":    "Monday Music Tips <mondaymusictips@matthewcawood.com>",
+    "mmt-matthew": "Matthew Cawood <mondaymusictips@matthewcawood.com>",
+    "matthew":     "Matthew Cawood <matthew@matthewcawood.com>",
+    "noreply":     FROM_MC,
+    "pr":          FROM_PR,
+  };
   const SITE    = (process.env.SITE_URL || "https://app.matthewcawood.com").replace(/\/$/, "");
   if (!SERVICE || !RESEND) return json(500, { error: "missing env (SERVICE/RESEND)" });
 
@@ -78,7 +88,15 @@ export default async (req) => {
   const requested = Array.isArray(body.recipients)
     ? [...new Set(body.recipients.map((e) => String(e || "").trim().toLowerCase()).filter(Boolean))]
     : [];
-  const normEmail = (e) => { e = String(e || "").trim().toLowerCase(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) ? e : ""; };
+  // Returns a clean lowercase address, or "" if invalid. Rejects consecutive/edge
+  // dots (e.g. "a..b@x.com") which pass a naive regex but Resend rejects — and one
+  // bad address makes Resend reject the whole 100-email batch it sits in.
+  const normEmail = (e) => {
+    e = String(e || "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return "";
+    if (/\.\./.test(e) || /(^\.)|(\.@)|(@\.)|(\.$)/.test(e)) return "";
+    return e;
+  };
 
   // Ad-hoc (custom) email from the Studio Compose panel: inline content + a chosen
   // audience (a list, all members, or one person) instead of a predefined campaign.
@@ -123,6 +141,23 @@ export default async (req) => {
       },
     });
 
+  // PostgREST caps a single response at 1000 rows. Page through with limit/offset so
+  // large audiences (the whole Monday Music Tips list is 2000+) are fully fetched
+  // rather than silently truncated to the first 1000. Returns { ok, rows } or { ok:false, res }.
+  const sbAll = async (path) => {
+    const PAGE = 1000; let offset = 0; const all = [];
+    for (;;) {
+      const sep = path.includes("?") ? "&" : "?";
+      const r = await sb(`${path}${sep}limit=${PAGE}&offset=${offset}`);
+      if (!r.ok) return { ok: false, res: r };
+      const rows = await r.json();
+      all.push(...rows);
+      if (rows.length < PAGE) break;
+      offset += PAGE;
+    }
+    return { ok: true, rows: all };
+  };
+
   let content, isList = false, listSlug = null;
   let footerReason = MEMBER_FOOTER, unsubText = "Unsubscribe from emails";
   let unsubBase = `${SITE}/.netlify/functions/email-unsubscribe?t=`;
@@ -132,13 +167,17 @@ export default async (req) => {
 
   // Already-sent (successful) for this campaign → skip (a double-send is impossible).
   const alreadySent = new Set();
-  const lr = await sb(`email_log?select=email&campaign=eq.${encodeURIComponent(campaign)}&status=eq.sent`);
-  if (lr.ok) for (const row of await lr.json()) alreadySent.add((row.email || "").toLowerCase());
+  const lr = await sbAll(`email_log?select=email&campaign=eq.${encodeURIComponent(campaign)}&status=eq.sent`);
+  if (lr.ok) for (const row of lr.rows) alreadySent.add((row.email || "").toLowerCase());
 
   if (adhoc) {
     content = adhoc.content;
     if (adhoc.template === "mmt") { renderH = renderMMTHTML; renderS = renderMMTSubject; }
-    if (adhoc.template === "mmt" || adhoc.brand === "matthew") FROM = FROM_MC;
+    // From identity: an explicit composer choice wins; otherwise MMT defaults to the
+    // Monday Music Tips address and a Matthew-branded custom email to FROM_MC.
+    if (adhoc.from && SENDERS[adhoc.from]) FROM = SENDERS[adhoc.from];
+    else if (adhoc.template === "mmt") FROM = SENDERS["mmt-matthew"];
+    else if (adhoc.brand === "matthew") FROM = FROM_MC;
     const type = adhoc.audience.type;
     if (type === "list") {
       listSlug = String(adhoc.audience.listSlug || ""); isList = true;
@@ -148,22 +187,24 @@ export default async (req) => {
       footerReason = `You're getting this because you signed up to ${listName}.`;
       unsubText = `Unsubscribe from ${listName}`;
       unsubBase = `${SITE}/.netlify/functions/list-unsubscribe?l=${encodeURIComponent(listSlug)}&t=`;
-      const r = await sb(`email_list_subscriptions?list_slug=eq.${encodeURIComponent(listSlug)}&select=email,opted_out,email_contacts(name,unsubscribe_token,global_opt_out)`);
-      if (!r.ok) return json(502, { error: "list lookup failed", detail: await r.text() });
-      for (const s of await r.json()) {
+      const r = await sbAll(`email_list_subscriptions?list_slug=eq.${encodeURIComponent(listSlug)}&select=email,opted_out,email_contacts(name,unsubscribe_token,global_opt_out)`);
+      if (!r.ok) return json(502, { error: "list lookup failed", detail: await r.res.text() });
+      for (const s of r.rows) {
         const e = (s.email || "").toLowerCase(); const c = s.email_contacts || {};
         if (!e) continue;
+        if (!normEmail(e)) { skipped.push({ email: e, reason: "invalid email" }); continue; }
         if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
         if (s.opted_out || c.global_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
         if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
         eligible.push({ email: s.email, name: c.name, unsubscribe_token: c.unsubscribe_token });
       }
     } else if (type === "members") {
-      const r = await sb(`allowed_emails?select=email,name,unsubscribe_token,email_opt_out`);
-      if (!r.ok) return json(502, { error: "member lookup failed", detail: await r.text() });
-      for (const m of await r.json()) {
+      const r = await sbAll(`allowed_emails?select=email,name,unsubscribe_token,email_opt_out`);
+      if (!r.ok) return json(502, { error: "member lookup failed", detail: await r.res.text() });
+      for (const m of r.rows) {
         const e = (m.email || "").toLowerCase();
         if (!e) continue;
+        if (!normEmail(e)) { skipped.push({ email: e, reason: "invalid email" }); continue; }
         if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
         if (m.email_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
         if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
@@ -181,8 +222,9 @@ export default async (req) => {
         await sb(`email_contacts`, { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ email: e }) }).catch(() => {});
         const cRes = await sb(`email_contacts?email=eq.${encodeURIComponent(e)}&select=name,unsubscribe_token,global_opt_out`);
         const c = (cRes.ok ? (await cRes.json())[0] : null) || {};
-        if (EXCLUDED.has(e)) skipped.push({ email: e, reason: "excluded account" });
-        else if (c.global_opt_out) skipped.push({ email: e, reason: "unsubscribed" });
+        // Hand-picked recipients are explicit, so internal/owner addresses are allowed
+        // through here (lets you send yourself a real copy). Opt-outs are still honoured.
+        if (c.global_opt_out) skipped.push({ email: e, reason: "unsubscribed" });
         else if (alreadySent.has(e)) skipped.push({ email: e, reason: "already sent" });
         else eligible.push({ email: e, name: c.name, unsubscribe_token: c.unsubscribe_token });
       }
@@ -206,11 +248,12 @@ export default async (req) => {
       footerReason = `You're getting this because you signed up to ${listName}.`;
       unsubText = `Unsubscribe from ${listName}`;
       unsubBase = `${SITE}/.netlify/functions/list-unsubscribe?l=${encodeURIComponent(listSlug)}&t=`;
-      const r = await sb(`email_list_subscriptions?list_slug=eq.${encodeURIComponent(listSlug)}&select=email,opted_out,email_contacts(name,unsubscribe_token,global_opt_out)`);
-      if (!r.ok) return json(502, { error: "list lookup failed", detail: await r.text() });
-      for (const s of await r.json()) {
+      const r = await sbAll(`email_list_subscriptions?list_slug=eq.${encodeURIComponent(listSlug)}&select=email,opted_out,email_contacts(name,unsubscribe_token,global_opt_out)`);
+      if (!r.ok) return json(502, { error: "list lookup failed", detail: await r.res.text() });
+      for (const s of r.rows) {
         const e = (s.email || "").toLowerCase(); const c = s.email_contacts || {};
         if (!e) continue;
+        if (!normEmail(e)) { skipped.push({ email: e, reason: "invalid email" }); continue; }
         if (EXCLUDED.has(e)) { skipped.push({ email: e, reason: "excluded account" }); continue; }
         if (s.opted_out || c.global_opt_out) { skipped.push({ email: e, reason: "unsubscribed" }); continue; }
         if (alreadySent.has(e)) { skipped.push({ email: e, reason: "already sent" }); continue; }
@@ -243,8 +286,8 @@ export default async (req) => {
     // Exclude current/former members for opt-in list campaigns (e.g. waitlist).
     if (isList && CAMPAIGN_META[campaign]?.excludeMembers && eligible.length) {
       const memberSet = new Set();
-      const mr = await sb(`allowed_emails?select=email`);
-      if (mr.ok) for (const r of await mr.json()) memberSet.add((r.email || "").toLowerCase());
+      const mr = await sbAll(`allowed_emails?select=email`);
+      if (mr.ok) for (const r of mr.rows) memberSet.add((r.email || "").toLowerCase());
       let everSet = new Set();
       const STRIPE = process.env.STRIPE_SECRET_KEY;
       if (STRIPE) {
@@ -298,15 +341,24 @@ export default async (req) => {
   // ── LIVE ───────────────────────────────────────────────────────────────────
   if (!eligible.length) return json(200, { campaign, mode, sent: 0, skipped, note: "no eligible recipients" });
 
-  if (skipped.length) {
+  // Log genuine skips once, on the first wave of a send. On later waves of a large
+  // send "skipped" is dominated by already-sent recipients, which we don't re-log.
+  const firstCall = alreadySent.size === 0;
+  if (firstCall && skipped.length) {
     await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
       body: JSON.stringify(skipped.map((s) => ({ email: s.email, campaign, status: "skipped",
         meta: { reason: s.reason } }))) }).catch(() => {});
   }
 
+  // Send at most MAX_PER_CALL per invocation so a big list (2000+) never risks the
+  // function timeout. Already-sent recipients are excluded above, so the client calls
+  // "live" repeatedly and each wave resumes exactly where the last one finished.
+  const MAX_PER_CALL = 800;
+  const toSend = eligible.slice(0, MAX_PER_CALL);
+  const more = eligible.length > toSend.length;
   let sent = 0; const failures = [];
-  for (let i = 0; i < eligible.length; i += 100) {
-    const chunk = eligible.slice(i, i + 100);
+  for (let i = 0; i < toSend.length; i += 100) {
+    const chunk = toSend.slice(i, i + 100);
     const batch = chunk.map((m) => {
       const unsub = `${unsubBase}${m.unsubscribe_token}&c=${campaign}`;
       return {
@@ -323,10 +375,28 @@ export default async (req) => {
     });
     const out = await res.json().catch(() => ({}));
     if (!res.ok) {
-      for (const m of chunk) failures.push({ email: m.email, error: out?.message || "resend batch error" });
-      await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
-        body: JSON.stringify(chunk.map((m) => ({ email: m.email, campaign, status: "failed",
-          error: (out?.message || "resend batch error").slice(0, 500) }))) }).catch(() => {});
+      // A single bad address makes Resend reject the whole 100-batch. Re-send in
+      // sub-batches of 10 so one bad address only takes out a few neighbours, not 99.
+      for (let k = 0; k < batch.length; k += 10) {
+        const sub = batch.slice(k, k + 10);
+        const sres = await fetch("https://api.resend.com/emails/batch", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${RESEND}`, "Content-Type": "application/json" },
+          body: JSON.stringify(sub),
+        });
+        const sout = await sres.json().catch(() => ({}));
+        if (sres.ok) {
+          const sids = Array.isArray(sout.data) ? sout.data : [];
+          await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
+            body: JSON.stringify(sub.map((m, j) => ({ email: m.to[0], campaign, status: "sent", resend_id: sids[j]?.id || null }))) }).catch(() => {});
+          sent += sub.length;
+        } else {
+          for (const m of sub) failures.push({ email: m.to[0], error: sout?.message || "resend batch error" });
+          await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
+            body: JSON.stringify(sub.map((m) => ({ email: m.to[0], campaign, status: "failed",
+              error: (sout?.message || "resend batch error").slice(0, 500) }))) }).catch(() => {});
+        }
+      }
       continue;
     }
     const ids = Array.isArray(out.data) ? out.data : [];
@@ -337,5 +407,5 @@ export default async (req) => {
     sent += chunk.length;
   }
 
-  return json(200, { campaign, mode, sent, failed: failures.length, failures, skipped: skipped.length });
+  return json(200, { campaign, mode, sent, more, failed: failures.length, failures, skipped: skipped.length });
 };

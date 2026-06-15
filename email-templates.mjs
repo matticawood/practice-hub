@@ -840,7 +840,7 @@ export function renderMMTHTML(content, ctx = {}) {
 
       ${rule}
 
-      <tr><td style="padding:10px 40px 0;text-align:center">
+      <tr><td style="padding:10px 40px 22px;text-align:center">
         <p style="margin:0;font-size:14px;color:#8a7d6b">Have a suggestion for a future Monday Music Tip? <a href="${esc(suggestUrl)}" style="color:#b4881a;font-weight:600">Let me know</a>.</p>
       </td></tr>
 
