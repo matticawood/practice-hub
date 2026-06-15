@@ -51,6 +51,26 @@ const SLURSETS={
   8:[ [], [[0,3],[4,7]], [[0,7]], [[0,1],[2,3],[4,5],[6,7]], [[0,3]], [[4,7]], [[0,3],[4,5],[6,7]], [[0,1],[2,5]] ],
 };
 const near=(arr,p)=>arr.reduce((a,b)=>Math.abs(b-p)<Math.abs(a-p)?b:a);
+// Grade 3+ leaves the five-finger position: a full scale (octave+) the melody can range over
+const SCALE={maj:[0,2,4,5,7,9,11,12,14], min:[0,2,3,5,7,8,10,12,14]};
+function genContour(nbars,span){                 // varied wide-range contours reaching up to `span`
+  const shape=rnd(['arch','arch','wave','rise','fall']); const out=[];
+  for(let b=0;b<nbars;b++){ const t=nbars>1?b/(nbars-1):0; let v;
+    if(shape==='arch') v=span*(1-Math.abs(2*t-1));
+    else if(shape==='wave') v=span*(0.5-0.5*Math.cos(t*2*Math.PI));
+    else if(shape==='rise') v=span*t; else v=span*(1-t);
+    out.push(Math.max(0,Math.min(span,Math.round(v)))); }
+  return out;
+}
+// per-beat rhythm cells incl. semiquavers (Grade 3+); each cell fills exactly one beat (beat-aligned)
+const BEATCELLS=[[1],[1],[1],[0.5,0.5],[0.5,0.5],[0.5,0.25,0.25],[0.25,0.25,0.5],[0.25,0.25,0.25,0.25],[1.5,0.5]];
+function barRhythm(barU,wide,compound){
+  if(compound) return rnd(RHY_COMPOUND);
+  if(!wide) return rnd(RHY[barU]||RHY[2]);
+  const beats=Math.round(barU); const out=[]; let b=0;
+  while(b<beats){ const cell=rnd(BEATCELLS); if(cell[0]===1.5){ if(b<=beats-2){ out.push(1.5,0.5); b+=2; continue; } else { out.push(1); b++; continue; } } out.push(...cell); b++; }
+  return out;
+}
 
 function offsets(mode){ return POS[mode]; }         // semitone offsets of the box
 
@@ -61,6 +81,19 @@ function pickStaccatoBar(rh,barU,nbars){           // a mid bar where the RH mov
   for(let b=1;b<nbars-1;b++){ const inb=rh.filter((n,i)=>rb[i]===b); if(inb.length && inb.every(n=>!n.rest&&n.d<=1)) cands.push(b); }
   return cands.length? cands[Math.floor(Math.random()*cands.length)] : -1;
 }
+// a POOL of cadential figures (melody close + LH) so endings vary instead of one fixed formula
+function cadenceFigure(barU, beatLen, compound){
+  const lhPool=[ [[4,beatLen],[0,barU-beatLen]] ];                 // V -> I, varied rhythm
+  if(barU%2===0 && !compound) lhPool.push([[4,barU/2],[0,barU/2]]);
+  const melPool=[ [[0,barU]],                                       // held tonic (suspension over the V)
+                  [[1,beatLen],[0,barU-beatLen]],                   // 2 -> 1
+                  [[4,beatLen],[0,barU-beatLen]] ];                 // 5 -> 1 (falling)
+  if(!compound && barU>=3){ melPool.push([[2,1],[1,1],[0,barU-2]],  // 3 -> 2 -> 1 descent
+                                         [[2,beatLen],[0,barU-beatLen]]); } // 3 -> 1
+  if(!compound) melPool.push([[1,0.5],[0,barU-0.5]]);               // quaver appoggiatura -> 1
+  return { lh: rnd(lhPool), mel: rnd(melPool) };
+}
+
 function phraseRanges(nbars, stacBar, style){       // slur phrase bar-ranges, split around any staccato bar
   let bounds;
   if(style==='whole') bounds=[[0,nbars-1]];
@@ -81,58 +114,76 @@ function buildCandidate(grade){
   const [top,bottom]=time.split('/').map(Number); const barU=(top/bottom)*4;
   const compound=(bottom===8 && top%3===0); const beatLen=compound?1.5:1; const nbeats=Math.round(barU/beatLen);
   const nbars = grade===2 ? (time==='2/4'?6:4) : 8;
-  const off=offsets(mode), span = grade===2 ? 4 : 4;     // box index range 0..span
+  const wide = grade>=3;                                  // Grade 3+ leaves the five-finger position
+  const off = wide ? SCALE[mode] : POS[mode];
+  const span = wide ? 7 : 4;                              // melody index range 0..span (octave for G3+)
   // ---- HARMONY as a PERIOD: half cadence (V) at the midpoint, perfect cadence (V->I) at the close ----
   const half = Math.ceil(nbars/2);
+  const restate = nbars>=6 && chance(0.55);   // sometimes a PARALLEL period (restate), sometimes a CONTRASTING one
+  const cad = cadenceFigure(barU, beatLen, compound);   // this piece's cadence, drawn from the pool
+  // the MIDPOINT is pooled, not fixed: half cadence (V) / imperfect cadence (I) / continuous (no midpoint stop)
+  const midType = rnd(['HC','HC','HC','IAC','continuous','continuous']);
   const Tn = mode==='maj' ? {I:'I',V:'V',pre:['ii','iii']} : {I:'i',V:'v',pre:['iv']};
   const prog=[];
   for(let b=0;b<nbars;b++){
     if(b===0) prog.push(Tn.I);
-    else if(b===half-1) prog.push(Tn.V);          // half cadence at the midpoint
-    else if(b===nbars-1) prog.push(Tn.I);         // final tonic
-    else if(b===nbars-2) prog.push(Tn.V);         // dominant before the close -> perfect cadence
+    else if(restate && b===half) prog.push(Tn.I);                    // consequent restates over the tonic
+    else if(b===half-1) prog.push(midType==='HC'?Tn.V : midType==='IAC'?Tn.I : rnd([Tn.I,...Tn.pre,Tn.V]));
+    else if(b===nbars-1) prog.push(Tn.I);                            // final bar = the cadence figure
     else prog.push(rnd([Tn.I, ...Tn.pre, Tn.V]));
   }
 
   // pick LH texture (favour broken a touch so articulated pieces are possible; longer grades lean calmer)
   const texture = rnd(grade===2?['broken','broken','rootfifth','sustained']:['rootfifth','sustained','rootfifth','broken','broken','block']);
+  const brokenShape = rnd([[0,1,2],[0,2,1],[0,1,2,1],[0,1,2,1]]);   // broken-chord figure (up / root-5-3 / up-down)
 
   // ---- MELODY as a PARALLEL PERIOD: phrase A ends inconclusive (half cadence); phrase B RESTATES
   //      phrase A's opening bar, then drives stepwise to the tonic (perfect cadence). (research ww807c61l) ----
-  const contour = rnd(CONTOURS[nbars]||CONTOURS[4]);
-  const strong = prog.map((c,b)=> near(CH[mode][c].t, contour[b]));
+  const ctones = c => wide ? [...CH[mode][c].t, ...CH[mode][c].t.map(x=>x+7).filter(x=>x<=span)] : CH[mode][c].t;
+  const contour = wide ? genContour(nbars,span) : rnd(CONTOURS[nbars]||CONTOURS[4]);
+  const strong = prog.map((c,b)=> near(ctones(c), contour[b]));
   const degOf = m => off.indexOf(m-rhTonic);
-  const stepTo=(from,to,ch)=>{ const dir=Math.sign(to-from)||(chance(.5)?1:-1); let idx=clamp(from+dir*(chance(.75)?1:2),span); if(chance(.35))idx=near(ch.t,idx); if(idx===from)idx=clamp(from+(Math.sign(to-from)||1),span); return idx; };
+  const stepTo=(from,to,ct)=>{ const dir=Math.sign(to-from)||(chance(.5)?1:-1); let idx=clamp(from+dir*(chance(.75)?1:2),span); if(chance(.35))idx=near(ct,idx); if(idx===from)idx=clamp(from+(Math.sign(to-from)||1),span); return idx; };
   const rh=[]; let prev=strong[0];
-  const HC = rnd([1,4]);   // antecedent closes on scale-step 2 (idx1) or 5 (idx4): inconclusive
+  // antecedent close depends on the pooled midType: inconclusive (HC), on the tonic (IAC), or flow on (continuous)
+  const endDeg = midType==='HC' ? rnd(wide?[1,4,6]:[1,4]) : midType==='IAC' ? 0 : null;
   for(let b=0;b<half;b++){                                   // phrase A (antecedent)
-    const ch=CH[mode][prog[b]], pat=rnd(compound?RHY_COMPOUND:(RHY[barU]||RHY[2])), nextS=b<half-1?strong[b+1]:HC;
-    pat.forEach((d,j)=>{ const idx = (b===half-1&&j===pat.length-1)?HC : (j===0?strong[b]:stepTo(prev,nextS,ch));
-      rh.push({m:rhTonic+off[idx], d, bar:b}); prev=idx; });
+    const pat=barRhythm(barU,wide,compound), ct=ctones(prog[b]), nextS = b<half-1?strong[b+1] : (endDeg??strong[half]??0);
+    pat.forEach((d,j)=>{ const idx = (b===half-1&&j===pat.length-1&&endDeg!=null)?endDeg : (j===0?strong[b]:stepTo(prev,nextS,ct));
+      rh.push({m:rhTonic+off[clamp(idx,span)], d, bar:b}); prev=idx; });
   }
   const idea = rh.filter(n=>n.bar===0).map(n=>({m:n.m,d:n.d}));   // the "basic idea" to restate
   for(let b=half;b<nbars;b++){                               // phrase B (consequent)
-    if(b===half){ idea.forEach(n=>rh.push({m:n.m,d:n.d,bar:b})); prev=degOf(idea.at(-1).m); continue; } // restate opening
-    if(b===nbars-1){ rh.push({m:rhTonic+off[0], d:barU, bar:b}); prev=0; continue; }                     // final held tonic
-    const ch=CH[mode][prog[b]], pat=rnd(compound?RHY_COMPOUND:(RHY[barU]||RHY[2])), nextS=b<nbars-1?strong[b+1]:0;
-    pat.forEach((d,j)=>{ const idx = (j===0?strong[b]:stepTo(prev,nextS,ch)); rh.push({m:rhTonic+off[idx], d, bar:b}); prev=idx; });
+    if(restate && b===half){ idea.forEach(n=>rh.push({m:n.m,d:n.d,bar:b})); prev=degOf(idea.at(-1).m); continue; } // restate opening over tonic
+    if(b===nbars-1){ cad.mel.forEach(([idx,d])=>rh.push({m:rhTonic+off[idx], d, bar:b})); prev=0; continue; } // cadence figure from the pool
+    const ct=ctones(prog[b]), pat=barRhythm(barU,wide,compound), nextS=b<nbars-1?strong[b+1]:0;
+    pat.forEach((d,j)=>{ const idx = (j===0?strong[b]:stepTo(prev,nextS,ct)); rh.push({m:rhTonic+off[clamp(idx,span)], d, bar:b}); prev=idx; });
+  }
+  // Grade 3+: occasional 2-note chords (a diatonic 3rd under a strong melody note)
+  if(wide && chance(.5)){
+    const cand=rh.map((n,i)=>i).filter(i=>!Array.isArray(rh[i].m)&&!rh[i].rest&&rh[i].d>=1 && i>0 && i<rh.length-1 && degOf(rh[i].m)>=2);
+    for(let t=0,k=cand.length>4?2:1; t<k && cand.length; t++){ const i=rnd(cand); const idx=degOf(rh[i].m); rh[i].m=[rhTonic+off[idx-2], rh[i].m]; cand.splice(cand.indexOf(i),1); }
   }
   // LH from texture
   const lhTonic=rhTonic-12;
   const lh=[];
   // every texture below uses ONLY beat-aligned note values (beatLen = crotchet, or dotted-crotchet in compound)
   prog.forEach((c,b)=>{
-    const ch=CH[mode][c], root=ch.b, isCad = b>=nbars-1;
-    const fifth = ch.t.find(x=>x!==root) ?? root;
-    if(texture==='sustained' || isCad){ lh.push({m:lhTonic+off[root], d:barU}); return; }
-    if(texture==='block'){ lh.push({m:[lhTonic+off[root], lhTonic+off[ch.t[1]??root]], d:barU}); return; }
-    if(texture==='broken'){                       // one chord-tone per beat
-      const tones=[root, ch.t[1]??root, ch.t[2]??ch.t[1]??root];
-      for(let i=0;i<nbeats;i++) lh.push({m:lhTonic+off[clamp(tones[i%3],span)], d:beatLen});
+    const ch=CH[mode][c], root=ch.b;
+    if(b===nbars-1){ cad.lh.forEach(([idx,d])=>lh.push({m:lhTonic+off[idx], d})); return; } // cadence figure from the pool
+    // keep the ROOT lowest in every voicing (no held 6/4). For V (root at the box top) this means the
+    // texture naturally collapses to a repeated/held root, which is fine and idiomatic.
+    if(texture==='sustained'){ lh.push({m:lhTonic+off[root], d:barU}); return; }
+    if(texture==='block'){ const up=ch.t[1]; const dyad=(up!=null&&up>root)?[lhTonic+off[root],lhTonic+off[up]]:lhTonic+off[root]; lh.push({m:dyad, d:barU}); return; }
+    if(texture==='broken'){                       // broken chord, root anchored as the lowest note, figure pooled
+      const tones=[root, ch.t[1]??root, ch.t[2]??ch.t[1]??root].map(x=>x<root?root:x);
+      for(let i=0;i<nbeats;i++) lh.push({m:lhTonic+off[clamp(tones[brokenShape[i%brokenShape.length]],span)], d:beatLen});
       return;
     }
-    // rootfifth: root on beat 1, fifth holds the rest of the bar
-    lh.push({m:lhTonic+off[root], d:beatLen}, {m:lhTonic+off[fifth], d:barU-beatLen});
+    // oom-pah: root on the beat (bass), upper chord tones ABOVE it (never a bare sustained 5th)
+    const upper=ch.t.filter(x=>x>root).slice(0,2);
+    const above = upper.length? (upper.length>1?[lhTonic+off[upper[0]],lhTonic+off[upper[1]]]:lhTonic+off[upper[0]]) : lhTonic+off[root];
+    lh.push({m:lhTonic+off[root], d:beatLen}, {m:above, d:barU-beatLen});
   });
 
   // ---- EXPRESSION ENGINE: character-matched, contour-aware, and varied per piece ----
@@ -142,7 +193,7 @@ function buildCandidate(grade){
              : /scherz|giocoso|comodo/.test(tempo) ? 'light'
              : rnd(['legato','graceful','light','plain','plain']);
   // dynamic level matched to character (soft for cantabile, fuller for lively)
-  rh[0].dyn = rnd(prof==='legato'?['p','mp'] : prof==='light'?['mp','mf',grade>2?'f':'mf'] : ['p','mp','mf']);
+  rh[0].dyn = rnd(prof==='legato'?(wide?['pp','p','mp']:['p','mp']) : prof==='light'?['mp','mf',grade>2?'f':'mf'] : wide?['pp','p','mp','mf']:['p','mp','mf']);
 
   const nb = noteBarsOf(rh, barU);
   const idxInBars=(lo,hi)=>rh.map((_,i)=>i).filter(i=>nb[i]>=lo&&nb[i]<=hi);
@@ -179,7 +230,7 @@ function buildCandidate(grade){
     rh.forEach((n,i)=>{ if(nb[i]===stacBar && n.d<=1 && !n.rest) n.art='-.'; });
     const lb=noteBarsOf(lh,barU); lh.forEach((n,i)=>{ if(lb[i]===stacBar && n.d<=1 && !n.rest) n.art='-.'; });
   }
-  if(prof==='light' && stacBar<0 && chance(.4)){ const dn=idxInBars(1,1)[0]; if(dn!=null && !rh[dn].art && !rh[dn].slur) rh[dn].art='->'; }
+  if(prof==='light' && stacBar<0 && chance(.4)){ const ab=1+Math.floor(Math.random()*Math.max(1,nbars-2)); const dn=idxInBars(ab,ab)[0]; if(dn!=null && !rh[dn].art && !rh[dn].slur) rh[dn].art='->'; } // accent on any inner downbeat, not always bar 1
 
   rh.forEach(n=>delete n.bar);   // strip internal phrase marker
   const ex={ grade, key:ly, mode, flat, time, tempo, rh, lh };

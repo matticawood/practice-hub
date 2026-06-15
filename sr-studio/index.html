@@ -1,4 +1,5 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Sight Reading Studio</title>
+<script src="https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
 <style>
   :root{--ink:#1a1a1a;--mut:#666;--line:#e2e2e2;--ok:#137a3a;--bad:#b00020;--amber:#b8860b;--bg:#faf8f4;--sel:#2d6cdf}
   *{box-sizing:border-box}
@@ -61,6 +62,7 @@
       <div id="score" class="muted">Click “New candidate” to begin.</div>
       <div class="report" id="report"></div>
       <div class="btns">
+        <button id="play">▶ Play</button>
         <button class="primary" id="approve" disabled>✓ Approve &amp; bank</button>
         <button id="regen">↻ New candidate</button>
         <button id="skip">Skip</button>
@@ -211,7 +213,48 @@ async function refresh(){ const c=await api('/api/counts'); drawGrades(c);
   $('#bankList').innerHTML=bank.length?bank.map(e=>`<div class="row"><span>${e.i+1}. ${e.key} ${e.mode} ${e.time} · <span class="muted">${e.tempo}</span></span><span><a onclick="viewBank(${e.i})">view</a> · <a onclick="delBank(${e.i})">✕</a></span></div>`).join(''):'<span class="muted">none yet</span>'; }
 window.viewBank=async i=>{ const d=await api(`/api/view?grade=${grade}&i=${i}`); setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); };
 window.delBank=async i=>{ if(!confirm('Remove exercise '+(i+1)+'?'))return; await api('/api/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({grade,i})}); refresh(); };
-$('#regen').onclick=newCandidate; $('#skip').onclick=newCandidate; $('#approve').onclick=approve;
+// ---- audio playback: real sampled piano (soundfont) that respects dynamics, hairpins, slurs, staccato, accents, tenuto ----
+let audioCtx=null, piano=null, activeNodes=[];
+function tempoBPM(t){ const w=(t||'').split(/[\s,]/)[0];
+  const map={Largo:52,Larghetto:60,Adagio:58,Lento:54,Andantino:84,Andante:76,Comodo:96,Moderato:100,Allegretto:118,Allegro:134,Vivace:152}; return map[w]||92; }
+const DYN={pp:0.12,p:0.2,mp:0.32,mf:0.46,f:0.66,ff:0.85};
+function handGains(seq){                         // per-note gain from dynamics + hairpins
+  const g=seq.map(()=>0.46); let base=DYN.mf;
+  for(let i=0;i<seq.length;i++){ if(seq[i].dyn&&DYN[seq[i].dyn]!=null) base=DYN[seq[i].dyn]; g[i]=base; }
+  let s=-1, dir=0;                                // ramp gain across hairpin spans
+  for(let i=0;i<seq.length;i++){ const hp=seq[i].hp;
+    if(hp==='\\<'){ s=i; dir=1; } else if(hp==='\\>'){ s=i; dir=-1; }
+    else if(hp==='\\!'||hp==='\\!\\>'){ if(s>=0){ const a=g[s], b=dir>0?Math.min(0.85,a*1.7):Math.max(0.12,a*0.5);
+        for(let k=s;k<=i;k++) g[k]=a+(b-a)*((k-s)/Math.max(1,i-s)); }
+      s = hp==='\\!\\>'? i : -1; dir = hp==='\\!\\>'? -1 : 0; } }
+  return g;
+}
+function artic(n, slurOpen){                      // duration & loudness shaping from articulation
+  let durMult = slurOpen?1.0:0.9, gainMult=1;
+  if(n.art==='-.') durMult=0.42;                  // staccato: short
+  else if(n.art==='--'){ durMult=1.0; gainMult=1.06; }   // tenuto: full + slight weight
+  if(n.art==='->') gainMult=1.5;                  // accent: louder
+  return {durMult,gainMult};
+}
+function stopPlay(){ activeNodes.forEach(nd=>{try{nd.stop();}catch(e){}}); activeNodes=[]; }
+async function play(){
+  if(!model) return; stopPlay();
+  audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended') await audioCtx.resume();
+  if(!piano){ const btn=$('#play'); btn.textContent='loading piano…'; btn.disabled=true;
+    try{ piano = await Soundfont.instrument(audioCtx,'acoustic_grand_piano'); }catch(e){ alert('Could not load piano sound (needs internet).'); btn.textContent='▶ Play'; btn.disabled=false; return; }
+    btn.textContent='▶ Play'; btn.disabled=false; }
+  const spq=60/tempoBPM(model.meta.tempo), t0=audioCtx.currentTime+0.12;
+  for(const [seq,handGain] of [[model.rh,1.0],[model.lh,0.78]]){
+    const gv=handGains(seq); let t=0, slurOpen=false;
+    seq.forEach((n,i)=>{ if(n.slur==='(') slurOpen=true;
+      if(!n.rest){ const mids=Array.isArray(n.m)?n.m:[n.m]; const a=artic(n,slurOpen);
+        const dur=Math.max(0.08,n.d*spq*a.durMult), gain=Math.min(1,gv[i]*a.gainMult*handGain);
+        mids.forEach(m=> activeNodes.push(piano.play(m, t0+t*spq, {duration:dur, gain}))); }
+      if(n.slur===')') slurOpen=false; t+=n.d; });
+  }
+}
+$('#play').onclick=play;
+$('#regen').onclick=()=>{stopPlay();newCandidate();}; $('#skip').onclick=()=>{stopPlay();newCandidate();}; $('#approve').onclick=approve;
 refresh();
 </script>
 </body></html>
