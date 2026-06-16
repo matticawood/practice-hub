@@ -64,11 +64,10 @@ export function validate(ex){
     if(highest-lowest>g.maxSpan) probs.push(`${nm}: range ${highest-lowest} semis > ${g.maxSpan} (too wide for the grade)`);
     const first=tl[0]; const fnote=hand==='rh'?lo(first):lo(first);
     if(g.fixedPosition){
-      // five-finger: finger from the first note's scale-step WITHIN the position (anchored on the lowest).
-      // A note outside the position is caught by the span check above / idx<0 below — the first note need
-      // not be the lowest (it isn't when a hand carries the melody).
-      const pos=POS[ex.mode], idx=pos.indexOf(fnote-lowest);
-      if(idx<0){ probs.push(`${nm}: opening note off the five-finger position`); return 3; }
+      // a five-finger position may sit on ANY degree of the key. The span check above guarantees it fits one
+      // hand; the exact starting finger is supplied by the generator (ex.rhFinger/ex.lhFinger). Here we only
+      // need a best-effort fallback, so place the finger by the first note's position within the span.
+      const idx = Math.max(0, Math.min(4, Math.round((fnote-lowest)/Math.max(1,highest-lowest)*4)));
       return hand==='rh'?idx+1:5-idx;
     } else {
       // grade 3/4: only a plausible STARTING finger (passage may shift)
@@ -77,7 +76,8 @@ export function validate(ex){
       return Math.min(5,Math.max(1,5-Math.round((fnote-lowest)/2)));
     }
   }
-  const rhF=fingerOf('rh',RH,'RH'), lhF=fingerOf('lh',LH,'LH');
+  const rhFc=fingerOf('rh',RH,'RH'), lhFc=fingerOf('lh',LH,'LH'); // always run (does the range/position checks)
+  const rhF = ex.rhFinger ?? rhFc, lhF = ex.lhFinger ?? lhFc;     // prefer the generator's exact finger
   // parallels + clashes (outer voices: RH top vs LH bottom)
   let p=null;
   for(const t of onsets){ const rn=sound(RH,t), ln=sound(LH,t); if(!rn||!ln||rn.rest||ln.rest){p=null;continue;}

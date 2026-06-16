@@ -27,6 +27,13 @@ const CH_EXTRA = {
   maj:{ IV:{t:[3,5,7],b:3}, vi:{t:[5,7],b:5} },
   min:{ iv:{t:[3,5,7],b:3}, III:{t:[2,4,6],b:2}, VI:{t:[5,7],b:5} },
 };
+// the key's full scale (degree -> semitone) and each chord's members BY SCALE DEGREE (0=tonic).
+// used so the melody's five-finger position can sit on any degree of the key, not just the tonic.
+const KEYSCALE = { maj:[0,2,4,5,7,9,11,12,14,16], min:[0,2,3,5,7,8,10,12,14,16] };
+const CHORD_DEG = {
+  maj:{ I:[0,2,4], ii:[1,3,5], iii:[2,4,6], IV:[3,5,0], V:[4,6,1], vi:[5,0,2] },
+  min:{ i:[0,2,4], iv:[3,5,0], v:[4,6,1], III:[2,4,6], VI:[5,0,2] },
+};
 const PROG = {
   maj:{4:[['I','V','I','I'],['I','ii','V','I'],['I','iii','V','I'],['I','V','ii','I']],
        6:[['I','V','I','ii','V','I'],['I','iii','ii','V','I','I'],['I','V','ii','V','I','I']],
@@ -151,32 +158,38 @@ function buildCandidate(grade, opts={}){
     : rnd(grade===2?['broken','bassline','rootfifth','broken','sustained']:['rootfifth','bassline','sustained','broken','broken','block']);
   const brokenShape = rnd([[0,1,2],[0,2,1],[0,1,2,1],[0,1,2,1]]);   // broken-chord figure (up / root-5-3 / up-down)
 
-  // ---- MELODY as a PARALLEL PERIOD: phrase A ends inconclusive (half cadence); phrase B RESTATES
-  //      phrase A's opening bar, then drives stepwise to the tonic (perfect cadence). (research ww807c61l) ----
-  const ctones = c => wide ? [...CHm[c].t, ...CHm[c].t.map(x=>x+7).filter(x=>x<=span)] : CHm[c].t;
+  // ---- MELODY: a PARALLEL PERIOD in a five-finger position that may sit on ANY degree of the key ----
+  const KS = KEYSCALE[mode];
+  const winLo = wide ? 0 : rnd([0,0,0,3,4]);         // Grade 2 hand position: tonic / sub-dominant / dominant
+  const W = wide ? span : 4;                         // top window index
+  const mnote = i => melReg + (wide ? off[clamp(i,span)] : KS[winLo+clamp(i,4)]);   // window index -> pitch
+  const wIdx = dg => { dg=((dg%7)+7)%7; for(let i=0;i<=4;i++) if((winLo+i)%7===dg) return i; return 0; }; // tonic-relative degree -> window index
+  const cadW = i => wide ? i : wIdx(i);              // map a cadence figure's degree into this window
+  const ctones = c => { if(wide) return [...CHm[c].t, ...CHm[c].t.map(x=>x+7).filter(x=>x<=span)];
+    const degs=CHORD_DEG[mode][c]||CHm[c].t; const out=[]; for(let i=0;i<=4;i++) if(degs.includes((winLo+i)%7)) out.push(i); return out.length?out:[0]; };
   const contour = wide ? genContour(nbars,span) : rnd(CONTOURS[nbars]||CONTOURS[4]);
   const strong = prog.map((c,b)=> near(ctones(c), contour[b]));
-  const degOf = m => off.indexOf(m-melReg);
-  const stepTo=(from,to,ct)=>{ const dir=Math.sign(to-from)||(chance(.5)?1:-1); let idx=clamp(from+dir*(chance(.75)?1:2),span); if(chance(.35))idx=near(ct,idx); if(idx===from)idx=clamp(from+(Math.sign(to-from)||1),span); return idx; };
+  const degOf = m => wide ? off.indexOf(m-melReg) : (KS.indexOf(m-melReg)-winLo);
+  const stepTo=(from,to,ct)=>{ const dir=Math.sign(to-from)||(chance(.5)?1:-1); let idx=clamp(from+dir*(chance(.75)?1:2),W); if(chance(.35))idx=near(ct,idx); if(idx===from)idx=clamp(from+(Math.sign(to-from)||1),W); return idx; };
   const rh=[]; let prev=strong[0];
-  // antecedent close depends on the pooled midType: inconclusive (HC), on the tonic (IAC), or flow on (continuous)
-  const endDeg = midType==='HC' ? rnd(wide?[1,4,6]:[1,4]) : midType==='IAC' ? 0 : null;
+  // antecedent close: inconclusive (a non-tonic chord tone), the tonic (IAC), or flow on (continuous)
+  const endDeg = midType==='HC' ? rnd(ctones(Tn.V).filter(i=>((winLo+i)%7)!==0).concat([wIdx(1)])) : midType==='IAC' ? wIdx(0) : null;
   for(let b=0;b<half;b++){                                   // phrase A (antecedent)
     const pat=barRhythm(barU,wide,compound), ct=ctones(prog[b]), nextS = b<half-1?strong[b+1] : (endDeg??strong[half]??0);
     pat.forEach((d,j)=>{ const idx = (b===half-1&&j===pat.length-1&&endDeg!=null)?endDeg : (j===0?strong[b]:stepTo(prev,nextS,ct));
-      rh.push({m:melReg+off[clamp(idx,span)], d, bar:b}); prev=idx; });
+      rh.push({m:mnote(idx), d, bar:b}); prev=idx; });
   }
   const idea = rh.filter(n=>n.bar===0).map(n=>({m:n.m,d:n.d}));   // the "basic idea" to restate
   for(let b=half;b<nbars;b++){                               // phrase B (consequent)
-    if(restate && b===half){ idea.forEach(n=>rh.push({m:n.m,d:n.d,bar:b})); prev=degOf(idea.at(-1).m); continue; } // restate opening over tonic
-    if(b===nbars-1){ cad.mel.forEach(([idx,d])=>rh.push({m:melReg+off[idx], d, bar:b})); prev=0; continue; } // cadence figure from the pool
-    const ct=ctones(prog[b]), pat=barRhythm(barU,wide,compound), nextS=b<nbars-1?strong[b+1]:0;
-    pat.forEach((d,j)=>{ const idx = (j===0?strong[b]:stepTo(prev,nextS,ct)); rh.push({m:melReg+off[clamp(idx,span)], d, bar:b}); prev=idx; });
+    if(restate && b===half){ idea.forEach(n=>rh.push({m:n.m,d:n.d,bar:b})); prev=degOf(idea.at(-1).m); continue; } // restate opening
+    if(b===nbars-1){ cad.mel.forEach(([idx,d])=>rh.push({m:mnote(cadW(idx)), d, bar:b})); prev=wIdx(0); continue; } // cadence figure (mapped into the position)
+    const ct=ctones(prog[b]), pat=barRhythm(barU,wide,compound), nextS=b<nbars-1?strong[b+1]:wIdx(0);
+    pat.forEach((d,j)=>{ const idx = (j===0?strong[b]:stepTo(prev,nextS,ct)); rh.push({m:mnote(idx), d, bar:b}); prev=idx; });
   }
   // Grade 3+: occasional 2-note chords (a diatonic 3rd under a strong melody note)
   if(wide && chance(.5)){
     const cand=rh.map((n,i)=>i).filter(i=>!Array.isArray(rh[i].m)&&!rh[i].rest&&rh[i].d>=1 && i>0 && i<rh.length-1 && degOf(rh[i].m)>=2);
-    for(let t=0,k=cand.length>4?2:1; t<k && cand.length; t++){ const i=rnd(cand); const idx=degOf(rh[i].m); rh[i].m=[melReg+off[idx-2], rh[i].m]; cand.splice(cand.indexOf(i),1); }
+    for(let t=0,k=cand.length>4?2:1; t<k && cand.length; t++){ const i=rnd(cand); const idx=degOf(rh[i].m); rh[i].m=[mnote(idx-2), rh[i].m]; cand.splice(cand.indexOf(i),1); }
   }
   // ---- ACCOMPANIMENT (written in accReg; beat-aligned values only) ----
   const lh=[];
@@ -252,8 +265,13 @@ function buildCandidate(grade, opts={}){
   if(prof==='light' && stacBar<0 && chance(.4)){ const ab=1+Math.floor(Math.random()*Math.max(1,nbars-2)); const dn=idxInBars(ab,ab)[0]; if(dn!=null && !rh[dn].art && !rh[dn].slur) rh[dn].art='->'; } // accent on any inner downbeat, not always bar 1
 
   rh.forEach(n=>delete n.bar);   // strip internal phrase marker
+  // starting fingers, computed from the actual hand positions (the melody's window + the accomp's tonic box)
+  const mStart=clamp(strong[0],4);
+  const melodyFing = swap ? 5-mStart : mStart+1;       // RH melody: thumb on the bottom; LH melody: pinky on the bottom
+  const accompFing = swap ? 1 : 5;                     // accomp opens on the I-chord root (bottom of its box)
   // assign to staves: treble = the higher-register part, bass = the lower. when swapped, the melody (rh) sits low.
-  const ex={ grade, key:ly, mode, flat, time, tempo, rh: swap?lh:rh, lh: swap?rh:lh };
+  const ex={ grade, key:ly, mode, flat, time, tempo, rh: swap?lh:rh, lh: swap?rh:lh,
+             rhFinger: swap?accompFing:melodyFing, lhFinger: swap?melodyFing:accompFing };
   return ex;
 }
 

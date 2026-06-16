@@ -49,7 +49,7 @@ const server = http.createServer(async (req,res)=>{
       catch(e){ return json(res,{error:String(e.message||e)}); } }
     if(p==='/api/approve' && req.method==='POST'){ const d=await body(req); const ex=d.ex; const g=ex.grade;
       const v=validate(ex); if(!v.ok) return json(res,{error:'not clean: '+v.problems.join('; ')});
-      const bank=loadBank(g); const clean={grade:g,key:ex.key,mode:ex.mode,flat:ex.flat,time:ex.time,tempo:ex.tempo,partial:ex.partial,rh:ex.rh,lh:ex.lh};
+      const bank=loadBank(g); const clean={grade:g,key:ex.key,mode:ex.mode,flat:ex.flat,time:ex.time,tempo:ex.tempo,partial:ex.partial,rhFinger:ex.rhFinger,lhFinger:ex.lhFinger,rh:ex.rh,lh:ex.lh};
       bank.push(clean); saveBank(g,bank); return json(res,{count:bank.length}); }
     if(p==='/api/bank'){ const g=+u.searchParams.get('grade')||2; return json(res,{bank:loadBank(g).map((e,i)=>({i,key:e.key,mode:e.mode,time:e.time,tempo:e.tempo}))}); }
     if(p==='/api/delete' && req.method==='POST'){ const d=await body(req); const bank=loadBank(d.grade); bank.splice(d.i,1); saveBank(d.grade,bank); return json(res,{count:bank.length}); }
