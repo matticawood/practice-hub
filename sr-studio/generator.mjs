@@ -186,6 +186,16 @@ function buildCandidate(grade, opts={}){
     const ct=ctones(prog[b]), pat=barRhythm(barU,wide,compound), nextS=b<nbars-1?strong[b+1]:wIdx(0);
     pat.forEach((d,j)=>{ const idx = (j===0?strong[b]:stepTo(prev,nextS,ct)); rh.push({m:mnote(idx), d, bar:b}); prev=idx; });
   }
+  // MINOR -> HARMONIC MINOR at the dominant/cadence: raise the natural 7th to the leading tone (resolves up to i)
+  if(mode==='min'){
+    const sc = wide?off:KS;
+    for(let i=0;i<rh.length;i++){ const n=rh[i]; if(n.rest||Array.isArray(n.m))continue;
+      const deg=sc.indexOf(n.m-melReg); if(deg<0 || deg%7!==6) continue;   // only the natural 7th (subtonic)
+      const inDom = prog[n.bar]===Tn.V;
+      const nxt = rh[i+1]; const up = nxt && !nxt.rest && !Array.isArray(nxt.m) && (sc.indexOf(nxt.m-melReg)%7===0);
+      if(inDom || up){ n.m += 1; n.alt='#'; }   // raise to the leading tone, spell sharp
+    }
+  }
   // Grade 3+: occasional 2-note chords (a diatonic 3rd under a strong melody note)
   if(wide && chance(.5)){
     const cand=rh.map((n,i)=>i).filter(i=>!Array.isArray(rh[i].m)&&!rh[i].rest&&rh[i].d>=1 && i>0 && i<rh.length-1 && degOf(rh[i].m)>=2);

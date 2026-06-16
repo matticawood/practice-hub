@@ -111,7 +111,8 @@ export function toLily(ex, withNumber=true){
   const key=ex.key.length>1 ? ex.key[0]+(ex.key[1]==='f'?'es':ex.key[1]==='s'?'is':ex.key[1]) : ex.key; // bf->bes, ef->ees
   const noteLy=n=>{
     if(n.rest) return 'r'+durLy(n.d);
-    const pitch=Array.isArray(n.m)? '<'+n.m.map(x=>midiToLy(x,ex.flat)).join(' ')+'>' : midiToLy(n.m,ex.flat);
+    const sp = m => midiToLy(m, n.alt==='#'? false : ex.flat);   // a raised note (leading tone) is spelled with a sharp
+    const pitch=Array.isArray(n.m)? '<'+n.m.map(sp).join(' ')+'>' : sp(n.m);
     return pitch+durLy(n.d);
   };
   const voice=(tl,fing)=>tl.map((n,i)=>{ let s=noteLy(n);
@@ -136,7 +137,7 @@ export function serializeHand(notes, flat, barUnits){
   for(const n of notes){
     let tok;
     if(n.rest) tok='R';
-    else tok = Array.isArray(n.m)? n.m.map(x=>midiToName(x,flat)).join('+') : midiToName(n.m,flat);
+    else { const nm=m=>midiToName(m, n.alt==='#'?false:flat); tok = Array.isArray(n.m)? n.m.map(nm).join('+') : nm(n.m); }
     if(n.d!==1) tok+=':'+n.d;
     if(n.dyn) tok+='{'+n.dyn+'}';
     if(n.art) tok+=({'-.':'.', '--':'_', '->':'^'})[n.art]||'';
