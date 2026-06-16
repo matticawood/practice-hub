@@ -76,10 +76,9 @@
         <div><label>Time</label><input id="m_time"></div>
         <div><label>Tempo / character</label><input id="m_tempo"></div>
       </div>
-      <h4>Right hand</h4><div class="lane" id="rhLane"></div>
-      <h4>Left hand</h4><div class="lane" id="lhLane"></div>
+      <div id="staff" style="overflow-x:auto"></div>
       <div class="palette hidden" id="palette"></div>
-      <div class="hint">Click a note to select it, then use the palette below it (pitch ↑↓, length, articulation, delete, insert). The bar borders turn green when full, red when the beats don’t add up.</div>
+      <div class="hint"><b>Drag a notehead up or down</b> to change its pitch (snaps to the key). <b>Click</b> a note to select it, then use the palette for its length, articulation, rest, insert or delete.</div>
     </div>
   </div>
   <div class="card bank">
@@ -107,27 +106,49 @@ function diatonic(m,dir){
 }
 function nudge(arr,dir){ return Array.isArray(arr)?arr.map(x=>diatonic(x,dir)):diatonic(arr,dir); }
 
-function renderLane(hand){
-  const lane=$(hand==='rh'?'#rhLane':'#lhLane'); lane.innerHTML='';
-  const notes=model[hand], bu=barUnits(); let t=0, bar=mkBar(); let barSum=0;
-  notes.forEach((n,i)=>{
-    bar.appendChild(noteEl(hand,i,n));
-    barSum+=n.d; t+=n.d;
-    if(Math.abs(t%bu)<1e-9){ tagBar(bar,barSum,bu); lane.appendChild(bar); bar=mkBar(); barSum=0; }
-  });
-  if(barSum>0){ tagBar(bar,barSum,bu); lane.appendChild(bar); }
+// ---- draggable grand-staff editor ----
+const LETTERS=['c','d','e','f','g','a','b'];
+const SCALE_INT={maj:[0,2,4,5,7,9,11],min:[0,2,3,5,7,8,10]};
+const PC2STEP={0:0,1:0,2:1,3:1,4:2,5:3,6:3,7:4,8:4,9:5,10:5,11:6};
+function keyInfo(){ const k=model.meta.key, tonicPc=(KEYPC[k]??0), tL=LETTERS.indexOf(k[0]); const ints=SCALE_INT[model.meta.mode]||SCALE_INT.maj; const lp={}; for(let d=0;d<7;d++) lp[(tL+d)%7]=((tonicPc+ints[d])%12+12)%12; return lp; }
+const dstepOf=m=>{ const pc=((m%12)+12)%12, oct=Math.floor(m/12)-1; return oct*7+PC2STEP[pc]; };
+function stepToMidi(step){ const lp=keyInfo(); const oct=Math.floor(step/7), li=((step%7)+7)%7; return (oct+1)*12+lp[li]; }
+const TY=[34,44,54,64,74], BY=[114,124,134,144,154];
+const yTreb=m=>74-(dstepOf(m)-dstepOf(64))*5, yBass=m=>154-(dstepOf(m)-dstepOf(43))*5;
+const NS='http://www.w3.org/2000/svg';
+function renderStaff(){
+  const wrap=$('#staff'); const total=model.rh.reduce((s,n)=>s+n.d,0)||1, bu=barUnits();
+  const PXB=34, PAD=54, Wpx=Math.max(640,PAD+total*PXB+30), H=190, xAt=t=>PAD+t*PXB;
+  const svg=document.createElementNS(NS,'svg'); svg.setAttribute('viewBox',`0 0 ${Wpx} ${H}`); svg.setAttribute('width',Wpx); svg.style.height=H+'px';
+  const add=(tag,a,p=svg)=>{ const e=document.createElementNS(NS,tag); for(const k in a) e.setAttribute(k,a[k]); p.appendChild(e); return e; };
+  [...TY,...BY].forEach(y=>add('line',{x1:PAD-8,y1:y,x2:Wpx-10,y2:y,stroke:'#aaa','stroke-width':1}));
+  add('text',{x:16,y:66,'font-size':38,fill:'#333'}).textContent='𝄞';
+  add('text',{x:16,y:140,'font-size':34,fill:'#333'}).textContent='𝄢';
+  for(let t=bu;t<=total-1e-6;t+=bu) add('line',{x1:xAt(t),y1:TY[0],x2:xAt(t),y2:BY[4],stroke:'#ddd','stroke-width':1});
+  function hand(h,yFn,lines){ let t=0; model[h].forEach((n,i)=>{ const x=xAt(t)+9;
+    if(n.rest){ add('text',{x:x-4,y:(yFn===yTreb?56:136),'font-size':15,fill:'#999'}).textContent='𝄽'; }
+    else { const ms=Array.isArray(n.m)?n.m:[n.m], grp=add('g',{style:'cursor:ns-resize'}), s0=sel&&sel.hand===h&&sel.index===i;
+      ms.forEach(m=>{ const y=yFn(m);
+        for(let ly=lines[0]-10; ly>=y-2; ly-=10) add('line',{x1:x-9,y1:ly,x2:x+9,y2:ly,stroke:'#aaa'},grp);
+        for(let ly=lines[4]+10; ly<=y+2; ly+=10) add('line',{x1:x-9,y1:ly,x2:x+9,y2:ly,stroke:'#aaa'},grp);
+        add('ellipse',{cx:x,cy:y,rx:6.6,ry:5,fill:n.d>=2?'#fff':(s0?'#2d6cdf':'#1a1a1a'),stroke:s0?'#2d6cdf':'#1a1a1a','stroke-width':n.d>=2?1.8:1.2},grp);
+        if(n.alt) add('text',{x:x-17,y:y+5,'font-size':15,fill:'#1a1a1a'},grp).textContent='♯';
+      });
+      attachDrag(grp,h,i,yFn);
+    } t+=n.d; }); }
+  hand('rh',yTreb,TY); hand('lh',yBass,BY);
+  wrap.innerHTML=''; wrap.appendChild(svg);
 }
-function mkBar(){ const d=document.createElement('div'); d.className='bar'; return d; }
-function tagBar(bar,sum,bu){ const f=document.createElement('span'); f.className='fill';
-  const beats=(sum/(bu/(+model.meta.time.split('/')[0]))).toFixed(2).replace(/\.00$/,'');
-  f.textContent = Math.abs(sum-bu)<1e-9?'✓':`${sum} / ${bu}`; bar.classList.add(Math.abs(sum-bu)<1e-9?'full':'bad'); bar.prepend(f); }
-function noteEl(hand,i,n){
-  const d=document.createElement('div'); d.className='note'+(sel&&sel.hand===hand&&sel.index===i?' sel':'');
-  const marks=[n.dyn?n.dyn:'',n.art?({'-.':'.','--':'_','->':'>'})[n.art]:'',n.slur||'',n.hp?n.hp.replace(/\\\\/g,'').replace('!','!'):''].filter(Boolean).join(' ');
-  d.innerHTML=`<div class="pn">${n.rest?'rest':(Array.isArray(n.m)?n.m.map(nameOf).join('+'):nameOf(n.m))}</div>
-    <div class="du">${durLabel(n.d)}</div><div class="mk">${marks||'&nbsp;'}</div>`;
-  d.onclick=()=>{ sel={hand,index:i}; draw(); };
-  return d;
+function attachDrag(grp,h,i,yFn){
+  grp.addEventListener('mousedown',ev=>{ ev.preventDefault(); const n=model[h][i]; if(n.rest)return;
+    const startY=ev.clientY, origM=Array.isArray(n.m)?[...n.m]:n.m; let moved=0;
+    const onMove=e=>{ const dy=e.clientY-startY; moved=Math.max(moved,Math.abs(dy)); grp.setAttribute('transform',`translate(0,${ -Math.round(-dy/5)*5 })`); };
+    const onUp=e=>{ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); grp.removeAttribute('transform');
+      if(moved<4){ sel={hand:h,index:i}; draw(); return; }
+      const steps=Math.round(-(e.clientY-startY)/5); if(!steps){ return; }
+      const shift=mm=>stepToMidi(dstepOf(mm)+steps); delete n.alt;
+      n.m=Array.isArray(origM)?origM.map(shift):shift(origM); sel={hand:h,index:i}; commit(); };
+    document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp); });
 }
 function selectedNote(){ return sel? model[sel.hand][sel.index] : null; }
 
@@ -182,7 +203,7 @@ function mark(m){ const n=selectedNote();
 }
 let timer=null;
 function commit(){ draw(); clearTimeout(timer); timer=setTimeout(rerender,250); }
-function draw(){ renderLane('rh'); renderLane('lh'); renderPalette(); }
+function draw(){ renderStaff(); renderPalette(); }
 
 async function rerender(){
   model.meta.flat = FLATKEYS.has(model.meta.key) || (model.meta.mode==='min' && ['d','g','c','f'].includes(model.meta.key));
