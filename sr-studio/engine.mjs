@@ -64,9 +64,9 @@ export function validate(ex){
     if(highest-lowest>g.maxSpan) probs.push(`${nm}: range ${highest-lowest} semis > ${g.maxSpan} (too wide for the grade)`);
     const first=tl[0]; const fnote=hand==='rh'?lo(first):lo(first);
     if(g.fixedPosition){
-      // strict five-finger: anchor finger on the lowest note; finger from scale-step
-      if(hand==='lh' && lo(first)!==lowest) probs.push(`LH: marked finger note is not the lowest (finger 5 cannot reach below it)`);
-      if(hand==='rh' && lo(first)!==lowest && false){} // RH first need not be lowest
+      // five-finger: finger from the first note's scale-step WITHIN the position (anchored on the lowest).
+      // A note outside the position is caught by the span check above / idx<0 below — the first note need
+      // not be the lowest (it isn't when a hand carries the melody).
       const pos=POS[ex.mode], idx=pos.indexOf(fnote-lowest);
       if(idx<0){ probs.push(`${nm}: opening note off the five-finger position`); return 3; }
       return hand==='rh'?idx+1:5-idx;
@@ -94,13 +94,13 @@ export function validate(ex){
   // staccato only on short notes (hard: contradictory notation)
   for(const [s,nm] of [[ex.rh,'RH'],[ex.lh,'LH']]) s.forEach((n,i)=>{ if(n.art==='-.'&&n.d>1) probs.push(`${nm} note ${i+1}: staccato on a long note`); });
   if(![...ex.rh,...ex.lh].some(n=>n.dyn)) warns.push('no dynamic marking');
-  // melody should genuinely move (not hover on two notes) — stylistic
-  const rhP=ex.rh.filter(n=>!n.rest).map(n=>Array.isArray(n.m)?n.m[0]:n.m);
-  const distinct=new Set(rhP).size, mrange=Math.max(...rhP)-Math.min(...rhP);
-  if(distinct<4) warns.push(`melody static (${distinct} distinct pitches)`);
-  if(mrange<5) warns.push(`melody range narrow (${mrange} semis < a 4th)`);
-  const lhP=ex.lh.filter(n=>!n.rest).map(n=>Array.isArray(n.m)?n.m[0]:n.m);
-  if(new Set(lhP).size<3) warns.push(`left hand static (${new Set(lhP).size} distinct pitches)`);
+  // the MELODIC line should genuinely move — checked on whichever hand is the melody (either may carry it)
+  const pitches = s => s.filter(n=>!n.rest).map(n=>Array.isArray(n.m)?n.m[0]:n.m);
+  const rhP=pitches(ex.rh), lhP=pitches(ex.lh);
+  const rng = a => a.length? Math.max(...a)-Math.min(...a) : 0;
+  const melDistinct=Math.max(new Set(rhP).size, new Set(lhP).size), melRange=Math.max(rng(rhP), rng(lhP));
+  if(melDistinct<4) warns.push(`melody static (${melDistinct} distinct pitches)`);
+  if(melRange<5) warns.push(`melody range narrow (${melRange} semis)`);
   return { ok:probs.length===0, errors:probs, warnings:warns, problems:[...probs,...warns], rhF, lhF };
 }
 
