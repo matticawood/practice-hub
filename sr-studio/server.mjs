@@ -21,10 +21,10 @@ function render(ex){               // ex -> { svg, validation }
   return new Promise(res=>{
     const v=validate(ex);
     const id='sr'+Math.random().toString(36).slice(2,9);
-    const ly=join(tmpdir(),id+'.ly'), svg=join(tmpdir(),id+'.svg');
+    const ly=join(tmpdir(),id+'.ly'), svg=join(tmpdir(),id+'.svg'), cropped=join(tmpdir(),id+'.cropped.svg');
     writeFileSync(ly, lilyDoc(toLily({...ex,n:ex.n||''}),20));
-    execFile('lilypond',['--svg','-dno-point-and-click','-o',join(tmpdir(),id),ly],(err)=>{
-      let s=''; try{ s=readFileSync(svg,'utf8'); }catch{ s='<p style="color:#b00">render error</p>'; }
+    execFile('lilypond',['-dcrop','--svg','-dno-point-and-click','-o',join(tmpdir(),id),ly],(err)=>{
+      let s=''; try{ s=readFileSync(cropped,'utf8'); }catch{ try{ s=readFileSync(svg,'utf8'); }catch{ s='<p style="color:#b00">render error</p>'; } }
       res({ svg:s, validation:{ok:v.ok,errors:v.errors,warnings:v.warnings,rhF:v.rhF,lhF:v.lhF} });
     });
   });

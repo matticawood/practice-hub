@@ -13,14 +13,19 @@ const KEYS = {
 };
 const KEYS3 = { maj:[...KEYS.maj,['a',69,false],['bf',70,true],['ef',63,true]], min:[...KEYS.min,['b',71,false]] };
 const TEMPI = {
-  2:['Andante','Andante cantabile','Moderato','Allegretto','Allegretto grazioso','Andantino','Moderato grazioso'],
-  3:['Andante con moto','Moderato','Allegretto','Allegro moderato','Andante cantabile','Allegretto scherzando','Comodo'],
-  4:['Allegro moderato','Andante sostenuto','Allegretto con moto','Moderato e cantabile','Allegro grazioso','Larghetto'],
+  2:['Andante','Andantino','Adagio','Moderato','Allegretto','Allegro','Andante cantabile','Andante espressivo','Andante tranquillo','Moderato grazioso','Moderato semplice','Allegretto grazioso','Allegretto giocoso','Andante dolce','Allegro moderato'],
+  3:['Andante','Andantino','Adagio','Larghetto','Moderato','Allegretto','Allegro','Vivace','Andante con moto','Andante sostenuto','Andante espressivo','Moderato cantabile','Allegretto scherzando','Allegretto leggiero','Allegro grazioso','Comodo'],
+  4:['Adagio','Larghetto','Lento','Andante','Andante sostenuto','Andante con espressione','Moderato','Moderato e cantabile','Allegretto','Allegretto con moto','Allegro','Allegro moderato','Allegro grazioso','Allegro giocoso','Allegro risoluto','Vivace','Con moto'],
 };
-// chords as box scale-step indices (0=tonic..4=fifth). bass = LH root index.
+// chords as scale-step indices (0=tonic..). bass = LH root index. CH = five-finger-safe (Grade 2).
 const CH = {
   maj:{ I:{t:[0,2,4],b:0}, ii:{t:[1,3],b:1}, iii:{t:[2,4],b:2}, V:{t:[4,1],b:4} },
   min:{ i:{t:[0,2,4],b:0}, iv:{t:[3,0],b:3}, v:{t:[4,1],b:4} },
+};
+// extra chords for Grade 3+ (out of the five-finger box) — richer harmony, root kept lowest
+const CH_EXTRA = {
+  maj:{ IV:{t:[3,5,7],b:3}, vi:{t:[5,7],b:5} },
+  min:{ iv:{t:[3,5,7],b:3}, III:{t:[2,4,6],b:2}, VI:{t:[5,7],b:5} },
 };
 const PROG = {
   maj:{4:[['I','V','I','I'],['I','ii','V','I'],['I','iii','V','I'],['I','V','ii','I']],
@@ -123,14 +128,18 @@ function buildCandidate(grade){
   const cad = cadenceFigure(barU, beatLen, compound);   // this piece's cadence, drawn from the pool
   // the MIDPOINT is pooled, not fixed: half cadence (V) / imperfect cadence (I) / continuous (no midpoint stop)
   const midType = rnd(['HC','HC','HC','IAC','continuous','continuous']);
-  const Tn = mode==='maj' ? {I:'I',V:'V',pre:['ii','iii']} : {I:'i',V:'v',pre:['iv']};
+  const CHm = wide ? {...CH[mode], ...CH_EXTRA[mode]} : CH[mode];   // richer chord set for Grade 3+
+  const Tn = mode==='maj' ? {I:'I',V:'V'} : {I:'i',V:'v'};
+  // inner bars MOVE through non-tonic harmony (no clumps of I) — the tonic frames the piece, it doesn't fill it
+  const moves = mode==='maj' ? (wide?['ii','iii','IV','V','vi']:['ii','iii','V']) : (wide?['iv','v','III','VI']:['iv','v']);
+  const moveChord = prev => { let p,t=0; do{ p=rnd(moves); t++; }while(p===prev && t<8); return p; };
   const prog=[];
   for(let b=0;b<nbars;b++){
     if(b===0) prog.push(Tn.I);
     else if(restate && b===half) prog.push(Tn.I);                    // consequent restates over the tonic
-    else if(b===half-1) prog.push(midType==='HC'?Tn.V : midType==='IAC'?Tn.I : rnd([Tn.I,...Tn.pre,Tn.V]));
+    else if(b===half-1) prog.push(midType==='HC'?Tn.V : midType==='IAC'?Tn.I : moveChord(prog[b-1]));
     else if(b===nbars-1) prog.push(Tn.I);                            // final bar = the cadence figure
-    else prog.push(rnd([Tn.I, ...Tn.pre, Tn.V]));
+    else prog.push(moveChord(prog[b-1]));                            // genuinely moving inner harmony
   }
 
   // pick LH texture (favour broken a touch so articulated pieces are possible; longer grades lean calmer)
@@ -139,7 +148,7 @@ function buildCandidate(grade){
 
   // ---- MELODY as a PARALLEL PERIOD: phrase A ends inconclusive (half cadence); phrase B RESTATES
   //      phrase A's opening bar, then drives stepwise to the tonic (perfect cadence). (research ww807c61l) ----
-  const ctones = c => wide ? [...CH[mode][c].t, ...CH[mode][c].t.map(x=>x+7).filter(x=>x<=span)] : CH[mode][c].t;
+  const ctones = c => wide ? [...CHm[c].t, ...CHm[c].t.map(x=>x+7).filter(x=>x<=span)] : CHm[c].t;
   const contour = wide ? genContour(nbars,span) : rnd(CONTOURS[nbars]||CONTOURS[4]);
   const strong = prog.map((c,b)=> near(ctones(c), contour[b]));
   const degOf = m => off.indexOf(m-rhTonic);
@@ -169,7 +178,7 @@ function buildCandidate(grade){
   const lh=[];
   // every texture below uses ONLY beat-aligned note values (beatLen = crotchet, or dotted-crotchet in compound)
   prog.forEach((c,b)=>{
-    const ch=CH[mode][c], root=ch.b;
+    const ch=CHm[c], root=ch.b;
     if(b===nbars-1){ cad.lh.forEach(([idx,d])=>lh.push({m:lhTonic+off[idx], d})); return; } // cadence figure from the pool
     // keep the ROOT lowest in every voicing (no held 6/4). For V (root at the box top) this means the
     // texture naturally collapses to a repeated/held root, which is fine and idiomatic.
@@ -188,9 +197,10 @@ function buildCandidate(grade){
 
   // ---- EXPRESSION ENGINE: character-matched, contour-aware, and varied per piece ----
   const tempo = rnd(TEMPI[grade]);
-  const prof = /cantabile|sostenuto|espress/.test(tempo) ? 'legato'
-             : /grazioso/.test(tempo) ? 'graceful'
-             : /scherz|giocoso|comodo/.test(tempo) ? 'light'
+  const tl = tempo.toLowerCase();
+  const prof = /cantabile|sostenuto|espress|dolce|tranquillo|semplice|adagio|larghetto|lento/.test(tl) ? 'legato'
+             : /grazioso/.test(tl) ? 'graceful'
+             : /scherz|giocoso|leggiero|vivace|comodo|risoluto|brio/.test(tl) ? 'light'
              : rnd(['legato','graceful','light','plain','plain']);
   // dynamic level matched to character (soft for cantabile, fuller for lively)
   rh[0].dyn = rnd(prof==='legato'?(wide?['pp','p','mp']:['p','mp']) : prof==='light'?['mp','mf',grade>2?'f':'mf'] : wide?['pp','p','mp','mf']:['p','mp','mf']);

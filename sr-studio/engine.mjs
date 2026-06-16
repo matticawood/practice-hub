@@ -108,6 +108,7 @@ export function validate(ex){
 export function toLily(ex, withNumber=true){
   const v=validate(ex);
   const mode=ex.mode==='maj'?'major':'minor';
+  const key=ex.key.length>1 ? ex.key[0]+(ex.key[1]==='f'?'es':ex.key[1]==='s'?'is':ex.key[1]) : ex.key; // bf->bes, ef->ees
   const noteLy=n=>{
     if(n.rest) return 'r'+durLy(n.d);
     const pitch=Array.isArray(n.m)? '<'+n.m.map(x=>midiToLy(x,ex.flat)).join(' ')+'>' : midiToLy(n.m,ex.flat);
@@ -120,8 +121,8 @@ export function toLily(ex, withNumber=true){
   return `\\score {
   \\new PianoStaff <<
     ${name}
-    \\new Staff { \\set fingeringOrientations = #'(up) \\tempo "${ex.tempo}" \\key ${ex.key} \\${mode} \\time ${ex.time} ${partial}${voice(ex.rh,v.rhF)} \\bar "|." }
-    \\new Staff { \\clef bass \\set fingeringOrientations = #'(down) \\override Fingering.direction = #DOWN \\override Fingering.staff-padding = #1.4 \\key ${ex.key} \\${mode} \\time ${ex.time} ${partial}${voice(ex.lh,v.lhF)} \\bar "|." }
+    \\new Staff { \\set fingeringOrientations = #'(up) \\tempo "${ex.tempo}" \\key ${key} \\${mode} \\time ${ex.time} ${partial}${voice(ex.rh,v.rhF)} \\bar "|." }
+    \\new Staff { \\clef bass \\set fingeringOrientations = #'(down) \\override Fingering.direction = #DOWN \\override Fingering.staff-padding = #1.4 \\key ${key} \\${mode} \\time ${ex.time} ${partial}${voice(ex.lh,v.lhF)} \\bar "|." }
   >>
 }`;
 }
