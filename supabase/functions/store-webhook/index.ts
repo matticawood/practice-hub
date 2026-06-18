@@ -4,7 +4,7 @@
 // Deploy with --no-verify-jwt (Stripe calls it with no JWT). Needs its own Stripe
 // webhook endpoint + STORE_WEBHOOK_SECRET.
 import { STORE } from "../_shared/store-catalog.ts";
-import { brandedEmail, ic, sendEmail } from "../_shared/branded-email.ts";
+import { brandedEmail, ic, sendEmail, logEmail } from "../_shared/branded-email.ts";
 
 const STORE_WEBHOOK_SECRET = Deno.env.get("STORE_WEBHOOK_SECRET") || "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
@@ -47,6 +47,13 @@ Deno.serve(async (req) => {
   const session = event.data.object;
   const meta = session.metadata || {};
   if (meta.type !== "store") return new Response("ignored", { status: 200 });
+  // Only deliver once the payment has actually cleared. For cards "completed" already
+  // means paid; this guards delayed/async methods (BNPL, bank debits) that can complete
+  // the session while still unpaid, so a failed/pending payment never gets the product.
+  if (session.payment_status && session.payment_status !== "paid") {
+    console.log("store-webhook: not paid yet, skipping delivery", session.id, session.payment_status);
+    return new Response("ok", { status: 200 });
+  }
 
   const email = (session.customer_details?.email || session.customer_email || "").toLowerCase();
   const slug  = meta.slug;
@@ -63,6 +70,7 @@ Deno.serve(async (req) => {
     body: JSON.stringify({
       stripe_session_id: session.id, email, slug, kind: item.type,
       amount_minor: session.amount_total ?? null, currency: session.currency ?? null,
+      vid: session.client_reference_id ?? null,
     }),
   });
   if (!ins.ok) { console.error("store_orders insert failed:", ins.status, await ins.text()); return new Response("ok", { status: 200 }); }
@@ -93,7 +101,7 @@ Deno.serve(async (req) => {
   const ctaHref    = isCourse ? `${BRAND}/store/learn/?t=${token}` : `${FN_BASE}/store-access?token=${token}`;
   const reviewHref = `${BRAND}/store/${slug}/#reviews`;
   const paid = `${((session.amount_total || 0) / 100).toFixed(2)} ${(session.currency || "gbp").toUpperCase()}`;
-  await sendEmail({
+  const deliverId = await sendEmail({
     apiKey: RESEND_API_KEY, from: FROM, to: email, replyTo: REPLY_TO,
     subject: isCourse ? `Your course access: ${item.title}` : `Your download: ${item.title}`,
     html: brandedEmail({
@@ -114,6 +122,8 @@ Deno.serve(async (req) => {
       footerNote: "Matthew Cawood · Store",
     }),
   });
+
+  await logEmail(SUPABASE_URL, SERVICE_KEY, { email, campaign: "store-delivery", resend_id: deliverId, meta: { slug, kind: item.type } });
 
   // ── Notify Matt ──
   await sendEmail({

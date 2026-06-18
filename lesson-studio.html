@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark">
 <title>Lesson Studio · The Practice Room</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="/lessons-render.js?v=3"></script>
+<script src="/lessons-render.js?v=5"></script>
 <style>
   :root { --bg:#0f0f0f; --panel:#1a1a1a; --border:#2e2e2e; --ink:#f0f0f0; --mut:#888888; --gold:#F5C518; --accent:#F5C518; }
   * { box-sizing:border-box; }
@@ -52,6 +52,39 @@
   label { display:block; font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:11px 0 4px; }
   input[type=text], input[type=number], textarea, select { width:100%; background:#141414; border:1px solid var(--border); border-radius:8px; color:var(--ink); padding:8px 10px; font-size:.85rem; font-family:inherit; resize:vertical; }
   input:focus, textarea:focus, select:focus { outline:none; border-color:var(--accent); }
+  /* ── Inline editor: big cream preview, hover edit, dark side drawer ── */
+  .ie-grid { display:grid; grid-template-columns:1fr 0px; gap:0; transition:grid-template-columns .18s; align-items:start; }
+  .ie-grid.drawer-open { grid-template-columns:1fr 372px; }
+  .ie-main { min-width:0; }
+  .ie-page { background:#faf7f3; border-radius:12px; padding:24px 22px; margin:10px 0; color:#1a1410;
+    --text:#1a1410; --accent:#f5c518; --accent-dark:#9a6f12; --border:#e3e1e6; --surface:#fff; --surface-2:#f5f2ee; --text-muted:#8a7868; }
+  .ie-blk { position:relative; border-radius:8px; }
+  .ie-blk:hover { box-shadow:0 0 0 2px var(--gold); }
+  .ie-blk.ie-active { box-shadow:0 0 0 2px var(--gold); }
+  .ie-tools { position:absolute; top:3px; right:3px; display:none; gap:2px; background:#1a1a1a; border:1px solid #2e2e2e;
+    border-radius:8px; padding:2px; box-shadow:0 3px 10px rgba(0,0,0,.45); z-index:5; }
+  .ie-blk:hover > .ie-tools { display:flex; }
+  .ie-tools button { border:none; background:transparent; cursor:pointer; font-size:.78rem; line-height:1; padding:4px 6px; border-radius:5px; color:#cfcfcf; }
+  .ie-tools button:hover { background:#2e2e2e; color:#fff; }
+  .ie-tools .ie-edit { color:var(--gold); font-weight:700; }
+  .ie-add { height:12px; margin:-6px 0; position:relative; cursor:pointer; }
+  .ie-add::before { content:""; position:absolute; left:8px; right:8px; top:50%; border-top:2px dashed transparent; }
+  .ie-add:hover::before { border-top-color:var(--gold); }
+  .ie-add::after { content:"+"; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:17px; height:17px;
+    border-radius:50%; background:var(--gold); color:#1a1410; font-weight:700; font-size:.72rem; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .12s; }
+  .ie-add:hover::after { opacity:1; }
+  .ie-drawer { overflow:auto; background:var(--panel); border-left:1px solid var(--border); min-width:0; align-self:stretch; border-radius:0 12px 12px 0; max-height:82vh; position:sticky; top:14px; }
+  .ie-grid:not(.drawer-open) .ie-drawer { display:none; }
+  .ie-dhead { position:sticky; top:0; background:var(--panel); display:flex; align-items:center; gap:8px; padding:11px 13px; border-bottom:1px solid var(--border); z-index:2; }
+  .ie-dhead b { font-size:.82rem; flex:1; text-transform:capitalize; }
+  .ie-dbody { padding:12px 13px; }
+  .ie-dbody .blk { margin-bottom:0; }
+  .ie-tools .ie-ai-tool { color:var(--gold); font-weight:800; font-size:.66rem; letter-spacing:.04em; }
+  .ie-ai { margin-top:12px; border-top:1px dashed var(--border); padding-top:12px; }
+  .ie-ai-h { font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--gold); margin-bottom:6px; }
+  .ie-ai textarea { min-height:60px; font-size:.82rem; }
+  .ie-ai-row { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .ie-ai-row .status { font-size:.74rem; }
   textarea { min-height:70px; line-height:1.5; }
   .row { display:flex; gap:10px; flex-wrap:wrap; }
   .row > * { flex:1; min-width:120px; }
@@ -212,6 +245,8 @@ const state = {
   list: [],          // lessons in current course+level
   lesson: null,      // the lesson being edited (working copy)
   dirty: false,
+  inlineMode: false, // big-preview inline editing (vs the classic list editor)
+  ieIndex: null,     // which block's editor is open in the inline side drawer
 };
 
 function renderCourseTabs() {
@@ -290,7 +325,7 @@ function blockDefault(type) {
   switch (type) {
     case "heading":   return { type, text: "", size: 2 };
     case "text":      return { type, md: "" };
-    case "callout":   return { type, style: "key", md: "" };
+    case "callout":   return { type, style: "key", label: "", md: "" };
     case "example":   return { type, title: "", md: "" };
     case "image":     return { type, url: "", alt: "", caption: "" };
     case "audio":     return { type, url: "", caption: "" };
@@ -352,6 +387,7 @@ function normalizeQuestion(q) {
 // ── Editor render ─────────────────────────────────────────────
 const CALLOUT_STYLES = ["key","tip","note","watch"];
 function renderEditor() {
+  if (state.inlineMode) return renderInlineEditor();
   document.getElementById("editor-empty").style.display = "none";
   const pane = document.getElementById("editor-pane");
   pane.style.display = "block";
@@ -363,6 +399,7 @@ function renderEditor() {
       <span class="badge ${L.status === "published" ? "b-ready" : "b-draft"}">${L.status === "published" ? "Published" : "Draft"}</span>
       <span class="sp" style="flex:1"></span>
       <button class="btn btn-sm btn-gold" id="full-preview">⤢ Full preview</button>
+      <button class="btn btn-sm" id="inline-edit">✎ Inline edit</button>
       <button class="btn btn-sm" id="toggle-preview">${state.previewHidden ? "Show preview" : "Hide preview"}</button>
       ${L.id ? `<button class="btn btn-sm btn-danger" id="del-lesson">Delete lesson</button>` : ""}
     </div>
@@ -463,6 +500,7 @@ function renderEditor() {
     if (!state.previewHidden) refreshPreview();
   };
   document.getElementById("full-preview").onclick = openFullPreview;
+  document.getElementById("inline-edit").onclick = () => { state.inlineMode = true; state.ieIndex = null; renderEditor(); };
 
   refreshPreview();
 }
@@ -486,10 +524,12 @@ function renderBlockEditor(b, i) {
   } else if (b.type === "text") {
     fields = `<textarea class="js-bf" data-i="${i}" data-f="md" placeholder="Body text. Markdown: **bold**, *italic*, \`code\`, [link](url), - lists">${escapeHtml(b.md)}</textarea>`;
   } else if (b.type === "callout") {
-    fields = `<label>Style</label>
+    fields = `<div class="row"><div><label>Style</label>
       <select class="js-bf" data-i="${i}" data-f="style">
         ${CALLOUT_STYLES.map(s => `<option value="${s}" ${b.style === s ? "selected" : ""}>${s}</option>`).join("")}
-      </select>
+      </select></div>
+      <div><label>Label (optional, overrides the style label)</label>
+      <input type="text" class="js-bf" data-i="${i}" data-f="label" placeholder="e.g. In this lesson" value="${escapeAttr(b.label || "")}"></div></div>
       <textarea class="js-bf" data-i="${i}" data-f="md" placeholder="Callout text">${escapeHtml(b.md)}</textarea>`;
   } else if (b.type === "example") {
     fields = `<input type="text" class="js-bf" data-i="${i}" data-f="title" placeholder="Example title (optional)" value="${escapeAttr(b.title || "")}">
@@ -684,11 +724,212 @@ let _pvTimer = null;
 function refreshPreview() {
   clearTimeout(_pvTimer);
   _pvTimer = setTimeout(() => {
+    if (state.inlineMode) {
+      // live edits update just the open block; structural changes re-render fully
+      if (state.ieIndex != null) updateIeBlock(state.ieIndex);
+      else renderIeRender();
+      return;
+    }
     const host = document.getElementById("preview");
     if (!host || !window.LessonRender) return;
     host.innerHTML = LessonRender.html(cleanBlocksForRender(state.lesson.blocks));
     try { LessonRender.init(host, {}); } catch (e) {}
   }, 180);
+}
+
+// ── Inline editor: a big, member-accurate preview where each block has a hover
+// toolbar; clicking edit opens that block's existing editor form in a side drawer
+// (reusing renderBlockEditor + bindBlockEditors so there is no duplicate logic). ──
+const ADD_TYPE_OPTIONS = `
+  <option value="heading">Heading</option><option value="text" selected>Text</option>
+  <option value="callout">Callout</option><option value="example">Example</option>
+  <option value="image">Image</option><option value="audio">Audio</option>
+  <option value="play">Play (piano sound)</option><option value="keyboard">Interactive keyboard</option>
+  <option value="notation">Notation (stave)</option><option value="video">Video (Mux)</option>
+  <option value="download">Download</option><option value="task">Task</option>
+  <option value="questions">Questions / quiz</option><option value="divider">Divider</option>`;
+
+function renderInlineEditor() {
+  document.getElementById("editor-empty").style.display = "none";
+  const pane = document.getElementById("editor-pane");
+  pane.style.display = "block";
+  const L = state.lesson;
+  pane.innerHTML = `
+    <div class="toolbar">
+      <strong style="font-size:.95rem">${L.id ? "Edit lesson" : "New lesson"}</strong>
+      <span class="badge ${L.status === "published" ? "b-ready" : "b-draft"}">${L.status === "published" ? "Published" : "Draft"}</span>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn btn-sm btn-gold" id="full-preview">⤢ Full preview</button>
+      <button class="btn btn-sm" id="list-edit">▤ List view</button>
+      ${L.id ? `<button class="btn btn-sm btn-danger" id="del-lesson">Delete lesson</button>` : ""}
+    </div>
+    <div class="ai-bar">
+      <div style="font-weight:700;font-size:.82rem;margin-bottom:8px">AI draft</div>
+      <div class="ai-row">
+        <div><label>Topic for this lesson</label>
+          <input type="text" id="ai-topic" placeholder="e.g. Reading the treble clef, note names C to G"></div>
+        <button class="btn btn-gold" id="ai-draft">Draft whole lesson</button>
+      </div>
+      <div class="hint">Drafts a complete ${COURSE_LABEL[L.course]} lesson for level ${L.level} and replaces the blocks below.</div>
+      <div class="status" id="ai-status"></div>
+    </div>
+    <div class="row" style="margin-bottom:6px">
+      <div><label>Title</label><input type="text" class="js-meta" data-field="title" value="${escapeAttr(L.title)}"></div>
+      <div style="max-width:150px"><label>Summary</label><input type="text" class="js-meta" data-field="summary" value="${escapeAttr(L.summary || "")}"></div>
+      <div style="max-width:110px"><label>Minutes</label><input type="number" class="js-meta" data-field="est_minutes" value="${L.est_minutes || 10}" min="1" max="120"></div>
+      <div style="max-width:130px"><label>Status</label>
+        <select class="js-meta" data-field="status">
+          <option value="draft" ${L.status === "draft" ? "selected" : ""}>Draft</option>
+          <option value="published" ${L.status === "published" ? "selected" : ""}>Published</option>
+        </select></div>
+    </div>
+    <div class="hint" style="margin:2px 0 6px">Hover any block for its edit, move and delete controls. Hover between blocks to insert.</div>
+    <div class="ie-grid" id="ie-grid">
+      <div class="ie-main">
+        <div id="ie-render" class="ie-page"></div>
+        <div class="addbar"><select id="add-type">${ADD_TYPE_OPTIONS}</select><button class="btn btn-sm" id="add-block">+ Add block at end</button></div>
+        <div class="sticky-save"><button class="btn btn-gold" id="save-lesson">Save</button><span class="status" id="save-status">${state.dirty ? "Unsaved changes" : ""}</span></div>
+      </div>
+      <aside class="ie-drawer" id="ie-drawer"></aside>
+    </div>`;
+
+  pane.querySelectorAll(".js-meta").forEach(inp => inp.oninput = () => {
+    const f = inp.dataset.field;
+    L[f] = (f === "est_minutes") ? (parseInt(inp.value, 10) || null) : inp.value;
+    markDirty();
+    if (f === "status") {
+      const bd = pane.querySelector(".toolbar .badge");
+      bd.className = "badge " + (L.status === "published" ? "b-ready" : "b-draft");
+      bd.textContent = L.status === "published" ? "Published" : "Draft";
+    }
+  });
+  document.getElementById("add-block").onclick = () => {
+    L.blocks.push(blockDefault(document.getElementById("add-type").value));
+    state.ieIndex = L.blocks.length - 1; markDirty(); renderEditor();
+  };
+  document.getElementById("save-lesson").onclick = saveLesson;
+  document.getElementById("ai-draft").onclick = aiDraftLesson;
+  if (L.id) document.getElementById("del-lesson").onclick = deleteLesson;
+  document.getElementById("full-preview").onclick = openFullPreview;
+  document.getElementById("list-edit").onclick = () => { state.inlineMode = false; state.ieIndex = null; renderEditor(); };
+
+  renderIeRender();
+  if (state.ieIndex != null && L.blocks[state.ieIndex]) openIeDrawer(state.ieIndex);
+}
+
+function renderIeRender() {
+  const host = document.getElementById("ie-render");
+  if (!host || !window.LessonRender) return;
+  host.innerHTML = LessonRender.html(cleanBlocksForRender(state.lesson.blocks));
+  try { LessonRender.init(host, {}); } catch (e) {}
+  const body = host.querySelector(".lr-body");
+  if (!body) return;
+  const kids = Array.from(body.children);
+  // a top insert affordance
+  const top = document.createElement("div"); top.className = "ie-add"; top.dataset.after = -1;
+  body.insertBefore(top, body.firstChild);
+  kids.forEach((el, i) => {
+    const w = document.createElement("div"); w.className = "ie-blk"; w.dataset.bi = i;
+    body.insertBefore(w, el); w.appendChild(el);
+    w.insertAdjacentHTML("afterbegin",
+      `<div class="ie-tools">
+        <button class="ie-edit" data-act="edit" title="Edit">✎</button>
+        <button class="ie-ai-tool" data-act="ai" title="Improve with AI">AI</button>
+        <button data-act="up" title="Move up">↑</button>
+        <button data-act="down" title="Move down">↓</button>
+        <button data-act="del" title="Delete">✕</button>
+      </div>`);
+    const add = document.createElement("div"); add.className = "ie-add"; add.dataset.after = i;
+    body.insertBefore(add, w.nextSibling);
+  });
+  body.querySelectorAll(".ie-tools button").forEach(btn => btn.onclick = (e) => {
+    e.stopPropagation();
+    const i = +btn.closest(".ie-blk").dataset.bi, act = btn.dataset.act;
+    if (act === "edit") openIeDrawer(i);
+    else if (act === "ai") openIeDrawer(i, true);
+    else if (act === "up") { state.ieIndex = null; moveBlock(i, -1); }
+    else if (act === "down") { state.ieIndex = null; moveBlock(i, 1); }
+    else if (act === "del") { if (confirm("Delete this block?")) { state.lesson.blocks.splice(i, 1); state.ieIndex = null; markDirty(); renderEditor(); } }
+  });
+  body.querySelectorAll(".ie-add").forEach(a => a.onclick = () => {
+    const after = +a.dataset.after;
+    state.lesson.blocks.splice(after + 1, 0, blockDefault("text"));
+    state.ieIndex = after + 1; markDirty(); renderEditor();
+  });
+  if (state.ieIndex != null) {
+    const act = body.querySelector(`.ie-blk[data-bi="${state.ieIndex}"]`);
+    if (act) act.classList.add("ie-active");
+  }
+}
+
+// the drawer body = the block's editor form + a per-block "Improve with AI" prompt
+function ieDrawerBody(i) {
+  return renderBlockEditor(state.lesson.blocks[i], i) +
+    `<div class="ie-ai">
+       <div class="ie-ai-h">Improve this block with AI</div>
+       <textarea id="ie-ai-prompt" placeholder="Tell the AI how to change this block, e.g. explain it more simply, add a worked example on the keyboard, make it shorter, fix the notation"></textarea>
+       <div class="ie-ai-row"><button class="btn btn-gold btn-sm" id="ie-ai-go">Improve</button><span class="status" id="ie-ai-status"></span></div>
+     </div>`;
+}
+
+function bindIeDrawer(i) {
+  bindBlockEditors();   // scoped to #editor-pane, so it wires the drawer's block fields
+  const close = document.getElementById("ie-dclose");
+  if (close) close.onclick = closeIeDrawer;
+  const go = document.getElementById("ie-ai-go");
+  if (go) go.onclick = async () => {
+    const ta = document.getElementById("ie-ai-prompt");
+    const st = document.getElementById("ie-ai-status");
+    const instruction = (ta.value || "").trim();
+    if (!instruction) { st.textContent = "Write an instruction first."; st.className = "status err"; ta.focus(); return; }
+    go.disabled = true; st.textContent = "Improving…"; st.className = "status";
+    try {
+      if (await aiImproveBlock(i, instruction)) {
+        updateIeBlock(i);
+        document.getElementById("ie-dbody").innerHTML = ieDrawerBody(i);
+        bindIeDrawer(i);
+        const s2 = document.getElementById("ie-ai-status");
+        s2.textContent = "Improved. Review the block, then Save."; s2.className = "status ok";
+      } else { st.textContent = "No change returned. Try rewording."; st.className = "status err"; go.disabled = false; }
+    } catch (e) { st.textContent = "Failed: " + e.message; st.className = "status err"; go.disabled = false; }
+  };
+}
+
+function openIeDrawer(i, focusAi) {
+  const L = state.lesson;
+  if (!L.blocks[i]) return;
+  state.ieIndex = i;
+  const drawer = document.getElementById("ie-drawer"), grid = document.getElementById("ie-grid");
+  drawer.innerHTML =
+    `<div class="ie-dhead"><b>${L.blocks[i].type}</b><button class="btn btn-sm" id="ie-dclose">Close</button></div>` +
+    `<div class="ie-dbody" id="ie-dbody">${ieDrawerBody(i)}</div>`;
+  bindIeDrawer(i);
+  grid.classList.add("drawer-open");
+  document.querySelectorAll(".ie-blk.ie-active").forEach(e => e.classList.remove("ie-active"));
+  const act = document.querySelector(`.ie-blk[data-bi="${i}"]`);
+  if (act) act.classList.add("ie-active");
+  if (focusAi) { const ta = document.getElementById("ie-ai-prompt"); if (ta) { ta.scrollIntoView({ block: "center" }); ta.focus(); } }
+}
+
+function closeIeDrawer() {
+  state.ieIndex = null;
+  const grid = document.getElementById("ie-grid"), d = document.getElementById("ie-drawer");
+  if (grid) grid.classList.remove("drawer-open");
+  if (d) d.innerHTML = "";
+  document.querySelectorAll(".ie-blk.ie-active").forEach(e => e.classList.remove("ie-active"));
+}
+
+// re-render just one block's preview in place (keeps its hover toolbar)
+function updateIeBlock(i) {
+  const w = document.querySelector(`.ie-blk[data-bi="${i}"]`);
+  if (!w) { renderIeRender(); return; }
+  const tools = w.querySelector(".ie-tools");
+  const tmp = document.createElement("div");
+  tmp.innerHTML = LessonRender.html([cleanBlocksForRender(state.lesson.blocks)[i]]);
+  try { LessonRender.init(tmp, {}); } catch (e) {}
+  const fresh = tmp.querySelector(".lr-body") ? tmp.querySelector(".lr-body").firstElementChild : null;
+  Array.from(w.children).forEach(c => { if (c !== tools) c.remove(); });
+  if (fresh) w.appendChild(fresh);
 }
 // drop empty mcq option lines so the preview looks right while typing
 function cleanBlocksForRender(blocks) {
@@ -822,7 +1063,7 @@ async function aiDraftLesson() {
     const objectives = Array.isArray(outline.objectives) ? outline.objectives.filter(Boolean) : [];
     if (objectives.length) {
       blocks.push({ type: "heading", text: "What you'll learn", size: 2 });
-      blocks.push({ type: "callout", style: "key", md: objectives.map(o => "- " + o).join("\n") });
+      blocks.push({ type: "callout", style: "key", label: "In this lesson", md: objectives.map(o => "- " + o).join("\n") });
     }
     for (let i = 0; i < sections.length; i++) {
       setAiStatus(`Writing section ${i + 1} of ${sections.length}: ${sections[i].heading}…`);
@@ -853,22 +1094,33 @@ async function aiDraftLesson() {
   }
 }
 
-async function aiRefineBlock(i) {
+// Core: send one block + a written instruction to the AI's "block" mode and
+// replace it with the rewrite. Returns true if the block changed.
+async function aiImproveBlock(i, instruction) {
   const L = state.lesson;
+  const out = await aiStream({ mode: "block", course: L.course, level: L.level, block: L.blocks[i], instruction });
+  if (out && out.block) {
+    L.blocks[i] = normalizeBlocks([out.block])[0] || L.blocks[i];
+    markDirty();
+    return true;
+  }
+  return false;
+}
+
+// Classic list editor: the per-block "AI" button (uses a native prompt).
+async function aiRefineBlock(i) {
   const instruction = prompt("How should I change this block?\n(e.g. \"explain it more simply\", \"add a worked example\", \"make it shorter\")");
   if (!instruction) return;
   const st = document.getElementById("save-status");
-  if (st) { st.textContent = "Refining block…"; st.className = "status"; }
+  if (st) { st.textContent = "Improving block…"; st.className = "status"; }
   try {
-    const out = await aiStream({ mode: "block", course: L.course, level: L.level, block: L.blocks[i], instruction });
-    if (out && out.block) {
-      L.blocks[i] = normalizeBlocks([out.block])[0] || L.blocks[i];
-      markDirty(); renderEditor();
-      document.getElementById("save-status").textContent = "Block refined. Review and Save.";
-      document.getElementById("save-status").className = "status ok";
-    }
+    if (await aiImproveBlock(i, instruction)) {
+      renderEditor();
+      const s = document.getElementById("save-status");
+      if (s) { s.textContent = "Block improved. Review and Save."; s.className = "status ok"; }
+    } else if (st) { st.textContent = "No change returned."; st.className = "status err"; }
   } catch (e) {
-    if (st) { st.textContent = "Refine failed: " + e.message; st.className = "status err"; }
+    if (st) { st.textContent = "Improve failed: " + e.message; st.className = "status err"; }
   }
 }
 

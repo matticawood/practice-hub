@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const { slug, pageUrl, currency: reqCur } = await req.json();
+    const { slug, pageUrl, currency: reqCur, vid } = await req.json();
     const item = slug ? STORE[slug] : undefined;
     if (!item)          return json({ error: "Unknown product" }, 400);
     if (item.price <= 0) return json({ error: "This product is free" }, 400);
@@ -77,13 +77,16 @@ Deno.serve(async (req) => {
     params.set("line_items[0][price_data][currency]", cur);
     params.set("line_items[0][price_data][unit_amount]", String(amount));
     params.set("line_items[0][price_data][product_data][name]", item.title);
+    // NOTE: do NOT set product_data.images — on a Checkout Session a line-item image
+    // takes the header slot and suppresses the account logo. Leaving it off so the
+    // M-logo + brand colour show (matches the booking checkout).
     params.set("line_items[0][quantity]", "1");
-    // Collect the buyer's email at Stripe so delivery can reach them.
-    params.set("customer_creation", "always");
     params.set("metadata[type]",  "store");
     params.set("metadata[slug]",  slug);
     params.set("metadata[kind]",  item.type);
     params.set("metadata[title]", item.title);
+    // Thread the cookieless visitor id through to the webhook for funnel stitching.
+    if (vid) params.set("client_reference_id", String(vid).slice(0, 200));
 
     const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",

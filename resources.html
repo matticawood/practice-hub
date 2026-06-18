@@ -1610,7 +1610,7 @@
   </div><!-- /panel-theory -->
 
   <!-- Piece detail modal -->
-  <div id="piece-modal-overlay" class="piece-modal-overlay" onclick="closePieceModal()">
+  <div id="piece-modal-overlay" class="piece-modal-overlay" onclick="pieceModalDismiss()">
     <div class="piece-modal" onclick="event.stopPropagation()">
       <div id="piece-modal-inner"></div>
     </div>
@@ -2069,12 +2069,9 @@ document.getElementById("lib-diff-chips").addEventListener("click", function(e) 
   _libRenderActive();
 });
 
-// Library sub-tab switching
-document.getElementById("lib-sub-tab-bar").addEventListener("click", function(e) {
-  const btn = e.target.closest(".sub-tab[data-lib-sub]");
-  if (!btn) return;
-  const sub = btn.dataset.libSub;
-  document.querySelectorAll(".sub-tab[data-lib-sub]").forEach(function(b) { b.classList.toggle("active", b === btn); });
+// Apply a library sub-tab (All Pieces / Books / My Collection) without touching history.
+function _applyLibSub(sub) {
+  document.querySelectorAll(".sub-tab[data-lib-sub]").forEach(function(b) { b.classList.toggle("active", b.dataset.libSub === sub); });
   requestAnimationFrame(_plSlideUnderline);
   document.getElementById("panel-lib-all").style.display        = sub === "all"        ? "" : "none";
   document.getElementById("panel-lib-books").style.display      = sub === "books"      ? "" : "none";
@@ -2088,10 +2085,24 @@ document.getElementById("lib-sub-tab-bar").addEventListener("click", function(e)
   if (sub === "collection" && !_collectionLoaded) loadCollection();
   if (sub === "books") { if (!_libraryLoaded) loadLibrary(); else renderBooksLibrary(); }
   if (sub === "all") renderLibrary();
+}
+
+// Library sub-tab switching — push a history entry on real change so swipe-back
+// steps back through the sub-tabs (?lib=books|collection; All = canonical URL).
+document.getElementById("lib-sub-tab-bar").addEventListener("click", function(e) {
+  const btn = e.target.closest(".sub-tab[data-lib-sub]");
+  if (!btn) return;
+  const sub = btn.dataset.libSub;
+  _applyLibSub(sub);
+  const _url = sub && sub !== "all" ? "/resources.html?lib=" + sub : "/resources.html";
+  if (location.pathname + location.search !== _url) history.pushState(null, "", _url);
+  else history.replaceState(null, "", _url);
+  if (window._shUpdateNav) window._shUpdateNav("resources");
 });
 
 // ── Piece modal ───────────────────────────────────────────────────────────────
-function showPieceModal(pieceId) {
+let _piecePushed = false;
+function showPieceModal(pieceId, skipPush) {
   let piece = findAnyLibPiece(pieceId);
   if (!piece && myCollection[pieceId]) piece = myCollection[pieceId];
   if (!piece) return;
@@ -2108,7 +2119,7 @@ function showPieceModal(pieceId) {
   const coverMono = escHtml((((piece.composer || piece.title || '?').trim().charAt(0)) || '?').toUpperCase());
   document.getElementById('piece-modal-inner').innerHTML =
     '<div class="pm-cover" style="--c:' + coverColor + '">' +
-      '<button class="pm-close" onclick="closePieceModal()">&times;</button>' +
+      '<button class="pm-close" onclick="pieceModalDismiss()">&times;</button>' +
       '<span class="pm-cover-mono" aria-hidden="true">' + coverMono + '</span>' +
       '<div class="pm-cover-eyebrow">' + escHtml(coverEyebrow) + '</div>' +
     '</div>' +
@@ -2133,16 +2144,25 @@ function showPieceModal(pieceId) {
 
   document.getElementById('piece-modal-overlay').classList.add('open');
   document.body.style.overflow = 'hidden';
+  if (!skipPush) { history.pushState({ resPiece: pieceId }, ""); _piecePushed = true; }
 }
 
 function closePieceModal() {
   document.getElementById('piece-modal-overlay').classList.remove('open');
   document.body.style.overflow = '';
+  _piecePushed = false;
+}
+
+// Dismiss via X / overlay / Escape: step back through history so swipe-back
+// closes the modal (and the pushed entry is consumed), unless it was deep-linked.
+function pieceModalDismiss() {
+  if (_piecePushed) history.back();   // popstate handler closes the modal
+  else closePieceModal();
 }
 
 // Close on Escape key
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closePieceModal();
+  if (e.key === 'Escape') pieceModalDismiss();
 });
 
 // Delegated handler for modal collection buttons
@@ -4755,7 +4775,7 @@ function _revealLibraryAdmin() {
     let _pTries = 0;
     (function _openPieceWhenReady() {
       if (findAnyLibPiece(pieceParam) || (myCollection && myCollection[pieceParam])) {
-        try { showPieceModal(pieceParam); } catch (e) {}
+        try { showPieceModal(pieceParam, true); } catch (e) {}
       } else if (_pTries++ < 30) {
         setTimeout(_openPieceWhenReady, 100);
       }
@@ -4793,7 +4813,7 @@ function _resourcesRoute(href) {
   if (url.pathname.replace(/\.html$/, '') !== '/resources') return false;
   const sec = url.searchParams.get('section') || '';
   const canonical = sec ? '/resources.html?section=' + sec : '/resources.html';
-  history.pushState(null, '', canonical);
+  if (location.pathname + location.search !== canonical) history.pushState(null, '', canonical);
   switchSection(sec || 'library');
   if (window._shUpdateNav) window._shUpdateNav('resources');
   return true;
@@ -4806,6 +4826,24 @@ document.addEventListener('click', function(e) {
 });
 // Used by shared-header's same-page route interceptor
 window.__shSamePageRoute = function(target) { _resourcesRoute(target); };
+
+// ── Swipe-back / browser-back within resources ───────────────────────────────
+// Back closes an open piece modal first; otherwise it restores the section
+// (Pieces Library / PPD / Glossary / Key) and the library sub-tab from the URL.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+window.addEventListener("popstate", function () {
+  const overlay = document.getElementById("piece-modal-overlay");
+  if (overlay && overlay.classList.contains("open")) { closePieceModal(); return; }
+  const sp = new URLSearchParams(location.search);
+  const section = sp.get("section") || "";
+  if (section === "ppd" || section === "glossary" || section === "key") {
+    switchSection(section);
+  } else {
+    switchSection("library");
+    _applyLibSub(sp.get("lib") || "all");
+  }
+  if (window._shUpdateNav) window._shUpdateNav("resources");
+});
 
 </script>
 </body>

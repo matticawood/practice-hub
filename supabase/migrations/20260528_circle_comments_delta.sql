@@ -1,0 +1,11 @@
+-- ============================================================
+-- Circle delta migration 2026-05-28 (comments) — APPLIED 2026-05-28
+--
+-- All 16 comments from this delta were inserted into community_post_comments
+-- per the original (pre-routing-fix) generation. The follow-up migration
+-- `20260528_circle_admin_posts_move.sql` then moves the comments belonging
+-- to admin-authored posts (3 posts) into content_feed_comments along with
+-- their parent post.
+--
+-- This file is intentionally a no-op now; left as a record of the run.
+-- ============================================================

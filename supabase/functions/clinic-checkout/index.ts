@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { eventTypeId, startTime, duration, name, email, timeZone, pageUrl, notes, fileUrl, pkg, currency: reqCur } = body;
+    const { eventTypeId, startTime, duration, name, email, timeZone, pageUrl, notes, fileUrl, pkg, currency: reqCur, vid } = body;
     const currency = await resolveCurrency(req, reqCur);
     const table = PRICES[currency];
     const cur = currency.toLowerCase();
@@ -93,6 +93,7 @@ Deno.serve(async (req) => {
     params.set("mode", "payment");
     params.set("success_url", `${pageUrl}?success=true&session_id={CHECKOUT_SESSION_ID}`);
     params.set("cancel_url", `${pageUrl}?cancelled=true`);
+    if (vid) params.set("client_reference_id", String(vid).slice(0, 200));
 
     if (pkg) {
       // ── Package purchase: grant credits, no slot chosen now ──

@@ -55,11 +55,32 @@ function gcalLink(o: { start: string; end: string; summary: string; description:
 }
 const b64 = (s: string) => btoa(unescape(encodeURIComponent(s)));
 
+// ── Analytics: record the paid booking, and log the confirmation email so the
+//    resend-webhook can attach delivery/open/click engagement (by resend_id). ──
+async function recordBooking(o: { vid: string | null; email: string | null; kind: string; amount_minor: number | null; currency: string | null; sessionId: string }) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/bookings`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({ vid: o.vid, email: o.email, kind: o.kind, amount_minor: o.amount_minor, currency: o.currency, stripe_session_id: o.sessionId }),
+    });
+  } catch (_) { /* best-effort */ }
+}
+async function logEmailRow(email: string, campaign: string, resendId: string | null, meta?: unknown) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/email_log`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({ email, campaign, status: "sent", resend_id: resendId, meta: meta ?? null }),
+    });
+  } catch (_) { /* best-effort */ }
+}
+
 // ── Branded confirmation to the CUSTOMER for a single paid booking ──
 async function sendCustomerConfirmation(bookingData: any, meta: Record<string, string>, notes: string | undefined) {
   try {
     const to = meta.attendeeEmail;
-    if (!to) return;
+    if (!to) return null;
     const tz       = meta.attendeeTimeZone || "Europe/London";
     const zoomUrl  = bookingData?.meetingUrl || bookingData?.videoCallData?.url || null;
     const startISO = bookingData?.start || meta.startTime;
@@ -100,7 +121,7 @@ async function sendCustomerConfirmation(bookingData: any, meta: Record<string, s
       footerNote: "Matthew Cawood · Online Lessons & Clinics",
     });
 
-    await fetch("https://api.resend.com/emails", {
+    const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -110,7 +131,9 @@ async function sendCustomerConfirmation(bookingData: any, meta: Record<string, s
         attachments: [{ filename: "booking.ics", content: b64(ics), content_type: "text/calendar; method=PUBLISH" }],
       }),
     });
-  } catch (e: any) { console.error("customer confirmation failed:", e.message); }
+    const d = await r.json().catch(() => null);
+    return (d && d.id) ? String(d.id) : null;
+  } catch (e: any) { console.error("customer confirmation failed:", e.message); return null; }
 }
 
 // ── Package purchase → grant lesson credits + email the buyer ──
@@ -127,9 +150,11 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
   });
   if (!ins.ok && ins.status !== 409) console.error("credit insert failed:", ins.status, await ins.text());
 
+  await recordBooking({ vid: session.client_reference_id ?? null, email, kind: "package", amount_minor: session.amount_total ?? null, currency: session.currency ?? null, sessionId: session.id });
+
   // Buyer email: how to book their lessons
   try {
-    await fetch("https://api.resend.com/emails", {
+    const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -150,6 +175,8 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
         }),
       }),
     });
+    const d = await r.json().catch(() => null);
+    await logEmailRow(email, "booking-confirm", (d && d.id) ? String(d.id) : null, { qty });
   } catch (e: any) { console.error("package buyer email failed:", e.message); }
 
   // Notify Matt
@@ -304,6 +331,14 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ignored: session.mode === "subscription" ? "subscription" : "store" }), { headers: { "Content-Type": "application/json" } });
     }
 
+    // Only act once the payment has actually cleared. Cards complete as "paid"; this
+    // guards delayed/async methods that can complete a session while still unpaid, so a
+    // failed/pending payment never books a lesson or grants credits.
+    if (session.payment_status && session.payment_status !== "paid") {
+      console.log("clinic-webhook: not paid yet, skipping", session.id, session.payment_status);
+      return new Response(JSON.stringify({ ignored: "unpaid" }), { headers: { "Content-Type": "application/json" } });
+    }
+
     // Package purchase → grant credits, no Cal.com booking yet.
     if (meta.type === "package") {
       await grantPackageCredits(meta, session);
@@ -320,6 +355,13 @@ Deno.serve(async (req) => {
     const paidStr        = `${((session.amount_total || 0) / 100).toFixed(2)} ${(session.currency || "gbp").toUpperCase()}`;
     meta.paid            = paidStr;
     meta.stripeSessionId = session.id;
+    // Record the paid booking for revenue + funnel analytics (even if Cal.com fails below).
+    const _kindMap: Record<string, string> = { "20": "20min", "30": "30min", "60": "60min" };
+    await recordBooking({
+      vid: session.client_reference_id ?? null, email: meta.attendeeEmail,
+      kind: _kindMap[String(meta.duration)] || "clinic",
+      amount_minor: session.amount_total ?? null, currency: session.currency ?? null, sessionId: session.id,
+    });
 
     const noteParts: string[] = [];
     if (meta.notes) noteParts.push(meta.notes);
@@ -369,7 +411,24 @@ Deno.serve(async (req) => {
     } else {
       console.log("Booking created successfully:", booking.data?.uid);
       await sendNotificationEmail(booking.data, meta, combinedNotes);     // → Matt
-      await sendCustomerConfirmation(booking.data, meta, combinedNotes);  // → customer (branded, +calendar)
+      const _confirmId = await sendCustomerConfirmation(booking.data, meta, combinedNotes);  // → customer (branded, +calendar)
+      await logEmailRow(meta.attendeeEmail, "booking-confirm", _confirmId, { kind: meta.duration });
+      // Enrich the booking row with Cal.com detail so it shows in the customer's My Account hub.
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/bookings?stripe_session_id=eq.${encodeURIComponent(session.id)}`, {
+          method: "PATCH",
+          headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+          body: JSON.stringify({
+            cal_uid: booking.data?.uid || null,
+            start_time: booking.data?.start || meta.startTime || null,
+            meeting_url: booking.data?.meetingUrl || booking.data?.videoCallData?.url || null,
+            status: "accepted",
+            event_type_id: String(meta.eventTypeId || ""),
+            attendee_timezone: meta.attendeeTimeZone || null,
+            attendee_name: meta.attendeeName || null,
+          }),
+        });
+      } catch (_) { /* best-effort */ }
     }
   }
 

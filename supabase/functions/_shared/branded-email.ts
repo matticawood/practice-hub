@@ -32,17 +32,42 @@ ${dt}${cta}
 </table></td></tr></table></body></html>`;
 }
 
-// Fire-and-forget Resend send. Returns true on success.
+// Resend send. Returns the Resend message id (string) on success, or null on
+// failure. The id is logged to email_log so the resend-webhook can attach
+// delivery/open/click engagement to transactional emails. (Truthy on success,
+// falsy on failure, so existing boolean-style callers keep working.)
 export async function sendEmail(o: {
   apiKey: string; from: string; to: string; subject: string; html: string; replyTo?: string;
-}): Promise<boolean> {
+}): Promise<string | null> {
   try {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: o.from, to: [o.to], subject: o.subject, html: o.html, reply_to: o.replyTo }),
     });
-    if (!r.ok) console.error("Resend send failed:", r.status, await r.text());
-    return r.ok;
-  } catch (e: any) { console.error("Resend send error:", e.message); return false; }
+    if (!r.ok) { console.error("Resend send failed:", r.status, await r.text()); return null; }
+    const data = await r.json().catch(() => null);
+    return (data && data.id) ? String(data.id) : null;
+  } catch (e: any) { console.error("Resend send error:", e.message); return null; }
+}
+
+// Log a transactional send to email_log (so engagement can attach by resend_id).
+// Best-effort: never throws. Uses ignore-duplicates so a repeat buyer doesn't error
+// against the (email, campaign) once-only index.
+export async function logEmail(supabaseUrl: string, serviceKey: string, row: {
+  email: string; campaign: string; resend_id: string | null; meta?: unknown;
+}): Promise<void> {
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/email_log`, {
+      method: "POST",
+      headers: {
+        apikey: serviceKey, Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        email: row.email, campaign: row.campaign, status: "sent",
+        resend_id: row.resend_id, meta: row.meta ?? null,
+      }),
+    });
+  } catch (_) { /* best-effort */ }
 }

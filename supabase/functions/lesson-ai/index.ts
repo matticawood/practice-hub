@@ -171,7 +171,7 @@ function buildRequest(body: any) {
     const user = titleHint
       ? `Plan a ${c} lesson for level ${level} on: "${titleHint}".${body.topic ? " Extra guidance: " + body.topic : ""}`
       : `Plan a ${c} lesson for level ${level} on: ${body.topic || "an appropriate next topic for this level"}.`;
-    return { model: MODEL, max_tokens: 2000, stream: true, system, tools: [OUTLINE_TOOL],
+    return { model: MODEL, max_tokens: 4000, stream: true, system, tools: [OUTLINE_TOOL],
       tool_choice: { type: "tool", name: "emit_outline" }, messages: [{ role: "user", content: user }] };
   }
 
@@ -183,7 +183,7 @@ function buildRequest(body: any) {
     const system = baseSystem(course, level, body.priorConcepts) + arc +
       `\n\n${SKELETON_NOTE}\n\n${BLOCK_SCHEMA_DOC}\n\nWrite ONLY the blocks for one section. Start with a heading block (size 2) for the section title. Then teach it thoroughly with a few text, callout, and example blocks, plus notation / play / keyboard blocks wherever the learner should see, hear, or read the idea, and where useful a task block. Include exactly ONE inline questions block (mode "inline", 2 or 3 questions) that checks just this section. Do not write a whole-lesson quiz. Do not repeat other sections. Return ONLY by calling emit_blocks.`;
     const user = `Lesson title: "${body.title || ""}". Write the section titled "${sec.heading || ""}". What it must teach: ${sec.focus || sec.heading || ""}.`;
-    return { model: MODEL, max_tokens: 3500, stream: true, system, tools: [BLOCKS_TOOL],
+    return { model: MODEL, max_tokens: 6000, stream: true, system, tools: [BLOCKS_TOOL],
       tool_choice: { type: "tool", name: "emit_blocks" }, messages: [{ role: "user", content: user }] };
   }
 
@@ -194,7 +194,7 @@ function buildRequest(body: any) {
     const system = baseSystem(course, level) +
       `\n\n${BLOCK_SCHEMA_DOC}\n\nReturn ONLY by calling emit_blocks with a SINGLE block: a "questions" block with "mode":"quiz", a short title like "Check yourself", and 5 questions that test the whole lesson. Mix mcq, truefalse and short kinds. Give every question an "explain". Keep questions answerable from the lesson.`;
     const user = `Write the end-of-lesson quiz for the lesson titled "${body.title || ""}".${arc}`;
-    return { model: MODEL, max_tokens: 2500, stream: true, system, tools: [BLOCKS_TOOL],
+    return { model: MODEL, max_tokens: 3500, stream: true, system, tools: [BLOCKS_TOOL],
       tool_choice: { type: "tool", name: "emit_blocks" }, messages: [{ role: "user", content: user }] };
   }
 
@@ -209,7 +209,7 @@ function buildRequest(body: any) {
       `3. A heading (size 2) "Summary", then ONE text block with a short markdown bullet list recapping the must-know points.\n` +
       `Do NOT include a quiz here. Do NOT re-teach. Keep it tight.`;
     const user = `Write the closing Playing connection, Key terms and Summary for the lesson titled "${body.title || ""}".${arc}`;
-    return { model: MODEL, max_tokens: 1800, stream: true, system, tools: [BLOCKS_TOOL],
+    return { model: MODEL, max_tokens: 3000, stream: true, system, tools: [BLOCKS_TOOL],
       tool_choice: { type: "tool", name: "emit_blocks" }, messages: [{ role: "user", content: user }] };
   }
 

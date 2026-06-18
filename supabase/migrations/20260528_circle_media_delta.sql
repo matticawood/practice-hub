@@ -1,0 +1,11 @@
+-- ============================================================
+-- Circle delta migration 2026-05-28 (media) — APPLIED 2026-05-28
+--
+-- All media UPDATEs were applied to the original tables
+-- (community_posts / community_post_comments). The follow-up migration
+-- `20260528_circle_admin_posts_move.sql` carries the existing media jsonb
+-- along when it copies admin-authored rows over to content_feed_posts /
+-- content_feed_comments.
+--
+-- This file is intentionally a no-op now; left as a record of the run.
+-- ============================================================

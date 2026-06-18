@@ -201,7 +201,7 @@
         return `<div class="lr-text">${mdToHtml(b.md)}</div>`;
       case "callout":
         return `<div class="lr-callout lr-callout-${esc(b.style || "note")}">
-          <div class="lr-callout-label">${esc(CALLOUT_LABEL[b.style] || "Note")}</div>
+          <div class="lr-callout-label">${esc(b.label || CALLOUT_LABEL[b.style] || "Note")}</div>
           <div class="lr-text">${mdToHtml(b.md)}</div></div>`;
       case "example":
         return `<div class="lr-example">
@@ -374,13 +374,13 @@
       if (!abc) return;
       loadAbcjs().then(() => {
         try {
-          // Size the stave to its content so a short example is not stretched sparse
-          // and a long line is not crammed. Width scales with bar count, capped to the
-          // column; the figure is centred via CSS. (No responsive:"resize" — that
-          // forces the SVG to fill the container, which is the stretching we don't want.)
-          const bars = (abc.match(/\|/g) || []).length || 1;
-          const staffwidth = Math.max(240, Math.min(640, bars * 130 + 190));
-          window.ABCJS.renderAbc(out, abc, { paddingtop: 4, paddingbottom: 4, staffwidth });
+          // Render each stave at the FULL column width. abcjs leaves a short or final
+          // line unjustified (narrow, left-clustered), so "%%stretchlast 1" forces that
+          // line to spread across the whole staffwidth — full-width staves with the notes
+          // distributed and normal note size. staffwidth tracks the container so it stays
+          // responsive on narrow screens.
+          const full = Math.max(260, (out.clientWidth || 660) - 4);
+          window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full });
           out.dataset.done = "1";
         } catch (e) { out.innerHTML = '<div class="lr-abc-err">This notation could not be rendered.</div>'; }
       }).catch(() => { out.innerHTML = '<div class="lr-abc-err">The notation library failed to load.</div>'; });

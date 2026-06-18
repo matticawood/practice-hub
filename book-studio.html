@@ -7,7 +7,7 @@
 <title>Book Studio · The Practice Room</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/abcjs@6.4.4/dist/abcjs-basic-min.js"></script>
-<script src="/book-render.js?v=5"></script>
+<script src="/book-render.js?v=52"></script>
 <style>
   :root{ --bg:#0f0f0f; --panel:#1a1a1a; --border:#2e2e2e; --ink:#f0f0f0; --mut:#888; --gold:#F5C518; }
   *{box-sizing:border-box}
@@ -23,7 +23,7 @@
   .btn:disabled{opacity:.5;cursor:default}
   main{display:none;max-width:1640px;margin:0 auto;padding:16px 18px 90px}
   .intro{color:var(--mut);font-size:.84rem;line-height:1.5;margin:0 0 14px;max-width:900px}
-  .grid{display:grid;grid-template-columns:230px minmax(0,1fr) 440px;gap:16px;align-items:start}
+  .grid{display:grid;grid-template-columns:220px minmax(0,1fr) 560px;gap:16px;align-items:start}
   @media(max-width:1240px){ .grid{grid-template-columns:210px minmax(0,1fr)} .prev-col{display:none} }
   .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px}
   .card h3{margin:0 0 10px;font-size:.82rem;font-weight:700;display:flex;align-items:center;justify-content:space-between}
@@ -71,8 +71,11 @@
   #auth h1{font-size:1.05rem;margin:0 0 14px}
   #auth input{margin-bottom:9px}
   .small-err{color:#f87171;font-size:.8rem;margin-bottom:8px;display:none}
-  /* print: only the print container, one A4 per page */
-  #bp-print{display:none}
+  /* print: only the print container, one A4 per page. NOTE: off-screen (not display:none) so
+     the print container is laid out during hydrate — measurement-based overlays (count numbers,
+     spread-chord rolls, gliss, coda arrows) need a real layout or getScreenCTM/getBoundingClientRect
+     return zero and the overlays silently drop. @media print re-positions it to 0,0. */
+  #bp-print{position:fixed;left:-100000px;top:0}
   @media print{
     body *{visibility:hidden}
     #bp-print, #bp-print *{visibility:visible}
@@ -90,6 +93,7 @@
     <span id="hdr-status" style="color:var(--mut);font-size:.74rem"></span>
     <button class="btn btn-sm" id="designall-btn">AI: design all remaining</button>
     <button class="btn btn-sm btn-gold" id="export-btn">Export PDF</button>
+    <a class="btn btn-sm" href="/cover-studio.html">Cover Studio</a>
     <a class="btn btn-sm" href="/practice-log.html">The Practice Room</a>
     <button class="btn btn-sm" id="logout">Log out</button>
   </div>
@@ -216,7 +220,7 @@ function setStatus(msg, cls){ const e=$("status"); if(e){ e.textContent=msg||"";
 
 // ── Books ────────────────────────────────────────────────────────
 async function loadBooks(){
-  const { data, error } = await db.from("books").select("id,slug,title,subtitle,status").order("title");
+  const { data, error } = await db.from("books").select("id,slug,title,subtitle,status,theme").order("title");
   if (error){ alert("Load failed: "+error.message); return; }
   S.books = data || [];
   renderBookList();
@@ -462,6 +466,9 @@ function blockEditor(b,i){
     case "paragraph":
       body = TA("text",b.text,"Text") + markupHint();
       break;
+    case "level":
+      body = T("label",b.label,"Level label (gold, e.g. Level 2)") + TA("text",b.text,"Description") + markupHint();
+      break;
     case "concepts":
       body = (b.items||[]).map((it,j) => `
         <div class="sub">
@@ -512,7 +519,9 @@ function blockEditor(b,i){
         + T("caption",b.caption,"Caption (optional)");
       break;
     case "image":
-      body = T("src",b.src,"Image URL") + T("caption",b.caption,"Caption (optional)");
+      body = T("src",b.src,"Image URL (public)") + T("path",b.path,"Private path (book-sources bucket)")
+        + `<div class="chk"><input type="checkbox" class="b-in" data-i="${i}" data-f="full" ${b.full?'checked':''}> Full width, no card rounding (sheet music)</div>`
+        + T("caption",b.caption,"Caption (optional)");
       break;
     case "spacer":
       body = `<label>Height (px)</label><input type="number" class="b-in" data-i="${i}" data-f="size" value="${b.size||16}" style="width:100px">`;
@@ -647,11 +656,29 @@ async function designAll(){
 // ── Preview ──────────────────────────────────────────────────────
 let prevTimer=null;
 function refreshPreview(){ clearTimeout(prevTimer); prevTimer=setTimeout(doPreview, 140); }
+// Resolve private 'book-sources' image placeholders to short-lived signed URLs.
+// Renderer leaves <img data-br-img="slug/p03.png"> blank (it has no Supabase client).
+const _signCache = {};
+async function signBookImages(root){
+  if (!root) return;
+  const els = [...root.querySelectorAll('img[data-br-img]')].filter(el => !el.src);
+  // batch-sign the unique uncached paths (one request per 100), far faster than 1-per-image
+  const need = [...new Set(els.map(el => el.getAttribute('data-br-img')).filter(p => p && !_signCache[p]))];
+  for (let i=0; i<need.length; i+=100){
+    const chunk = need.slice(i, i+100);
+    try {
+      const { data } = await db.storage.from('book-sources').createSignedUrls(chunk, 3600);
+      if (data) data.forEach(d => { if (d && d.signedUrl) _signCache[d.path] = d.signedUrl; });
+    } catch(e){}
+  }
+  els.forEach(el => { const p = el.getAttribute('data-br-img'); if (_signCache[p]) el.src = _signCache[p]; });
+}
 function doPreview(){
   if (!S.page){ $("prev").innerHTML=""; return; }
   const prev=$("prev");
   prev.innerHTML = BookRender.pageHTML(S.page, S.book);
   BookRender.hydrate(prev);
+  signBookImages(prev);
   $("prev-pg").textContent = S.page.meta.pageNumber ? "page "+S.page.meta.pageNumber : "";
   // scale the 210mm page into the preview column
   const frame = prev.closest(".prev-frame");
@@ -670,14 +697,25 @@ function doPreview(){
 window.addEventListener("resize", () => { if (S.page) doPreview(); });
 
 // ── Export (print → save as PDF) ─────────────────────────────────
-function exportPDF(){
+async function exportPDF(){
   if (!S.book){ alert("Open a book first."); return; }
   if (S.dirty && !confirm("You have unsaved changes. Export anyway?")) return;
+  const btn=$("export-btn"), old=btn?btn.textContent:"";
+  if(btn){ btn.disabled=true; btn.textContent="Preparing…"; }
   const pages = S.pages.slice().sort((a,b)=>a.position-b.position);
   const host = $("bp-print");
   host.innerHTML = pages.map(p => BookRender.pageHTML(p, S.book)).join("");
   BookRender.hydrate(host);
-  setTimeout(() => { window.print(); }, 300);   // let abcjs finish
+  await signBookImages(host);
+  // WAIT for every image to actually finish loading before printing — a fixed delay
+  // dropped images at scale (420+ exercises), printing blanks. 15s/image safety cap.
+  const imgs = [...host.querySelectorAll('img')];
+  await Promise.all(imgs.map(img => (img.complete && img.naturalWidth)
+    ? Promise.resolve()
+    : new Promise(res => { img.onload = img.onerror = res; setTimeout(res, 15000); })));
+  if (document.fonts && document.fonts.ready){ try { await document.fonts.ready; } catch(e){} }
+  if(btn){ btn.disabled=false; btn.textContent=old; }
+  setTimeout(() => window.print(), 250);   // let layout settle, then print
 }
 
 BookRender.ensureStyles(document);   // inject page CSS up front (independent of auth)

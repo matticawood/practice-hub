@@ -9762,7 +9762,7 @@ function switchDashContentTab(tab) {
   streamBtn.style.fontWeight         = isContent ? '600' : '700';
 }
 
-function switchMainLbTab(main) {
+function switchMainLbTab(main, fromHistory) {
   // Report the exact Hub sub-view to presence ("live now"), so the owner sees
   // who's on Roadmap vs Stats vs Leaderboard, not just "Hub".
   window._shHubView = main;
@@ -9809,7 +9809,27 @@ function switchMainLbTab(main) {
   if (msn) msn.querySelectorAll('.msn-item').forEach(item =>
     item.classList.toggle('active', item.dataset.msnVal === main)
   );
+  // History: a real tab change pushes an entry so the OS edge-swipe / browser back
+  // returns to the previous Hub tab instead of leaving the page. The first call
+  // (initial load / deep link) establishes the base entry; restores from popstate
+  // pass fromHistory and never push. No URL change, so the ?goto router is untouched.
+  if (!fromHistory) {
+    const st = { hubTab: main };
+    if (window._hubTabPrev == null) history.replaceState(st, "");
+    else if (main !== window._hubTabPrev) history.pushState(st, "");
+  }
+  window._hubTabPrev = main;
 }
+
+// Edge-swipe / browser-back between Hub tabs: restore the tab from the popped
+// state. If there is no hub state (back past the Hub), let the browser leave.
+window.addEventListener("popstate", (e) => {
+  const tab = e.state && e.state.hubTab;
+  if (tab && tab !== window._hubTabPrev) {
+    switchMainLbTab(tab, true);
+    if (window._shHighlightHubTab) window._shHighlightHubTab(tab);
+  }
+});
 
 async function renderLeaderboard(tab) {
   if (tab) _currentLbTab = tab;
@@ -19703,6 +19723,34 @@ async function bootApp() {
       g.classList.toggle("open", g === targetGroup)
     );
   }
+
+  // Expose a helper so non-click tab changes (browser-back / edge-swipe restoring
+  // a Hub tab) can re-highlight the shared-header nav to match, the same way a
+  // click would. Finds the nav link whose href maps to this tab.
+  window._shHighlightHubTab = function (tab) {
+    // Does this nav link's href point at the given Hub sub-tab? (dashboard = the
+    // bare /practice-log.html link with no ?goto; others carry ?goto=<tab>.)
+    const _isTab = (href) => {
+      if (!href) return false;
+      const m = /[?&]goto=([^&]+)/.exec(href);
+      return tab === "dashboard"
+        ? (href.indexOf("/practice-log.html") !== -1 && !m)
+        : (!!m && m[1] === tab);
+    };
+    // Top-level "Hub" stays active on the primary tab / sidebar / mobile-tab rows.
+    document.querySelectorAll(".sh-tab[data-page], .sh-sb-item[data-page], .sh-mob-tab[data-page]").forEach(t => {
+      const on = t.dataset.page === "hub";
+      t.classList.toggle("active", on);
+      if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+    });
+    // Sub-tab surfaces — dropdown, mobile-sheet items, sidebar sub-items, pill row:
+    // active where the link points at this tab, cleared everywhere else.
+    document.querySelectorAll(".sh-tab-drop a, .sh-item, .sh-sb-subitem, .sh-mob-pill").forEach(a => {
+      const on = _isTab(a.getAttribute("href"));
+      a.classList.toggle("active", on);
+      if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+  };
 
   document.addEventListener("click", function _shTabIntercept(e) {
     const link = e.target.closest(".sh-tab, .sh-tab-drop a, .sh-item, .sh-mob-pill, .sh-sb-item, .sh-sb-subitem");

@@ -2,7 +2,7 @@
 // newsletter list, then returns (and emails) a signed download link.
 //   POST { slug, email } → { url }
 import { STORE } from "../_shared/store-catalog.ts";
-import { brandedEmail, ic, sendEmail } from "../_shared/branded-email.ts";
+import { brandedEmail, ic, sendEmail, logEmail } from "../_shared/branded-email.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL   = Deno.env.get("SUPABASE_URL") || "";
@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     if (!url) return json({ error: "Sorry, that download isn't available right now." }, 500);
 
     // Email a copy of the link too.
-    await sendEmail({
+    const freeId = await sendEmail({
       apiKey: RESEND_API_KEY, from: FROM, to: em, replyTo: REPLY_TO,
       subject: `Your free download: ${item.title}`,
       html: brandedEmail({
@@ -87,6 +87,7 @@ Deno.serve(async (req) => {
         footerNote: "Matthew Cawood · Store",
       }),
     });
+    await logEmail(SUPABASE_URL, SERVICE_KEY, { email: em, campaign: "free-pdf", resend_id: freeId, meta: { slug } });
 
     return json({ url });
   } catch (e: any) {

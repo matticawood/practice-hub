@@ -1,0 +1,19 @@
+-- ============================================================
+-- Circle delta migration 2026-05-28 (posts) — APPLIED 2026-05-28
+--
+-- The active routing for admin-authored posts (matthew@matthewcawood.com)
+-- now goes to content_feed_posts; see the follow-up migration
+-- `20260528_circle_admin_posts_move.sql` which:
+--   - moves the 3 admin posts that were inserted from this file into
+--     community_posts back over to content_feed_posts (with their comments
+--     and media);
+--   - inserts the 2 admin posts that weren't applied previously
+--     ("Shaping in Grade 8 Pieces" and "🎯 Weekly Practice Focus - 25th May 2026").
+--
+-- The 3 non-admin posts originally inserted from this file remain in place:
+--   - "Harmonic analysis" (Daniel Duordoe) - community_posts
+--   - "Question" (Bobby) - community_posts
+--   - "Etude in Dm" (Cécile Dautriat) - community_posts
+--
+-- This file is intentionally a no-op now; left as a record of the run.
+-- ============================================================

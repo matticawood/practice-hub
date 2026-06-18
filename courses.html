@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light">
 <title>Courses · The Practice Room</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="/lessons-render.js?v=3"></script>
+<script src="/lessons-render.js?v=5"></script>
 <!-- Global styles so the shared header (its buttons use .btn/.btn-ghost/.btn-bell/
      #presence-btn from style.css) renders identically to every other page. Our
      own warm tokens + component CSS below override what we need. -->
@@ -157,8 +157,17 @@ function showToast(msg, ms) {
 }
 
 // ── Views ─────────────────────────────────────────────────────
-function renderOverview() {
+// Push/replace a history entry for in-page view changes so swipe-back / browser-back
+// steps Lesson → Course → Overview instead of leaving the page.
+function _courseHist(state, url, push) {
+  if (push === false) return;
+  if (location.pathname + location.search !== url) history.pushState(state, "", url);
+  else history.replaceState(state, "", url);
+}
+
+function renderOverview(push) {
   window._shPageDetail = "Courses"; if (window._shPing) window._shPing();
+  _courseHist({ view: "overview" }, "/courses.html", push);
   const v = document.getElementById("view");
   const cards = COURSES.map(c => {
     const ls = LESSONS.filter(l => l.course === c.key);
@@ -182,9 +191,10 @@ function renderOverview() {
   scrollTop();
 }
 
-function renderCourse(courseKey) {
+function renderCourse(courseKey, push) {
   const c = COURSE[courseKey];
   window._shPageDetail = "Courses · " + c.label; if (window._shPing) window._shPing();
+  _courseHist({ view: "course", course: courseKey }, "/courses.html?course=" + encodeURIComponent(courseKey), push);
   const v = document.getElementById("view");
   const ls = LESSONS.filter(l => l.course === courseKey);
   const byLevel = {};
@@ -212,13 +222,18 @@ function renderCourse(courseKey) {
   scrollTop();
 }
 
-async function openLesson(id, courseKey) {
+async function openLesson(id, courseKey, push) {
   const v = document.getElementById("view");
   v.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
   const { data: lesson, error } = await db.from("lessons").select("*").eq("id", id).single();
-  if (error || !lesson) { showToast("Could not load that lesson."); renderCourse(courseKey); return; }
+  if (error || !lesson) {
+    showToast("Could not load that lesson.");
+    if (courseKey && COURSE[courseKey]) renderCourse(courseKey, false); else renderOverview(false);
+    return;
+  }
   const c = COURSE[lesson.course] || { label: "Course" };
   window._shPageDetail = "Courses · " + c.label + " · " + lesson.title; if (window._shPing) window._shPing();
+  _courseHist({ view: "lesson", lesson: id, course: lesson.course }, "/courses.html?lesson=" + encodeURIComponent(id), push);
 
   const alreadyDone = PROGRESS[id] && PROGRESS[id].completed;
   v.innerHTML = `
@@ -288,8 +303,22 @@ function scrollTop() { window.scrollTo({ top: 0, behavior: "smooth" }); }
   document.getElementById("app-main").style.display = "block";
   document.getElementById("app-header").style.display = "";
 
-  renderOverview();
+  // Deep-link straight to a lesson or course; otherwise the overview.
+  const _sp = new URLSearchParams(location.search);
+  const _lz = _sp.get("lesson"), _cz = _sp.get("course");
+  if (_lz) openLesson(_lz, null, true);
+  else if (_cz && COURSE[_cz]) renderCourse(_cz, true);
+  else renderOverview(true);
 })();
+
+// Swipe-back / browser-back steps Lesson → Course → Overview.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+window.addEventListener("popstate", (e) => {
+  const s = e.state || {};
+  if (s.view === "lesson" && s.lesson)      openLesson(s.lesson, s.course, false);
+  else if (s.view === "course" && s.course) renderCourse(s.course, false);
+  else                                      renderOverview(false);
+});
 </script>
 </body>
 </html>

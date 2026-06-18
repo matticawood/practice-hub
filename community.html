@@ -2656,7 +2656,7 @@
 
       <!-- ── Detail view ─────────────────────────────────────────────────────── -->
       <div id="view-detail" style="display:none">
-        <button class="detail-back" onclick="showList()">
+        <button class="detail-back" onclick="history.back()">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
           Back
         </button>
@@ -2759,7 +2759,7 @@
 
       <!-- ── Activity detail view ──────────────────────────────────────────── -->
       <div id="view-activity-detail" style="display:none">
-        <button class="detail-back" onclick="showList()">
+        <button class="detail-back" onclick="history.back()">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
           Back
         </button>
@@ -3275,7 +3275,7 @@ let _feedItems = []; // all feed rows for detail view lookup
   // Deep-link: ?post=<id> — open post directly (e.g. from a notification)
   const _deepPostId = new URLSearchParams(window.location.search).get("post");
   if (_deepPostId) {
-    showDetail(_deepPostId);
+    showDetail(_deepPostId, true);   // skip the history push; we manage it below
     // Clean the URL so refreshing doesn't re-open the post
     history.replaceState(null, "", "/community.html");
   }
@@ -3509,13 +3509,20 @@ function setPostFilter(type, btn) {
   const badge = document.getElementById("badge-" + (type || "feed"));
   if (badge) { badge.style.display = "none"; badge.textContent = ""; }
   _renderFilteredPosts();
-  // Keep URL and nav in sync
-  if (type === "practice_log") {
-    history.replaceState(null, "", "/community.html?tab=practice-log");
-  } else {
-    history.replaceState(null, "", type ? `/community.html?filter=${encodeURIComponent(type)}` : "/community.html");
-  }
+  // Keep URL and nav in sync. PUSH a new history entry when the filter actually
+  // changes (so swiping back steps through the previous filters); REPLACE when the
+  // URL is already correct — i.e. the initial load, a back/forward restore that
+  // already set it, or the menu path that pushed just before calling us.
+  const _url = type === "practice_log"
+    ? "/community.html?tab=practice-log"
+    : (type ? `/community.html?filter=${encodeURIComponent(type)}` : "/community.html");
+  if (location.pathname + location.search !== _url) history.pushState(null, "", _url);
+  else history.replaceState(null, "", _url);
   _syncCommNavActive(type || "");
+  // _syncCommNavActive only covers the dropdown + mobile-sheet items; re-run the
+  // shared-header highlighter (URL-driven via ?filter) so the desktop sidebar
+  // sub-items and the mobile pill row also follow an in-page filter change.
+  if (window._shUpdateNav) window._shUpdateNav("community");
 }
 
 function _syncCommNavActive(currFilter) {
@@ -4061,7 +4068,7 @@ function _pauseVideosIn(sel) {
   document.querySelectorAll(`${sel} mux-player, ${sel} video`).forEach(v => { try { v.pause(); } catch (e) {} });
 }
 
-function showDetail(postId) {
+function showDetail(postId, skipPush) {
   _currentPostId = postId;
   _feedScrollY = window.scrollY;          // remember where we were in the feed
   _pauseVideosIn("#view-list");           // stop the feed video before hiding it
@@ -4070,10 +4077,15 @@ function showDetail(postId) {
   window.scrollTo(0, 0);
   renderDetail(postId);
   loadComments(postId);
+  // Push a history entry so the OS edge-swipe (browser back) and the in-app Back
+  // button both return to the post list instead of leaving the page. Skipped when
+  // opened from the ?post= deep link (that path manages history itself).
+  if (!skipPush) history.pushState({ commDetail: postId }, "");
 }
 
 function showList() {
   _currentPostId = null;
+  _currentActivityDetail = null;          // also leaving any activity detail
   _pauseVideosIn("#view-detail");         // stop the detail video on the way out
   document.getElementById("view-detail").style.display          = "none";
   document.getElementById("view-activity-detail").style.display = "none";
@@ -4081,6 +4093,30 @@ function showList() {
   document.getElementById("community-main").style.display       = "";
   window.scrollTo(0, _feedScrollY);       // restore the feed position (no jump to top)
 }
+
+// Take over scroll restoration so the browser does not jump to the top on a back
+// navigation; showDetail saves the feed scroll and showList restores it.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
+// Edge-swipe / browser-back while reading a post: pop our pushed entry and return
+// to the list (same as the in-app Back button) rather than leaving the forum.
+window.addEventListener("popstate", () => {
+  if (_currentPostId != null || _currentActivityDetail != null) { showList(); return; }
+  // Back/forward between feed filters (e.g. selected from the menu): re-apply the
+  // URL's filter/tab and the menu highlights, mirroring __shSamePageRoute.
+  const params = new URLSearchParams(location.search);
+  const tab = params.get("tab") || "";
+  if (tab === "practice-log")      switchTab("practice-log");
+  else if (tab === "activity")     switchTab("activity");
+  else {
+    switchTab("posts");
+    const filter = params.get("filter") || "";
+    const f = ["progress", "feedback", "question", "post"].includes(filter) ? filter : null;
+    const btn = document.querySelector(`.space-card[data-filter="${f || "feed"}"]`);
+    setPostFilter(f, btn);
+  }
+  if (window._shUpdateNav) window._shUpdateNav("community");
+});
 
 // ── Composer ──────────────────────────────────────────────────────────────────
 function openComposer() {
@@ -7558,7 +7594,10 @@ async function deletePost(postId) {
   }
   const { error } = await db.from("community_posts").delete().eq("id", postId);
   if (error) { alert("Couldn't delete: " + error.message); return; }
-  showList();
+  // If we were reading this post, pop our pushed history entry (popstate → showList)
+  // so the back stack stays clean; otherwise we're on the list, just refresh it.
+  if (_currentPostId === postId) history.back();
+  else showList();
   await loadPosts();
 }
 
@@ -8729,15 +8768,18 @@ function _refreshPostLikeBtn(safeKey, postId) {
 }
 
 // ── Activity detail view ──────────────────────────────────────────────────────
-async function showActivityDetail(eventType, itemId) {
+async function showActivityDetail(eventType, itemId, skipPush) {
   _currentActivityDetail = { eventType, itemId };
   _activityCommentMedia = [];
+  _feedScrollY = window.scrollY;          // remember the feed position to restore on back
 
   // Switch views
   document.getElementById("view-list").style.display = "none";
   document.getElementById("view-detail").style.display = "none";
   document.getElementById("view-activity-detail").style.display = "";
   window.scrollTo(0, 0);
+  // Same as showDetail: push a history entry so edge-swipe / Back return to the feed.
+  if (!skipPush) history.pushState({ commActivity: itemId }, "");
 
   // Render the activity item content in #activity-detail-area
   const row = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId));
