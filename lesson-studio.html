@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark">
 <title>Lesson Studio · The Practice Room</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="/lessons-render.js?v=5"></script>
+<script src="/lessons-render.js?v=8"></script>
 <style>
   :root { --bg:#0f0f0f; --panel:#1a1a1a; --border:#2e2e2e; --ink:#f0f0f0; --mut:#888888; --gold:#F5C518; --accent:#F5C518; }
   * { box-sizing:border-box; }
@@ -73,7 +73,16 @@
   .ie-add::after { content:"+"; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:17px; height:17px;
     border-radius:50%; background:var(--gold); color:#1a1410; font-weight:700; font-size:.72rem; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .12s; }
   .ie-add:hover::after { opacity:1; }
-  .ie-drawer { overflow:auto; background:var(--panel); border-left:1px solid var(--border); min-width:0; align-self:stretch; border-radius:0 12px 12px 0; max-height:82vh; position:sticky; top:14px; }
+  /* Click-to-edit text fields (type directly into what members see) */
+  .ie-ce { outline:none; border-radius:4px; cursor:text; transition:box-shadow .12s, background .12s; min-height:1.1em; }
+  .ie-ce:hover { box-shadow:0 0 0 1px #e2c98a inset; }
+  .ie-ce:focus { box-shadow:0 0 0 2px var(--gold) inset; background:#fffdf5; }
+  .ie-ce:empty::before { content:attr(data-ph); color:#b9b3a6; pointer-events:none; }
+  /* Fixed to the viewport so the Close button is ALWAYS in view, however far the
+     page is scrolled (sticky was unreliable inside the grid). The grid still
+     reserves its column so the block being edited isn't hidden behind it. */
+  .ie-drawer { position:fixed; top:14px; right:16px; width:356px; max-height:calc(100vh - 28px); overflow:auto;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:0 14px 48px rgba(0,0,0,.45); z-index:60; }
   .ie-grid:not(.drawer-open) .ie-drawer { display:none; }
   .ie-dhead { position:sticky; top:0; background:var(--panel); display:flex; align-items:center; gap:8px; padding:11px 13px; border-bottom:1px solid var(--border); z-index:2; }
   .ie-dhead b { font-size:.82rem; flex:1; text-transform:capitalize; }
@@ -245,7 +254,7 @@ const state = {
   list: [],          // lessons in current course+level
   lesson: null,      // the lesson being edited (working copy)
   dirty: false,
-  inlineMode: false, // big-preview inline editing (vs the classic list editor)
+  inlineMode: true, // big-preview inline editing is the default (List view button switches to the classic list editor)
   ieIndex: null,     // which block's editor is open in the inline side drawer
 };
 
@@ -559,7 +568,14 @@ function renderBlockEditor(b, i) {
   } else if (b.type === "notation") {
     fields = `<textarea class="js-bf" data-i="${i}" data-f="abc" rows="4" placeholder="ABC notation, e.g.&#10;X:1&#10;M:4/4&#10;L:1/4&#10;K:C&#10;C D E F | G2 A2 | c4 |]" style="font-family:ui-monospace,monospace;font-size:.82rem">${escapeHtml(b.abc || "")}</textarea>
       <input type="text" class="js-bf" data-i="${i}" data-f="caption" placeholder="Caption (optional)" value="${escapeAttr(b.caption || "")}">
-      <div class="hint">Printed stave from ABC notation. K: sets the key (e.g. "K:G" or "K:G clef=bass"), M: the time signature, L: the default note length. Renders live in the preview.</div>`;
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0 2px">
+        <span class="hint" style="margin:0">Blank stave:</span>
+        <select id="bs-clef-${i}"><option value="treble">Treble</option><option value="bass">Bass</option><option value="grand">Grand (both)</option></select>
+        <input id="bs-meter-${i}" type="text" value="4/4" style="width:54px" title="Time signature">
+        <input id="bs-bars-${i}" type="number" min="1" max="12" value="1" style="width:54px" title="Number of bars">
+        <button type="button" class="btn btn-sm" onclick="insertBlankStave(${i})">Insert blank stave</button>
+      </div>
+      <div class="hint">Printed stave from ABC notation. K: sets the key (e.g. "K:G" or "K:G clef=bass"), M: the time signature, L: the default note length. "Blank stave" fills empty bars with invisible rests so members get full-width staves to write on. Renders live in the preview.</div>`;
   } else if (b.type === "video") {
     fields = `<input type="text" class="js-bf" data-i="${i}" data-f="playbackId" placeholder="Mux Playback ID (from the uploaded asset)" value="${escapeAttr(b.playbackId || "")}">
       <input type="text" class="js-bf" data-i="${i}" data-f="caption" placeholder="Caption (optional)" value="${escapeAttr(b.caption || "")}">
@@ -637,6 +653,31 @@ function renderQuestionEditor(q, bi, qi) {
     ${extra}
     ${explain}
   </div>`;
+}
+
+// Build a full-width BLANK stave (clef + time signature + barlines, no notes or
+// rests) using ABC invisible rests ("x"), so it renders as an empty stave to
+// write on. "grand" = both clefs braced together.
+function blankStaveAbc(clef, meter, bars) {
+  meter = (meter || "4/4").trim();
+  const m = meter.match(/^(\d+)\s*\/\s*(\d+)$/);
+  const num = m ? +m[1] : 4, den = m ? +m[2] : 4;
+  const beats = Math.max(1, Math.round(num * 4 / den)); // invisible-rest length in quarter units
+  const n = Math.max(1, Math.min(12, bars || 1));
+  const line = Array.from({ length: n }, () => "x" + beats).join(" | ") + " |]";
+  if (clef === "grand") {
+    return `X:1\nM:${meter}\nL:1/4\nK:C\n%%score (T) (B)\nV:T clef=treble\nV:B clef=bass\n[V:T] ${line}\n[V:B] ${line}`;
+  }
+  const k = clef === "bass" ? "K:C clef=bass" : "K:C clef=treble";
+  return `X:1\nM:${meter}\nL:1/4\n${k}\n${line}`;
+}
+function insertBlankStave(i) {
+  const g = id => document.getElementById(id + "-" + i);
+  const clef = g("bs-clef") ? g("bs-clef").value : "treble";
+  const meter = g("bs-meter") ? g("bs-meter").value : "4/4";
+  const bars = g("bs-bars") ? parseInt(g("bs-bars").value, 10) : 1;
+  const ta = document.querySelector(`textarea.js-bf[data-i="${i}"][data-f="abc"]`);
+  if (ta) { ta.value = blankStaveAbc(clef, meter, bars); ta.dispatchEvent(new Event("input", { bubbles: true })); }
 }
 
 function bindBlockEditors() {
@@ -783,7 +824,7 @@ function renderInlineEditor() {
           <option value="published" ${L.status === "published" ? "selected" : ""}>Published</option>
         </select></div>
     </div>
-    <div class="hint" style="margin:2px 0 6px">Hover any block for its edit, move and delete controls. Hover between blocks to insert.</div>
+    <div class="hint" style="margin:2px 0 6px">Click any text to edit it right here. Hover a block for its edit, move and delete controls. Hover between blocks to insert.</div>
     <div class="ie-grid" id="ie-grid">
       <div class="ie-main">
         <div id="ie-render" class="ie-page"></div>
@@ -817,6 +858,84 @@ function renderInlineEditor() {
   if (state.ieIndex != null && L.blocks[state.ieIndex]) openIeDrawer(state.ieIndex);
 }
 
+// ── Click-to-edit: serialize rendered HTML back to the block's markdown ───────
+function _ieInline(node) {
+  let s = "";
+  node.childNodes.forEach(n => {
+    if (n.nodeType === 3) { s += n.nodeValue; return; }
+    if (n.nodeType !== 1) return;
+    const tag = n.tagName.toLowerCase(), inner = _ieInline(n);
+    if (tag === "strong" || tag === "b") s += "**" + inner + "**";
+    else if (tag === "em" || tag === "i") s += "*" + inner + "*";
+    else if (tag === "code") s += "`" + inner + "`";
+    else if (tag === "a") s += "[" + inner + "](" + (n.getAttribute("href") || "") + ")";
+    else if (tag === "br") s += "\n";
+    else s += inner;
+  });
+  return s;
+}
+function _ieBlockMd(root) {
+  const out = []; let loose = "";
+  const flush = () => { const t = loose.replace(/ /g, " ").trim(); if (t) out.push(t); loose = ""; };
+  root.childNodes.forEach(n => {
+    if (n.nodeType === 3) { loose += n.nodeValue; return; }
+    if (n.nodeType !== 1) return;
+    const tag = n.tagName.toLowerCase();
+    if (tag === "p" || tag === "div") { flush(); const t = _ieInline(n).replace(/ /g, " ").trim(); if (t) out.push(t); }
+    else if (tag === "ul" || tag === "ol") {
+      flush(); const li = [];
+      Array.from(n.children).forEach((c, idx) => {
+        if (c.tagName.toLowerCase() === "li") li.push((tag === "ol" ? (idx + 1) + ". " : "- ") + _ieInline(c).replace(/ /g, " ").trim());
+      });
+      if (li.length) out.push(li.join("\n"));
+    } else if (tag === "br") { loose += "\n"; }
+    else loose += _ieInline(n);
+  });
+  flush();
+  return out.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function _ieReadField(el) {
+  const kind = el.dataset.ieKind;
+  if (kind === "plain") return el.innerText.replace(/ /g, " ").trim();
+  if (kind === "inlinemd") return _ieInline(el).replace(/\s*\n\s*/g, " ").replace(/ /g, " ").trim();
+  return _ieBlockMd(el);
+}
+const IE_EDITABLE = {
+  heading:  [[".lr-heading", "text", "inlinemd", "Heading"]],
+  text:     [[".lr-text", "md", "blockmd", "Write text…"]],
+  callout:  [[".lr-callout-label", "label", "plain", "Label"], [".lr-text", "md", "blockmd", "Callout text…"]],
+  example:  [[".lr-example-title", "title", "plain", "Title"], [".lr-text", "md", "blockmd", "Example text…"]],
+  task:     [[".lr-text", "md", "blockmd", "Task…"]],
+  image:    [["figcaption.lr-cap", "caption", "plain", "Caption"]],
+  audio:    [[".lr-audio-cap", "caption", "plain", "Caption"]],
+  keyboard: [["figcaption.lr-cap", "caption", "plain", "Caption"]],
+  notation: [["figcaption.lr-cap", "caption", "plain", "Caption"]],
+  video:    [[".lr-cap", "caption", "plain", "Caption"]],
+  download: [[".lr-cap", "note", "plain", "Note"]],
+};
+function _ieMakeEditable(w, i) {
+  const b = state.lesson.blocks[i]; if (!b) return;
+  const specs = IE_EDITABLE[b.type]; if (!specs) return;
+  specs.forEach(([sel, field, kind, ph]) => {
+    const el = w.querySelector(sel);
+    if (!el || el.closest(".ie-tools")) return;
+    el.setAttribute("contenteditable", "true");
+    el.classList.add("ie-ce");
+    el.dataset.ieKind = kind;
+    el.dataset.ph = ph;
+    el.title = "Click to edit";
+    el.addEventListener("input", () => {
+      const blk = state.lesson && state.lesson.blocks[i]; // read live, never a captured ref
+      if (blk) blk[field] = _ieReadField(el);
+      markDirty();
+    });
+    el.addEventListener("keydown", (e) => {
+      if ((kind === "plain" || kind === "inlinemd") && e.key === "Enter") { e.preventDefault(); el.blur(); }
+    });
+    el.addEventListener("click", (e) => e.stopPropagation());
+  });
+}
+
 function renderIeRender() {
   const host = document.getElementById("ie-render");
   if (!host || !window.LessonRender) return;
@@ -841,6 +960,7 @@ function renderIeRender() {
       </div>`);
     const add = document.createElement("div"); add.className = "ie-add"; add.dataset.after = i;
     body.insertBefore(add, w.nextSibling);
+    _ieMakeEditable(w, i);
   });
   body.querySelectorAll(".ie-tools button").forEach(btn => btn.onclick = (e) => {
     e.stopPropagation();
@@ -918,6 +1038,16 @@ function closeIeDrawer() {
   if (d) d.innerHTML = "";
   document.querySelectorAll(".ie-blk.ie-active").forEach(e => e.classList.remove("ie-active"));
 }
+// Escape closes the open block drawer (so you never have to scroll up to the Close button).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const grid = document.getElementById("ie-grid");
+  if (grid && grid.classList.contains("drawer-open") && !document.getElementById("fp-overlay")?.offsetParent) {
+    const t = e.target;
+    if (t && t.tagName === "TEXTAREA") return; // let Escape blur a field first if you're typing
+    closeIeDrawer();
+  }
+});
 
 // re-render just one block's preview in place (keeps its hover toolbar)
 function updateIeBlock(i) {
@@ -930,6 +1060,7 @@ function updateIeBlock(i) {
   const fresh = tmp.querySelector(".lr-body") ? tmp.querySelector(".lr-body").firstElementChild : null;
   Array.from(w.children).forEach(c => { if (c !== tools) c.remove(); });
   if (fresh) w.appendChild(fresh);
+  _ieMakeEditable(w, i);
 }
 // drop empty mcq option lines so the preview looks right while typing
 function cleanBlocksForRender(blocks) {
@@ -975,6 +1106,7 @@ async function saveLesson() {
   if (!L.title.trim()) { status.textContent = "Give the lesson a title first."; status.className = "status err"; return; }
   status.textContent = "Saving…"; status.className = "status";
 
+  const wasNew = !L.id;
   const payload = {
     course: L.course, level: L.level, sort_order: L.sort_order,
     title: L.title.trim(), summary: (L.summary || "").trim() || null,
@@ -987,11 +1119,17 @@ async function saveLesson() {
   else      res = await db.from("lessons").insert(payload).select().single();
 
   if (res.error) { status.textContent = "Save failed: " + res.error.message; status.className = "status err"; return; }
-  state.lesson = { ...res.data, blocks: normalizeBlocks(res.data.blocks) };
+  // Keep the in-memory lesson (it IS what we just saved); only fold in the
+  // server-assigned fields. Replacing state.lesson here would detach the live
+  // block objects that the open inline/drawer editors hold references to, so a
+  // subsequent edit would write to an orphaned object and be lost on next save.
+  L.id = res.data.id;
+  L.updated_at = res.data.updated_at;
   state.dirty = false;
   status.textContent = "Saved."; status.className = "status ok";
   await loadList();
   renderList();
+  if (wasNew) renderEditor(); // surface the Edit/Delete toolbar now the lesson has an id
 }
 
 async function deleteLesson() {

@@ -370,8 +370,17 @@
     root.querySelectorAll(".lr-notation").forEach(fig => {
       const src = fig.querySelector(".lr-abc-src"), out = fig.querySelector(".lr-abc-out");
       if (!src || !out || out.dataset.done) return;
-      const abc = (src.textContent || "").trim();
+      let abc = (src.textContent || "").trim();
       if (!abc) return;
+      // Strip a spurious leading barline. The drafts sometimes prefix the music
+      // body with "| " (e.g. "| G4 |]"), which abcjs draws as a stray barline
+      // right after the time signature. Remove a lone leading "|" at the start of
+      // each music line (keeping "|]", "||", "|:" and any [V:..] voice prefix).
+      abc = abc.split("\n").map(line =>
+        (/^\s*([A-Za-z]:|%%)/.test(line))
+          ? line
+          : line.replace(/^(\s*(?:\[V:[^\]]*\]\s*)?)\|(?![\]|:])\s*/, "$1")
+      ).join("\n");
       loadAbcjs().then(() => {
         try {
           // Render each stave at the FULL column width. abcjs leaves a short or final
@@ -391,7 +400,10 @@
   function injectStyles() {
     if (_styled) return; _styled = true;
     const css = `
-    .lr-body{max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
+    /* Self-contained light tokens so the host page's theme (e.g. the dark app
+       chrome) can't bleed into the lesson. Without this, --surface/--surface-2
+       could resolve dark and inputs/cards render black. */
+    .lr-body{--surface:#ffffff;--surface-2:#f0ebe2;--border:#e0d5c8;--text:#1a1410;--text-muted:#8a7868;--accent:#f5c518;color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
     .lr-heading{font-weight:800;letter-spacing:-.01em;margin:26px 0 10px;line-height:1.25}
     h2.lr-heading{font-size:1.3rem} h3.lr-heading{font-size:1.08rem}
     .lr-text{font-size:1rem;margin:0 0 4px}
@@ -452,7 +464,7 @@
     .lr-opt.lr-sel{border-color:var(--accent,#f5c518)}
     .lr-opt.lr-correct{border-color:#5fbf7e;background:#eaf6ee}
     .lr-opt.lr-wrong{border-color:#d9534f;background:#fbecea}
-    .lr-short{display:flex;gap:8px}.lr-input{flex:1;color:var(--text,#1a1410);background:var(--surface,#fff);border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:9px 12px;font:inherit;font-size:.92rem}
+    .lr-short{display:flex;gap:8px}.lr-input{flex:1;color:var(--text,#1a1410);background:var(--surface-2,#f5f2ee);color-scheme:light;border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:9px 12px;font:inherit;font-size:.92rem}
     .lr-input.lr-correct{border-color:#5fbf7e}.lr-input.lr-wrong{border-color:#d9534f}
     .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:.85rem;cursor:pointer}
     .lr-reflect{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
