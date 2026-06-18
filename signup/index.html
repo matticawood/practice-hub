@@ -616,21 +616,28 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
 })();
 </script>
 <script>
-/* Inside the iOS/Android app, /signup opens in the app's own webview, which traps
-   the external checkout redirect (-> membership-redirect -> Stripe). So when we're
-   in the app wrapper, point the Join buttons straight at the external
-   membership-redirect URL with target=_blank, which the app hands to Safari/Chrome
-   where the checkout works (and the purchase happens outside the app webview). */
+/* Inside the app wrapper (PWAShell), /signup opens in the app's own webview, and a
+   target=_blank LINK to the checkout gets trapped there (the app's nav delegate
+   tries to load it in-app and fails). But window.open() goes through the app's UI
+   delegate, which hands it to Safari — that's exactly how the billing portal works.
+   So intercept the Join buttons and window.open() a DIRECT Stripe checkout URL.
+   Pre-fetch the URL so window.open runs inside the click gesture. */
 (function(){
   if(!/PWAShell/i.test(navigator.userAgent||"")) return;
   var vid; try{ vid=localStorage.getItem("tpr_vid"); }catch(e){}
-  var src=new URLSearchParams(location.search).get("utm_source");
-  var url="https://gyskfutmncprqxazgatv.supabase.co/functions/v1/membership-redirect";
-  var q=[]; if(vid) q.push("vid="+encodeURIComponent(vid)); if(src) q.push("utm_source="+encodeURIComponent(src));
-  if(q.length) url+="?"+q.join("&");
-  [].forEach.call(document.querySelectorAll('a[href^="/join.html"]'),function(a){
-    a.setAttribute("href",url); a.setAttribute("target","_blank"); a.setAttribute("rel","noopener");
-  });
+  var FN="https://gyskfutmncprqxazgatv.supabase.co/functions/v1/";
+  var q=vid?("?vid="+encodeURIComponent(vid)):"";
+  var checkoutUrl=null;
+  fetch(FN+"membership-price"+q).then(function(r){return r.ok?r.json():null;})
+    .then(function(d){ if(d&&d.checkoutUrl) checkoutUrl=d.checkoutUrl; }).catch(function(){});
+  document.addEventListener("click",function(e){
+    var a=e.target.closest && e.target.closest('a[href^="/join.html"]');
+    if(!a) return;
+    e.preventDefault();
+    var u=checkoutUrl||(FN+"membership-redirect"+q); // fall back to the redirect fn if prefetch is slow
+    var w=window.open(u,"_blank");
+    if(!w) window.location.href=u;
+  },true);
 })();
 </script>
 </body>

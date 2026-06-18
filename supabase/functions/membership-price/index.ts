@@ -36,6 +36,23 @@ const cors = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
+// Stripe Payment Links per currency (must match membership-redirect). Used to
+// return a DIRECT checkout URL so the app can window.open() it into Safari
+// (mirroring the billing portal flow), instead of relying on a same-origin
+// link that the app webview traps.
+const LINKS: Record<string, string> = {
+  GBP: "https://buy.stripe.com/28EeV61nA9Z0fxJaAB5EY00",
+  USD: "https://buy.stripe.com/eVq8wI4zMefg85haAB5EY01",
+  CAD: "https://buy.stripe.com/bJe4gseam8UWbht8st5EY02",
+  EUR: "https://buy.stripe.com/bJe28k0jw7QSbhtcIJ5EY03",
+  AUD: "https://buy.stripe.com/28E5kw6HU0oqadpaAB5EY04",
+  SEK: "https://buy.stripe.com/14A5kw7LY7QSfxJ2455EY05",
+  NOK: "https://buy.stripe.com/9B65kw3vIc78bhtaAB5EY06",
+  DKK: "https://buy.stripe.com/28E28keam7QS5X91015EY07",
+  SGD: "https://buy.stripe.com/6oU8wIgiub341GT8st5EY09",
+  NZD: "https://buy.stripe.com/00w00c0jw9Z099laAB5EY0a",
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
@@ -52,8 +69,16 @@ Deno.serve(async (req) => {
 
   const currency = (country && COUNTRY_CURRENCY[country]) ? COUNTRY_CURRENCY[country] : "GBP";
   const p = PRICES[currency] || PRICES["GBP"];
+
+  // Direct checkout URL (Payment Link) for this currency, with the visitor id
+  // threaded as client_reference_id for /signup attribution.
+  const vidRaw = new URL(req.url).searchParams.get("vid");
+  const vid = vidRaw ? vidRaw.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64) : "";
+  let checkoutUrl = LINKS[currency] || LINKS["GBP"];
+  if (vid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "client_reference_id=" + encodeURIComponent(vid);
+
   return new Response(
-    JSON.stringify({ currency, display: p.display, minor: p.minor, period: "month" }),
-    { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } },
+    JSON.stringify({ currency, display: p.display, minor: p.minor, period: "month", checkoutUrl }),
+    { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } },
   );
 });
