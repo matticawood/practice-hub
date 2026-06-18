@@ -638,6 +638,8 @@ async function loadAnalytics() {
   catch (e) { console.error("renderFunnels failed:", e); }
   try { await renderAcquisition(); }    // /signup landing-page funnel
   catch (e) { console.error("renderAcquisition failed:", e); }
+  try { await renderCourseProgress(); } // how far buyers get through the store course
+  catch (e) { console.error("renderCourseProgress failed:", e); }
   try { renderInsights2({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows, emailLog, emailClicks }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
@@ -915,6 +917,76 @@ async function renderAcquisition() {
 // TOP of the page. Lifecycle/cohorts anchor on first-session ACTIVATION (members
 // have no signup date). Renders above everything else via afterbegin.
 // ══════════════════════════════════════════════════════════════════════════════
+// ── Course progress: how far buyers get through a store course ─────────────────
+async function renderCourseProgress() {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+  const SLUG = "the-art-of-understanding-music", NAME = "The Art of Understanding Music";
+  const [progRes, lessRes, ordRes] = await Promise.all([
+    db.from("course_progress").select("email,lesson_id,lesson_index,status").eq("slug", SLUG),
+    db.from("lessons").select("id,title").eq("course", SLUG).eq("status", "published").order("level").order("sort_order"),
+    db.from("store_orders").select("email").eq("slug", SLUG).eq("kind", "course"),
+  ]);
+  const prog = progRes.data || [], lessons = lessRes.data || [], orders = ordRes.data || [];
+  if (!lessons.length) return;
+  const esc = s => String(s == null ? "" : s).replace(/</g, "&lt;");
+  const pct = (n, d) => d ? Math.round(n / d * 100) : 0;
+  const total = lessons.length;
+  const idxOf = {}; lessons.forEach((l, i) => { idxOf[l.id] = i; });
+
+  const viewedBy = lessons.map(() => new Set());
+  const doneBy = lessons.map(() => new Set());
+  const furthest = {};
+  for (const p of prog) {
+    const i = idxOf[p.lesson_id]; if (i == null) continue;
+    const em = (p.email || "").toLowerCase(); if (!em) continue;
+    viewedBy[i].add(em);
+    if (p.status === "completed") doneBy[i].add(em);
+    furthest[em] = Math.max(furthest[em] == null ? -1 : furthest[em], i);
+  }
+  const bought = new Set(orders.map(o => (o.email || "").toLowerCase()).filter(Boolean)).size;
+  const started = Object.keys(furthest).length;
+  const fv = Object.values(furthest);
+  const avgFurthest = fv.length ? fv.reduce((a, b) => a + b, 0) / fv.length : -1;
+  const reachedEnd = viewedBy[total - 1].size, doneEnd = doneBy[total - 1].size;
+
+  const card = (label, big, sub) => `<div style="flex:1;min-width:130px;background:#0f1729;border:1px solid #1e2d4a;border-radius:12px;padding:12px 14px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b">${label}</div>
+      <div style="font-size:1.5rem;font-weight:800;color:#e2e8f0;margin-top:3px">${big}</div>
+      <div style="font-size:.72rem;color:#64748b;margin-top:2px">${sub || ""}</div></div>`;
+
+  const maxV = Math.max(1, ...viewedBy.map(s => s.size));
+  let rows = "";
+  lessons.forEach((l, i) => {
+    const v = viewedBy[i].size, c = doneBy[i].size;
+    rows += `<tr>
+      <td style="color:#64748b;padding:4px 8px">${i + 1}</td>
+      <td style="padding:4px 8px;color:#cbd5e1">${esc(l.title)}</td>
+      <td style="padding:4px 8px;width:46%"><div style="background:#1e293b;border-radius:5px;height:16px"><div style="background:#f5c518;height:100%;border-radius:5px;width:${Math.round(v / maxV * 100)}%"></div></div></td>
+      <td style="padding:4px 8px;text-align:right;color:#e2e8f0;font-variant-numeric:tabular-nums">${v}</td>
+      <td style="padding:4px 8px;text-align:right;color:#4ade80;font-variant-numeric:tabular-nums">${c}</td>
+    </tr>`;
+  });
+
+  const bodyHtml = !started
+    ? `<div style="color:#64748b;font-size:.85rem;padding:6px 0">No course-player visits recorded yet. Data appears here once buyers open the course.</div>`
+    : `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+        ${card("Started", started, bought ? `${pct(started, bought)}% of ${bought} buyers` : "opened the course")}
+        ${card("Avg furthest", `${(avgFurthest + 1).toFixed(1)} / ${total}`, "lessons in, per starter")}
+        ${card("Reached the end", reachedEnd, started ? `${pct(reachedEnd, started)}% of starters` : "")}
+        ${card("Finished the end", doneEnd, "watched the final video")}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:.84rem">
+        <thead><tr style="color:#64748b;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em">
+          <th style="padding:4px 8px">#</th><th style="padding:4px 8px">Lesson</th>
+          <th style="padding:4px 8px">Reached</th><th style="padding:4px 8px;text-align:right">Viewed</th>
+          <th style="padding:4px 8px;text-align:right">Finished</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+
+  el.insertAdjacentHTML("beforeend",
+    `<h2 class="section-header" style="margin-top:8px">Course progress: ${esc(NAME)} <span class="section-meta">${started} started</span></h2>${bodyHtml}`);
+}
+
 // ── Whole-site traffic + store/booking funnels + email + smart insights ────────
 async function renderFunnels() {
   const el = document.getElementById("analytics-content");
