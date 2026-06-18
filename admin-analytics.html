@@ -923,7 +923,7 @@ async function renderCourseProgress() {
   if (!el) return;
   const SLUG = "the-art-of-understanding-music", NAME = "The Art of Understanding Music";
   const [progRes, lessRes, ordRes] = await Promise.all([
-    db.from("course_progress").select("email,lesson_id,lesson_index,status").eq("slug", SLUG),
+    db.from("course_progress").select("email,lesson_id,lesson_index,status,updated_at").eq("slug", SLUG),
     db.from("lessons").select("id,title").eq("course", SLUG).eq("status", "published").order("level").order("sort_order"),
     db.from("store_orders").select("email").eq("slug", SLUG).eq("kind", "course"),
   ]);
@@ -936,13 +936,14 @@ async function renderCourseProgress() {
 
   const viewedBy = lessons.map(() => new Set());
   const doneBy = lessons.map(() => new Set());
-  const furthest = {};
+  const furthest = {}, doneCount = {}, lastActive = {};
   for (const p of prog) {
     const i = idxOf[p.lesson_id]; if (i == null) continue;
     const em = (p.email || "").toLowerCase(); if (!em) continue;
     viewedBy[i].add(em);
-    if (p.status === "completed") doneBy[i].add(em);
+    if (p.status === "completed") { doneBy[i].add(em); doneCount[em] = (doneCount[em] || 0) + 1; }
     furthest[em] = Math.max(furthest[em] == null ? -1 : furthest[em], i);
+    if (!lastActive[em] || p.updated_at > lastActive[em]) lastActive[em] = p.updated_at;
   }
   const bought = new Set(orders.map(o => (o.email || "").toLowerCase()).filter(Boolean)).size;
   const started = Object.keys(furthest).length;
@@ -968,6 +969,30 @@ async function renderCourseProgress() {
     </tr>`;
   });
 
+  // Per-buyer drop-off list: who stopped where (earliest-stopped first).
+  const fmtDate = s => { try { return new Date(s).toLocaleDateString(undefined, { day: "numeric", month: "short" }); } catch { return ""; } };
+  const buyers = Object.keys(furthest)
+    .map(em => ({ em, far: furthest[em], done: doneCount[em] || 0, last: lastActive[em] }))
+    .sort((a, b) => a.far - b.far || (a.last < b.last ? 1 : -1));
+  const buyerRows = buyers.map(b => {
+    const atEnd = b.far === total - 1;
+    return `<tr>
+      <td style="padding:4px 8px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">${esc(b.em)}</td>
+      <td style="padding:4px 8px;color:${atEnd ? "#4ade80" : "#e2e8f0"}">Lesson ${b.far + 1}/${total}${atEnd ? " ✓" : ""} <span style="color:#64748b">${esc(lessons[b.far] ? lessons[b.far].title : "")}</span></td>
+      <td style="padding:4px 8px;text-align:right;color:#64748b;font-variant-numeric:tabular-nums">${b.done}</td>
+      <td style="padding:4px 8px;text-align:right;color:#64748b;white-space:nowrap">${fmtDate(b.last)}</td>
+    </tr>`;
+  }).join("");
+  const buyerList = `<h3 style="font-size:.9rem;color:#94a3b8;margin:20px 0 6px">Where each buyer stopped <span style="color:#64748b;font-weight:400">(${buyers.length})</span></h3>
+      <div style="max-height:360px;overflow:auto;border:1px solid #1e2d4a;border-radius:10px">
+        <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+          <thead><tr style="color:#64748b;text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em">
+            <th style="padding:6px 8px;position:sticky;top:0;background:#0a0f1e">Buyer</th>
+            <th style="padding:6px 8px;position:sticky;top:0;background:#0a0f1e">Furthest reached</th>
+            <th style="padding:6px 8px;text-align:right;position:sticky;top:0;background:#0a0f1e">Done</th>
+            <th style="padding:6px 8px;text-align:right;position:sticky;top:0;background:#0a0f1e">Last active</th></tr></thead>
+          <tbody>${buyerRows}</tbody></table></div>`;
+
   const bodyHtml = !started
     ? `<div style="color:#64748b;font-size:.85rem;padding:6px 0">No course-player visits recorded yet. Data appears here once buyers open the course.</div>`
     : `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
@@ -981,7 +1006,8 @@ async function renderCourseProgress() {
           <th style="padding:4px 8px">#</th><th style="padding:4px 8px">Lesson</th>
           <th style="padding:4px 8px">Reached</th><th style="padding:4px 8px;text-align:right">Viewed</th>
           <th style="padding:4px 8px;text-align:right">Finished</th></tr></thead>
-        <tbody>${rows}</tbody></table>`;
+        <tbody>${rows}</tbody></table>
+      ${buyerList}`;
 
   el.insertAdjacentHTML("beforeend",
     `<h2 class="section-header" style="margin-top:8px">Course progress: ${esc(NAME)} <span class="section-meta">${started} started</span></h2>${bodyHtml}`);
