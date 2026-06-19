@@ -1,9 +1,14 @@
-// membership-checkout-url — returns the membership Stripe Payment Link for the
-// visitor's currency (Netlify geo), with the visitor id threaded as
-// client_reference_id. SAME-ORIGIN with /signup so the iOS app webview can fetch
-// it (cross-origin Supabase fetches get blocked in the app). The page then
-// window.open()s the returned URL into the Safari sheet — exactly how the
-// billing portal works in-app.
+// membership-checkout-url — SAME-ORIGIN redirect to the membership Stripe
+// Payment Link for the visitor's currency (Netlify geo), with the visitor id
+// threaded as client_reference_id.
+//
+// Why a 302 (not JSON): in the iOS app webview, window.open() only reaches the
+// shell's UI delegate (the Safari sheet) when it's called SYNCHRONOUSLY inside
+// the click gesture. Fetching the URL first (await) consumes the gesture, so the
+// sheet never opens and the fallback navigation gets trapped in the webview
+// ("no wifi" bounce). So /signup window.open()s THIS url directly inside the
+// click, with no await; the sheet opens on a same-origin URL and we 302 it on
+// to buy.stripe.com from the server. ?format=json still returns the URL as JSON.
 
 const COUNTRY_CURRENCY = {
   GB: "GBP", JE: "GBP", GG: "GBP", IM: "GBP",
@@ -45,13 +50,24 @@ exports.handler = async (event) => {
   const currency = (country && COUNTRY_CURRENCY[country]) ? COUNTRY_CURRENCY[country] : "GBP";
   let url = LINKS[currency] || LINKS["GBP"];
 
-  const vidRaw = (event.queryStringParameters && event.queryStringParameters.vid) || "";
+  const qs = event.queryStringParameters || {};
+  const vidRaw = qs.vid || "";
   const vid = String(vidRaw).replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64);
   if (vid) url += (url.includes("?") ? "&" : "?") + "client_reference_id=" + encodeURIComponent(vid);
 
+  if (qs.format === "json") {
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      body: JSON.stringify({ url, currency }),
+    };
+  }
+
+  // Default: 302 straight to Stripe so the in-app Safari sheet (opened
+  // synchronously on this same-origin URL) lands on checkout.
   return {
-    statusCode: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-    body: JSON.stringify({ url, currency }),
+    statusCode: 302,
+    headers: { Location: url, "Cache-Control": "no-store" },
+    body: "",
   };
 };
