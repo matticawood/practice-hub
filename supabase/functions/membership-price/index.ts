@@ -30,6 +30,22 @@ const PRICES: Record<string, { minor: number; display: string }> = {
   NZD: { minor: 2999,  display: "NZ$29.99" },
 };
 
+// Annual = monthly x10 ("2 months free"). `equiv` is the annual price / 12, the
+// per-month figure we show under the annual option. Hardcoded so the currency
+// formatting matches PRICES exactly (no fragile client-side number formatting).
+const ANNUAL: Record<string, { display: string; equiv: string }> = {
+  GBP: { display: "£129.90",  equiv: "£10.83" },
+  USD: { display: "$179.90",  equiv: "$14.99" },
+  EUR: { display: "€149.90",  equiv: "€12.49" },
+  CAD: { display: "CA$239.90", equiv: "CA$19.99" },
+  AUD: { display: "A$249.90", equiv: "A$20.83" },
+  SEK: { display: "1690 kr",  equiv: "141 kr" },
+  NOK: { display: "1790 kr",  equiv: "149 kr" },
+  DKK: { display: "1140 kr",  equiv: "95 kr" },
+  SGD: { display: "S$229.90", equiv: "S$19.16" },
+  NZD: { display: "NZ$299.90", equiv: "NZ$24.99" },
+};
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -77,8 +93,13 @@ Deno.serve(async (req) => {
   let checkoutUrl = LINKS[currency] || LINKS["GBP"];
   if (vid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "client_reference_id=" + encodeURIComponent(vid);
 
+  const a = ANNUAL[currency] || ANNUAL["GBP"];
+
   return new Response(
-    JSON.stringify({ currency, display: p.display, minor: p.minor, period: "month", checkoutUrl }),
+    JSON.stringify({
+      currency, display: p.display, minor: p.minor, period: "month", checkoutUrl,
+      annualDisplay: a.display, annualEquivDisplay: a.equiv, annualSaving: "2 months free",
+    }),
     { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } },
   );
 });

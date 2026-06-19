@@ -1,4 +1,4 @@
-// ── Payment links per currency ─────────────────────────────────────────────
+// ── Payment links per currency (monthly) ───────────────────────────────────
 const LINKS: Record<string, string> = {
   GBP: "https://buy.stripe.com/28EeV61nA9Z0fxJaAB5EY00",
   USD: "https://buy.stripe.com/eVq8wI4zMefg85haAB5EY01",
@@ -10,6 +10,20 @@ const LINKS: Record<string, string> = {
   DKK: "https://buy.stripe.com/28E28keam7QS5X91015EY07",
   SGD: "https://buy.stripe.com/6oU8wIgiub341GT8st5EY09",
   NZD: "https://buy.stripe.com/00w00c0jw9Z099laAB5EY0a",
+};
+
+// ── Payment links per currency (annual = monthly x10, "2 months free") ──────
+const LINKS_ANNUAL: Record<string, string> = {
+  GBP: "https://buy.stripe.com/aFa7sEeam7QS71d3895EY0b",
+  USD: "https://buy.stripe.com/14AcMYc2e6MOadp2455EY0c",
+  CAD: "https://buy.stripe.com/3cI14g4zMgno99lcIJ5EY0d",
+  EUR: "https://buy.stripe.com/fZuaEQd6ignoadp4cd5EY0e",
+  AUD: "https://buy.stripe.com/7sY6oA8Q21suetF8st5EY0f",
+  SEK: "https://buy.stripe.com/eVq9AM5DQb343P12455EY0g",
+  NOK: "https://buy.stripe.com/28EfZa4zMfjk99lfUV5EY0h",
+  DKK: "https://buy.stripe.com/cNi9AMc2e3ACetFeQR5EY0i",
+  SGD: "https://buy.stripe.com/14A28keam6MObhtcIJ5EY0j",
+  NZD: "https://buy.stripe.com/8x2eV68Q28UW85hdMN5EY0k",
 };
 
 // ── Country → currency ─────────────────────────────────────────────────────
@@ -74,7 +88,11 @@ Deno.serve(async (req) => {
   }
 
   const currency = (country && COUNTRY_CURRENCY[country]) ? COUNTRY_CURRENCY[country] : "GBP";
-  let url = LINKS[currency] ?? LINKS["GBP"];
+
+  // plan=annual routes to the yearly link; anything else (incl. absent) stays monthly.
+  const plan = new URL(req.url).searchParams.get("plan") === "annual" ? "annual" : "monthly";
+  const table = plan === "annual" ? LINKS_ANNUAL : LINKS;
+  let url = table[currency] ?? table["GBP"];
 
   // Thread the landing-page visitor id through to Stripe. Payment Links accept a
   // client_reference_id query param, which surfaces in the checkout.session.completed
@@ -83,7 +101,7 @@ Deno.serve(async (req) => {
   const vid = vidRaw ? vidRaw.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64) : "";
   if (vid) url += (url.includes("?") ? "&" : "?") + "client_reference_id=" + encodeURIComponent(vid);
 
-  console.log(`country=${country} → currency=${currency}${vid ? ` vid=${vid}` : ""}`);
+  console.log(`country=${country} → currency=${currency} plan=${plan}${vid ? ` vid=${vid}` : ""}`);
 
   return new Response(null, {
     status: 302,

@@ -150,6 +150,11 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
     color: var(--muted);
     line-height: 1.5;
   }
+  .plan-toggle{display:inline-flex;background:#1a1a1d;border:1px solid #2e2e30;border-radius:10px;padding:4px;gap:4px;margin-bottom:18px}
+  .plan-opt{appearance:none;border:0;background:transparent;color:var(--muted);font-family:inherit;font-size:0.9rem;font-weight:600;padding:8px 16px;border-radius:7px;cursor:pointer;transition:background .18s,color .18s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+  .plan-opt.is-active{background:var(--gold);color:#000}
+  .plan-save{font-size:0.62rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:100px;background:rgba(245,197,24,0.16);color:var(--gold)}
+  .plan-opt.is-active .plan-save{background:rgba(0,0,0,0.16);color:#000}
 
   .pricing-badge { font-size: 1rem !important; padding: 0.6rem 1.5rem !important; letter-spacing: 0.08em !important; }
 
@@ -485,10 +490,14 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
   
   <h2 style="">A better way to learn piano starts here.</h2>
   <div class="pricing-block" style="">
+    <div class="plan-toggle" role="tablist" aria-label="Billing period">
+      <button type="button" class="plan-opt is-active" data-plan="monthly">Monthly</button>
+      <button type="button" class="plan-opt" data-plan="annual">Annual <span class="plan-save">2 months free</span></button>
+    </div>
     <div class="price-main" style="">
       <span class="price-amount" style="">£12.99</span>
       <span class="price-period" style="">/month</span></div>
-    <div class="price-equiv" style="">$17.99 USD · €14.99 EUR · pricing shown in your local currency at checkout</div>
+    <div class="price-equiv" style="">Billed monthly · cancel anytime</div>
   </div>
   <a href="/join.html" class="btn-primary" data-cta="join-final" style="">Join The Practice Room →</a>
   
@@ -594,23 +603,58 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
 })();
 </script>
 <script>
-/* Show the membership price in the visitor's local currency (display only; the
-   checkout already localises). Falls back to the rendered £ on any failure. */
+/* Membership pricing + monthly/annual toggle. Shows the visitor's local currency
+   (display only; checkout localises). The selected plan is threaded into the Join
+   links as ?plan=annual and shared via window.__tprPlan for the in-app handler.
+   Monthly is the default; annual shows the per-month equivalent with "2 months
+   free". Falls back to the rendered GBP figures on any fetch failure. */
+window.__tprPlan = "monthly";
 (function(){
   var SUPA="https://gyskfutmncprqxazgatv.supabase.co";
   var ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+  // Defaults (GBP) so the toggle works even if the price fetch fails.
+  var data={display:"£12.99",annualDisplay:"£129.90",annualEquivDisplay:"£10.83",annualSaving:"2 months free",currency:"GBP"};
+
+  function applyPlan(plan){
+    window.__tprPlan = plan;
+    var amt=document.querySelector(".price-amount"),
+        per=document.querySelector(".price-period"),
+        eq=document.querySelector(".price-equiv");
+    if(plan==="annual"){
+      if(amt) amt.textContent=data.annualEquivDisplay;
+      if(per) per.textContent="/month";
+      if(eq) eq.textContent="Billed annually at "+data.annualDisplay+" · "+(data.annualSaving||"2 months free");
+    } else {
+      if(amt) amt.textContent=data.display;
+      if(per) per.textContent="/month";
+      if(eq) eq.textContent="Billed monthly · cancel anytime";
+    }
+    [].forEach.call(document.querySelectorAll(".plan-opt"),function(b){
+      b.classList.toggle("is-active", b.getAttribute("data-plan")===plan);
+    });
+    // Thread the plan into the web Join links (the in-app handler reads __tprPlan).
+    [].forEach.call(document.querySelectorAll('a[data-cta^="join"]'),function(a){
+      try{
+        var u=new URL(a.getAttribute("href"), location.origin);
+        if(plan==="annual") u.searchParams.set("plan","annual"); else u.searchParams.delete("plan");
+        a.setAttribute("href", u.pathname+u.search);
+      }catch(e){}
+    });
+  }
+
+  // Wire the toggle immediately (defaults guarantee it works pre-fetch).
+  [].forEach.call(document.querySelectorAll(".plan-opt"),function(b){
+    b.addEventListener("click",function(){ applyPlan(b.getAttribute("data-plan")); });
+  });
+
   fetch(SUPA+"/functions/v1/membership-price",{headers:{apikey:ANON,Authorization:"Bearer "+ANON}})
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       if(!d || !d.display) return;
-      var amt=document.querySelector(".price-amount");
-      if(amt) amt.textContent=d.display;
+      data=d;
       var fp=document.querySelector(".faq-price");
       if(fp) fp.textContent=d.display+"/month";
-      if(d.currency && d.currency!=="GBP"){
-        var eq=document.querySelector(".price-equiv");
-        if(eq) eq.textContent="Billed monthly in your local currency. Cancel anytime.";
-      }
+      applyPlan(window.__tprPlan);   // re-render the current plan with localised figures
     })
     .catch(function(){});
 })();
@@ -633,7 +677,10 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
   if(!/PWAShell/i.test(navigator.userAgent||"")) return;
   function ext(){
     var vid; try{ vid=localStorage.getItem("tpr_vid"); }catch(e){}
-    return "https://gyskfutmncprqxazgatv.supabase.co/functions/v1/membership-redirect"+(vid?("?vid="+encodeURIComponent(vid)):"");
+    var qs=[];
+    if(vid) qs.push("vid="+encodeURIComponent(vid));
+    if(window.__tprPlan==="annual") qs.push("plan=annual");
+    return "https://gyskfutmncprqxazgatv.supabase.co/functions/v1/membership-redirect"+(qs.length?("?"+qs.join("&")):"");
   }
   document.addEventListener("click",function(e){
     var a=e.target.closest && e.target.closest('a[data-cta^="join"]');
