@@ -35,10 +35,25 @@ Deno.serve(async (req) => {
     }
   } catch (_) { /* fall through to zeros; the page hides the line if empty */ }
 
+  // Distinct pieces worked on in the window (breadth-of-repertoire proof).
+  let recentPieces = 0;
+  try {
+    const ri = await fetch(
+      `${url}/rest/v1/practice_items?select=piece_label,practice_sessions!inner(session_date)&practice_sessions.session_date=gte.${cutoff}&limit=10000`,
+      { headers: { apikey: key!, Authorization: `Bearer ${key}` } },
+    );
+    if (ri.ok) {
+      const items = await ri.json();
+      const seen = new Set<string>();
+      for (const it of items) if (it.piece_label) seen.add(it.piece_label);
+      recentPieces = seen.size;
+    }
+  } catch (_) { /* leave 0 */ }
+
   return new Response(
     JSON.stringify({
       sessions, hours: Math.round(minutes / 60),
-      recentSessions, recentHours: Math.round(recentMinutes / 60), windowDays: 30,
+      recentSessions, recentHours: Math.round(recentMinutes / 60), recentPieces, windowDays: 30,
     }),
     {
       headers: {
