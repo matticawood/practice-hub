@@ -33,17 +33,19 @@ const PRICES: Record<string, { minor: number; display: string }> = {
 // Annual = monthly x10 ("2 months free"). `equiv` is the annual price / 12, the
 // per-month figure we show under the annual option. Hardcoded so the currency
 // formatting matches PRICES exactly (no fragile client-side number formatting).
-const ANNUAL: Record<string, { display: string; equiv: string }> = {
-  GBP: { display: "£129.90",  equiv: "£10.83" },
-  USD: { display: "$179.90",  equiv: "$14.99" },
-  EUR: { display: "€149.90",  equiv: "€12.49" },
-  CAD: { display: "CA$239.90", equiv: "CA$19.99" },
-  AUD: { display: "A$249.90", equiv: "A$20.83" },
-  SEK: { display: "1690 kr",  equiv: "141 kr" },
-  NOK: { display: "1790 kr",  equiv: "149 kr" },
-  DKK: { display: "1140 kr",  equiv: "95 kr" },
-  SGD: { display: "S$229.90", equiv: "S$19.16" },
-  NZD: { display: "NZ$299.90", equiv: "NZ$24.99" },
+// display = annual total, equiv = annual/12 (per-month shown big),
+// saving = 2x monthly (the "2 months free" amount, shown to make it concrete).
+const ANNUAL: Record<string, { display: string; equiv: string; saving: string }> = {
+  GBP: { display: "£129.90",  equiv: "£10.83",  saving: "£25.98" },
+  USD: { display: "$179.90",  equiv: "$14.99",  saving: "$35.98" },
+  EUR: { display: "€149.90",  equiv: "€12.49",  saving: "€29.98" },
+  CAD: { display: "CA$239.90", equiv: "CA$19.99", saving: "CA$47.98" },
+  AUD: { display: "A$249.90", equiv: "A$20.83", saving: "A$49.98" },
+  SEK: { display: "1690 kr",  equiv: "141 kr",  saving: "338 kr" },
+  NOK: { display: "1790 kr",  equiv: "149 kr",  saving: "358 kr" },
+  DKK: { display: "1140 kr",  equiv: "95 kr",   saving: "228 kr" },
+  SGD: { display: "S$229.90", equiv: "S$19.16", saving: "S$45.98" },
+  NZD: { display: "NZ$299.90", equiv: "NZ$24.99", saving: "NZ$59.98" },
 };
 
 const cors = {
@@ -99,6 +101,7 @@ Deno.serve(async (req) => {
     JSON.stringify({
       currency, display: p.display, minor: p.minor, period: "month", checkoutUrl,
       annualDisplay: a.display, annualEquivDisplay: a.equiv, annualSaving: "2 months free",
+      annualSavingAmount: a.saving,
     }),
     { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } },
   );
