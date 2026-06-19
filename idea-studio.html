@@ -432,19 +432,28 @@ function renderIdea(){
         <ol class="beats small">${arr(d.outline).map(b=>`<li>${esc(b)}</li>`).join("")}</ol></div>
       <p class="small" style="margin-top:10px"><b style="color:var(--gold)">Human payoff:</b> ${esc(d.payoff)}</p>
       <div class="row" style="margin-top:14px">
-        <input id="rfIn" placeholder="Refine: e.g. punchier titles, a darker angle, simpler mystery" style="flex:1">
-        <button id="rfGo" class="sm ghost">Refine</button>
+        <input id="rfIn" placeholder="Develop with AI: a direction to take it, an angle, something to add..." style="flex:1">
+        <button id="rfGo" class="sm ghost">Develop</button>
+      </div>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap">
         <button id="fcGo" class="sm ghost">Fact-check</button>
+        <button id="foGo" class="sm ghost">Filming outline</button>
         <button id="svGo" class="sm">Save to backlog</button>
       </div>
       <p id="dvErr2" class="err"></p>
       <div id="fcOut" style="margin-top:10px"></div>
+      <div id="foOut" style="margin-top:10px"></div>
     </div>`;
   $("#rfGo").onclick = async () => {
     const instruction = $("#rfIn").value.trim(); if(!instruction) return;
     const b = $("#rfGo"); b.disabled = true; b.textContent="...";
-    try{ const d2 = await callAI({ mode:"refine", idea: currentIdea, instruction }); currentIdea = Object.assign({ vehicle: currentIdea.vehicle }, d2); renderIdea(); }
-    catch(e){ $("#dvErr2").textContent = e.message; b.disabled=false; b.textContent="Refine"; }
+    try{
+      const d2 = await callAI({ mode:"refine", idea: currentIdea, instruction });
+      // carry the saved facts across a develop step (the vehicle's facts still hold)
+      currentIdea = Object.assign({ vehicle: currentIdea.vehicle, facts: currentIdea.facts }, d2);
+      renderIdea();
+    }
+    catch(e){ $("#dvErr2").textContent = e.message; b.disabled=false; b.textContent="Develop"; }
   };
   $("#fcGo").onclick = async () => {
     const b = $("#fcGo"); b.disabled = true; b.textContent = "Checking the web...";
@@ -453,34 +462,91 @@ function renderIdea(){
       const out = await callText({ mode:"factcheck", idea: currentIdea });
       const data = extractJson(out);
       if(!data || !Array.isArray(data.claims)){ $("#fcOut").innerHTML = '<p class="small">'+esc(out.slice(0,800))+'</p>'; return; }
-      const col = { verified:"#3ddc84", misleading:"#F5C518", false:"#ff5a5a", unverified:"#8a8a8a" };
-      $("#fcOut").innerHTML =
-        (data.summary ? `<p class="small" style="margin:4px 0 10px"><b>Fact-check:</b> ${esc(data.summary)}</p>` : "") +
-        (data.claims.length ? data.claims.map(c => `
-          <div class="card" style="margin-bottom:8px">
-            <div class="small"><span style="color:${col[c.verdict]||"#8a8a8a"};font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em">${esc(c.verdict||"?")}</span> &nbsp;${esc(c.claim)}</div>
-            ${c.note ? `<div class="small muted" style="margin-top:4px">${esc(c.note)}</div>` : ""}
-            ${c.source ? `<a class="small" href="${esc(c.source)}" target="_blank" rel="noopener">source &#8599;</a>` : ""}
-          </div>`).join("") : '<p class="muted small">No checkable factual claims found.</p>');
+      currentIdea.facts = { claims: data.claims, summary: data.summary || "" };   // saved with the idea
+      renderFacts(currentIdea.facts);
     }catch(e){ $("#fcOut").innerHTML = '<p class="err">'+esc(e.message)+'</p>'; }
     finally{ b.disabled = false; b.textContent = "Fact-check"; }
+  };
+  $("#foGo").onclick = async () => {
+    const b = $("#foGo"); b.disabled = true; b.textContent = "Writing...";
+    $("#foOut").innerHTML = '<p class="muted small">Building your bullet-point filming outline...</p>';
+    try{
+      const fo = await callAI({ mode:"film_outline", idea: currentIdea,
+        facts: currentIdea.facts || undefined, notes: $("#rfIn").value.trim() || undefined });
+      currentIdea.filmOutline = fo;
+      renderFilmOutline(fo);
+    }catch(e){ $("#foOut").innerHTML = '<p class="err">'+esc(e.message)+'</p>'; }
+    finally{ b.disabled = false; b.textContent = "Filming outline"; }
   };
   $("#svGo").onclick = (e) => saveIdea({
     vehicle: currentIdea.vehicle, kind: currentIdea.kind, question: currentIdea.question,
     mystery: currentIdea.mystery, titles: currentIdea.titles||[], outline: currentIdea.outline||[],
-    payoff: currentIdea.payoff, status:"developing"
+    payoff: currentIdea.payoff, status:"developing",
+    facts: currentIdea.facts || null, film_outline: currentIdea.filmOutline || null
   }, e.target, editId);
+  if(currentIdea.facts) renderFacts(currentIdea.facts);
+  if(currentIdea.filmOutline) renderFilmOutline(currentIdea.filmOutline);
+}
+
+function renderFacts(f){
+  const col = { verified:"#3ddc84", misleading:"#F5C518", false:"#ff5a5a", unverified:"#8a8a8a" };
+  const claims = arr(f.claims);
+  $("#fcOut").innerHTML =
+    (f.summary ? `<p class="small" style="margin:4px 0 10px"><b>Fact-check:</b> ${esc(f.summary)} <span class="muted">(saved with this idea)</span></p>` : "") +
+    (claims.length ? claims.map(c => `
+      <div class="card" style="margin-bottom:8px">
+        <div class="small"><span style="color:${col[c.verdict]||"#8a8a8a"};font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em">${esc(c.verdict||"?")}</span> &nbsp;${esc(c.claim)}</div>
+        ${c.note ? `<div class="small muted" style="margin-top:4px">${esc(c.note)}</div>` : ""}
+        ${c.source ? `<a class="small" href="${esc(c.source)}" target="_blank" rel="noopener">source &#8599;</a>` : ""}
+      </div>`).join("") : '<p class="muted small">No checkable factual claims found.</p>');
+}
+
+function filmOutlineText(fo){
+  let t = (fo.title ? "TITLE: " + fo.title + "\n\n" : "");
+  t += "HOOK (first 5s): " + (fo.hook||"") + "\n\n";
+  arr(fo.sections).forEach(s => {
+    t += (s.heading||"").toUpperCase() + "\n";
+    arr(s.bullets).forEach(b => t += "  - " + b + "\n");
+    t += "\n";
+  });
+  t += "CLOSE: " + (fo.closing||"") + "\n";
+  return t;
+}
+function renderFilmOutline(fo){
+  $("#foOut").innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b class="small" style="color:var(--gold)">Filming outline</b>
+        <button id="foCopy" class="sm ghost">Copy</button>
+      </div>
+      <div class="small" style="margin:6px 0"><b>Title:</b> ${esc(fo.title||"")}</div>
+      <div class="small" style="margin:6px 0"><b style="color:#cfcfcf">Hook (first 5s):</b> ${esc(fo.hook||"")}</div>
+      ${arr(fo.sections).map(s=>`<div style="margin-top:8px"><b class="small">${esc(s.heading||"")}</b>
+        <ul class="small">${arr(s.bullets).map(b=>`<li>${esc(b)}</li>`).join("")}</ul></div>`).join("")}
+      <div class="small" style="margin-top:8px"><b style="color:var(--gold)">Close:</b> ${esc(fo.closing||"")}</div>
+    </div>`;
+  $("#foCopy").onclick = () => {
+    navigator.clipboard.writeText(filmOutlineText(fo));
+    const b = $("#foCopy"); b.textContent = "Copied"; setTimeout(()=>b.textContent="Copy", 1500);
+  };
 }
 
 // ── backlog ──
 async function saveIdea(obj, btn, updateId){
   if(btn){ btn.disabled = true; btn.textContent = "Saving..."; }
   obj.updated_at = new Date().toISOString();
-  const { error } = updateId
-    ? await db.from("video_ideas").update(obj).eq("id", updateId)
-    : await db.from("video_ideas").insert(obj);
-  if(btn){ btn.textContent = error ? "Error" : "Saved"; }
-  if(!error){ editId = null; loadBacklog(); }
+  const run = (o) => updateId
+    ? db.from("video_ideas").update(o).eq("id", updateId)
+    : db.from("video_ideas").insert(o);
+  let { error } = await run(obj);
+  // facts / film_outline columns may not be migrated yet -> save the rest
+  if(error && /facts|film_outline|column|schema cache/i.test(error.message||"")){
+    const { facts, film_outline, ...base } = obj;
+    ({ error } = await run(base));
+  }
+  if(btn){ btn.disabled = false; btn.textContent = error ? "Error" : "Saved"; }
+  if(error){ console.warn("save error:", error.message); }
+  else { editId = null; loadBacklog(); }
 }
 async function loadBacklog(){
   const { data, error } = await db.from("video_ideas").select("*").order("created_at",{ascending:false});
@@ -514,7 +580,15 @@ $("#blOut").onclick = async e => {
     editId = id;   // develop this saved item; Save will update it in place
     document.querySelector('.seg button[data-mode="develop"]').click();
     $("#dvVehicle").value = i.vehicle || ""; $("#dvAngle").value = i.question || "";
-    $("#dvGo").click();
+    if(i.question && ((i.titles&&i.titles.length) || (i.outline&&i.outline.length))){
+      // already developed -> restore it (with saved facts + outline), don't re-run the AI
+      currentIdea = { vehicle:i.vehicle, kind:i.kind, question:i.question, mystery:i.mystery,
+        titles:i.titles||[], outline:i.outline||[], payoff:i.payoff,
+        facts:i.facts||null, filmOutline:i.film_outline||null };
+      renderIdea();
+    } else {
+      $("#dvGo").click();
+    }
   }
 };
 // typing a brand-new vehicle by hand means it's a new idea, not an edit of a saved row

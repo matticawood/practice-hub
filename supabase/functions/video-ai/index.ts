@@ -84,6 +84,32 @@ const IDEA_TOOL = {
   },
 };
 
+const FILM_OUTLINE_TOOL = {
+  name: "emit_film_outline",
+  description: "A practical bullet-point shooting outline Matthew reads off while filming to camera.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "the single title to film toward (pick the strongest)" },
+      hook: { type: "string", description: "the exact opening line(s) to say in the first ~5 seconds, in his voice" },
+      sections: {
+        type: "array",
+        description: "the body in filming order: each section is a beat of the investigation",
+        items: {
+          type: "object",
+          properties: {
+            heading: { type: "string", description: "short label for this beat" },
+            bullets: { type: "array", items: { type: "string" }, description: "short, speakable talking points in order; prefix a bullet with [PLAY] where he should demonstrate at the piano, and [FACT] where he should state a verified fact" },
+          },
+          required: ["heading", "bullets"],
+        },
+      },
+      closing: { type: "string", description: "how to land the human payoff, plus a soft non-salesy nod to The Practice Room only if it fits naturally" },
+    },
+    required: ["title", "hook", "sections", "closing"],
+  },
+};
+
 const INSIGHTS_SYSTEM = `You are a sharp, honest YouTube channel strategist for Matthew Cawood (pianist/educator). You understand his creative DNA: his strongest work uses music as evidence to reveal a human truth, vehicle-first.
 
 He has TWO GOALS. Weigh every recommendation against both, and be explicit about which goal each move serves:
@@ -208,6 +234,18 @@ function buildRequest(body: any) {
     const user = `Here is a current video idea (JSON):\n${JSON.stringify(body.idea)}\n\nRefine it per this instruction: "${body.instruction}". Keep what works. Return the full idea again in the same shape.`;
     return { model: MODEL, max_tokens: 3000, stream: true, system: SYSTEM,
       tools: [IDEA_TOOL], tool_choice: { type: "tool", name: "emit_idea" },
+      messages: [{ role: "user", content: user }] };
+  }
+  if (mode === "film_outline") {
+    if (!body.idea) return null;
+    const ideaStr = typeof body.idea === "string" ? body.idea : JSON.stringify(body.idea);
+    const facts = body.facts
+      ? `\n\nVERIFIED FACTS to weave in. State the CORRECTED version; never repeat a debunked myth as true:\n${typeof body.facts === "string" ? body.facts : JSON.stringify(body.facts)}`
+      : "";
+    const notes = body.notes ? `\n\nMatthew's own directions/additions to honour:\n${body.notes}` : "";
+    const user = `Turn this developed video idea into a practical BULLET-POINT FILMING OUTLINE that Matthew reads off while filming to camera.\n\nIdea (JSON):\n${ideaStr}${facts}${notes}\n\nShoot order: a punchy hook for the first ~5 seconds, then ordered sections (the investigation beats), then land the human payoff. Keep every bullet short and speakable, in his voice. Mark [PLAY] where he should demonstrate at the piano and [FACT] where he states a verified fact. No emojis, no em dashes.`;
+    return { model: MODEL, max_tokens: 3500, stream: true, system: SYSTEM,
+      tools: [FILM_OUTLINE_TOOL], tool_choice: { type: "tool", name: "emit_film_outline" },
       messages: [{ role: "user", content: user }] };
   }
   if (mode === "insights") {
