@@ -236,6 +236,13 @@ function buildRequest(body: any) {
       tools: [IDEA_TOOL], tool_choice: { type: "tool", name: "emit_idea" },
       messages: [{ role: "user", content: user }] };
   }
+  if (mode === "revise_facts") {
+    if (!body.idea || !body.facts) return null;
+    const user = `Here is a developed video idea (JSON):\n${JSON.stringify(body.idea)}\n\nA fact-check was run against it. Here are the verdicts (JSON):\n${typeof body.facts === "string" ? body.facts : JSON.stringify(body.facts)}\n\nRevise the idea so it stands entirely on TRUE ground:\n- If a core premise, mystery, title, beat or payoff relied on a claim judged FALSE or MISLEADING, do NOT keep the myth. Find the truthful version of the story (it is usually MORE fascinating than the myth) and pivot the angle to it.\n- Correct any factual detail across the question, mystery, titles, outline and payoff to match the verified facts.\n- Keep everything that checked out; stay in his voice, vehicle-first.\n\nReturn the full revised idea in the same shape.`;
+    return { model: MODEL, max_tokens: 3000, stream: true, system: SYSTEM,
+      tools: [IDEA_TOOL], tool_choice: { type: "tool", name: "emit_idea" },
+      messages: [{ role: "user", content: user }] };
+  }
   if (mode === "film_outline") {
     if (!body.idea) return null;
     const ideaStr = typeof body.idea === "string" ? body.idea : JSON.stringify(body.idea);
