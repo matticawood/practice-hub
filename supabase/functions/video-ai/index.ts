@@ -151,7 +151,7 @@ function buildRequest(body: any) {
     if (!body.channelData) return null;
     const meta = body.meta ? `${body.meta}\n\n` : "";
     const user = `${meta}Here is the channel's full catalogue (title | views | date):\n\n${body.channelData}\n\nAnalyse it honestly and specifically. What genuinely overperforms vs underperforms? Which title structures win? How is the channel evolving over time? Where should it go next, especially in service of the vehicle-first "human truth inside the music" approach? Use real titles and view counts as evidence throughout.`;
-    return { model: MODEL, max_tokens: 4000, stream: true, system: INSIGHTS_SYSTEM,
+    return { model: MODEL, max_tokens: 6500, stream: true, system: INSIGHTS_SYSTEM,
       tools: [INSIGHTS_TOOL], tool_choice: { type: "tool", name: "emit_insights" },
       messages: [{ role: "user", content: user }] };
   }
