@@ -616,35 +616,25 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
 })();
 </script>
 <script>
-/* In-app checkout (PWAShell). The app shell only diverts window.open() to the
-   Safari sheet when the target is an EXTERNAL host (that's why the billing portal,
-   which opens billing.stripe.com directly, works). A window.open() of a same-origin
-   url gets loaded inside the webview instead, and any server redirect to Stripe
-   from there gets trapped ("no wifi" bounce). And the open must be SYNCHRONOUS in
-   the click (no await) or the gesture is lost.
-   So: pre-fetch the DIRECT buy.stripe.com url on load (same-origin fetch, which the
-   webview allows), then on tap window.open() that external url synchronously. If the
-   prefetch isn't ready, open the external Supabase redirect directly (no fetch). */
+/* In-app checkout (PWAShell). The iOS app is a WKWebView pinned to app-bound
+   domains (only app.matthewcawood.com), so ANY navigation to an external host in
+   the main frame is blocked by WebKit -> "no wifi" error -> app bounces to login.
+   That is exactly what /join.html did: it window.location.replace()'d to the
+   external Supabase redirect (a JS main-frame nav), which the shell's
+   decidePolicyFor treats as navigationType .other and tries to load in-webview.
+   The ONE path the shell sends to SFSafariViewController instead is a real user
+   LINK TAP to an external host (.linkActivated -> .cancel -> SFSafariViewController).
+   So in the app we point the Join links straight at the external redirect url and
+   let the native tap happen: no /join.html, no window.open, no JS navigation. */
 (function(){
   if(!/PWAShell/i.test(navigator.userAgent||"")) return;
   var vid; try{ vid=localStorage.getItem("tpr_vid"); }catch(e){}
   var q=vid?("?vid="+encodeURIComponent(vid)):"";
-  // External fallback that needs no fetch: the Supabase redirect (geo + 302 server-side).
-  var fallbackUrl="https://gyskfutmncprqxazgatv.supabase.co/functions/v1/membership-redirect"+q;
-  var directUrl=null;
-  // Pre-fetch the per-currency buy.stripe.com url (same-origin, JSON mode).
-  fetch("/.netlify/functions/membership-checkout-url"+(q?q+"&":"?")+"format=json")
-    .then(function(r){return r.ok?r.json():null;})
-    .then(function(d){ if(d&&d.url) directUrl=d.url; })
-    .catch(function(){});
-  document.addEventListener("click",function(e){
-    var a=e.target.closest && e.target.closest('a[href^="/join.html"]');
-    if(!a) return;
-    e.preventDefault();
-    var target=directUrl||fallbackUrl;          // ALWAYS an external host
-    var w=window.open(target,"_blank");          // synchronous: keeps the user gesture
-    if(!w) window.location.href=target;          // last-resort fallback
-  },true);
+  var ext="https://gyskfutmncprqxazgatv.supabase.co/functions/v1/membership-redirect"+q;
+  [].forEach.call(document.querySelectorAll('a[href^="/join.html"]'),function(a){
+    a.href=ext;                 // external host -> real tap opens the Safari sheet
+    a.removeAttribute("target"); // plain .linkActivated (no new-window/createWebView)
+  });
 })();
 </script>
 </body>
