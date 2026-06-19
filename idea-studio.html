@@ -200,6 +200,31 @@ async function callAI(body){
   if(obj && obj.error) throw new Error(obj.error);
   return obj;
 }
+// Like callAI but returns the model's raw TEXT (used by the web-search fact-check).
+async function callText(body){
+  await token0();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/video-ai`, {
+    method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token}` },
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    let m = "Request failed (" + res.status + ")"; const t = await res.text();
+    try { m = (JSON.parse(t).error || t); } catch(e) { if(t) m = t; }
+    if(res.status === 403) m = "Owner-only. Sign in as matthew@matthewcawood.com.";
+    throw new Error(m);
+  }
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let out = "";
+  for(;;){ const { done, value } = await reader.read(); if(done) break; out += dec.decode(value, { stream:true }); }
+  if(out.includes("__ERROR__")) throw new Error(out.replace(/^[\s\S]*__ERROR__/,"").trim() || "fact-check error");
+  return out;
+}
+function extractJson(text){
+  const f = text.match(/```json\s*([\s\S]*?)```/i);
+  if(f) { try { return JSON.parse(f[1]); } catch(e){} }
+  const b = text.match(/\{[\s\S]*\}/);
+  if(b) { try { return JSON.parse(b[0]); } catch(e){} }
+  return null;
+}
 
 // ── channel ──
 $("#loadChan").onclick = async () => {
@@ -278,15 +303,36 @@ function renderIdea(){
       <div class="row" style="margin-top:14px">
         <input id="rfIn" placeholder="Refine: e.g. punchier titles, a darker angle, simpler mystery" style="flex:1">
         <button id="rfGo" class="sm ghost">Refine</button>
+        <button id="fcGo" class="sm ghost">Fact-check</button>
         <button id="svGo" class="sm">Save to backlog</button>
       </div>
       <p id="dvErr2" class="err"></p>
+      <div id="fcOut" style="margin-top:10px"></div>
     </div>`;
   $("#rfGo").onclick = async () => {
     const instruction = $("#rfIn").value.trim(); if(!instruction) return;
     const b = $("#rfGo"); b.disabled = true; b.textContent="...";
     try{ const d2 = await callAI({ mode:"refine", idea: currentIdea, instruction }); currentIdea = Object.assign({ vehicle: currentIdea.vehicle }, d2); renderIdea(); }
     catch(e){ $("#dvErr2").textContent = e.message; b.disabled=false; b.textContent="Refine"; }
+  };
+  $("#fcGo").onclick = async () => {
+    const b = $("#fcGo"); b.disabled = true; b.textContent = "Checking the web...";
+    $("#fcOut").innerHTML = '<p class="muted small">Searching and verifying the factual claims. This takes a moment...</p>';
+    try{
+      const out = await callText({ mode:"factcheck", idea: currentIdea });
+      const data = extractJson(out);
+      if(!data || !Array.isArray(data.claims)){ $("#fcOut").innerHTML = '<p class="small">'+esc(out.slice(0,800))+'</p>'; return; }
+      const col = { verified:"#3ddc84", misleading:"#F5C518", false:"#ff5a5a", unverified:"#8a8a8a" };
+      $("#fcOut").innerHTML =
+        (data.summary ? `<p class="small" style="margin:4px 0 10px"><b>Fact-check:</b> ${esc(data.summary)}</p>` : "") +
+        (data.claims.length ? data.claims.map(c => `
+          <div class="card" style="margin-bottom:8px">
+            <div class="small"><span style="color:${col[c.verdict]||"#8a8a8a"};font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em">${esc(c.verdict||"?")}</span> &nbsp;${esc(c.claim)}</div>
+            ${c.note ? `<div class="small muted" style="margin-top:4px">${esc(c.note)}</div>` : ""}
+            ${c.source ? `<a class="small" href="${esc(c.source)}" target="_blank" rel="noopener">source &#8599;</a>` : ""}
+          </div>`).join("") : '<p class="muted small">No checkable factual claims found.</p>');
+    }catch(e){ $("#fcOut").innerHTML = '<p class="err">'+esc(e.message)+'</p>'; }
+    finally{ b.disabled = false; b.textContent = "Fact-check"; }
   };
   $("#svGo").onclick = (e) => saveIdea({
     vehicle: currentIdea.vehicle, kind: currentIdea.kind, question: currentIdea.question,

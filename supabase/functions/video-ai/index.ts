@@ -84,6 +84,11 @@ const IDEA_TOOL = {
   },
 };
 
+// Anthropic-hosted web search tool (live internet) for the fact-check pass.
+const WEB_SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 6 };
+
+const FACTCHECK_SYSTEM = `You are a meticulous music fact-checker. You verify CONCRETE FACTUAL claims using web search before judging them: historical events and dates, who composed/wrote/premiered what, attributions, "first to do X", biographical facts, and specific verifiable musical-theory assertions. You IGNORE subjective, interpretive, or artistic statements (e.g. "the saddest piece", "it feels like grief") because those are not facts to check. Popular myths repeated as fact must be flagged. Always search before judging; never rely on memory for a specific claim.`;
+
 function ctxBlock(channelContext?: string, avoid?: string[]) {
   let s = "";
   if (channelContext) s += `\n\nFor grounding, here is what this channel's audience already responds to (recent/top videos with view counts). Match this appetite, and do NOT repeat topics already covered:\n${channelContext}`;
@@ -115,6 +120,14 @@ function buildRequest(body: any) {
     return { model: MODEL, max_tokens: 3000, stream: true, system: SYSTEM,
       tools: [IDEA_TOOL], tool_choice: { type: "tool", name: "emit_idea" },
       messages: [{ role: "user", content: user }] };
+  }
+  if (mode === "factcheck") {
+    if (!body.idea) return null;
+    const user = `Fact-check the concrete factual claims in this music video idea. Use web search to verify each one before judging; do not rely on memory.\n\nIdea (JSON):\n${JSON.stringify(body.idea)}\n\nFind every verifiable factual claim (ignore subjective/artistic statements). For each, give: the claim, a verdict (one of: verified, false, misleading, unverified), a short note (the correction or nuance), and a source URL you actually used.\n\nWhen done, end your reply with ONLY this JSON inside a \`\`\`json fenced code block:\n{ "claims": [ { "claim": "...", "verdict": "verified|false|misleading|unverified", "note": "...", "source": "https://..." } ], "summary": "one short overall line" }`;
+    // Web search needs the agentic loop, so NO forced tool here; the model searches
+    // then writes a text answer ending in the JSON block (the client extracts it).
+    return { model: MODEL, max_tokens: 4000, stream: true, system: FACTCHECK_SYSTEM,
+      tools: [WEB_SEARCH_TOOL], messages: [{ role: "user", content: user }] };
   }
   return null;
 }
@@ -185,8 +198,13 @@ Deno.serve(async (req) => {
               if (!data || data === "[DONE]") continue;
               let evt: any;
               try { evt = JSON.parse(data); } catch { continue; }
-              if (evt.type === "content_block_delta" && evt.delta?.type === "input_json_delta" && evt.delta.partial_json) {
-                controller.enqueue(encoder.encode(evt.delta.partial_json));
+              if (evt.type === "content_block_delta") {
+                // structured modes stream forced-tool JSON; factcheck (web search) streams text
+                if (evt.delta?.type === "input_json_delta" && evt.delta.partial_json) {
+                  controller.enqueue(encoder.encode(evt.delta.partial_json));
+                } else if (evt.delta?.type === "text_delta" && evt.delta.text) {
+                  controller.enqueue(encoder.encode(evt.delta.text));
+                }
               } else if (evt.type === "error") {
                 fail(evt.error?.message || "generation error");
               }
