@@ -90,15 +90,35 @@
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.start(t0); osc.stop(t0 + dur + 0.05);
   }
+  // Play a set of notes. opts:
+  //   sequence : play one after another (vs together as a chord)
+  //   beats    : array of note lengths in beats, parallel to notes (e.g. [2,2] = two
+  //              half notes). A null/invalid note entry is a REST: it still advances
+  //              the clock but makes no sound. When omitted, falls back to fixed lengths.
+  //   bpm      : tempo for the beats (default 80 → 1 beat = 0.75s)
   function playMidis(notes, opts) {
     opts = opts || {};
-    const midis = (notes || []).map(noteToMidi).filter(m => m != null);
-    if (!midis.length) return;
+    notes = notes || [];
     const ctx = audioCtx();
     loadPiano();
-    const seq = !!opts.sequence, gap = opts.gap || 0.55, dur = seq ? 0.7 : 2.4;
-    midis.forEach((m, i) => {
-      const when = ctx.currentTime + 0.03 + (seq ? i * gap : 0);
+    const seq = !!opts.sequence;
+    const beats = Array.isArray(opts.beats) ? opts.beats : null;
+    const spb = 60 / (opts.bpm || 80);   // seconds per beat
+    let cum = 0;
+    notes.forEach((nv, i) => {
+      const m = (nv == null) ? null : noteToMidi(nv);
+      let when, dur;
+      if (beats) {
+        const bl = (beats[i] != null ? beats[i] : 1);
+        when = ctx.currentTime + 0.03 + (seq ? cum * spb : 0);
+        dur = Math.max(0.08, bl * spb * 0.96);
+        if (seq) cum += bl;
+      } else {
+        const gap = opts.gap || 0.55;
+        when = ctx.currentTime + 0.03 + (seq ? i * gap : 0);
+        dur = seq ? 0.7 : 2.4;
+      }
+      if (m == null) return;   // rest: clock already advanced, play nothing
       if (_piano) { try { _piano.play(m, when, { gain: 2.2, duration: dur }); return; } catch (e) {} }
       synthNote(ctx, m, when, dur);
     });
@@ -217,7 +237,9 @@
       case "play": {
         const notes = Array.isArray(b.notes) ? b.notes : [];
         const seq = b.style === "sequence" || b.style === "melody" || b.style === "scale";
-        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}">
+        const beatsAttr = Array.isArray(b.beats) ? ` data-beats="${esc(JSON.stringify(b.beats))}"` : "";
+        const bpmAttr = b.bpm ? ` data-bpm="${esc(String(b.bpm))}"` : "";
+        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}>
           <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
       }
       case "keyboard": {
@@ -351,8 +373,13 @@
 
     // ── Audio blocks: play buttons + interactive keyboards ──
     const parseNotes = el => { try { return JSON.parse(el.dataset.notes || "[]"); } catch (e) { return []; } };
+    const parseJson = (s, fb) => { try { return s ? JSON.parse(s) : fb; } catch (e) { return fb; } };
     root.querySelectorAll(".lr-play-btn").forEach(btn =>
-      btn.addEventListener("click", () => playMidis(parseNotes(btn), { sequence: btn.dataset.seq === "1" })));
+      btn.addEventListener("click", () => playMidis(parseNotes(btn), {
+        sequence: btn.dataset.seq === "1",
+        beats: parseJson(btn.dataset.beats, null),
+        bpm: btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null
+      })));
     root.querySelectorAll(".lr-kbd-play").forEach(btn =>
       btn.addEventListener("click", () => playMidis(parseNotes(btn), { sequence: false })));
     root.querySelectorAll(".lr-kbd-live .lr-key").forEach(key =>
