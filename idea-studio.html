@@ -187,10 +187,18 @@ async function callAI(body){
     method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token}` },
     body: JSON.stringify(body)
   });
+  if(!res.ok){
+    let m = "Request failed (" + res.status + ")"; const t = await res.text();
+    try { m = (JSON.parse(t).error || t); } catch(e) { if(t) m = t; }
+    if(res.status === 403) m = "This tool is owner-only. You're signed in as a non-owner email, sign in as matthew@matthewcawood.com.";
+    throw new Error(m);
+  }
   const reader = res.body.getReader(); const dec = new TextDecoder(); let out = "";
   for(;;){ const { done, value } = await reader.read(); if(done) break; out += dec.decode(value, { stream:true }); }
-  if(out.startsWith("\n__ERROR__") || out.includes("__ERROR__")) throw new Error(out.replace(/^[\s\S]*__ERROR__/,"").trim() || "generation error");
-  return JSON.parse(out);
+  if(out.includes("__ERROR__")) throw new Error(out.replace(/^[\s\S]*__ERROR__/,"").trim() || "generation error");
+  let obj; try { obj = JSON.parse(out); } catch(e) { throw new Error("Could not read the response. " + out.slice(0,160)); }
+  if(obj && obj.error) throw new Error(obj.error);
+  return obj;
 }
 
 // ── channel ──
