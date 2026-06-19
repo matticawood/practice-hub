@@ -156,6 +156,7 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp
 
 let channelCtx = "";      // string of top videos for grounding
 let currentIdea = null;   // the developed idea on screen
+let editId = null;        // backlog row being developed in place (else null = new idea)
 let token = null;
 
 // ── auth ──
@@ -313,6 +314,7 @@ $("#bsOut").onclick = e => {
   const btn = e.target.closest("button"); if(!btn) return;
   const v = window._vehicles[+btn.closest(".card").dataset.i]; if(!v) return;
   if(btn.dataset.act==="develop"){
+    editId = null;   // brainstormed vehicle -> a fresh idea
     document.querySelector('.seg button[data-mode="develop"]').click();
     $("#dvVehicle").value = v.vehicle; $("#dvAngle").value = v.mysteryHint || "";
     $("#dvGo").click();
@@ -383,15 +385,18 @@ function renderIdea(){
     vehicle: currentIdea.vehicle, kind: currentIdea.kind, question: currentIdea.question,
     mystery: currentIdea.mystery, titles: currentIdea.titles||[], outline: currentIdea.outline||[],
     payoff: currentIdea.payoff, status:"developing"
-  }, e.target);
+  }, e.target, editId);
 }
 
 // ── backlog ──
-async function saveIdea(obj, btn){
+async function saveIdea(obj, btn, updateId){
   if(btn){ btn.disabled = true; btn.textContent = "Saving..."; }
-  const { error } = await db.from("video_ideas").insert(obj);
+  obj.updated_at = new Date().toISOString();
+  const { error } = updateId
+    ? await db.from("video_ideas").update(obj).eq("id", updateId)
+    : await db.from("video_ideas").insert(obj);
   if(btn){ btn.textContent = error ? "Error" : "Saved"; }
-  if(!error) loadBacklog();
+  if(!error){ editId = null; loadBacklog(); }
 }
 async function loadBacklog(){
   const { data, error } = await db.from("video_ideas").select("*").order("created_at",{ascending:false});
@@ -407,6 +412,7 @@ async function loadBacklog(){
           <select class="sm" data-status style="width:auto;padding:5px 8px">
             ${["idea","developing","scripted","published","parked"].map(s=>`<option ${i.status===s?"selected":""}>${s}</option>`).join("")}
           </select>
+          <button class="sm" data-develop>Develop</button>
           <button class="sm ghost" data-del>Delete</button>
         </div>
       </div>
@@ -419,7 +425,16 @@ $("#blOut").onclick = async e => {
   const card = e.target.closest(".card"); if(!card) return; const id = card.dataset.id;
   if(e.target.dataset.del){ if(confirm("Delete this idea?")){ await db.from("video_ideas").delete().eq("id",id); loadBacklog(); } }
   else if(e.target.dataset.star){ await db.from("video_ideas").update({ rating:+e.target.dataset.star }).eq("id",id); loadBacklog(); }
+  else if(e.target.dataset.develop !== undefined && e.target.hasAttribute("data-develop")){
+    const i = (window._backlog||[]).find(x => x.id === id); if(!i) return;
+    editId = id;   // develop this saved item; Save will update it in place
+    document.querySelector('.seg button[data-mode="develop"]').click();
+    $("#dvVehicle").value = i.vehicle || ""; $("#dvAngle").value = i.question || "";
+    $("#dvGo").click();
+  }
 };
+// typing a brand-new vehicle by hand means it's a new idea, not an edit of a saved row
+$("#dvVehicle").addEventListener("input", () => { editId = null; });
 $("#blOut").onchange = async e => {
   if(e.target.matches("[data-status]")){ const id = e.target.closest(".card").dataset.id; await db.from("video_ideas").update({ status:e.target.value }).eq("id",id); }
 };
