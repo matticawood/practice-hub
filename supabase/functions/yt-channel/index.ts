@@ -68,29 +68,46 @@ Deno.serve(async (req) => {
       if (!pageToken) break;
     }
 
-    // 3. stats for those videos (50 per call)
+    // ISO 8601 duration (PT#H#M#S) -> seconds
+    const durSec = (iso: string): number => {
+      const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso || "");
+      if (!m) return 0;
+      return (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0));
+    };
+
+    // 3. stats + duration + thumbnail for those videos (50 per call)
     const vids: any[] = [];
     for (let i = 0; i < ids.length; i += 50) {
-      const v = await ytGet("videos", { part: "snippet,statistics", id: ids.slice(i, i + 50).join(",") }, key);
+      const v = await ytGet("videos", { part: "snippet,statistics,contentDetails", id: ids.slice(i, i + 50).join(",") }, key);
       for (const it of v.items || []) {
+        const d = durSec(it.contentDetails?.duration);
+        const th = it.snippet?.thumbnails || {};
         vids.push({
           videoId: it.id,
           title: it.snippet?.title || "",
           publishedAt: it.snippet?.publishedAt || "",
           views: parseInt(it.statistics?.viewCount || "0", 10),
+          durationSec: d,
+          isShort: d > 0 && d <= 60,   // heuristic: <=60s is a Short
+          thumb: (th.high || th.medium || th.default || {}).url || "",
         });
       }
     }
     vids.sort((a, b) => b.views - a.views);
+
+    const longs = vids.filter(v => !v.isShort);
+    const shorts = vids.filter(v => v.isShort);
 
     return jsonRes(200, {
       channelId,
       channelTitle: c.snippet?.title || "",
       subscribers: parseInt(c.statistics?.subscriberCount || "0", 10),
       videoCount: parseInt(c.statistics?.videoCount || "0", 10),
-      top: vids.slice(0, 30),     // best performers (grounding)
+      counts: { long: longs.length, shorts: shorts.length },
+      top: longs.slice(0, 24),          // top long-form (with thumbnails) for grounding + thumbnail analysis
+      topShorts: shorts.slice(0, 12),   // top shorts
       recent: vids.slice().sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1)).slice(0, 20),
-      all: vids.map(v => ({ title: v.title, views: v.views, date: (v.publishedAt || "").slice(0, 10) })), // full catalogue for insights
+      all: vids.map(v => ({ title: v.title, views: v.views, date: (v.publishedAt || "").slice(0, 10), sec: v.durationSec, short: v.isShort })),
     });
   } catch (e) {
     return jsonRes(502, { error: String((e as Error).message || e) });

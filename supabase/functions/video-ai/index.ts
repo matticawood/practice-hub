@@ -84,29 +84,43 @@ const IDEA_TOOL = {
   },
 };
 
-const INSIGHTS_SYSTEM = `You are a sharp, honest YouTube channel strategist for Matthew Cawood (pianist/educator). You also understand his creative DNA: his strongest work uses music as evidence to reveal a human truth, vehicle-first. Analyse his real video data (titles + view counts + dates). Be specific and evidence-based: quote actual titles and view counts, separate what genuinely overperforms from what flops, spot the title structures that win, notice how the channel is evolving over time, and give concrete, opinionated direction, not vague encouragement. Where a strong direction fits his "human truth inside the music" approach, say so. Do not flatter; tell him what to do more of, less of, and what to try next.`;
+const INSIGHTS_SYSTEM = `You are a sharp, honest YouTube channel strategist for Matthew Cawood (pianist/educator). You understand his creative DNA: his strongest work uses music as evidence to reveal a human truth, vehicle-first.
+
+He has TWO GOALS. Weigh every recommendation against both, and be explicit about which goal each move serves:
+- GOAL 1 (REACH / GROWTH): grow the channel to a broader, more interesting audience so it stays alive and healthy.
+- GOAL 2 (CONVERSION): attract aspiring pianists, people actively learning, who are likely to join his membership "The Practice Room", done in an interesting, non-salesy way.
+These can pull in opposite directions (broad viral appeal vs niche learner depth). Name where they align and where they conflict, and recommend a balance/portfolio, not a fantasy that one move does everything.
+
+Analyse SHORTS and LONG-FORM SEPARATELY (the data flags each video as short or long, with duration). They do different jobs: shorts tend to drive reach/discovery; long-form drives depth, trust and conversion. Say what each format is actually doing for him, with evidence.
+
+Be specific and evidence-based: quote real titles and view counts, separate genuine overperformers from flops, spot the title structures that win, note how the channel is evolving over time. No flattery, tell him what to do more of, less of, and what to try next.`;
 
 const INSIGHTS_TOOL = {
   name: "emit_insights",
-  description: "Evidence-based strategic analysis of the channel with concrete direction.",
+  description: "Goal-anchored, format-aware strategic analysis of the channel.",
   input_schema: {
     type: "object",
     properties: {
-      headline: { type: "string", description: "one or two sentences: where the channel is strongest and where it should head" },
+      headline: { type: "string", description: "one or two sentences: the core read, tied to his two goals" },
+      formatRead: { type: "object", properties: {
+        shorts: { type: "string", description: "what Shorts are actually doing for him (reach? subs? dead end?), with evidence" },
+        longForm: { type: "string", description: "what long-form is doing (depth, conversion, the real hits), with evidence" },
+      }, required: ["shorts", "longForm"] },
       whatWorks: { type: "array", items: { type: "object", properties: {
         pattern: { type: "string" }, why: { type: "string" },
         examples: { type: "array", items: { type: "string" }, description: "real titles (with views) that prove it" },
+        serves: { type: "string", enum: ["growth", "conversion", "both"], description: "which goal this serves" },
       }, required: ["pattern", "why"] } },
       whatFlops: { type: "array", items: { type: "object", properties: {
         pattern: { type: "string" }, why: { type: "string" },
       }, required: ["pattern", "why"] } },
       titlePatterns: { type: "array", items: { type: "string" }, description: "title styles/structures that correlate with high views" },
-      opportunities: { type: "array", items: { type: "object", properties: {
-        idea: { type: "string" }, why: { type: "string" },
-      }, required: ["idea", "why"] } },
-      directions: { type: "array", items: { type: "string" }, description: "3-6 concrete strategic moves / where to go next" },
+      growthMoves: { type: "array", items: { type: "string" }, description: "concrete moves for GOAL 1 (reach / a broader audience)" },
+      conversionMoves: { type: "array", items: { type: "string" }, description: "concrete moves for GOAL 2 (attract aspiring pianists likely to join The Practice Room, done interestingly)" },
+      tensions: { type: "array", items: { type: "string" }, description: "where the two goals conflict, and how to balance them" },
+      directions: { type: "array", items: { type: "string" }, description: "3-6 synthesised top priorities, in order" },
     },
-    required: ["headline", "whatWorks", "directions"],
+    required: ["headline", "formatRead", "whatWorks", "growthMoves", "conversionMoves", "directions"],
   },
 };
 
@@ -114,6 +128,55 @@ const INSIGHTS_TOOL = {
 const WEB_SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 6 };
 
 const FACTCHECK_SYSTEM = `You are a meticulous music fact-checker. You verify CONCRETE FACTUAL claims using web search before judging them: historical events and dates, who composed/wrote/premiered what, attributions, "first to do X", biographical facts, and specific verifiable musical-theory assertions. You IGNORE subjective, interpretive, or artistic statements (e.g. "the saddest piece", "it feels like grief") because those are not facts to check. Popular myths repeated as fact must be flagged. Always search before judging; never rely on memory for a specific claim.`;
+
+const THUMB_SYSTEM = `You are a YouTube thumbnail strategist for Matthew Cawood (pianist, 143k subs). The thumbnail decides the click. You are shown his REAL thumbnails as images. Analyse what actually works for him and design concepts grounded in that, balanced against his two goals: GOAL 1 broad reach/growth, GOAL 2 attracting aspiring pianists who'd join his membership "The Practice Room". Be concrete and visual: focal point, face and expression, text (short and legible), colour and contrast, composition. No generic advice; reference what you actually see in his thumbnails.`;
+
+const THUMB_PATTERNS_TOOL = {
+  name: "emit_thumb_patterns",
+  description: "What recurring visual patterns make this creator's thumbnails work, from the images shown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      summary: { type: "string", description: "one or two sentences: his thumbnail formula at a glance" },
+      patterns: { type: "array", items: { type: "object", properties: {
+        pattern: { type: "string" }, why: { type: "string", description: "why it drives clicks, referencing what you see" },
+      }, required: ["pattern", "why"] } },
+      avoid: { type: "array", items: { type: "string" }, description: "what tends to weaken his thumbnails" },
+    },
+    required: ["summary", "patterns"],
+  },
+};
+
+const THUMB_CONCEPTS_TOOL = {
+  name: "emit_thumb_concepts",
+  description: "Concrete thumbnail concepts for a specific video, grounded in his proven style.",
+  input_schema: {
+    type: "object",
+    properties: {
+      concepts: { type: "array", items: { type: "object", properties: {
+        headline: { type: "string", description: "one line describing the thumbnail at a glance" },
+        subject: { type: "string", description: "the main visual / foreground" },
+        textOverlay: { type: "string", description: "short punchy on-image text (or 'none')" },
+        expression: { type: "string", description: "facial expression / emotion if a face is used" },
+        colour: { type: "string", description: "colour + mood + contrast" },
+        composition: { type: "string", description: "layout / where the eye goes" },
+        why: { type: "string", description: "why it earns the click and which goal it serves" },
+      }, required: ["headline", "subject", "why"] } },
+    },
+    required: ["concepts"],
+  },
+};
+
+// Build a multimodal message: the creator's thumbnails as images + framing text.
+function thumbContent(thumbs: any[], lead: string, trail?: string) {
+  const content: any[] = [{ type: "text", text: lead }];
+  (thumbs || []).slice(0, 12).forEach((t, i) => {
+    content.push({ type: "text", text: `Thumbnail ${i + 1}: "${t.title}" — ${t.views} views` });
+    if (t.url) content.push({ type: "image", source: { type: "url", url: t.url } });
+  });
+  if (trail) content.push({ type: "text", text: trail });
+  return content;
+}
 
 function ctxBlock(channelContext?: string, avoid?: string[]) {
   let s = "";
@@ -150,10 +213,28 @@ function buildRequest(body: any) {
   if (mode === "insights") {
     if (!body.channelData) return null;
     const meta = body.meta ? `${body.meta}\n\n` : "";
-    const user = `${meta}Here is the channel's full catalogue (title | views | date):\n\n${body.channelData}\n\nAnalyse it honestly and specifically. What genuinely overperforms vs underperforms? Which title structures win? How is the channel evolving over time? Where should it go next, especially in service of the vehicle-first "human truth inside the music" approach? Use real titles and view counts as evidence throughout.`;
-    return { model: MODEL, max_tokens: 6500, stream: true, system: INSIGHTS_SYSTEM,
+    const user = `${meta}Here is the channel's full catalogue. Each row is: title | views | date | duration(seconds) | SHORT or LONG.\n\n${body.channelData}\n\nAnalyse honestly and specifically against his two goals (reach/growth AND attracting aspiring pianists who'd join The Practice Room). Treat SHORTS and LONG-FORM separately. What genuinely overperforms vs underperforms in each format? Which title structures win? How is the channel evolving? Then give goal-anchored moves: what grows reach, what attracts learner-prospects, and where those two goals conflict and how to balance them. Use real titles and view counts as evidence throughout.`;
+    return { model: MODEL, max_tokens: 7000, stream: true, system: INSIGHTS_SYSTEM,
       tools: [INSIGHTS_TOOL], tool_choice: { type: "tool", name: "emit_insights" },
       messages: [{ role: "user", content: user }] };
+  }
+  if (mode === "thumb_patterns") {
+    if (!Array.isArray(body.thumbs) || !body.thumbs.length) return null;
+    const content = thumbContent(body.thumbs,
+      "These are Matthew Cawood's best-performing video thumbnails (title and views given before each image). Study them as images and identify the recurring visual formula that earns clicks for HIM specifically, and what weakens a thumbnail. Be concrete about what you actually see.");
+    return { model: MODEL, max_tokens: 2500, stream: true, system: THUMB_SYSTEM,
+      tools: [THUMB_PATTERNS_TOOL], tool_choice: { type: "tool", name: "emit_thumb_patterns" },
+      messages: [{ role: "user", content }] };
+  }
+  if (mode === "thumb_concept") {
+    if (!body.idea) return null;
+    const ideaStr = typeof body.idea === "string" ? body.idea : JSON.stringify(body.idea);
+    const content = thumbContent(body.thumbs || [],
+      "These reference images are Matthew Cawood's best-performing thumbnails (study his style).",
+      `Now propose 3 distinct thumbnail concepts for this NEW video, grounded in what works for him above:\n\n${ideaStr}\n\nFor each concept give the headline, subject/foreground, short on-image text, facial expression if any, colour/mood, composition, and why it earns the click (and which goal it serves: reach or attracting aspiring pianists).`);
+    return { model: MODEL, max_tokens: 2600, stream: true, system: THUMB_SYSTEM,
+      tools: [THUMB_CONCEPTS_TOOL], tool_choice: { type: "tool", name: "emit_thumb_concepts" },
+      messages: [{ role: "user", content }] };
   }
   if (mode === "factcheck") {
     if (!body.idea) return null;
