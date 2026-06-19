@@ -50,10 +50,36 @@ Deno.serve(async (req) => {
     }
   } catch (_) { /* leave 0 */ }
 
+  // Breadth-of-app activity in the window (the app is more than practice logging):
+  // skill games, achievements earned, community posts + messages.
+  async function count(path: string): Promise<number> {
+    try {
+      const r = await fetch(`${url}/rest/v1/${path}`, {
+        headers: { apikey: key!, Authorization: `Bearer ${key}`, Prefer: "count=exact", Range: "0-0" },
+      });
+      const total = (r.headers.get("content-range") || "").split("/")[1];
+      return total ? parseInt(total, 10) : 0;
+    } catch { return 0; }
+  }
+
+  const [note, chord, ear, passage, achievements, posts, messages] = await Promise.all([
+    count(`note_game_scores?select=id&created_at=gte.${cutoff}`),
+    count(`chord_game_scores?select=id&created_at=gte.${cutoff}`),
+    count(`ear_game_scores?select=id&created_at=gte.${cutoff}`),
+    count(`passage_games?select=id&created_at=gte.${cutoff}`),
+    count(`achievement_events?select=id&earned_at=gte.${cutoff}`),
+    count(`community_posts?select=id&created_at=gte.${cutoff}`),
+    count(`community_messages?select=id&created_at=gte.${cutoff}`),
+  ]);
+  const recentGames = note + chord + ear + passage;
+  const recentAchievements = achievements;
+  const recentCommunity = posts + messages;
+
   return new Response(
     JSON.stringify({
       sessions, hours: Math.round(minutes / 60),
-      recentSessions, recentHours: Math.round(recentMinutes / 60), recentPieces, windowDays: 30,
+      recentSessions, recentHours: Math.round(recentMinutes / 60), recentPieces,
+      recentGames, recentAchievements, recentCommunity, windowDays: 30,
     }),
     {
       headers: {
