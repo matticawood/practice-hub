@@ -616,25 +616,34 @@ footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;fo
 })();
 </script>
 <script>
-/* Inside the app wrapper (PWAShell), /signup opens in the app's own webview, and a
-   target=_blank LINK to the checkout gets trapped there (the app's nav delegate
-   tries to load it in-app and fails). window.open() goes through the app's UI
-   delegate (the Safari sheet) instead, BUT only when it's called SYNCHRONOUSLY
-   inside the click gesture. Awaiting a fetch first consumes the gesture, so the
-   sheet never opens and the fallback navigation gets trapped ("no wifi" bounce).
-   So we open a SAME-ORIGIN url with NO await, right inside the click; that url
-   302s on to the Stripe checkout from the server. */
+/* In-app checkout (PWAShell). The app shell only diverts window.open() to the
+   Safari sheet when the target is an EXTERNAL host (that's why the billing portal,
+   which opens billing.stripe.com directly, works). A window.open() of a same-origin
+   url gets loaded inside the webview instead, and any server redirect to Stripe
+   from there gets trapped ("no wifi" bounce). And the open must be SYNCHRONOUS in
+   the click (no await) or the gesture is lost.
+   So: pre-fetch the DIRECT buy.stripe.com url on load (same-origin fetch, which the
+   webview allows), then on tap window.open() that external url synchronously. If the
+   prefetch isn't ready, open the external Supabase redirect directly (no fetch). */
 (function(){
   if(!/PWAShell/i.test(navigator.userAgent||"")) return;
   var vid; try{ vid=localStorage.getItem("tpr_vid"); }catch(e){}
   var q=vid?("?vid="+encodeURIComponent(vid)):"";
-  var checkoutUrl="/.netlify/functions/membership-checkout-url"+q;
+  // External fallback that needs no fetch: the Supabase redirect (geo + 302 server-side).
+  var fallbackUrl="https://gyskfutmncprqxazgatv.supabase.co/functions/v1/membership-redirect"+q;
+  var directUrl=null;
+  // Pre-fetch the per-currency buy.stripe.com url (same-origin, JSON mode).
+  fetch("/.netlify/functions/membership-checkout-url"+(q?q+"&":"?")+"format=json")
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){ if(d&&d.url) directUrl=d.url; })
+    .catch(function(){});
   document.addEventListener("click",function(e){
     var a=e.target.closest && e.target.closest('a[href^="/join.html"]');
     if(!a) return;
     e.preventDefault();
-    var w=window.open(checkoutUrl,"_blank");   // synchronous: keeps the user gesture
-    if(!w) window.location.href=checkoutUrl;    // last-resort fallback
+    var target=directUrl||fallbackUrl;          // ALWAYS an external host
+    var w=window.open(target,"_blank");          // synchronous: keeps the user gesture
+    if(!w) window.location.href=target;          // last-resort fallback
   },true);
 })();
 </script>
