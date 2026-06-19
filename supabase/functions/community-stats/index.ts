@@ -15,22 +15,31 @@ Deno.serve(async (req) => {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-  let sessions = 0, minutes = 0;
+  // Rolling 30-day window reads as live momentum (a young platform's lifetime
+  // total sounds small; "in the last 30 days" sounds active). Lifetime is also
+  // returned so the page can switch to it later once it's a bigger flex.
+  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+
+  let sessions = 0, minutes = 0, recentSessions = 0, recentMinutes = 0;
   try {
-    const r = await fetch(`${url}/rest/v1/practice_sessions?select=duration_minutes`, {
+    const r = await fetch(`${url}/rest/v1/practice_sessions?select=duration_minutes,session_date`, {
       headers: { apikey: key!, Authorization: `Bearer ${key}` },
     });
     if (r.ok) {
       const rows = await r.json();
-      sessions = rows.length;
-      for (const row of rows) minutes += (row.duration_minutes || 0);
+      for (const row of rows) {
+        const m = row.duration_minutes || 0;
+        sessions += 1; minutes += m;
+        if (row.session_date && row.session_date >= cutoff) { recentSessions += 1; recentMinutes += m; }
+      }
     }
   } catch (_) { /* fall through to zeros; the page hides the line if empty */ }
 
-  const hours = Math.round(minutes / 60);
-
   return new Response(
-    JSON.stringify({ sessions, hours }),
+    JSON.stringify({
+      sessions, hours: Math.round(minutes / 60),
+      recentSessions, recentHours: Math.round(recentMinutes / 60), windowDays: 30,
+    }),
     {
       headers: {
         ...cors,
