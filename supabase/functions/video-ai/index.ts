@@ -84,6 +84,32 @@ const IDEA_TOOL = {
   },
 };
 
+const INSIGHTS_SYSTEM = `You are a sharp, honest YouTube channel strategist for Matthew Cawood (pianist/educator). You also understand his creative DNA: his strongest work uses music as evidence to reveal a human truth, vehicle-first. Analyse his real video data (titles + view counts + dates). Be specific and evidence-based: quote actual titles and view counts, separate what genuinely overperforms from what flops, spot the title structures that win, notice how the channel is evolving over time, and give concrete, opinionated direction, not vague encouragement. Where a strong direction fits his "human truth inside the music" approach, say so. Do not flatter; tell him what to do more of, less of, and what to try next.`;
+
+const INSIGHTS_TOOL = {
+  name: "emit_insights",
+  description: "Evidence-based strategic analysis of the channel with concrete direction.",
+  input_schema: {
+    type: "object",
+    properties: {
+      headline: { type: "string", description: "one or two sentences: where the channel is strongest and where it should head" },
+      whatWorks: { type: "array", items: { type: "object", properties: {
+        pattern: { type: "string" }, why: { type: "string" },
+        examples: { type: "array", items: { type: "string" }, description: "real titles (with views) that prove it" },
+      }, required: ["pattern", "why"] } },
+      whatFlops: { type: "array", items: { type: "object", properties: {
+        pattern: { type: "string" }, why: { type: "string" },
+      }, required: ["pattern", "why"] } },
+      titlePatterns: { type: "array", items: { type: "string" }, description: "title styles/structures that correlate with high views" },
+      opportunities: { type: "array", items: { type: "object", properties: {
+        idea: { type: "string" }, why: { type: "string" },
+      }, required: ["idea", "why"] } },
+      directions: { type: "array", items: { type: "string" }, description: "3-6 concrete strategic moves / where to go next" },
+    },
+    required: ["headline", "whatWorks", "directions"],
+  },
+};
+
 // Anthropic-hosted web search tool (live internet) for the fact-check pass.
 const WEB_SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 6 };
 
@@ -119,6 +145,14 @@ function buildRequest(body: any) {
     const user = `Here is a current video idea (JSON):\n${JSON.stringify(body.idea)}\n\nRefine it per this instruction: "${body.instruction}". Keep what works. Return the full idea again in the same shape.`;
     return { model: MODEL, max_tokens: 3000, stream: true, system: SYSTEM,
       tools: [IDEA_TOOL], tool_choice: { type: "tool", name: "emit_idea" },
+      messages: [{ role: "user", content: user }] };
+  }
+  if (mode === "insights") {
+    if (!body.channelData) return null;
+    const meta = body.meta ? `${body.meta}\n\n` : "";
+    const user = `${meta}Here is the channel's full catalogue (title | views | date):\n\n${body.channelData}\n\nAnalyse it honestly and specifically. What genuinely overperforms vs underperforms? Which title structures win? How is the channel evolving over time? Where should it go next, especially in service of the vehicle-first "human truth inside the music" approach? Use real titles and view counts as evidence throughout.`;
+    return { model: MODEL, max_tokens: 4000, stream: true, system: INSIGHTS_SYSTEM,
+      tools: [INSIGHTS_TOOL], tool_choice: { type: "tool", name: "emit_insights" },
       messages: [{ role: "user", content: user }] };
   }
   if (mode === "factcheck") {

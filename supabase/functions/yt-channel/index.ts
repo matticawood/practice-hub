@@ -58,10 +58,10 @@ Deno.serve(async (req) => {
     channelId = c.id;
     const uploads = c.contentDetails?.relatedPlaylists?.uploads;
 
-    // 2. recent uploads (up to ~150) -> video ids
+    // 2. ALL uploads -> video ids (paginate fully so insights see all-time hits)
     const ids: string[] = [];
     let pageToken = "";
-    for (let p = 0; p < 3 && uploads; p++) {
+    for (let p = 0; p < 20 && uploads; p++) {
       const pl = await ytGet("playlistItems", { part: "contentDetails", playlistId: uploads, maxResults: "50", ...(pageToken ? { pageToken } : {}) }, key);
       for (const it of pl.items || []) { const vid = it.contentDetails?.videoId; if (vid) ids.push(vid); }
       pageToken = pl.nextPageToken || "";
@@ -90,6 +90,7 @@ Deno.serve(async (req) => {
       videoCount: parseInt(c.statistics?.videoCount || "0", 10),
       top: vids.slice(0, 30),     // best performers (grounding)
       recent: vids.slice().sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1)).slice(0, 20),
+      all: vids.map(v => ({ title: v.title, views: v.views, date: (v.publishedAt || "").slice(0, 10) })), // full catalogue for insights
     });
   } catch (e) {
     return jsonRes(502, { error: String((e as Error).message || e) });

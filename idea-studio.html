@@ -98,6 +98,7 @@
     <div class="seg" style="margin:6px 0 0">
       <button data-mode="brainstorm" class="on">Brainstorm vehicles</button>
       <button data-mode="develop">Develop a vehicle</button>
+      <button data-mode="insights">Channel insights</button>
       <button data-mode="backlog">Backlog</button>
     </div>
 
@@ -124,6 +125,17 @@
       </div>
       <p id="dvErr" class="err"></p>
       <div id="dvOut" style="margin-top:16px"></div>
+    </div>
+
+    <!-- INSIGHTS -->
+    <div id="paneInsights" class="panel hide">
+      <div class="topbar" style="align-items:flex-start">
+        <div><h2>Channel insights &amp; direction</h2>
+          <p class="sub">Claude reads your whole catalogue (titles, views, dates) and tells you what's working and where to push.</p></div>
+        <button id="inGo">Analyse my channel</button>
+      </div>
+      <p id="inErr" class="err"></p>
+      <div id="inOut" style="margin-top:12px"></div>
     </div>
 
     <!-- BACKLOG -->
@@ -176,6 +188,7 @@ document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
   const m = b.dataset.mode;
   $("#paneBrainstorm").classList.toggle("hide", m!=="brainstorm");
   $("#paneDevelop").classList.toggle("hide", m!=="develop");
+  $("#paneInsights").classList.toggle("hide", m!=="insights");
   $("#paneBacklog").classList.toggle("hide", m!=="backlog");
   if(m==="backlog") loadBacklog();
 });
@@ -227,21 +240,53 @@ function extractJson(text){
 }
 
 // ── channel ──
-$("#loadChan").onclick = async () => {
+async function loadChannel(){
   $("#chanErr").textContent = ""; $("#loadChan").disabled = true; $("#loadChan").textContent = "Loading...";
   try{
     await token0();
     const r = await fetch(`${SUPABASE_URL}/functions/v1/yt-channel`, { headers:{ Authorization:`Bearer ${token}` } });
     const d = await r.json();
     if(d.error) throw new Error(d.error);
+    window._chan = d;
     $("#chanSub").textContent = `${d.channelTitle} · ${Number(d.subscribers).toLocaleString()} subscribers · ${d.videoCount} videos`;
     const box = $("#chanBox"); box.classList.remove("hide");
     box.innerHTML = d.top.map(v => `<div><span>${esc(v.title)}</span><span class="muted">${Number(v.views).toLocaleString()}</span></div>`).join("");
     channelCtx = d.top.slice(0,25).map(v => `- "${v.title}" (${Number(v.views).toLocaleString()} views)`).join("\n");
-  }catch(e){ $("#chanErr").textContent = "Could not load channel: " + e.message + " (check the YouTube API key restrictions)"; }
+    return d;
+  }catch(e){ $("#chanErr").textContent = "Could not load channel: " + e.message + " (check the YouTube API key restrictions)"; throw e; }
   finally{ $("#loadChan").disabled = false; $("#loadChan").textContent = "Reload videos"; }
-};
+}
+$("#loadChan").onclick = () => loadChannel().catch(()=>{});
 const ctxOpt = () => ($("#useChan").checked && channelCtx) ? channelCtx : null;
+
+// ── channel insights ──
+$("#inGo").onclick = async () => {
+  $("#inErr").textContent = ""; const b = $("#inGo"); b.disabled = true; b.textContent = "Analysing...";
+  $("#inOut").innerHTML = '<p class="muted small">Reading your whole catalogue and analysing performance. This takes a moment...</p>';
+  try{
+    let d = window._chan;
+    if(!d || !d.all) d = await loadChannel();
+    if(!d || !Array.isArray(d.all) || !d.all.length) throw new Error("No channel data. Try 'Load videos' in the panel above.");
+    const channelData = d.all.map(v => `${v.title} | ${v.views} | ${v.date}`).join("\n");
+    const meta = `${d.channelTitle} — ${Number(d.subscribers).toLocaleString()} subscribers, ${d.videoCount} videos.`;
+    renderInsights(await callAI({ mode:"insights", channelData, meta }));
+  }catch(e){ $("#inErr").textContent = e.message; $("#inOut").innerHTML = ""; }
+  finally{ b.disabled = false; b.textContent = "Re-analyse"; }
+};
+function renderInsights(d){
+  const cards = (arr, fn) => (arr && arr.length) ? arr.map(fn).join("") : "";
+  $("#inOut").innerHTML = `
+    <div class="card" style="border-color:#4a4322"><p class="small" style="margin:0"><b style="color:var(--gold)">The read:</b> ${esc(d.headline||"")}</p></div>
+    ${(d.whatWorks&&d.whatWorks.length)?`<h2 style="margin:16px 0 8px;font-size:.95rem">What's working</h2>`:""}
+    ${cards(d.whatWorks, w=>`<div class="card" style="margin-bottom:8px"><div class="small"><b>${esc(w.pattern)}</b></div><div class="small muted" style="margin-top:3px">${esc(w.why)}</div>${(w.examples&&w.examples.length)?`<div class="small" style="margin-top:5px;color:#cfcfcf">${w.examples.map(esc).join(" &middot; ")}</div>`:""}</div>`)}
+    ${(d.whatFlops&&d.whatFlops.length)?`<h2 style="margin:16px 0 8px;font-size:.95rem">What underperforms</h2>`:""}
+    ${cards(d.whatFlops, w=>`<div class="card" style="margin-bottom:8px"><div class="small"><b>${esc(w.pattern)}</b></div><div class="small muted" style="margin-top:3px">${esc(w.why)}</div></div>`)}
+    ${(d.titlePatterns&&d.titlePatterns.length)?`<h2 style="margin:16px 0 8px;font-size:.95rem">Title patterns that win</h2><ul class="small">${d.titlePatterns.map(t=>`<li>${esc(t)}</li>`).join("")}</ul>`:""}
+    ${(d.opportunities&&d.opportunities.length)?`<h2 style="margin:16px 0 8px;font-size:.95rem">Opportunities</h2>`:""}
+    ${cards(d.opportunities, o=>`<div class="card" style="margin-bottom:8px"><div class="small"><b>${esc(o.idea)}</b></div><div class="small muted" style="margin-top:3px">${esc(o.why)}</div></div>`)}
+    <h2 style="margin:16px 0 8px;font-size:.95rem">Where to go next</h2>
+    <ol class="beats small">${(d.directions||[]).map(x=>`<li>${esc(x)}</li>`).join("")}</ol>`;
+}
 
 // ── brainstorm ──
 $("#bsGo").onclick = async () => {
