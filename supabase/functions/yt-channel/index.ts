@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
   } catch { return jsonRes(401, { error: "Unauthorised" }); }
 
   const url = new URL(req.url);
-  const handle = (url.searchParams.get("handle") || "matthewcawood").replace(/^@/, "");
+  const handle = (url.searchParams.get("handle") || "matticawood").replace(/^@/, "");
   let channelId = url.searchParams.get("channelId") || "";
 
   try {
