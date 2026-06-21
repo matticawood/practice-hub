@@ -79,16 +79,33 @@
     for (const ch of m[2]) v += ch === "#" ? 1 : -1;
     return v + (parseInt(m[3], 10) + 1) * 12;
   }
-  function synthNote(ctx, midi, t0, dur) {
+  function synthNote(ctx, midi, t0, dur, mul) {
+    mul = mul || 1;   // per-note loudness multiplier (for accents / strong-weak beats)
     const osc = ctx.createOscillator(), g = ctx.createGain();
     osc.type = "triangle";
     osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
     osc.connect(g); g.connect(ctx.destination);
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.32 * mul, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.1 * mul, t0 + 0.3);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.start(t0); osc.stop(t0 + dur + 0.05);
+  }
+  // A natural metronome tick: a very short burst of white noise through a bandpass filter. No
+  // tonal oscillator, so there is no electronic pitch or twang, just a clean mechanical "tick".
+  // Played on each beat under a clip when opts.click is set.
+  function metroClick(ctx, t0) {
+    const len = Math.ceil(ctx.sampleRate * 0.04);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2100; bp.Q.value = 0.8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.5, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.032);
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.start(t0); src.stop(t0 + 0.05);
   }
   // Play a set of notes. opts:
   //   sequence : play one after another (vs together as a chord)
@@ -103,10 +120,12 @@
     loadPiano();
     const seq = !!opts.sequence;
     const beats = Array.isArray(opts.beats) ? opts.beats : null;
+    const gains = Array.isArray(opts.gains) ? opts.gains : null;   // per-note loudness (accents)
     const spb = 60 / (opts.bpm || 80);   // seconds per beat
     let cum = 0;
     notes.forEach((nv, i) => {
       const m = (nv == null) ? null : noteToMidi(nv);
+      const mul = (gains && gains[i] != null) ? gains[i] : 1;
       let when, dur;
       if (beats) {
         const bl = (beats[i] != null ? beats[i] : 1);
@@ -119,9 +138,15 @@
         dur = seq ? 0.7 : 2.4;
       }
       if (m == null) return;   // rest: clock already advanced, play nothing
-      if (_piano) { try { _piano.play(m, when, { gain: 2.2, duration: dur }); return; } catch (e) {} }
-      synthNote(ctx, m, when, dur);
+      if (_piano) { try { _piano.play(m, when, { gain: 2.2 * mul, duration: dur }); return; } catch (e) {} }
+      synthNote(ctx, m, when, dur, mul);
     });
+    // optional metronome: one tick per beat across the whole clip
+    if (opts.click) {
+      const total = beats ? (seq ? beats.reduce((a, b) => a + (b || 0), 0) : Math.max(...beats.map(b => b || 1)))
+                          : notes.length;
+      for (let bt = 0; bt < total - 1e-6; bt++) metroClick(ctx, ctx.currentTime + 0.03 + bt * spb);
+    }
   }
   function pcMod(m) { return ((m % 12) + 12) % 12; }
   // Build an interactive HTML piano. opts: { highlight:[notes], from, to, playable }.
@@ -239,7 +264,9 @@
         const seq = b.style === "sequence" || b.style === "melody" || b.style === "scale";
         const beatsAttr = Array.isArray(b.beats) ? ` data-beats="${esc(JSON.stringify(b.beats))}"` : "";
         const bpmAttr = b.bpm ? ` data-bpm="${esc(String(b.bpm))}"` : "";
-        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}>
+        const clickAttr = b.click ? ` data-click="1"` : "";
+        const gainsAttr = Array.isArray(b.gains) ? ` data-gains="${esc(JSON.stringify(b.gains))}"` : "";
+        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}>
           <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
       }
       case "keyboard": {
@@ -378,7 +405,9 @@
       btn.addEventListener("click", () => playMidis(parseNotes(btn), {
         sequence: btn.dataset.seq === "1",
         beats: parseJson(btn.dataset.beats, null),
-        bpm: btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null
+        bpm: btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null,
+        click: btn.dataset.click === "1",
+        gains: parseJson(btn.dataset.gains, null)
       })));
     root.querySelectorAll(".lr-kbd-play").forEach(btn =>
       btn.addEventListener("click", () => playMidis(parseNotes(btn), { sequence: false })));
@@ -413,10 +442,21 @@
           // Render each stave at the FULL column width. abcjs leaves a short or final
           // line unjustified (narrow, left-clustered), so "%%stretchlast 1" forces that
           // line to spread across the whole staffwidth — full-width staves with the notes
-          // distributed and normal note size. staffwidth tracks the container so it stays
-          // responsive on narrow screens.
+          // distributed and normal note size, whether the line is open-ended or closed
+          // with a final bar line. staffwidth tracks the container so it stays responsive.
           const full = Math.max(260, (out.clientWidth || 660) - 4);
           window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full });
+          // abcjs gives the SVG fixed width/height attributes but NO viewBox, so CSS
+          // "max-width:100%" shrinks the SVG's box without scaling its content — on any
+          // width narrower than the drawing (mobile, the studio preview) the right side
+          // overflows and the final bar line is clipped off. Adding a viewBox makes the
+          // content scale with the box, so the whole stave (final bar line included)
+          // stays visible at every width.
+          const s = out.querySelector("svg");
+          if (s && !s.getAttribute("viewBox")) {
+            const w = parseFloat(s.getAttribute("width")), h = parseFloat(s.getAttribute("height"));
+            if (w && h) { s.setAttribute("viewBox", "0 0 " + w + " " + h); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); }
+          }
           out.dataset.done = "1";
         } catch (e) { out.innerHTML = '<div class="lr-abc-err">This notation could not be rendered.</div>'; }
       }).catch(() => { out.innerHTML = '<div class="lr-abc-err">The notation library failed to load.</div>'; });
@@ -465,7 +505,12 @@
     .lr-kbd-live .lr-key{cursor:pointer}
     .lr-key-press{filter:brightness(1.22)}
     .lr-notation{margin:18px 0;overflow-x:auto}
-    .lr-abc-out{display:flex;justify-content:center}
+    /* Centre via text-align (block), NOT flexbox: a flex child's min-width:auto
+       stops max-width:100% from shrinking a wide SVG, so on narrow widths (the
+       studio preview panel, phones) the stave overflows and the right edge —
+       including the final bar line — gets clipped. Inline-centring lets the SVG
+       scale down to fit so the whole stave stays visible. */
+    .lr-abc-out{text-align:center}
     .lr-notation svg{max-width:100%;height:auto}
     .lr-abc-err{font-size:.85rem;color:var(--text-muted,#8a7868);border:1px dashed var(--border,#e3e1e6);border-radius:8px;padding:10px}
     .lr-task{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
