@@ -58,5 +58,5 @@ const server = http.createServer(async (req,res)=>{
     res.writeHead(404); res.end('not found');
   }catch(e){ res.writeHead(500); res.end(String(e.stack||e)); }
 });
-const PORT=7700;
+const PORT=process.env.PORT||7700;
 server.listen(PORT,()=>console.log(`Sight Reading Studio -> http://localhost:${PORT}`));

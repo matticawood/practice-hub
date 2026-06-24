@@ -34,6 +34,7 @@ const SH_SUBNAV = {
   ],
   resources: [
     { label: "Pieces Library", href: "/resources.html" },
+    { label: "Courses", href: "/courses.html" },
     { label: "Piano Practice Daily", href: "/resources.html?section=ppd" },
     { label: "Glossary", href: "/resources.html?section=glossary" },
     { label: "Key Explorer", href: "/resources.html?section=key" },

@@ -198,6 +198,7 @@ const ACH_COLOURS = {
   improv:      ["rgba(251,146,60,.13)",  "rgba(251,146,60,.35)",  "#fb923c"],
   theorycat:   ["rgba(99,102,241,.13)",  "rgba(99,102,241,.35)",  "#6366f1"],
   eartraining: ["rgba(244,63,94,.13)",   "rgba(244,63,94,.35)",   "#f43f5e"],
+  courses:     ["rgba(16,185,129,.13)",  "rgba(16,185,129,.35)",  "#10b981"],
   books:       ["rgba(234,179,8,.13)",   "rgba(234,179,8,.35)",   "#eab308"],
   variety:     ["rgba(34,197,94,.13)",   "rgba(34,197,94,.35)",   "#22c55e"],
   saves:       ["rgba(168,85,247,.13)",  "rgba(168,85,247,.35)",  "#a855f7"],
@@ -340,6 +341,8 @@ const ACH_ICON_MAP = {
   // Consistency / variety / profile additions
   tmo25:_AI.CALCK, pweek:_AI.CALCK, wkwarr:_AI.SUNRISE, renais:_AI.PALETTE,
   cmcs:_AI.BELL, cmav:_AI.SPARKLE,
+  // Courses
+  course_first_lesson:_AI.BOOK, course_theory_level1:_AI.MEDAL,
 };
 
 function achBadgeIcon(id) {
@@ -371,7 +374,7 @@ const _BADGE_CAT_SHAPE = {
   eartraining:'hex', depth:'star', books:'circle', variety:'star',
   saves:'shield', reading:'shield', community:'circle', game:'hex',
   library:'diamond', noterec:'star', chordrec:'diamond', earrec:'hex', live:'star',
-  roadmap:'circle',
+  roadmap:'circle', courses:'shield',
 };
 // Colour palette per category [light, mid, dark] — interpolated by tier
 const _BADGE_PALETTE = {
@@ -384,6 +387,7 @@ const _BADGE_PALETTE = {
   improv:      ['#fdba74','#ea580c','#c2410c'],  // peach → vivid orange → deep orange
   theorycat:   ['#86efac','#16a34a','#15803d'],  // light green → vivid → rich green
   eartraining: ['#d8b4fe','#9333ea','#7e22ce'],  // soft violet → vivid → rich violet
+  courses:     ['#6ee7b7','#10b981','#047857'],  // theory course green (#10b981). When other courses ship, split into per-course cats (course_theory green / course_ear pink #ec4899 / course_improv orange #f97316) so each badge matches its course colour.
   depth:       ['#fca5a5','#dc2626','#991b1b'],  // light red → vivid → rich crimson
   books:       ['#a5b4fc','#4338ca','#3730a3'],  // periwinkle → vivid → rich indigo
   variety:     ['#f9a8d4','#db2777','#be185d'],  // soft pink → vivid hot pink → deep rose
@@ -473,6 +477,7 @@ const ACH_CAT_SVG = {
   improv:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
   theorycat:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
   eartraining: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`,
+  courses:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1 2.5 3 6 3s6-2 6-3v-5"/><path d="M22 10v6"/></svg>`,
   books:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
   variety:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>`,
   saves:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
@@ -582,6 +587,10 @@ const ACHIEVEMENTS = [
   { id:"ett5",  cat:"eartraining", icon:"🎵",  name:"Tuned In",           desc:"Spend 5 hours on ear training",                    check:s=>_achItemTypeMins(s,"eartraining")>=300,      prog:s=>[_achItemTypeMins(s,"eartraining"),300]       },
   { id:"ett25", cat:"eartraining", icon:"🎶",  name:"Golden Ear",         desc:"Spend 25 hours on ear training",                   check:s=>_achItemTypeMins(s,"eartraining")>=1500,     prog:s=>[_achItemTypeMins(s,"eartraining"),1500]      },
   { id:"ett50", cat:"eartraining", icon:"👑",  name:"Perfect Pitch",      desc:"Spend 50 hours on ear training",                   check:s=>_achItemTypeMins(s,"eartraining")>=3000,     prog:s=>[_achItemTypeMins(s,"eartraining"),3000]      },
+  // Courses — lesson + level completion (driven by lesson_progress, not practice logging).
+  // Extend as levels/courses ship: add course_theory_level2, course_eartraining_level1, etc.
+  { id:"course_first_lesson",  cat:"courses", icon:"📖", name:"First Lesson",     desc:"Complete your first course lesson",             check:(s,x)=>(x.lessonsCompleted||0)>=1,  prog:(s,x)=>[x.lessonsCompleted||0,1] },
+  { id:"course_theory_level1", cat:"courses", icon:"🎓", name:"Theory: Level 1",  desc:"Complete every lesson in Music Theory Level 1",  check:(s,x)=>(x.theoryL1Total||0)>0 && (x.theoryL1Done||0)>=(x.theoryL1Total||0),  prog:(s,x)=>[x.theoryL1Done||0, x.theoryL1Total||13] },
   // Long sessions
   { id:"d60", cat:"depth",    icon:"🎯", name:"Deep Practice",    desc:"Complete a session of 1 hour or more",   check:s=>s.some(ss=>(ss.duration_minutes||0)>=60)  },
   { id:"d120",cat:"depth",    icon:"🏋️", name:"Marathon",         desc:"Complete a session of 2 hours or more",  check:s=>s.some(ss=>(ss.duration_minutes||0)>=120) },
@@ -875,6 +884,18 @@ async function loadAchievementExtras() {
       _achExtras.streakSaves = savesCount || 0;
     } catch(e) { _achExtras.streakSaves = 0; }
   }
+
+  // Course / lesson completion (for Courses achievements). Counts completed lessons
+  // and, for the level badge, how many of the published Music Theory L1 lessons are done.
+  try {
+    const { data: lp } = await db.from("lesson_progress").select("lesson_id").eq("email", email).eq("completed", true);
+    const doneIds = new Set((lp || []).map(r => r.lesson_id));
+    _achExtras.lessonsCompleted = doneIds.size;
+    const { data: t1 } = await db.from("lessons").select("id").eq("course", "theory").eq("level", 1).eq("status", "published");
+    const t1ids = (t1 || []).map(r => r.id);
+    _achExtras.theoryL1Total = t1ids.length;
+    _achExtras.theoryL1Done  = t1ids.filter(id => doneIds.has(id)).length;
+  } catch(e) { _achExtras.lessonsCompleted = 0; _achExtras.theoryL1Total = 0; _achExtras.theoryL1Done = 0; }
 }
 
 function computeAchievements(sessions, dbEarned = new Set()) {

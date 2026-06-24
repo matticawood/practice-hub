@@ -119,6 +119,7 @@
     const ctx = audioCtx();
     loadPiano();
     const seq = !!opts.sequence;
+    const gate = opts.staccato ? 0.3 : (opts.legato ? 1.1 : 0.96);   // staccato = short/detached, legato = notes overlap smoothly
     const beats = Array.isArray(opts.beats) ? opts.beats : null;
     const gains = Array.isArray(opts.gains) ? opts.gains : null;   // per-note loudness (accents)
     const spb = 60 / (opts.bpm || 80);   // seconds per beat
@@ -130,12 +131,12 @@
       if (beats) {
         const bl = (beats[i] != null ? beats[i] : 1);
         when = ctx.currentTime + 0.03 + (seq ? cum * spb : 0);
-        dur = Math.max(0.08, bl * spb * 0.96);
+        dur = Math.max(0.08, bl * spb * gate);
         if (seq) cum += bl;
       } else {
         const gap = opts.gap || 0.55;
         when = ctx.currentTime + 0.03 + (seq ? i * gap : 0);
-        dur = seq ? 0.7 : 2.4;
+        dur = seq ? (opts.staccato ? 0.2 : opts.legato ? 0.95 : 0.7) : 2.4;
       }
       if (m == null) return;   // rest: clock already advanced, play nothing
       if (_piano) { try { _piano.play(m, when, { gain: 2.2 * mul, duration: dur }); return; } catch (e) {} }
@@ -177,7 +178,7 @@
       const left = (wi + 1) * ww;
       html += `<div class="lr-key lr-key-b${hiSet[m] ? " lr-key-hi" : ""}" data-midi="${m}" style="left:calc(${left.toFixed(4)}% - ${(ww * 0.32).toFixed(4)}%);width:${(ww * 0.64).toFixed(4)}%"></div>`;
     }
-    return `<div class="lr-kbd-keys">${html}</div>`;
+    return `<div class="lr-kbd-keys" style="--kw:${whites.length}">${html}</div>`;
   }
 
   // ── Minimal, safe markdown → HTML (bold, italic, code, links, lists) ──
@@ -266,7 +267,9 @@
         const bpmAttr = b.bpm ? ` data-bpm="${esc(String(b.bpm))}"` : "";
         const clickAttr = b.click ? ` data-click="1"` : "";
         const gainsAttr = Array.isArray(b.gains) ? ` data-gains="${esc(JSON.stringify(b.gains))}"` : "";
-        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}>
+        const stacAttr = b.staccato ? ` data-staccato="1"` : "";
+        const legAttr = b.legato ? ` data-legato="1"` : "";
+        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}${stacAttr}${legAttr}>
           <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
       }
       case "keyboard": {
@@ -407,7 +410,9 @@
         beats: parseJson(btn.dataset.beats, null),
         bpm: btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null,
         click: btn.dataset.click === "1",
-        gains: parseJson(btn.dataset.gains, null)
+        gains: parseJson(btn.dataset.gains, null),
+        staccato: btn.dataset.staccato === "1",
+        legato: btn.dataset.legato === "1"
       })));
     root.querySelectorAll(".lr-kbd-play").forEach(btn =>
       btn.addEventListener("click", () => playMidis(parseNotes(btn), { sequence: false })));
@@ -454,8 +459,13 @@
           // stays visible at every width.
           const s = out.querySelector("svg");
           if (s && !s.getAttribute("viewBox")) {
-            const w = parseFloat(s.getAttribute("width")), h = parseFloat(s.getAttribute("height"));
-            if (w && h) { s.setAttribute("viewBox", "0 0 " + w + " " + h); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); }
+            // Base the viewBox on the actual drawn content (getBBox), not abcjs's
+            // width/height attrs: slurs/ties arc above or below the staff (into
+            // negative y or past the height), and a "0 0 w h" viewBox clips them.
+            let vb = null;
+            try { const bb = s.getBBox(); const p = 3; if (bb.width && bb.height) vb = (bb.x - p) + " " + (bb.y - p) + " " + (bb.width + p * 2) + " " + (bb.height + p * 2); } catch (e) {}
+            if (!vb) { const w = parseFloat(s.getAttribute("width")), h = parseFloat(s.getAttribute("height")); if (w && h) vb = "0 0 " + w + " " + h; }
+            if (vb) { s.setAttribute("viewBox", vb); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); }
           }
           out.dataset.done = "1";
         } catch (e) { out.innerHTML = '<div class="lr-abc-err">This notation could not be rendered.</div>'; }
@@ -470,13 +480,13 @@
     /* Self-contained light tokens so the host page's theme (e.g. the dark app
        chrome) can't bleed into the lesson. Without this, --surface/--surface-2
        could resolve dark and inputs/cards render black. */
-    .lr-body{--surface:#ffffff;--surface-2:#f0ebe2;--border:#e0d5c8;--text:#1a1410;--text-muted:#8a7868;--accent:#f5c518;color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
+    .lr-body{--surface:#ffffff;--surface-2:#f1f1f4;--border:#e0d5c8;--text:#1a1410;--text-muted:#8a7868;--accent:#f5c518;color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
     .lr-heading{font-weight:800;letter-spacing:-.01em;margin:26px 0 10px;line-height:1.25}
     h2.lr-heading{font-size:1.3rem} h3.lr-heading{font-size:1.08rem}
     .lr-text{font-size:1rem;margin:0 0 4px}
     .lr-text p{margin:0 0 12px} .lr-text ul,.lr-text ol{margin:0 0 12px;padding-left:22px}
     .lr-text li{margin:4px 0} .lr-text code{background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-size:.9em}
-    .lr-callout{border-radius:12px;padding:14px 16px;margin:16px 0;border:1px solid var(--border,#e3e1e6);background:var(--surface-2,#f5f2ee)}
+    .lr-callout{border-radius:12px;padding:14px 16px;margin:16px 0;border:1px solid var(--border,#e3e1e6);background:var(--surface,#fff)}
     .lr-callout-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
     .lr-callout-key{border-left:3px solid var(--accent,#f5c518)}
     .lr-callout-watch{border-left:3px solid #d9534f}.lr-callout-watch .lr-callout-label{color:#c0392b}
@@ -496,9 +506,9 @@
     .lr-kbd-label{font-weight:700;font-size:.92rem}
     .lr-kbd-play{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2,#f5f2ee);border:1.5px solid var(--border,#e3e1e6);border-radius:8px;padding:5px 11px;font:inherit;font-size:.8rem;font-weight:700;color:var(--text,#1a1410);cursor:pointer}
     .lr-kbd-play:hover{border-color:var(--accent,#f5c518)}
-    .lr-kbd-keys{position:relative;height:124px;border-radius:9px;background:linear-gradient(#2a2520,#1c1813);box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
+    .lr-kbd-keys{position:relative;width:100%;aspect-ratio:var(--kw,7) / 2.6;max-height:124px;border-radius:9px;background:linear-gradient(#2a2520,#1c1813);box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
     .lr-key{position:absolute;top:0;box-sizing:border-box}
-    .lr-key-w{height:100%;background:linear-gradient(#fff,#f1ece2);border:1px solid #c8c1b2;border-radius:0 0 5px 5px}
+    .lr-key-w{height:100%;background:linear-gradient(#fff,#ededf1);border:1px solid #cbc9cf;border-radius:0 0 5px 5px}
     .lr-key-b{height:62%;background:linear-gradient(#403930,#16120d);border:1px solid #000;border-radius:0 0 4px 4px;z-index:2;box-shadow:0 2px 3px rgba(0,0,0,.4)}
     .lr-key-w.lr-key-hi{background:linear-gradient(#ffe9a0,#f5c518)}
     .lr-key-b.lr-key-hi{background:linear-gradient(#e0aa00,#9a7400)}
@@ -513,7 +523,7 @@
     .lr-abc-out{text-align:center}
     .lr-notation svg{max-width:100%;height:auto}
     .lr-abc-err{font-size:.85rem;color:var(--text-muted,#8a7868);border:1px dashed var(--border,#e3e1e6);border-radius:8px;padding:10px}
-    .lr-task{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
+    .lr-task{border:1px solid var(--border,#e0d5c8);border-left:4px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:var(--surface,#fff)}
     .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
     .lr-task-share{margin-top:10px;background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
     .lr-divider{border:none;border-top:1px solid var(--border,#e3e1e6);margin:24px 0}
@@ -531,7 +541,7 @@
     .lr-q{border:1px solid var(--border,#e3e1e6);border-radius:12px;padding:14px 16px;margin:10px 0;background:var(--surface,#fff)}
     .lr-q-prompt{font-weight:600;margin-bottom:10px}
     .lr-opts{display:flex;flex-direction:column;gap:8px}
-    .lr-opt{text-align:left;color:var(--text,#1a1410);background:var(--surface-2,#f5f2ee);border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:10px 12px;font:inherit;font-size:.92rem;cursor:pointer;transition:border-color .12s,background .12s}
+    .lr-opt{text-align:left;color:var(--text,#1a1410);background:var(--surface,#fff);border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:10px 12px;font:inherit;font-size:.92rem;cursor:pointer;transition:border-color .12s,background .12s}
     .lr-opt:hover:not(:disabled){border-color:var(--accent,#f5c518)}
     .lr-opt.lr-sel{border-color:var(--accent,#f5c518)}
     .lr-opt.lr-correct{border-color:#5fbf7e;background:#eaf6ee}
