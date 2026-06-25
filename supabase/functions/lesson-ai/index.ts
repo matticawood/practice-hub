@@ -41,12 +41,16 @@ field and type-specific fields. These are the ONLY allowed block types:
 - example:   { "type":"example", "title":"...", "md":"..." } // worked example; title optional
 - task:      { "type":"task", "md":"...", "share":false }    // a practice task to do at the piano
 - divider:   { "type":"divider" }
-- play:      { "type":"play", "label":"A perfect fifth: C to G", "notes":["C4","G4"], "style":"chord" }
+- play:      { "type":"play", "label":"Four half notes, counting 1-2 each", "notes":["C4","C4","C4","C4"], "style":"sequence", "beats":[2,2,2,2], "bpm":60, "click":true }
              //   Sounds the notes on a real piano in the lesson. Note names are
              //   scientific pitch: C4 = middle C, sharps "#", flats "b" (e.g. "F#4","Bb3").
              //   style "chord" = all together; "sequence" = one after another (scales, melodies, intervals heard melodically).
+             //   FOR RHYTHM, use style "sequence" with "beats": a per-note array of how many beats each note lasts,
+             //   matched 1:1 to the notes (2 = half note, 1 = quarter, 4 = whole, 1.5 = dotted quarter, 0.5 = eighth).
+             //   Also set "bpm" (tempo) and "click":true to sound a metronome ticking each beat. This is how you make
+             //   a clip play TRUE note lengths (e.g. half notes vs quarter notes). Omit beats/bpm for plain even playback.
              //   USE THIS generously whenever the learner should HEAR something:
-             //   intervals, chords, scales, "listen to the difference between...". It needs no audio file.
+             //   intervals, chords, scales, rhythms, "listen to the difference between...". It needs no audio file.
 - keyboard:  { "type":"keyboard", "label":"C major triad", "highlight":["C4","E4","G4"], "from":"C4", "to":"C6" }
              //   An interactive piano: highlighted keys are coloured and the learner can
              //   click ANY key to hear it, plus a Play button sounds the highlighted notes.
