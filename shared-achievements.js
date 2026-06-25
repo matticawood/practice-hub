@@ -342,7 +342,7 @@ const ACH_ICON_MAP = {
   tmo25:_AI.CALCK, pweek:_AI.CALCK, wkwarr:_AI.SUNRISE, renais:_AI.PALETTE,
   cmcs:_AI.BELL, cmav:_AI.SPARKLE,
   // Courses
-  course_first_lesson:_AI.BOOK, course_theory_level1:_AI.MEDAL,
+  course_first_lesson:_AI.BOOK, course_theory_level1:_AI.MEDAL, course_theory_level2:_AI.TROPHY,
 };
 
 function achBadgeIcon(id) {
@@ -591,6 +591,10 @@ const ACHIEVEMENTS = [
   // Extend as levels/courses ship: add course_theory_level2, course_eartraining_level1, etc.
   { id:"course_first_lesson",  cat:"courses", icon:"📖", name:"First Lesson",     desc:"Complete your first course lesson",             check:(s,x)=>(x.lessonsCompleted||0)>=1,  prog:(s,x)=>[x.lessonsCompleted||0,1] },
   { id:"course_theory_level1", cat:"courses", icon:"🎓", name:"Theory: Level 1",  desc:"Complete every lesson in Music Theory Level 1",  check:(s,x)=>(x.theoryL1Total||0)>0 && (x.theoryL1Done||0)>=(x.theoryL1Total||0),  prog:(s,x)=>[x.theoryL1Done||0, x.theoryL1Total||13] },
+  // Level 2 is being drip-released. Guard against early-firing: only earn once the FULL
+  // planned level (theoryL2Planned) is published AND all of it is done. Until then
+  // theoryL2Total (published count) is below the planned total, so it cannot fire.
+  { id:"course_theory_level2", cat:"courses", icon:"🏆", name:"Theory: Level 2",  desc:"Complete every lesson in Music Theory Level 2",  check:(s,x)=>(x.theoryL2Total||0) >= (x.theoryL2Planned||12) && (x.theoryL2Done||0) >= (x.theoryL2Total||0),  prog:(s,x)=>[x.theoryL2Done||0, x.theoryL2Planned||12] },
   // Long sessions
   { id:"d60", cat:"depth",    icon:"🎯", name:"Deep Practice",    desc:"Complete a session of 1 hour or more",   check:s=>s.some(ss=>(ss.duration_minutes||0)>=60)  },
   { id:"d120",cat:"depth",    icon:"🏋️", name:"Marathon",         desc:"Complete a session of 2 hours or more",  check:s=>s.some(ss=>(ss.duration_minutes||0)>=120) },
@@ -895,7 +899,12 @@ async function loadAchievementExtras() {
     const t1ids = (t1 || []).map(r => r.id);
     _achExtras.theoryL1Total = t1ids.length;
     _achExtras.theoryL1Done  = t1ids.filter(id => doneIds.has(id)).length;
-  } catch(e) { _achExtras.lessonsCompleted = 0; _achExtras.theoryL1Total = 0; _achExtras.theoryL1Done = 0; }
+    const { data: t2 } = await db.from("lessons").select("id").eq("course", "theory").eq("level", 2).eq("status", "published");
+    const t2ids = (t2 || []).map(r => r.id);
+    _achExtras.theoryL2Total   = t2ids.length;
+    _achExtras.theoryL2Done    = t2ids.filter(id => doneIds.has(id)).length;
+    _achExtras.theoryL2Planned = 12; // full planned Level 2 lesson count — bump if it changes
+  } catch(e) { _achExtras.lessonsCompleted = 0; _achExtras.theoryL1Total = 0; _achExtras.theoryL1Done = 0; _achExtras.theoryL2Total = 0; _achExtras.theoryL2Done = 0; _achExtras.theoryL2Planned = 12; }
 }
 
 function computeAchievements(sessions, dbEarned = new Set()) {
