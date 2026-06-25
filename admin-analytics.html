@@ -640,6 +640,8 @@ async function loadAnalytics() {
   catch (e) { console.error("renderAcquisition failed:", e); }
   try { await renderCourseProgress(); } // how far buyers get through the store course
   catch (e) { console.error("renderCourseProgress failed:", e); }
+  try { await renderMemberCourses(); }  // in-app member courses (theory/ear/improv) lesson completion
+  catch (e) { console.error("renderMemberCourses failed:", e); }
   try { renderInsights2({ allSessions, aeRows, posts, comments, likes, rsvps, attendance, events, baseline, usageRows, churnedCount: churnedSet.size, hasSubData: haveMembership, allStreaks, allGames, piecesMap, pieceGoals, noteScores, chordScores, cfPosts, cfComments, cfLikes, actComments, actReactions, savedPosts, achEvents, feedbackRows, emailLog, emailClicks }); }
   catch (e) { console.error("renderInsights failed:", e); }
   try { renderFeatureUsage(usageRows); }
@@ -1011,6 +1013,131 @@ async function renderCourseProgress() {
 
   el.insertAdjacentHTML("beforeend",
     `<h2 class="section-header" style="margin-top:8px">Course progress: ${esc(NAME)} <span class="section-meta">${started} started</span></h2>${bodyHtml}`);
+}
+
+// ── In-app member courses (Theory / Ear training / Improvisation) ───────────────
+// Completion summary from lesson_progress. Rows are written only when a member
+// taps "Mark as complete" in courses.html, so the honest metric here is lessons
+// COMPLETED (there is no view/open event for in-app lessons). Scoped to the in-app
+// courses; the store course lives in the same lessons table under its own slug.
+async function renderMemberCourses() {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+  const [lessRes, progRes] = await Promise.all([
+    db.from("lessons").select("id,course,level,sort_order,title")
+      .in("course", ["theory", "ear", "improv"]).eq("status", "published")
+      .order("course").order("level").order("sort_order"),
+    db.from("lesson_progress").select("email,lesson_id,completed,completed_at"),
+  ]);
+  const lessons = lessRes.data || [], prog = progRes.data || [];
+  if (!lessons.length) return;
+  const esc = s => String(s == null ? "" : s).replace(/</g, "&lt;");
+  const pct = (n, d) => d ? Math.round(n / d * 100) : 0;
+  const fmtDate = s => { try { return new Date(s).toLocaleDateString(undefined, { day: "numeric", month: "short" }); } catch { return ""; } };
+  const COURSE = {
+    theory: { name: "Music Theory", col: "#10b981" },
+    ear:    { name: "Ear Training", col: "#ec4899" },
+    improv: { name: "Improvisation", col: "#f97316" },
+  };
+
+  const byId = {}; lessons.forEach(l => { byId[l.id] = l; });
+  const doneByLesson = {}; lessons.forEach(l => { doneByLesson[l.id] = new Set(); });
+  const memberLast = {};                      // `${course}|${email}` -> latest completed_at
+  for (const p of prog) {
+    const l = byId[p.lesson_id]; if (!l || !p.completed) continue;   // ignore drafts + un-marked
+    const em = (p.email || "").toLowerCase(); if (!em) continue;
+    doneByLesson[p.lesson_id].add(em);
+    const k = l.course + "|" + em;
+    if (!memberLast[k] || (p.completed_at || "") > memberLast[k]) memberLast[k] = p.completed_at || "";
+  }
+
+  // group lessons by course, preserving query order
+  const courses = [], cmap = {};
+  lessons.forEach(l => { if (!cmap[l.course]) { cmap[l.course] = { course: l.course, lessons: [] }; courses.push(cmap[l.course]); } cmap[l.course].lessons.push(l); });
+
+  const card = (label, big, sub, col) => `<div style="flex:1;min-width:130px;background:#0f1729;border:1px solid #1e2d4a;border-radius:12px;padding:12px 14px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b">${label}</div>
+      <div style="font-size:1.5rem;font-weight:800;color:${col || "#e2e8f0"};margin-top:3px">${big}</div>
+      <div style="font-size:.72rem;color:#64748b;margin-top:2px">${sub || ""}</div></div>`;
+
+  let html = `<h2 class="section-header" style="border-top:2px solid #1e2d4a;padding-top:24px;margin-top:32px">In-app course progress <span class="section-meta">member lessons completed</span></h2>`;
+
+  for (const c of courses) {
+    const meta = COURSE[c.course] || { name: c.course, col: "#94a3b8" };
+    const cl = c.lessons, total = cl.length;
+    const furthest = {}, doneCount = {};
+    cl.forEach((l, i) => doneByLesson[l.id].forEach(em => {
+      doneCount[em] = (doneCount[em] || 0) + 1;
+      furthest[em] = Math.max(furthest[em] == null ? -1 : furthest[em], i);
+    }));
+    const learners = Object.keys(doneCount);
+    const started = learners.length;
+    const finishedAll = learners.filter(em => doneCount[em] >= total).length;
+    const avgDone = started ? learners.reduce((a, em) => a + doneCount[em], 0) / started : 0;
+
+    const levels = [...new Set(cl.map(l => l.level))].sort((a, b) => a - b);
+    const levelChips = levels.map(lv => {
+      const lvL = cl.filter(l => l.level === lv);
+      const completedLevel = learners.filter(em => lvL.every(l => doneByLesson[l.id].has(em))).length;
+      return `<span style="display:inline-block;background:#0f1729;border:1px solid #1e2d4a;border-radius:999px;padding:4px 11px;font-size:.74rem;color:#cbd5e1;margin:0 6px 6px 0">Level ${lv} <span style="color:${meta.col};font-weight:700">${completedLevel}</span> <span style="color:#64748b">finished all ${lvL.length}</span></span>`;
+    }).join("");
+
+    const maxD = Math.max(1, ...cl.map(l => doneByLesson[l.id].size));
+    let rows = "", lastLevel = null;
+    cl.forEach((l, i) => {
+      if (l.level !== lastLevel) {
+        rows += `<tr><td colspan="5" style="padding:10px 8px 3px;color:${meta.col};font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Level ${l.level}</td></tr>`;
+        lastLevel = l.level;
+      }
+      const d = doneByLesson[l.id].size;
+      rows += `<tr>
+        <td style="color:#64748b;padding:4px 8px">${i + 1}</td>
+        <td style="padding:4px 8px;color:#cbd5e1">${esc(l.title)}</td>
+        <td style="padding:4px 8px;width:46%"><div style="background:#1e293b;border-radius:5px;height:16px"><div style="background:${meta.col};height:100%;border-radius:5px;width:${Math.round(d / maxD * 100)}%"></div></div></td>
+        <td style="padding:4px 8px;text-align:right;color:#e2e8f0;font-variant-numeric:tabular-nums">${d}</td>
+        <td style="padding:4px 8px;text-align:right;color:#64748b;font-variant-numeric:tabular-nums">${started ? pct(d, started) : 0}%</td>
+      </tr>`;
+    });
+
+    const members = learners.map(em => ({ em, far: furthest[em], done: doneCount[em], last: memberLast[c.course + "|" + em] }))
+      .sort((a, b) => a.far - b.far || (a.last < b.last ? 1 : -1));
+    const memRows = members.map(m => {
+      const atEnd = m.done >= total, farL = cl[m.far];
+      return `<tr>
+        <td style="padding:4px 8px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">${esc(m.em)}</td>
+        <td style="padding:4px 8px;color:${atEnd ? "#4ade80" : "#e2e8f0"}">${m.done}/${total} done${atEnd ? " ✓" : ""} <span style="color:#64748b">${esc(farL ? ("L" + farL.level + " · " + farL.title) : "")}</span></td>
+        <td style="padding:4px 8px;text-align:right;color:#64748b;white-space:nowrap">${fmtDate(m.last)}</td>
+      </tr>`;
+    }).join("");
+
+    const body = !started
+      ? `<div style="color:#64748b;font-size:.85rem;padding:6px 0">No lessons completed yet in this course.</div>`
+      : `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+          ${card("Learners", started, "completed 1 or more lessons", meta.col)}
+          ${card("Avg completed", `${avgDone.toFixed(1)} / ${total}`, "lessons per learner")}
+          ${card("Finished course", finishedAll, total ? `${pct(finishedAll, started)}% of learners` : "")}
+          ${card("Published", total, `${levels.length} level${levels.length > 1 ? "s" : ""}`)}
+        </div>
+        ${levelChips ? `<div style="margin-bottom:14px">${levelChips}</div>` : ""}
+        <table style="width:100%;border-collapse:collapse;font-size:.84rem">
+          <thead><tr style="color:#64748b;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em">
+            <th style="padding:4px 8px">#</th><th style="padding:4px 8px">Lesson</th>
+            <th style="padding:4px 8px">Completed</th><th style="padding:4px 8px;text-align:right">Count</th>
+            <th style="padding:4px 8px;text-align:right">% of learners</th></tr></thead>
+          <tbody>${rows}</tbody></table>
+        <h3 style="font-size:.9rem;color:#94a3b8;margin:20px 0 6px">Per-member progress <span style="color:#64748b;font-weight:400">(${members.length})</span></h3>
+        <div style="max-height:360px;overflow:auto;border:1px solid #1e2d4a;border-radius:10px">
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+            <thead><tr style="color:#64748b;text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em">
+              <th style="padding:6px 8px;position:sticky;top:0;background:#0a0f1e">Member</th>
+              <th style="padding:6px 8px;position:sticky;top:0;background:#0a0f1e">Progress</th>
+              <th style="padding:6px 8px;text-align:right;position:sticky;top:0;background:#0a0f1e">Last done</th></tr></thead>
+            <tbody>${memRows}</tbody></table></div>`;
+
+    html += `<h3 style="font-size:1rem;color:${meta.col};margin:22px 0 10px;font-weight:700">${esc(meta.name)} <span style="color:#64748b;font-weight:400;font-size:.82rem">${started} learner${started === 1 ? "" : "s"} &middot; ${total} lesson${total === 1 ? "" : "s"}</span></h3>${body}`;
+  }
+
+  el.insertAdjacentHTML("beforeend", html);
 }
 
 // ── Whole-site traffic + store/booking funnels + email + smart insights ────────
