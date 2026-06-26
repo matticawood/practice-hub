@@ -2309,24 +2309,18 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     if (isAdmin) window._shEnableAdminPresence?.();
   }
 
-  // Admin-only: add an "Admin Analytics" link to the avatar dropdown (above Log out).
+  // Admin-only: add a single "Studios" link to the avatar dropdown (above Log out).
+  // The Studios hub (/studio.html) links out to every authoring + admin tool
+  // (Admin Analytics, Email Studio, Lesson Studio, etc.).
   if (isAdmin) {
     const _menu = document.getElementById("sh-user-menu");
     const _logout = document.getElementById("sh-logout-btn");
-    if (_menu && _logout && !document.getElementById("sh-admin-analytics-link")) {
+    if (_menu && _logout && !document.getElementById("sh-studios-link")) {
       const a = document.createElement("a");
       a.className = "sh-user-menu-item";
-      a.id = "sh-admin-analytics-link";
-      a.href = "/admin-analytics.html";
-      a.textContent = "Admin Analytics";
-      _menu.insertBefore(a, _logout);
-    }
-    if (_menu && _logout && !document.getElementById("sh-email-studio-link")) {
-      const a = document.createElement("a");
-      a.className = "sh-user-menu-item";
-      a.id = "sh-email-studio-link";
-      a.href = "/email-studio.html";
-      a.textContent = "Email Studio";
+      a.id = "sh-studios-link";
+      a.href = "/studio.html";
+      a.textContent = "Studios";
       _menu.insertBefore(a, _logout);
     }
   }
