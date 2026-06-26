@@ -269,7 +269,10 @@
         const gainsAttr = Array.isArray(b.gains) ? ` data-gains="${esc(JSON.stringify(b.gains))}"` : "";
         const stacAttr = b.staccato ? ` data-staccato="1"` : "";
         const legAttr = b.legato ? ` data-legato="1"` : "";
-        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}${stacAttr}${legAttr}>
+        // voices: independent simultaneous lines (e.g. a held left-hand note under a
+        // moving right-hand melody). Each voice is { notes, beats, bpm?, staccato? }.
+        const voicesAttr = Array.isArray(b.voices) ? ` data-voices="${esc(JSON.stringify(b.voices))}"` : "";
+        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}${stacAttr}${legAttr}${voicesAttr}>
           <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
       }
       case "keyboard": {
@@ -405,15 +408,34 @@
     const parseNotes = el => { try { return JSON.parse(el.dataset.notes || "[]"); } catch (e) { return []; } };
     const parseJson = (s, fb) => { try { return s ? JSON.parse(s) : fb; } catch (e) { return fb; } };
     root.querySelectorAll(".lr-play-btn").forEach(btn =>
-      btn.addEventListener("click", () => playMidis(parseNotes(btn), {
-        sequence: btn.dataset.seq === "1",
-        beats: parseJson(btn.dataset.beats, null),
-        bpm: btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null,
-        click: btn.dataset.click === "1",
-        gains: parseJson(btn.dataset.gains, null),
-        staccato: btn.dataset.staccato === "1",
-        legato: btn.dataset.legato === "1"
-      })));
+      btn.addEventListener("click", () => {
+        const voices = parseJson(btn.dataset.voices, null);
+        if (Array.isArray(voices) && voices.length) {
+          // Start each voice as its own sequence at (almost) the same instant, so a
+          // held bass note and a moving melody sound together as two hands would.
+          const bpm = btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null;
+          const click = btn.dataset.click === "1";
+          voices.forEach((v, vi) => playMidis(Array.isArray(v.notes) ? v.notes : [], {
+            sequence: true,
+            beats: Array.isArray(v.beats) ? v.beats : null,
+            bpm: v.bpm || bpm,
+            click: vi === 0 ? click : false,   // metronome at most once
+            gains: Array.isArray(v.gains) ? v.gains : null,
+            staccato: !!v.staccato,
+            legato: !!v.legato
+          }));
+          return;
+        }
+        playMidis(parseNotes(btn), {
+          sequence: btn.dataset.seq === "1",
+          beats: parseJson(btn.dataset.beats, null),
+          bpm: btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null,
+          click: btn.dataset.click === "1",
+          gains: parseJson(btn.dataset.gains, null),
+          staccato: btn.dataset.staccato === "1",
+          legato: btn.dataset.legato === "1"
+        });
+      }));
     root.querySelectorAll(".lr-kbd-play").forEach(btn =>
       btn.addEventListener("click", () => playMidis(parseNotes(btn), { sequence: false })));
     root.querySelectorAll(".lr-kbd-live .lr-key").forEach(key =>
