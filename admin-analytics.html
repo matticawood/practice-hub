@@ -884,73 +884,83 @@ async function renderAcquisition() {
   }
   h += `</div>`;
 
-  // ── YouTube: which video & which link ──────────────────────────────────────
+  // ── YouTube: which videos drive each link, with a time-window toggle ─────────
   // Combines signup-link clicks (signup_events) with store/brand-link clicks
-  // (site_events) — both tagged utm_content=<videoId> from the descriptions — so
-  // you can see which video drives traffic and which description link they clicked.
+  // (site_events), both tagged utm_content=<videoId>. The window pills + link tabs
+  // recompute client-side (instant) from the raw events held in this closure.
+  let ytRender = null;
   try {
-    const siteYT = await fetchAll("site_events", "vid,utm_content,path", q => q.eq("utm_source", "youtube").eq("event", "view"));
-    const destOf = p => !p ? "Other"
-      : p.startsWith("/store") ? "Store"
-      : p.startsWith("/book-a-lesson") ? "Book a lesson"
-      : p.startsWith("/monday") ? "Mailing"
-      : (p === "/" || p === "") ? "Home" : "Signup";
-    const vidYT = {};
-    const addV = (c, v, dest) => { if (!c) return; const o = vidYT[c] = vidYT[c] || { tot: new Set(), dest: {} }; o.tot.add(v); (o.dest[dest] = o.dest[dest] || new Set()).add(v); };
-    for (const e of views) if (e.utm_content) addV(e.utm_content, e.vid, "Signup");      // signup_events = the Signup link
-    for (const e of siteYT) addV(e.utm_content, e.vid, destOf(e.path));                  // site_events = store/brand links
-    // conversions per video (signup-side vid → utm_content; sparse until vid threading is fixed)
-    const vidContent = {};
-    for (const e of views) if (e.utm_content && vidContent[e.vid] === undefined) vidContent[e.vid] = e.utm_content;
-    const convPerVideo = {};
-    for (const v of convVids) { const c = vidContent[v]; if (c) convPerVideo[c] = (convPerVideo[c] || 0) + 1; }
+    const siteYT = await fetchAll("site_events", "vid,utm_content,path,ts", q => q.eq("utm_source", "youtube").eq("event", "view"));
+    const DESTS = ["Signup", "Book a lesson", "Store", "Home", "Mailing"];
+    const slug = d => d.replace(/[^a-zA-Z]/g, "");
+    const destOf = p => !p ? "Other" : p.startsWith("/store") ? "Store" : p.startsWith("/book-a-lesson") ? "Book a lesson" : p.startsWith("/monday") ? "Mailing" : (p === "/" || p === "") ? "Home" : "Signup";
+    const ytViews = views.filter(e => e.utm_content);   // tagged signup-link clicks
+    const vidContent = {}; for (const e of ytViews) if (vidContent[e.vid] === undefined) vidContent[e.vid] = e.utm_content;
 
-    if (Object.keys(vidYT).length) {
-      const DESTS = ["Signup", "Book a lesson", "Store", "Home", "Mailing"];
-      const slug = d => d.replace(/[^a-zA-Z]/g, "");
-      // unique-visitor totals per link (for the tab counts)
-      const linkTot = {};
-      for (const e of views)  if (e.utm_content) (linkTot["Signup"] = linkTot["Signup"] || new Set()).add(e.vid);
-      for (const e of siteYT) { const d = destOf(e.path); (linkTot[d] = linkTot[d] || new Set()).add(e.vid); }
-      const allTotal = new Set(); for (const o of Object.values(vidYT)) for (const v of o.tot) allTotal.add(v);
-      // top videos per link (and overall)
-      const perDest = {};
-      for (const d of DESTS) perDest[d] = Object.entries(vidYT).map(([c, o]) => [c, o.dest[d] ? o.dest[d].size : 0]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 15);
-      const allList = Object.entries(vidYT).map(([c, o]) => [c, o.tot.size]).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    if (ytViews.length || siteYT.length) {
+      window.__ytTitleMap = window.__ytTitleMap || {};
+      window.applyYtTitles = root => { const m = window.__ytTitleMap; (root || document).querySelectorAll("a.yt-vtitle[data-vid]").forEach(a => { const t = m[a.getAttribute("data-vid")]; if (t) { a.textContent = t + " ↗"; a.title = t; } }); };
 
-      const ytTable = (list, showConv) => {
-        if (!list.length) return `<div style="color:#64748b;font-size:.82rem;padding:12px 0">No clicks to this link yet.</div>`;
-        const mx = list[0][1] || 1;
-        return list.map(([content, count]) => {
-          const w = Math.max(2, Math.round(count / mx * 100));
-          const conv = showConv ? `<div style="flex:0 0 66px;text-align:right;color:#4ade80" title="members traced to this video">${convPerVideo[content] || 0} conv</div>` : "";
-          return `<div style="display:flex;align-items:center;gap:10px;font-size:.85rem;margin-bottom:9px">
-            <a href="https://youtu.be/${esc(content)}" target="_blank" rel="noopener" class="yt-vtitle" data-vid="${esc(content)}" style="flex:0 0 250px;color:#60a5fa;text-decoration:none;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(content)}">${esc(content)} ↗</a>
-            <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${w}%;height:100%;background:linear-gradient(90deg,#f5c518,#caa413)"></div></div>
-            <div style="flex:0 0 46px;text-align:right;color:#f5c518;font-weight:700">${count}</div>
-            ${conv}
-          </div>`;
-        }).join("");
+      // recompute + paint the link tabs + tables for a given time window (days; 0 = all time)
+      ytRender = (windowDays) => {
+        const cut = windowDays ? Date.now() - windowDays * 864e5 : 0;
+        const inWin = ts => !cut || (ts && new Date(ts).getTime() >= cut);
+        const vidYT = {};
+        const addV = (c, v, d) => { if (!c) return; const o = vidYT[c] = vidYT[c] || { tot: new Set(), dest: {} }; o.tot.add(v); (o.dest[d] = o.dest[d] || new Set()).add(v); };
+        for (const e of ytViews) if (inWin(e.ts)) addV(e.utm_content, e.vid, "Signup");
+        for (const e of siteYT)  if (inWin(e.ts)) addV(e.utm_content, e.vid, destOf(e.path));
+        const convPerVideo = {}; for (const c of convs) if (c.vid && inWin(c.ts)) { const k = vidContent[c.vid]; if (k) convPerVideo[k] = (convPerVideo[k] || 0) + 1; }
+        const linkTot = {}; for (const e of ytViews) if (inWin(e.ts)) (linkTot["Signup"] = linkTot["Signup"] || new Set()).add(e.vid);
+        for (const e of siteYT) if (inWin(e.ts)) { const d = destOf(e.path); (linkTot[d] = linkTot[d] || new Set()).add(e.vid); }
+        const allTotal = new Set(); for (const o of Object.values(vidYT)) for (const v of o.tot) allTotal.add(v);
+        const perDest = {}; for (const d of DESTS) perDest[d] = Object.entries(vidYT).map(([c, o]) => [c, o.dest[d] ? o.dest[d].size : 0]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 15);
+        const allList = Object.entries(vidYT).map(([c, o]) => [c, o.tot.size]).sort((a, b) => b[1] - a[1]).slice(0, 15);
+        const ytTable = (list, showConv) => {
+          if (!list.length) return `<div style="color:#64748b;font-size:.82rem;padding:12px 0">No clicks to this link in this window.</div>`;
+          const mx = list[0][1] || 1;
+          return list.map(([content, count]) => {
+            const w = Math.max(2, Math.round(count / mx * 100));
+            const conv = showConv ? `<div style="flex:0 0 66px;text-align:right;color:#4ade80" title="members traced to this video">${convPerVideo[content] || 0} conv</div>` : "";
+            return `<div style="display:flex;align-items:center;gap:10px;font-size:.85rem;margin-bottom:9px">
+              <a href="https://youtu.be/${esc(content)}" target="_blank" rel="noopener" class="yt-vtitle" data-vid="${esc(content)}" style="flex:0 0 250px;color:#60a5fa;text-decoration:none;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(content)}">${esc(content)} ↗</a>
+              <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${w}%;height:100%;background:linear-gradient(90deg,#f5c518,#caa413)"></div></div>
+              <div style="flex:0 0 46px;text-align:right;color:#f5c518;font-weight:700">${count}</div>
+              ${conv}
+            </div>`;
+          }).join("");
+        };
+        let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px">`;
+        html += `<button class="ytv-tab active" onclick="_ytShowDest('All',this)">All links <b>${allTotal.size}</b></button>`;
+        for (const d of DESTS) html += `<button class="ytv-tab" onclick="_ytShowDest('${slug(d)}',this)">${esc(d)} <b>${linkTot[d] ? linkTot[d].size : 0}</b></button>`;
+        html += `</div>`;
+        html += `<div class="ytv-table" id="ytv-All">${ytTable(allList, true)}</div>`;
+        for (const d of DESTS) html += `<div class="ytv-table" id="ytv-${slug(d)}" style="display:none">${ytTable(perDest[d], d === "Signup")}</div>`;
+        const cont = document.getElementById("ytv-container");
+        if (cont) { cont.innerHTML = html; window.applyYtTitles(cont); }
       };
-
-      // tab switcher (defined once; safe to reassign on re-render)
+      window.__ytRenderFn = ytRender;
       window._ytShowDest = function (id, btn) {
         document.querySelectorAll(".ytv-table").forEach(t => t.style.display = "none");
         const t = document.getElementById("ytv-" + id); if (t) t.style.display = "block";
         document.querySelectorAll(".ytv-tab").forEach(b => b.classList.remove("active"));
         if (btn) btn.classList.add("active");
       };
+      window._ytSetWin = function (days, btn) {
+        document.querySelectorAll(".ytv-win").forEach(b => b.classList.remove("active"));
+        if (btn) btn.classList.add("active");
+        if (typeof window.__ytRenderFn === "function") window.__ytRenderFn(days);
+      };
 
-      h += `<style>.ytv-tab{background:#0d1525;border:1px solid #1e2d4a;border-radius:8px;padding:8px 14px;font-size:.82rem;color:#94a3b8;cursor:pointer;font-family:inherit}.ytv-tab:hover{border-color:#3b4d6e}.ytv-tab.active{background:rgba(245,197,24,.14);border-color:#f5c518;color:#f5c518}.ytv-tab b{color:#f5c518}</style>`;
+      h += `<style>.ytv-tab,.ytv-win{background:#0d1525;border:1px solid #1e2d4a;border-radius:8px;padding:8px 14px;font-size:.82rem;color:#94a3b8;cursor:pointer;font-family:inherit}.ytv-tab:hover,.ytv-win:hover{border-color:#3b4d6e}.ytv-tab.active,.ytv-win.active{background:rgba(245,197,24,.14);border-color:#f5c518;color:#f5c518}.ytv-tab b{color:#f5c518}.ytv-win{font-weight:600}</style>`;
       h += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('share','#f5c518')}YouTube videos &amp; links <span class="section-meta">which videos drive each description link</span></h2>`;
-      h += `<div style="font-size:.74rem;color:#64748b;margin:8px 0 12px">Pick a link to see which videos drove clicks to it. Click a video to open it.</div>`;
-      h += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px">`;
-      h += `<button class="ytv-tab active" onclick="_ytShowDest('All',this)">All links <b>${allTotal.size}</b></button>`;
-      for (const d of DESTS) h += `<button class="ytv-tab" onclick="_ytShowDest('${slug(d)}',this)">${esc(d)} <b>${linkTot[d] ? linkTot[d].size : 0}</b></button>`;
-      h += `</div>`;
-      h += `<div class="ytv-table" id="ytv-All">${ytTable(allList, true)}</div>`;
-      for (const d of DESTS) h += `<div class="ytv-table" id="ytv-${slug(d)}" style="display:none">${ytTable(perDest[d], d === "Signup")}</div>`;
-      h += `<div style="margin-bottom:28px"></div>`;
+      h += `<div style="font-size:.74rem;color:#64748b;margin:8px 0 10px">Pick a time window, then a link, to see which videos are driving clicks. Click a video to open it.</div>`;
+      h += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px">
+        <button class="ytv-win active" onclick="_ytSetWin(0,this)">All time</button>
+        <button class="ytv-win" onclick="_ytSetWin(30,this)">30 days</button>
+        <button class="ytv-win" onclick="_ytSetWin(7,this)">7 days</button>
+        <button class="ytv-win" onclick="_ytSetWin(2,this)">48 hours</button>
+      </div>`;
+      h += `<div id="ytv-container"></div><div style="margin-bottom:28px"></div>`;
     }
   } catch (e) { console.warn("YouTube video breakdown failed:", e); }
 
@@ -997,22 +1007,23 @@ async function renderAcquisition() {
 
   el.insertAdjacentHTML("beforeend", h);
 
-  // Resolve YouTube video ids -> titles (owner-only yt-channel fn; server-side key, cached).
-  // Progressive: the panel already rendered with ids, swap in titles once they load.
-  (async () => {
-    const links = el.querySelectorAll("a.yt-vtitle[data-vid]");
-    if (!links.length) return;
-    try {
-      const { data: { session } } = await db.auth.getSession();
-      const r = await fetch(`${SUPABASE_URL}/functions/v1/yt-channel`, {
-        headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${session.access_token}` },
-      });
-      const j = await r.json();
-      const map = {};
-      for (const arr of [j.all, j.top, j.recent, j.topShorts]) for (const v of (arr || [])) if (v && v.videoId && v.title) map[v.videoId] = v.title;
-      links.forEach(a => { const t = map[a.getAttribute("data-vid")]; if (t) { a.textContent = t + " ↗"; a.title = t; } });
-    } catch (e) { /* leave ids if titles can't load */ }
-  })();
+  // YouTube section: paint the default (all-time) view, then resolve ids -> titles
+  // (owner-only yt-channel fn, cached) and re-apply across whatever is on screen.
+  if (typeof ytRender === "function") {
+    ytRender(0);
+    (async () => {
+      try {
+        const { data: { session } } = await db.auth.getSession();
+        const r = await fetch(`${SUPABASE_URL}/functions/v1/yt-channel`, {
+          headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${session.access_token}` },
+        });
+        const j = await r.json();
+        const map = window.__ytTitleMap || (window.__ytTitleMap = {});
+        for (const arr of [j.all, j.top, j.recent, j.topShorts]) for (const v of (arr || [])) if (v && v.videoId && v.title) map[v.videoId] = v.title;
+        if (window.applyYtTitles) window.applyYtTitles(document);
+      } catch (e) { /* leave ids if titles can't load */ }
+    })();
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
