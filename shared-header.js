@@ -1107,6 +1107,7 @@ function _shBuildChrome() {
             <div class="sh-avatar" id="sh-avatar-el"></div>
           </button>
           <div class="sh-user-menu" id="sh-user-menu">
+            <a class="sh-user-menu-item" href="/clinic-booking.html?view=mine">Your booked lessons</a>
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
             <a class="sh-user-menu-item" href="/updates.html">What's New</a>
             <a class="sh-user-menu-item" href="/billing.html">Billing</a>
@@ -1416,7 +1417,7 @@ const _SH_PAGE_LABELS = {
   "/focus.html":          "Weekly Focus",
   "/content-feed.html":   "Content Feed",
   "/events.html":         "Live Clinics",
-  "/clinic-booking.html": "Book a Clinic",
+  "/clinic-booking.html": "Book a Lesson",
   "/updates.html":        "Updates",
   "/profile.html":        "Profile",
   "/billing.html":        "Billing",

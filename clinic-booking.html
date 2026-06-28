@@ -1,944 +1,749 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Book a Clinic — Matthew Cawood</title>
-  <link rel="stylesheet" href="/style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="/shared-header.js?v=2026062410"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      /* Aligned to the main site palette in /style.css */
-      --bg:     #0f0f0f;
-      --card:   #1a1a1a;     /* = main-site --surface */
-      --cell:   #222222;     /* = main-site --surface-2 */
-      --cellh:  #2a2a2a;
-      --border: #2e2e2e;
-      --bord2:  #3c3c3c;
-      --text:   #f0f0f0;
-      --t2:     #888;
-      --t3:     #444;
-      --green:  #22c55e;     /* kept only for the small "available" dot */
-      --accent: #F5C518;     /* site-wide yellow */
-      --accent-dim: #c49a10;
-      --accent-subtle: #2a2000;
-      --accent-fg: #000000;  /* text on accent */
-      --r:      10px;        /* = main-site --radius */
-      --rc:     8px;
-    }
-    body {
-      background: var(--bg); color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
-      min-height: 100vh; display: flex; flex-direction: column;
-      align-items: stretch; justify-content: flex-start;
-      -webkit-font-smoothing: antialiased;
-    }
-    /* Header sits at top full-width */
-    #app-header { flex-shrink: 0; }
-    /* Main content: centre the booking cards */
-    /* Top-aligned, like the Live Clinics (events) page — content sits near the
-       top with a tight gap instead of floating in the middle of the viewport. */
-    #clinic-main {
-      flex: 1; display: flex; flex-direction: column;
-      align-items: center; justify-content: flex-start;
-      padding: 28px 20px 80px;
-    }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Book a Lesson — Matthew Cawood</title>
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/shared-header.js?v=2026062410"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  /* Booking flow ported 1:1 from the brand site book-a-lesson page, kept self-contained
+     so it renders identically under the app's shared header (no reliance on /style.css
+     beyond the header itself). */
+  :root{
+    --bg:#0a0a0b; --bg2:#101013; --surface:#141416; --surface-2:#1b1b1f; --surface-3:#222228;
+    --border:#26262b; --border-2:#34343b; --text:#f2f1ef; --heading:#ffffff;
+    --muted:#9a9aa2; --muted-2:#6c6c74; --accent:#f5c518; --gold-dim:#e8c43a; --gold-deep:#caa413;
+    --serif:"Fraunces",Georgia,serif;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;margin:0}
+  body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:radial-gradient(56% 38% at 50% -6%, rgba(245,197,24,.07), transparent 62%)}
+  #app-header{flex-shrink:0;position:relative;z-index:40}
+  section{position:relative;z-index:1}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 22px}
+  .muted{color:var(--muted)}
+  .eyebrow{font-size:.78rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:#1a1400;border:none;border-radius:12px;padding:13px 22px;font-weight:800;font-size:.95rem;cursor:pointer;font-family:inherit;transition:transform .12s,background .2s}
+  .btn:hover{transform:translateY(-1px);background:var(--gold-dim)}
+  .btn:disabled{opacity:.5;cursor:default;transform:none}
 
-    /* ─── Pick screen ─────────────────────────────── */
-    #screen-pick { width: 100%; max-width: 600px; }
-    /* Header — same hero treatment as the Tools pages: icon chip + title +
-       subtitle, with a muted ruled section label above the options. */
-    /* Header sits in a card (like the other pages) above the options. */
-    .pick-header-card {
-      background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
-      padding: 22px 24px; margin-bottom: 22px;
-    }
-    .pick-header { display: flex; align-items: center; gap: 15px; }
-    .pick-header-icon {
-      width: 46px; height: 46px; border-radius: 13px; flex-shrink: 0;
-      display: grid; place-items: center;
-      background: rgba(245,197,24,.12); color: var(--accent);
-      box-shadow: inset 0 0 0 1px rgba(245,197,24,.2);
-    }
-    .pick-header-icon svg { width: 23px; height: 23px; }
-    .pick-title { font-size: 1.5rem; font-weight: 800; margin: 0; color: var(--text); letter-spacing: -.015em; line-height: 1.1; }
-    .pick-sub   { font-size: .85rem; color: var(--t2); margin: 4px 0 0; }
-    .pick-desc  { font-size: .85rem; color: var(--t2); line-height: 1.7; margin: 14px 0 0; }
-    .pick-section-label {
-      font-size: .72rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .08em; color: var(--t2);
-      margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
-    }
-    .pick-card {
-      background: var(--card); border: 1.5px solid var(--border); border-radius: var(--r);
-      padding: 18px 20px; cursor: pointer; margin-bottom: 10px;
-      display: flex; align-items: center; justify-content: space-between;
-      transition: border-color .15s, background .15s, transform .15s;
-    }
-    .pick-card:hover {
-      border-color: var(--accent); background: var(--accent-subtle);
-      transform: translateY(-2px);
-    }
-    .pick-card:hover .pick-arrow { color: var(--accent); }
-    .pick-card:hover .pick-card-name { color: var(--accent); }
-    .pick-card-name { font-size: .95rem; font-weight: 700; margin-bottom: 4px; transition: color .15s; }
-    .pick-card-meta { font-size: .74rem; color: var(--t2); display: flex; gap: 12px; }
-    .pick-arrow { color: var(--t2); font-size: 1.2rem; transition: color .15s; }
+  /* intro */
+  .page-intro{padding:48px 0 6px}
+  .page-intro .eyebrow{color:var(--gold-deep)}
+  .page-intro h1{font-family:var(--serif);font-weight:600;color:#fff;letter-spacing:-.015em;font-size:clamp(2.4rem,5.4vw,3.6rem);line-height:1.04;margin:0}
+  .page-intro p{color:var(--muted);margin:14px 0 0}
+  .assure{display:flex;gap:28px;justify-content:center;flex-wrap:wrap;margin:24px 0 2px;color:var(--muted);font-size:.85rem}
+  .assure span{display:inline-flex;align-items:center;gap:8px}
+  .assure svg{width:16px;height:16px;stroke:var(--gold-deep);fill:none;stroke-width:1.7}
 
-    /* ─── Booking card ────────────────────────────── */
-    #screen-booking {
-      width: 100%; max-width: 600px;
-      background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
-      overflow: hidden;
-    }
-    /* Stacked layout on every width: info band on top, month grid, then times
-       underneath (the mobile arrangement, promoted to desktop). */
-    .booking-inner {
-      display: grid; grid-template-columns: 1fr;
-    }
+  .bk{max-width:980px;margin:0 auto;padding:0 22px}
+  .screen{display:none}
+  .screen.on{display:block;animation:fade .3s cubic-bezier(.16,1,.3,1)}
+  @keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  h2{font-family:var(--serif);font-weight:600;color:#fff;letter-spacing:-.01em}
 
-    /* ─── Info panel (top band) ───────────────────── */
-    .info-panel {
-      border-bottom: 1px solid var(--border); padding: 14px 18px;
-      display: flex; flex-direction: row; flex-wrap: wrap; align-items: center;
-      gap: 8px 14px;
-    }
-    .info-avatar {
-      width: 32px; height: 32px; border-radius: 50%;
-      background: #2c2c2c; border: 1px solid var(--bord2);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1rem; margin-bottom: 0;
-      overflow: hidden; object-fit: cover; flex-shrink: 0;
-    }
-    .info-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-    .info-host  { font-size: .73rem; color: var(--t2); margin-bottom: 0; }
-    .info-event { font-size: 1rem; font-weight: 700; margin-bottom: 0; line-height: 1.3; }
-    .info-rows  { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px 16px; width: 100%; }
-    .info-row   { display: flex; align-items: center; gap: 8px; font-size: .75rem; color: var(--t2); }
-    .info-ico   { flex-shrink: 0; display: flex; align-items: center; width: 14px; }
-    .back-link  {
-      margin-left: auto; padding-top: 0; font-size: .7rem; color: var(--t3);
-      cursor: pointer; display: flex; align-items: center; gap: 5px; transition: color .12s;
-    }
-    .back-link:hover { color: var(--t2); }
+  /* ── session products ── */
+  .sessions{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:760px){.sessions{grid-template-columns:1fr}}
+  .session{position:relative;display:flex;flex-direction:column;text-align:left;cursor:pointer;font-family:inherit;
+    background:linear-gradient(180deg,var(--surface),#0f0f11);border:1px solid var(--border);border-radius:18px;
+    padding:26px 24px 22px;transition:transform .15s cubic-bezier(.16,1,.3,1),border-color .2s,box-shadow .25s}
+  .session:hover{transform:translateY(-4px);border-color:var(--border-2);box-shadow:0 30px 60px -34px rgba(0,0,0,.9)}
+  .session .ic{width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;
+    background:rgba(245,197,24,.08);border:1px solid rgba(245,197,24,.16);margin-bottom:18px}
+  .session .ic svg{width:23px;height:23px;stroke:var(--gold-dim);fill:none;stroke-width:1.7}
+  .session .st{font-weight:700;font-size:1.12rem;color:#fff;letter-spacing:-.01em}
+  .session .sd{color:var(--muted);font-size:.9rem;margin-top:6px;line-height:1.5;flex:1}
+  .session .srow{display:flex;align-items:baseline;justify-content:space-between;margin-top:18px;padding-top:16px;border-top:1px solid var(--border)}
+  .session .sp{font-family:var(--serif);font-weight:600;font-size:1.7rem;color:#fff}
+  .session .sp small{font-size:.8rem;color:var(--muted-2);font-family:inherit;font-weight:600}
+  .session .go{font-size:.82rem;font-weight:700;color:var(--gold-dim);letter-spacing:.02em}
+  .session.feat{border-color:rgba(245,197,24,.5);background:linear-gradient(180deg,#1a1710,#0f0f11);
+    box-shadow:0 0 0 1px rgba(245,197,24,.12),0 36px 70px -40px rgba(245,197,24,.18)}
+  .session.feat:hover{border-color:var(--accent)}
+  .tag{position:absolute;top:-11px;left:24px;background:var(--accent);color:#1a1400;font-size:.62rem;font-weight:800;
+    letter-spacing:.1em;text-transform:uppercase;padding:5px 12px;border-radius:100px}
 
-    /* ─── Calendar area ───────────────────────────── */
-    .cal-area {
-      display: flex; flex-direction: column; overflow: hidden; min-width: 0;
-    }
+  /* ── packages banner ── */
+  .pkg-banner{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-top:18px;
+    background:linear-gradient(110deg,#16140d,#121214);border:1px solid var(--border-2);border-radius:18px;padding:24px 26px;
+    position:relative;overflow:hidden;cursor:pointer;transition:border-color .2s,transform .15s}
+  .pkg-banner::after{content:"";position:absolute;right:-40px;top:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(245,197,24,.12),transparent 70%)}
+  .pkg-banner:hover{border-color:rgba(245,197,24,.45);transform:translateY(-2px)}
+  .pkg-banner .pb-l{position:relative}
+  .pkg-banner h3{font-family:var(--serif);font-weight:600;font-size:1.4rem;color:#fff;margin:0}
+  .pkg-banner p{color:var(--muted);font-size:.92rem;margin:5px 0 0}
+  .pkg-banner .pb-cta{position:relative;flex-shrink:0;display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#1a1400;font-weight:800;border-radius:11px;padding:13px 22px;font-size:.95rem}
+  .pkg-banner .save{color:var(--gold-dim);font-weight:800}
 
-    /* toolbar */
-    .cal-toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 16px 20px 0; flex-shrink: 0; gap: 10px;
-    }
-    .cal-nav-group { display: flex; align-items: center; gap: 7px; }
-    .cal-range { font-size: .88rem; font-weight: 600; min-width: 140px; }
-    .nav-btn {
-      width: 27px; height: 27px; border: 1px solid var(--border); border-radius: 6px;
-      background: transparent; color: var(--t2); cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      transition: border-color .1s, background .1s, color .1s; flex-shrink: 0;
-    }
-    .nav-btn:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-subtle); color: var(--accent); }
-    .nav-btn:disabled { opacity: .3; cursor: not-allowed; }
-    .toolbar-right { display: flex; align-items: center; gap: 6px; }
-    .toggle-group {
-      display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
-    }
-    .toggle-btn {
-      background: transparent; border: none; color: var(--t2); font-size: .7rem;
-      padding: 4px 8px; cursor: pointer; font-family: inherit;
-      transition: background .1s, color .1s;
-    }
-    .toggle-btn.on { background: var(--accent-subtle); color: var(--accent); font-weight: 700; }
+  .redeem-chip{display:inline-flex;align-items:center;gap:9px;margin:26px auto 0;color:var(--text);background:var(--surface);
+    border:1px solid var(--border);border-radius:100px;padding:11px 20px;font-weight:600;font-size:.9rem;cursor:pointer;font-family:inherit;transition:border-color .2s}
+  .redeem-chip:hover{border-color:var(--accent);color:#fff}
+  .redeem-chip b{color:var(--gold-dim);font-weight:700}
 
-    /* ─── Month view (month on top, times underneath) ─ */
-    #view-month {
-      display: flex; flex-direction: column; flex: 1; overflow: hidden;
-    }
-    .cal-col {
-      width: 100%; padding: 16px 20px 18px;
-    }
-    .cal-grid {
-      display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
-      grid-auto-rows: 42px;
-    }
-    .cal-dname {
-      text-align: center; font-size: .68rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: .05em; color: var(--t2); padding-bottom: 10px;
-    }
-    .cal-day {
-      height: 42px; display: flex; align-items: center; justify-content: center;
-      border-radius: var(--rc); font-size: .88rem; font-weight: 500;
-      position: relative; user-select: none; transition: background .1s;
-    }
-    .cal-day.avail        { background: var(--cell); color: var(--text); cursor: pointer; }
-    .cal-day.avail:hover  { background: var(--cellh); }
-    .cal-day.empty,
-    .cal-day.past,
-    .cal-day.noSlots,
-    .cal-day.loading      { color: var(--t3); background: transparent; cursor: default; }
-    .cal-day.loading      { animation: pulse 1.2s ease-in-out infinite; }
-    @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.7} }
-    .cal-day.today-dot::after {
-      content: ""; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
-      width: 3px; height: 3px; border-radius: 50%; background: var(--t2);
-    }
-    .cal-day.selected        { background: var(--accent) !important; color: var(--accent-fg) !important; font-weight: 700; }
-    .cal-day.selected::after { display: none; }
+  .back{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-weight:600;cursor:pointer;background:none;border:none;font-family:inherit;font-size:.9rem;margin-bottom:20px}
+  .back:hover{color:var(--gold-dim)}
 
-    /* slots side */
-    .slots-col {
-      border-top: 1px solid var(--border); padding: 14px 18px 18px;
-      overflow-y: auto; min-width: 0;
-    }
-    .slots-day-hdr {
-      display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
-    }
-    .slots-day-lbl { font-size: .85rem; font-weight: 700; }
-    /* Times as a chip grid underneath the month (the chosen stacked layout). */
-    .slots-list    { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; max-height: 260px; overflow-y: auto; }
-    .slots-empty-state {
-      height: 100%; display: flex; align-items: center; justify-content: center;
-      color: var(--t3); font-size: .8rem; text-align: center;
-    }
+  /* ── package tier cards ── */
+  .pkg-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch}
+  @media(max-width:820px){.pkg-grid{grid-template-columns:1fr;max-width:420px;margin:0 auto}}
+  .pkg{position:relative;display:flex;flex-direction:column;background:linear-gradient(180deg,var(--surface),#0f0f11);
+    border:1px solid var(--border);border-radius:20px;padding:28px 26px;transition:transform .15s,border-color .2s,box-shadow .25s}
+  .pkg:hover{transform:translateY(-4px);box-shadow:0 36px 70px -42px rgba(0,0,0,.9)}
+  .pkg.best{border-color:rgba(245,197,24,.55);background:linear-gradient(180deg,#1a1710,#0f0f11);
+    box-shadow:0 0 0 1px rgba(245,197,24,.14),0 40px 80px -44px rgba(245,197,24,.22)}
+  .pkg .qty{font-weight:700;color:#fff;font-size:1.06rem}
+  .pkg .price{font-family:var(--serif);font-weight:600;font-size:2.7rem;color:#fff;line-height:1;margin:14px 0 2px}
+  .pkg .per{color:var(--muted);font-size:.86rem}
+  .pkg .save{display:inline-block;margin-top:14px;background:rgba(245,197,24,.12);border:1px solid rgba(245,197,24,.28);
+    color:var(--gold-dim);font-weight:800;font-size:.76rem;letter-spacing:.02em;padding:5px 11px;border-radius:100px}
+  .pkg ul{list-style:none;padding:0;margin:20px 0 22px;display:flex;flex-direction:column;gap:11px;flex:1}
+  .pkg li{display:flex;gap:10px;align-items:flex-start;color:#cfcfd4;font-size:.9rem;line-height:1.45}
+  .pkg li svg{flex:0 0 auto;width:16px;height:16px;stroke:var(--gold-dim);fill:none;stroke-width:2.4;margin-top:2px}
+  .pkg .choose{width:100%;text-align:center;border-radius:12px;padding:13px;font-weight:800;font-size:.95rem;cursor:pointer;font-family:inherit;
+    background:var(--surface-3);color:#fff;border:1px solid var(--border-2);transition:background .2s,transform .12s}
+  .pkg .choose:hover{transform:translateY(-1px)}
+  .pkg.best .choose{background:var(--accent);color:#1a1400;border-color:var(--accent)}
+  .pkg-reassure{display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin-top:26px;color:var(--muted);font-size:.84rem}
+  .pkg-reassure span{display:inline-flex;align-items:center;gap:7px}
+  .pkg-reassure svg{width:15px;height:15px;stroke:var(--gold-deep);fill:none;stroke-width:2}
 
-
-    /* ─── Shared slot button ──────────────────────── */
-    .slot-btn {
-      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-      border: 1px solid var(--border); border-radius: 7px;
-      background: transparent; color: var(--text);
-      font-size: .77rem; font-weight: 500; cursor: pointer; width: 100%; text-align: left;
-      font-family: inherit; transition: border-color .1s, background .1s;
-    }
-    .slot-btn:hover    { border-color: var(--bord2); background: var(--cell); }
-    .slot-btn.sel      { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-    .slot-btn.sel .sdot { background: var(--accent-fg) !important; }
-    .sdot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-    .slot-loading { font-size: .74rem; color: var(--t3); display: flex; align-items: center; gap: 7px; padding: 4px 0; }
-    .slot-empty   { font-size: .74rem; color: var(--t3); padding: 4px 0; }
-
-    /* ─── Details screen ──────────────────────────── */
-    #screen-details {
-      width: 100%; max-width: 600px;
-      background: var(--card); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
-    }
-    .det-inner { display: grid; grid-template-columns: 1fr; }
-    .det-main  { padding: 22px 24px; }
-    .det-title { font-size: .93rem; font-weight: 700; margin-bottom: 5px; }
-    .det-meta  { font-size: .77rem; color: var(--t2); margin-bottom: 24px; line-height: 1.6; }
-    .form-group { margin-bottom: 12px; }
-    .form-group label { display: block; font-size: .68rem; font-weight: 500; color: var(--t2); margin-bottom: 5px; }
-    .form-group input {
-      width: 100%; background: #111; border: 1px solid var(--border); border-radius: 7px;
-      padding: 9px 11px; color: var(--text); font-size: .84rem; outline: none; font-family: inherit;
-      transition: border-color .12s;
-    }
-    .form-group input:focus { border-color: var(--accent); }
-    .form-group input::placeholder { color: var(--t3); }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .confirm-btn {
-      width: 100%; background: var(--accent); color: var(--accent-fg); border: none; border-radius: 8px;
-      padding: 11px; font-size: .84rem; font-weight: 700; cursor: pointer; font-family: inherit;
-      margin-top: 4px; display: flex; align-items: center; justify-content: center; gap: 8px;
-      transition: opacity .12s;
-    }
-    .confirm-btn:hover    { opacity: .88; }
-    .confirm-btn:disabled { opacity: .35; cursor: not-allowed; }
-    .pay-note { font-size: .67rem; color: var(--t3); text-align: center; margin-top: 8px; }
-    .err-msg {
-      background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.25);
-      border-radius: 6px; padding: 8px 11px; font-size: .76rem; color: #f87171; margin-bottom: 10px;
-    }
-    .form-group textarea {
-      width: 100%; background: #111; border: 1px solid var(--border); border-radius: 7px;
-      padding: 9px 11px; color: var(--text); font-size: .84rem; outline: none; font-family: inherit;
-      resize: vertical; min-height: 76px; line-height: 1.55; transition: border-color .12s;
-    }
-    .form-group textarea:focus { border-color: var(--accent); }
-    .form-group textarea::placeholder { color: var(--t3); }
-    .file-drop {
-      display: flex; align-items: center; gap: 10px;
-      border: 1px dashed var(--border); border-radius: 7px;
-      padding: 11px 14px; cursor: pointer; transition: border-color .15s, background .15s;
-      width: 100%;
-    }
-    .file-drop:hover { border-color: var(--bord2); background: #161616; }
-    .file-drop-ico { color: var(--t3); flex-shrink: 0; }
-    .file-drop-text { font-size: .75rem; color: var(--t3); line-height: 1.4; }
-    .file-drop-text strong { color: var(--t2); font-weight: 500; display: block; }
-    .file-drop.has-file { border-color: var(--bord2); border-style: solid; }
-    .file-drop.has-file .file-drop-text strong { color: var(--text); }
-    .file-remove {
-      margin-left: auto; font-size: .7rem; color: var(--t3); cursor: pointer; flex-shrink: 0;
-      padding: 2px 5px; border-radius: 4px; transition: color .1s, background .1s;
-    }
-    .file-remove:hover { color: #f87171; background: rgba(239,68,68,.08); }
-
-    /* ─── Result screens ──────────────────────────── */
-    #screen-success, #screen-cancelled { text-align: center; max-width: 380px; }
-    .res-icon { font-size: 2.6rem; margin-bottom: 14px; }
-    .res-h2   { font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; }
-    .res-p    { font-size: .8rem; color: var(--t2); line-height: 1.7; }
-    .res-back { display: inline-block; margin-top: 18px; padding: 8px 20px; border: 1px solid var(--bord2); border-radius: 7px; color: var(--t2); font-size: .77rem; cursor: pointer; transition: border-color .12s, color .12s; }
-    .res-back:hover { border-color: var(--t3); color: var(--text); }
-
-    /* ─── Spinner ─────────────────────────────────── */
-    .spin { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.12); border-top-color: var(--t2); border-radius: 50%; animation: sp .7s linear infinite; display: inline-block; }
-    .spin.dk { border-color: rgba(0,0,0,.12); border-top-color: var(--t3); }
-    @keyframes sp { to { transform: rotate(360deg); } }
-
-    /* ─── Timezone select ────────────────────────── */
-    .tz-select {
-      background: transparent; border: none; color: var(--t2);
-      font-size: .7rem; font-family: inherit; cursor: pointer;
-      outline: none; padding: 0; width: 100%; max-width: 160px;
-      appearance: none; -webkit-appearance: none;
-    }
-    .tz-select option { background: #1c1c1c; color: var(--text); }
-    .tz-wrapper {
-      display: flex; align-items: center; gap: 4px; width: 100%;
-    }
-    .tz-caret { font-size: .55rem; color: var(--t3); flex-shrink: 0; }
-
-    /* ─── Responsive ──────────────────────────────── */
-    @media (max-width: 720px) {
-      #clinic-main { padding: 16px 10px; }
-      .booking-inner, .det-inner { grid-template-columns: 1fr; }
-
-      /* Info panel becomes a single tight horizontal band */
-      .info-panel {
-        border-right: none; border-bottom: 1px solid var(--border);
-        padding: 12px 14px;
-        flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-      }
-      .info-avatar { margin-bottom: 0; width: 30px; height: 30px; }
-      .info-event  { margin-bottom: 0; font-size: .9rem; }
-      .info-rows   { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; width: 100%; }
-      .info-row    { font-size: .7rem; }
-      .back-link   { margin-top: 0; padding-top: 0; }
-
-      .cal-col { width: 100%; padding: 8px 10px 10px; }
-      #view-month { flex-direction: column; }
-      .slots-col {
-        border-left: none; border-top: 1px solid var(--border);
-        padding: 10px 14px; max-height: 200px;     /* was 280 */
-      }
-      .slots-list { max-height: none; }
-
-      .cal-toolbar { padding: 10px 10px 0; }
-      .cal-range { min-width: 0; font-size: .82rem; }
-      /* Fixed-height rows instead of aspect-ratio — much more reliable */
-      .cal-grid { gap: 2px !important; grid-auto-rows: 34px !important; }
-      .cal-day { aspect-ratio: auto !important; height: 34px !important; font-size: .76rem; }
-      .cal-dname { padding-bottom: 4px; font-size: .58rem; }
-
-      .det-main { padding: 18px 14px; }
-    }
-    @media (max-width: 380px) {
-      #clinic-main { padding: 12px 6px; }
-      .cal-col { padding: 6px 6px 8px; }
-      .cal-toolbar { padding: 8px 8px 0; gap: 6px; }
-      .cal-range { font-size: .76rem; }
-      .cal-grid { grid-auto-rows: 28px !important; }
-      .cal-day { height: 28px !important; font-size: .72rem; }
-      .cal-dname { font-size: .54rem; padding-bottom: 3px; }
-      .nav-btn { width: 24px; height: 24px; }
-      .toggle-btn { padding: 4px 6px; font-size: .66rem; }
-      .slots-col { padding: 8px 10px; max-height: 160px; }
-    }
-  </style>
+  .panel{background:linear-gradient(180deg,var(--surface),#0f0f11);border:1px solid var(--border);border-radius:18px;padding:24px}
+  /* calendar */
+  .cal-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .cal-top button{background:var(--surface-2);border:1px solid var(--border);border-radius:9px;width:36px;height:36px;cursor:pointer;color:#fff;font-size:1rem;transition:border-color .2s}
+  .cal-top button:hover:not(:disabled){border-color:var(--accent)}
+  .cal-top button:disabled{opacity:.3;cursor:default}
+  .cal-range{font-weight:700;color:#fff;font-size:1.02rem}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .cal-dname{text-align:center;font-size:.58rem;font-weight:800;letter-spacing:.08em;color:var(--muted-2);padding:6px 0}
+  .cal-day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:.9rem;font-weight:600;color:var(--text)}
+  .cal-day.empty{visibility:hidden}
+  .cal-day.past,.cal-day.noSlots{color:var(--muted-2);opacity:.45}
+  .cal-day.loading{color:var(--muted-2);opacity:.55}
+  .cal-day.avail{background:var(--surface-2);cursor:pointer;border:1px solid transparent}
+  .cal-day.avail:hover{border-color:var(--accent);background:var(--surface-3)}
+  .cal-day.selected{background:var(--accent);color:#1a1400;font-weight:800}
+  .slots-wrap{margin-top:6px}
+  /* timezone selector */
+  .tz-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:.84rem;color:var(--muted);margin:0 0 16px;padding:0 0 16px;border-bottom:1px solid var(--border)}
+  .tz-row svg{width:15px;height:15px;stroke:var(--gold-deep);fill:none;stroke-width:1.7;flex:0 0 auto}
+  .tz-select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:8px 30px 8px 11px;font-family:inherit;font-size:.84rem;cursor:pointer;max-width:100%;color-scheme:dark;
+    appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa2' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;background-size:14px}
+  .tz-select:hover{border-color:var(--border-2)}
+  .tz-select:focus{outline:none;border-color:var(--accent)}
+  .slots-day-lbl{font-weight:700;color:#fff;margin:16px 0 12px}
+  .slots-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:9px}
+  .slot-btn{background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:11px 8px;cursor:pointer;font-family:inherit;font-weight:700;color:#fff;font-size:.92rem;transition:border-color .2s}
+  .slot-btn:hover{border-color:var(--accent)}
+  .slot-btn.sel{background:var(--accent);border-color:var(--accent);color:#1a1400}
+  .slot-empty{color:var(--muted);font-size:.9rem;padding:14px 0}
+  .spin{width:15px;height:15px;border:2px solid var(--border-2);border-top-color:var(--gold-dim);border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:-2px}
+  .spin.dk{border-color:rgba(0,0,0,.28);border-top-color:#1a1400}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  /* details form */
+  .field label{display:block;font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
+  .field input,.field textarea{width:100%;border:1px solid var(--border);background:var(--surface-2);border-radius:11px;padding:13px 15px;font-size:1rem;font-family:inherit;color:var(--text)}
+  .field input::placeholder,.field textarea::placeholder{color:var(--muted-2)}
+  .field input:focus,.field textarea:focus{outline:none;border-color:var(--accent);background:var(--surface-3)}
+  .field textarea{min-height:96px;resize:vertical;line-height:1.6}
+  .det-summary{background:linear-gradient(110deg,#16140d,var(--surface-2));border:1px solid var(--border-2);border-radius:14px;padding:16px 18px;margin-bottom:6px}
+  .det-summary .dt{font-weight:700;color:#fff}
+  .det-summary .dm{color:var(--gold-dim);font-size:.92rem;margin-top:3px}
+  .err{color:#ff7a6b;font-size:.9rem;margin-top:12px;display:none}
+  .file-label{display:flex;align-items:center;gap:10px;border:1px dashed var(--border-2);border-radius:11px;padding:13px 15px;cursor:pointer;color:var(--muted);font-size:.9rem;margin-top:6px}
+  .file-label.has{border-style:solid;color:#fff}
+  .narrow-form{max-width:580px;margin:0 auto}
+  .result{text-align:center;padding:40px 22px}
+  .result .big{font-size:2.8rem;margin-bottom:16px;line-height:0}
+  .result .big svg{display:block;margin:0 auto}
+  .result h2{font-size:1.9rem}
+  .btn-ghost{background:transparent;color:#fff;border:1px solid var(--border-2)}
+  .btn-ghost:hover{border-color:var(--accent);background:rgba(255,255,255,.04)}
+  .ccy-bar{display:flex;justify-content:flex-end;margin-bottom:14px}
+  .ccy-bar label{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:.82rem}
+  .ccy-bar select{background:var(--surface-2);color:#fff;border:1px solid var(--border);border-radius:9px;padding:7px 11px;font-family:inherit;font-size:.85rem;cursor:pointer}
+  .ccy-bar select:focus{outline:none;border-color:var(--accent)}
+  /* your booked lessons */
+  .mine-row{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+  .mine-row .mr-main{flex:1;min-width:0}
+  .mine-row .mr-t{font-weight:700;color:#fff}
+  .mine-row .mr-m{color:var(--muted);font-size:.88rem;margin-top:2px}
+  .mine-row .lk{font-weight:700;font-size:.85rem;color:#1a1400;background:var(--accent);border-radius:9px;padding:8px 12px;text-decoration:none;white-space:nowrap}
+  .mine-row .lk.ghost{background:transparent;color:var(--gold-dim);border:1px solid var(--border-2)}
+  .mine-empty{color:var(--muted);text-align:center;padding:24px 0}
+</style>
 </head>
 <body>
 
-<!-- ── Header (populated by shared-header.js) ── -->
+<!-- ── App header (populated by shared-header.js when signed in) ── -->
 <header id="app-header" style="display:none"></header>
-<main id="clinic-main">
 
-<!-- ── Pick screen ─────────────────────────── -->
-<div id="screen-pick">
-  <div class="pick-header-card">
-    <div class="pick-header">
-      <div class="pick-header-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="m9 16 2 2 4-4"/></svg>
-      </div>
-      <div class="pick-header-text">
-        <div class="pick-title">Book a Clinic</div>
-        <div class="pick-sub">One-to-one with Matthew Cawood · Online via Zoom</div>
-      </div>
-    </div>
-    <div class="pick-desc">A clinic is a short, focused, one-to-one session with Matthew. Stuck on a passage? Not sure what to practise next? Or just want some live feedback? Bring a question and leave with a clear answer or a clear plan.</div>
+<section class="page-intro"><div class="wrap">
+  <p class="eyebrow">1:1 with Matthew</p><h1>Book a Lesson</h1>
+  <p>Online clinics, full lessons and discounted packages, pick what suits, choose a time, and you're booked.</p>
+  <div class="assure">
+    <span><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>Online via Zoom</span>
+    <span><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M9 3v4M15 3v4"/></svg>Pick any free slot</span>
+    <span><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Secure checkout</span>
   </div>
-  <div class="pick-section-label">Choose a session</div>
-  <div id="pick-cards"></div>
-</div>
+</div></section>
 
-<!-- ── Booking screen ─────────────────────── -->
-<div id="screen-booking" style="display:none">
-  <div class="booking-inner">
+<section style="padding-top:14px;padding-bottom:90px"><div class="bk">
 
-    <div class="info-panel">
-      <div class="info-avatar"><img src="https://yt3.ggpht.com/kDmftVxFecm1OIr7lGv6jjzs3lzFJt4s8Bf44zSOWKMMWmZn8uHLfkR9lrwXHcUkcRG9xZKCWw=s88-c-k-c0x00ffffff-no-rj" alt="Matthew Cawood" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.innerHTML='MC'"/></div>
-      <div class="info-host">Matthew Cawood</div>
-      <div class="info-event" id="info-event"></div>
-      <div class="info-rows">
-        <div class="info-row"><span class="info-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span id="info-dur"></span></div>
-        <div class="info-row"><span class="info-ico"><svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="5" fill="#2D8CFF"/><path d="M4.5 8.5C4.5 7.67 5.17 7 6 7h8.5c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5H6c-.83 0-1.5-.67-1.5-1.5v-7z" fill="white"/><path d="M16.5 10.8l3.5-2.3v7l-3.5-2.3v-2.4z" fill="white"/></svg></span><span>Zoom Video</span></div>
-        <div class="info-row"><span class="info-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></span><span id="info-price"></span></div>
-        <div class="info-row"><span class="info-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span><div class="tz-wrapper"><select id="tz-select" class="tz-select" onchange="changeTZ(this.value)"></select><span class="tz-caret">▾</span></div></div>
-      </div>
-      <div class="back-link" onclick="goPickScreen()">← Change clinic</div>
-    </div>
-
-    <div class="cal-area">
-      <!-- Toolbar -->
-      <div class="cal-toolbar">
-        <div class="cal-nav-group">
-          <button class="nav-btn" id="nav-prev" onclick="navPrev()">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <div class="cal-range" id="cal-range"></div>
-          <button class="nav-btn" id="nav-next" onclick="navNext()">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-        </div>
-        <div class="toolbar-right">
-          <div class="toggle-group">
-            <button class="toggle-btn on" id="fmt12" onclick="setFmt(12)">12h</button>
-            <button class="toggle-btn"    id="fmt24" onclick="setFmt(24)">24h</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Month view -->
-      <div id="view-month" style="display:flex">
-        <div class="cal-col">
-          <div class="cal-grid" id="cal-grid"></div>
-        </div>
-        <div class="slots-col" id="slots-col">
-          <div class="slots-empty-state" id="slots-empty-state">
-            <span>Select a date to see<br>available times</span>
-          </div>
-          <div id="slots-day-hdr" class="slots-day-hdr" style="display:none">
-            <div class="slots-day-lbl" id="slots-day-lbl"></div>
-          </div>
-          <div class="slots-list" id="month-slots-list"></div>
-        </div>
-      </div>
-
-    </div>
-
+  <!-- YOUR BOOKED LESSONS (in-app, signed-in member; opened via ?view=mine) -->
+  <div class="screen narrow-form" id="screen-mine">
+    <h2 style="margin-bottom:6px">Your booked lessons</h2>
+    <p class="muted" id="mine-sub" style="margin:0 0 18px">Your upcoming one-to-one sessions.</p>
+    <div id="mine-list"></div>
+    <div style="text-align:center;margin-top:22px"><button class="btn" onclick="show('screen-products')">Book a lesson →</button></div>
   </div>
-</div>
 
-<!-- ── Details screen ─────────────────────── -->
-<div id="screen-details" style="display:none">
-  <div class="det-inner">
-    <div class="info-panel">
-      <div class="info-avatar"><img src="https://yt3.ggpht.com/kDmftVxFecm1OIr7lGv6jjzs3lzFJt4s8Bf44zSOWKMMWmZn8uHLfkR9lrwXHcUkcRG9xZKCWw=s88-c-k-c0x00ffffff-no-rj" alt="Matthew Cawood" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.innerHTML='MC'"/></div>
-      <div class="info-host">Matthew Cawood</div>
-      <div class="info-event" id="det-event"></div>
-      <div class="info-rows">
-        <div class="info-row"><span class="info-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span id="det-dur"></span></div>
-        <div class="info-row"><span class="info-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span><span id="det-date" style="font-size:.72rem;line-height:1.5"></span></div>
-        <div class="info-row"><span class="info-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></span><span id="det-price"></span></div>
-        <div class="info-row"><span class="info-ico"><svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="5" fill="#2D8CFF"/><path d="M4.5 8.5C4.5 7.67 5.17 7 6 7h8.5c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5H6c-.83 0-1.5-.67-1.5-1.5v-7z" fill="white"/><path d="M16.5 10.8l3.5-2.3v7l-3.5-2.3v-2.4z" fill="white"/></svg></span><span>Zoom Video</span></div>
-      </div>
-      <div class="back-link" onclick="goBookingScreen()">← Change time</div>
+  <!-- PRODUCTS -->
+  <div class="screen on" id="screen-products">
+    <div class="ccy-bar"><label>Prices in
+      <select id="ccy-select" onchange="onCcyChange(this.value)">
+        <option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
+        <option value="CAD">$ CAD</option><option value="AUD">$ AUD</option><option value="NZD">$ NZD</option>
+        <option value="SEK">kr SEK</option><option value="NOK">kr NOK</option><option value="DKK">kr DKK</option><option value="SGD">$ SGD</option>
+      </select></label></div>
+    <div class="sessions">
+      <button class="session" onclick="pickSingle('c20')">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 1.5"/></svg></div>
+        <div class="st">20-minute clinic</div>
+        <div class="sd">A quick question, a tricky bar, or a fast technique fix.</div>
+        <div class="srow"><div class="sp" id="price-c20">£18</div><div class="go">Choose →</div></div>
+      </button>
+      <button class="session" onclick="pickSingle('c30')">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v4.5l3.5 2"/></svg></div>
+        <div class="st">30-minute clinic</div>
+        <div class="sd">A deeper dive into a piece, passage or concept.</div>
+        <div class="srow"><div class="sp" id="price-c30">£30</div><div class="go">Choose →</div></div>
+      </button>
+      <button class="session feat" onclick="pickSingle('l60')">
+        <span class="tag">Most popular</span>
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2.5"/></svg></div>
+        <div class="st">1-hour lesson</div>
+        <div class="sd">A full, tailored lesson, proper time to make real progress.</div>
+        <div class="srow"><div class="sp" id="price-l60">£49</div><div class="go">Choose →</div></div>
+      </button>
     </div>
-    <div class="det-main">
-      <div class="det-title">Your details</div>
-      <div class="det-meta" id="det-meta"></div>
-      <div class="form-row">
-        <div class="form-group"><label>First name</label><input id="inp-fname" type="text" placeholder="Jane" autocomplete="given-name"/></div>
-        <div class="form-group"><label>Last name</label><input id="inp-lname" type="text" placeholder="Smith" autocomplete="family-name"/></div>
+
+    <div class="pkg-banner" onclick="show('screen-packages')">
+      <div class="pb-l">
+        <h3>Lesson packages</h3>
+        <p>Bundle your one-hour lessons and <span class="save">save up to <span id="pkg-save-amt">£68</span></span>, then book each one whenever you like.</p>
       </div>
-      <div class="form-group"><label>Email address</label><input id="inp-email" type="email" placeholder="jane@example.com" autocomplete="email"/></div>
-      <div class="form-group">
-        <label>What would you like to work on?</label>
-        <textarea id="inp-notes" placeholder="E.g. the opening of the Moonlight Sonata — I'm struggling with the rhythm in bar 5…"></textarea>
-      </div>
-      <div class="form-group">
-        <label>Attach sheet music or reference <span style="color:var(--t3);font-weight:400">(optional · PDF or image)</span></label>
-        <div class="file-drop" id="file-drop-label" onclick="handleFileClick(event)">
-          <input type="file" id="inp-file" accept=".pdf,image/*" multiple style="display:none" onchange="onFileChange(this)">
-          <span class="file-drop-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-          <div class="file-drop-text"><strong id="file-drop-name">Click to upload files</strong><span>PDF, JPG, PNG · max 10 MB each</span></div>
-          <span class="file-remove" id="file-remove" style="display:none" onclick="removeFile(event)">✕</span>
-        </div>
-      </div>
-      <div class="err-msg" id="err-msg" style="display:none"></div>
-      <button class="confirm-btn" id="pay-btn" onclick="startCheckout()">Confirm booking →</button>
-      <div class="pay-note">Charged in your local currency · Powered by Stripe</div>
+      <span class="pb-cta">View packages →</span>
+    </div>
+
+    <div style="text-align:center"><button class="redeem-chip" onclick="show('screen-redeem-email')">Already bought a package? <b>Book a lesson →</b></button></div>
+  </div>
+
+  <!-- PACKAGES -->
+  <div class="screen" id="screen-packages">
+    <button class="back" onclick="show('screen-products')">← All options</button>
+    <h2 style="margin-bottom:8px;font-size:clamp(1.9rem,4vw,2.4rem)">Lesson packages</h2>
+    <p class="muted" style="margin:0 0 32px;max-width:560px">Bundle your one-hour lessons for a better rate, then book each one whenever suits. Credits are valid for 12 months.</p>
+    <div class="pkg-grid" id="pkg-grid"></div>
+    <div class="pkg-reassure">
+      <span><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Valid for 12 months</span>
+      <span><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Book anytime, no rebooking fees</span>
+      <span><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>1:1 with Matthew over Zoom</span>
     </div>
   </div>
-</div>
 
-<!-- ── Success ──────────────────────────────── -->
-<div id="screen-success" style="display:none">
-  <div class="res-icon">✅</div>
-  <div class="res-h2">You're booked!</div>
-  <div class="res-p">Payment confirmed. Your Zoom link will arrive by email shortly.<br><span style="color:var(--t3)">Check spam if you don't see it.</span></div>
-  <span class="res-back" onclick="resetAll()">← Book another clinic</span>
-</div>
+  <!-- BOOKING (calendar + slots) -->
+  <div class="screen" id="screen-booking">
+    <button class="back" onclick="backToStart()">← Back</button>
+    <h2 id="bk-title" style="margin-bottom:4px">Pick a time</h2>
+    <p class="muted" id="bk-sub" style="margin:0 0 18px"></p>
+    <div class="panel">
+      <div class="tz-row">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg>
+        <span>Times shown in your time zone:</span>
+        <select id="tz-select" class="tz-select" onchange="onTzChange(this.value)" aria-label="Time zone"></select>
+      </div>
+      <div class="cal-top"><button id="nav-prev" onclick="navPrev()">‹</button><div class="cal-range" id="cal-range"></div><button id="nav-next" onclick="navNext()">›</button></div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <div class="slots-wrap">
+        <div id="slots-empty-state" class="slot-empty">Select a day to see available times.</div>
+        <div id="slots-day-hdr" style="display:none;margin-top:14px"><div class="slots-day-lbl" id="slots-day-lbl"></div></div>
+        <div class="slots-list" id="slots-list"></div>
+      </div>
+    </div>
+    <div id="basket-bar" style="display:none;position:sticky;bottom:12px;margin-top:16px;background:var(--surface);border:1px solid var(--border-2);border-radius:14px;padding:14px 16px;z-index:5">
+      <div id="basket-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+      <button class="btn" id="basket-continue" style="width:100%;justify-content:center" onclick="openRedeemReview()">Continue</button>
+    </div>
+  </div>
 
-<!-- ── Cancelled ─────────────────────────────── -->
-<div id="screen-cancelled" style="display:none">
-  <div class="res-icon">↩️</div>
-  <div class="res-h2">Payment cancelled</div>
-  <div class="res-p">No charge was made. Head back whenever you're ready.</div>
-  <span class="res-back" onclick="resetAll()">← Back to booking</span>
-</div>
+  <!-- DETAILS (single booking or redeem) -->
+  <div class="screen narrow-form" id="screen-details">
+    <button class="back" onclick="show('screen-booking')">← Change time</button>
+    <h2 style="margin-bottom:14px">Your details</h2>
+    <div class="det-summary"><div class="dt" id="det-title"></div><div class="dm" id="det-meta"></div></div>
+    <div class="field"><label>First name</label><input type="text" id="inp-fname" autocomplete="given-name"></div>
+    <div class="field"><label>Email</label><input type="email" id="inp-email" autocomplete="email"></div>
+    <div class="field"><label>What would you like to work on? <span style="text-transform:none;color:var(--muted-2)">(optional)</span></label><textarea id="inp-notes"></textarea></div>
+    <label class="file-label" id="file-label" onclick="document.getElementById('inp-file').click()"><span id="file-name">Attach sheet music / files (optional)</span></label>
+    <input type="file" id="inp-file" multiple style="display:none" onchange="onFileChange(this)">
+    <button class="btn" id="pay-btn" style="margin-top:18px;width:100%;justify-content:center" onclick="confirmBooking()">Confirm booking →</button>
+    <div class="err" id="err-msg"></div>
+  </div>
 
-</main><!-- /#clinic-main -->
+  <!-- PACKAGE BUY details -->
+  <div class="screen narrow-form" id="screen-pkg-details">
+    <button class="back" onclick="show('screen-packages')">← Packages</button>
+    <h2 style="margin-bottom:14px">Your details</h2>
+    <div class="det-summary"><div class="dt" id="pkg-title"></div><div class="dm" id="pkg-meta"></div></div>
+    <div class="field"><label>First name</label><input type="text" id="pkg-fname" autocomplete="given-name"></div>
+    <div class="field"><label>Email</label><input type="email" id="pkg-email" autocomplete="email"></div>
+    <p class="muted" style="font-size:.86rem;margin-top:12px">After payment you'll get an email and can book each lesson here using this address.</p>
+    <button class="btn" id="pkg-btn" style="margin-top:14px;width:100%;justify-content:center" onclick="buyPackage()">Continue to payment →</button>
+    <div class="err" id="pkg-err"></div>
+  </div>
+
+  <!-- REDEEM email -->
+  <div class="screen narrow-form" id="screen-redeem-email">
+    <button class="back" onclick="show('screen-products')">← All options</button>
+    <h2 style="margin-bottom:6px">Use your lesson package</h2>
+    <p class="muted" style="margin:0 0 18px">Enter the email you bought your package with and we'll show how many lessons you have left.</p>
+    <div class="field"><label>Email</label><input type="email" id="rd-email" autocomplete="email"></div>
+    <button class="btn" id="rd-btn" style="margin-top:16px" onclick="checkCredits()">Check my lessons →</button>
+    <div class="err" id="rd-err"></div>
+  </div>
+
+  <!-- RESULT -->
+  <div class="screen" id="screen-result"><div class="result panel"><div class="big" id="res-emoji"></div><h2 id="res-title"></h2><p class="muted" id="res-msg" style="max-width:440px;margin:10px auto 0"></p><a class="btn btn-ghost" href="/clinic-booking.html" style="margin-top:22px">Done</a></div></div>
+
+  <!-- CHECKOUT HANDOFF (iOS app only — a real tap is required to reach Stripe) -->
+  <div class="screen" id="screen-checkout"><div class="result panel">
+    <div class="big"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#f5c518" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+    <h2>Almost there</h2>
+    <p class="muted" style="max-width:420px;margin:10px auto 0">Your time is held. Tap below to pay securely with Stripe, then come back here.</p>
+    <a class="btn" id="co-link" href="#" style="margin-top:22px">Continue to secure checkout →</a>
+  </div></div>
+
+</div></section>
 
 <script>
-// ════════════════════════════════════════════════════
-const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_URL = "https://gyskfutmncprqxazgatv.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
 const FN   = `${SUPABASE_URL}/functions/v1`;
 const AUTH = { "Authorization": `Bearer ${SUPABASE_ANON}`, "Content-Type": "application/json" };
 
-const CLINICS = [
-  { id:5482429, title:"20 min clinic", duration:20, price:"£18.00", desc:"Quick question or technique fix" },
-  { id:5482430, title:"30 min clinic", duration:30, price:"£30.00", desc:"Deeper dive into a piece or concept" },
+// Cal.com event-type id for the 1-hour lesson ("60 Min Clinic").
+const EVENT_1HR = 5982378;
+
+const PRODUCTS = {
+  c20: { id:5482429, title:"20-minute clinic", duration:20, price:"£18" },
+  c30: { id:5482430, title:"30-minute clinic", duration:30, price:"£30" },
+  l60: { id:EVENT_1HR, title:"1-hour lesson",   duration:60, price:"£49" },
+};
+// Package display (prices mirror clinic-checkout PACKAGES).
+const PACKAGES = [
+  { pkg:"3",  title:"3 one-hour lessons",  price:"£140", per:"≈ £46.67 / lesson", save:"Save £7" },
+  { pkg:"6",  title:"6 one-hour lessons",  price:"£270", per:"£45.00 / lesson",   save:"Save £24" },
+  { pkg:"12", title:"12 one-hour lessons", price:"£520", per:"≈ £43.33 / lesson", save:"Save £68" },
 ];
-// ════════════════════════════════════════════════════
 
-let userTZ  = Intl.DateTimeFormat().resolvedOptions().timeZone;
+// ── currency: detected by location server-side (clinic-checkout ?action=prices), GBP fallback ──
+let CURRENCY="GBP", SYM="£", LP=null;
+function money(v){ v=Number(v); return SYM + (Number.isInteger(v)? v : v.toFixed(2)); }
+const SUPPORTED_CCY=["GBP","USD","EUR","CAD","AUD","NZD","SEK","NOK","DKK","SGD"];
+// Detect the buyer's currency in the BROWSER (their real IP), more reliable than
+// the server header. Falls back gracefully if the lookup is blocked/unavailable.
+async function detectCcy(){
+  try{
+    const r=await fetch("https://ipapi.co/currency/",{cache:"no-store"});
+    if(r.ok){ const c=(await r.text()).trim().toUpperCase(); if(SUPPORTED_CCY.includes(c)) return c; }
+  }catch(e){}
+  return "";
+}
+async function loadPrices(force){
+  let cur=force||""; try{ cur=cur||localStorage.getItem("lesson_ccy")||""; }catch(e){}
+  if(!cur) cur=await detectCcy();            // explicit choice > browser geo > server fallback
+  const q=cur?`&currency=${encodeURIComponent(cur)}`:"";
+  try{
+    const r=await fetch(`${FN}/clinic-checkout?action=prices&_=${Date.now()}${q}`,{headers:AUTH,cache:"no-store"});
+    const d=await r.json();
+    if(d&&d.prices){ CURRENCY=d.currency; SYM=d.symbol; LP=d.prices; applyPrices();
+      const s=document.getElementById("ccy-select"); if(s) s.value=CURRENCY; }
+  }catch(e){}
+}
+function onCcyChange(v){ try{localStorage.setItem("lesson_ccy",v);}catch(e){} loadPrices(v); }
+function applyPrices(){
+  if(!LP) return;
+  PRODUCTS.c20.price=money(LP.c20); PRODUCTS.c30.price=money(LP.c30); PRODUCTS.l60.price=money(LP.l60);
+  const set=(id,v)=>{const e=document.getElementById(id); if(e) e.textContent=money(v);};
+  set("price-c20",LP.c20); set("price-c30",LP.c30); set("price-l60",LP.l60);
+  PACKAGES.length=0;
+  [["3",LP.pkg3],["6",LP.pkg6],["12",LP.pkg12]].forEach(([n,price])=>{
+    const qty=+n, save=qty*LP.l60-price;
+    PACKAGES.push({pkg:n,title:`${n} one-hour lessons`,price:money(price),per:`≈ ${money(Math.round(price/qty))} / lesson`,save:`Save ${money(save)}`});
+  });
+  renderPackages();
+  const bn=document.getElementById("pkg-save-amt"); if(bn) bn.textContent=money(12*LP.l60-LP.pkg12);
+}
 
-// Curated list of common IANA timezones
-const TZ_LIST = [
-  "Pacific/Honolulu","America/Anchorage","America/Los_Angeles","America/Denver",
-  "America/Chicago","America/New_York","America/Sao_Paulo","Atlantic/Reykjavik",
-  "Europe/London","Europe/Paris","Europe/Berlin","Europe/Helsinki","Europe/Moscow",
-  "Asia/Dubai","Asia/Kolkata","Asia/Bangkok","Asia/Singapore","Asia/Shanghai",
-  "Asia/Tokyo","Asia/Seoul","Australia/Perth","Australia/Sydney","Pacific/Auckland",
-];
-let clinic  = null;
-let selSlot = null;
-let timeFmt = 12;
+let userTZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/London";
+// ── timezone selector: full IANA list, each labelled with its current offset ──
+function tzLabel(tz){
+  try{
+    const off = new Intl.DateTimeFormat("en-GB",{timeZone:tz,timeZoneName:"shortOffset"}).formatToParts(new Date()).find(p=>p.type==="timeZoneName")?.value || "";
+    return `${tz.replace(/_/g," ")}${off?` (${off})`:""}`;
+  }catch(e){ return tz.replace(/_/g," "); }
+}
+function tzShort(){
+  try{ return new Intl.DateTimeFormat("en-GB",{timeZone:userTZ,timeZoneName:"short"}).formatToParts(new Date()).find(p=>p.type==="timeZoneName")?.value || ""; }catch(e){ return ""; }
+}
+function populateTz(){
+  const sel=document.getElementById("tz-select"); if(!sel) return;
+  let zones=[]; try{ zones=Intl.supportedValuesOf("timeZone"); }catch(e){}
+  if(!zones.length) zones=["Europe/London","Europe/Paris","Europe/Berlin","America/New_York","America/Toronto","America/Chicago","America/Los_Angeles","Asia/Dubai","Asia/Kolkata","Asia/Singapore","Asia/Tokyo","Australia/Sydney","Pacific/Auckland"];
+  if(!zones.includes(userTZ)) zones.unshift(userTZ);
+  sel.innerHTML = zones.map(z=>`<option value="${z}"${z===userTZ?" selected":""}>${tzLabel(z)}</option>`).join("");
+}
+function onTzChange(tz){
+  userTZ = tz;
+  selDate=null; selSlot=null; clearSlots(); loadingAvail=true; renderMonth();
+  loadMonthAvailability(calYear,calMonth).then(()=>{ renderMonth(); autoSelectFirst(); });
+}
+let mode = "single";        // 'single' | 'redeem'
+let clinic = null;          // selected product
+let redeemEmail = "";
+let basket = [];            // redeem mode: ISO slots queued to book together
+let redeemRemaining = 0;    // package credits available
+let calYear, calMonth, selDate=null, selSlot=null, monthAvail=null, loadingAvail=false, selFiles=[];
 
-// Month view state
-let calYear, calMonth, selDate = null;
-let monthAvail    = null;  // Set<"YYYY-MM-DD"> | null (null = unknown/error)
-let loadingAvail  = false; // true while month fetch is in flight
-
-
-// ── Utilities ────────────────────────────────────────
 const pad = n => String(n).padStart(2,"0");
 const toISO = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const todayISO = () => toISO(new Date());
+const fmtTime = iso => new Date(iso).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:userTZ});
+function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on")); document.getElementById(id).classList.add("on"); window.scrollTo({top:0,behavior:"smooth"}); }
 
-function fmtTime(iso) {
-  return new Date(iso).toLocaleTimeString([],{
-    hour:"2-digit", minute:"2-digit", timeZone:userTZ, hour12:timeFmt===12
-  });
+// The iOS app (PWAShell WKWebView) is pinned to app-bound domains, so a JS nav to an
+// external host (Stripe) is blocked and bounces to login — only a real user tap routes
+// to the in-app Safari sheet. So in-app we show a tappable handoff; on the web we
+// redirect straight to checkout as normal. Mirrors join.html.
+function goCheckout(url){
+  if(/PWAShell/i.test(navigator.userAgent||"")){
+    document.getElementById("co-link").href=url; show("screen-checkout");
+  } else { location.href=url; }
 }
 
-// ── Screen routing ───────────────────────────────────
-const SCREENS = ["screen-pick","screen-booking","screen-details","screen-success","screen-cancelled"];
-function show(id) {
-  SCREENS.forEach(s => {
-    document.getElementById(s).style.display = s===id ? "block" : "none";
-  });
+// ── product selection ──
+function pickSingle(key){
+  clinic = PRODUCTS[key]; mode = "single";
+  window.mcTrack && window.mcTrack("lesson_select",{slug:key});
+  if (key==="l60" && !clinic.id){ alert("1-hour lessons aren't quite set up yet, please try a clinic, or contact Matthew."); return; }
+  startBooking();
 }
+function startBooking(){
+  selDate=null; selSlot=null; monthAvail=null; basket=[];
+  const now=new Date(); calYear=now.getFullYear(); calMonth=now.getMonth();
+  document.getElementById("bk-title").textContent = mode==="redeem" ? "Book your lessons" : `Pick a time`;
+  document.getElementById("bk-sub").textContent = mode==="redeem"
+    ? `You have ${redeemRemaining} lesson${redeemRemaining===1?"":"s"} left. Pick one or more, then book them together.` : `${clinic.title} · ${clinic.price}`;
+  renderBasket();
+  populateTz(); clearSlots(); show("screen-booking"); renderMonth();
+  loadMonthAvailability(calYear,calMonth).then(()=>{ renderMonth(); autoSelectFirst(); });
+}
+function backToStart(){ show(mode==="redeem" ? "screen-redeem-email" : "screen-products"); }
 
-// ── Boot ─────────────────────────────────────────────
-function boot() {
-  // Always render pick cards so the screen is ready whenever we return to it
-  document.getElementById("pick-cards").innerHTML = CLINICS.map(c => `
-    <div class="pick-card" onclick="pickClinic(${c.id})">
-      <div>
-        <div class="pick-card-name">${c.title}</div>
-        <div class="pick-card-meta"><span>⏱ ${c.duration}m</span><span style="display:flex;align-items:center;gap:4px"><svg width="13" height="13" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="5" fill="#2D8CFF"/><path d="M4.5 8.5C4.5 7.67 5.17 7 6 7h8.5c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5H6c-.83 0-1.5-.67-1.5-1.5v-7z" fill="white"/><path d="M16.5 10.8l3.5-2.3v7l-3.5-2.3v-2.4z" fill="white"/></svg>Zoom</span><span>${c.price}</span></div>
-      </div>
-      <span class="pick-arrow">›</span>
+// ── packages ──
+function renderPackages(){
+  const BEST="6";
+  const tick='<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
+  document.getElementById("pkg-grid").innerHTML = PACKAGES.map(p=>`
+    <div class="pkg${p.pkg===BEST?" best":""}">
+      ${p.pkg===BEST?'<span class="tag">Most popular</span>':""}
+      <div class="qty">${p.pkg} one-hour lessons</div>
+      <div class="price">${p.price}</div>
+      <div class="per">${p.per}</div>
+      <span class="save">${p.save}</span>
+      <ul>
+        <li>${tick}Full 60-minute lessons with Matthew</li>
+        <li>${tick}Book each one whenever you like</li>
+        <li>${tick}Valid for 12 months</li>
+      </ul>
+      <button class="choose" onclick="pickPackage('${p.pkg}')">Choose ${p.pkg}-pack →</button>
     </div>`).join("");
-
-  const p = new URLSearchParams(window.location.search);
-  if (p.get("success")==="true")   { show("screen-success");   return; }
-  if (p.get("cancelled")==="true") { show("screen-cancelled"); return; }
-  show("screen-pick");
+}
+let curPkg=null;
+function pickPackage(pkg){
+  curPkg = PACKAGES.find(p=>p.pkg===pkg);
+  document.getElementById("pkg-title").textContent = curPkg.title;
+  document.getElementById("pkg-meta").textContent = `${curPkg.price} · ${curPkg.save} · book each lesson whenever`;
+  document.getElementById("pkg-err").style.display="none";
+  show("screen-pkg-details");
+}
+async function buyPackage(){
+  const name=document.getElementById("pkg-fname").value.trim();
+  const email=document.getElementById("pkg-email").value.trim();
+  const err=document.getElementById("pkg-err");
+  if(!name){ err.textContent="Please enter your name."; err.style.display="block"; return; }
+  if(!/.+@.+\..+/.test(email)){ err.textContent="Please enter a valid email."; err.style.display="block"; return; }
+  const btn=document.getElementById("pkg-btn"); btn.disabled=true; btn.innerHTML='<span class="spin dk"></span> Preparing…';
+  try{
+    window.mcTrack && window.mcTrack("lesson_checkout_click",{slug:"pkg"+curPkg.pkg});
+    const res=await fetch(`${FN}/clinic-checkout`,{method:"POST",headers:AUTH,body:JSON.stringify({ pkg:curPkg.pkg, name, email, currency:CURRENCY, vid:window.mcVid, pageUrl:location.href.split("?")[0] })});
+    const data=await res.json();
+    if(data.url) goCheckout(data.url); else throw new Error(data.error||"Error");
+  }catch(e){ err.textContent=e.message; err.style.display="block"; btn.disabled=false; btn.innerHTML="Continue to payment →"; }
 }
 
-function resetAll() {
-  history.replaceState(null,"",window.location.pathname);
-  clinic = null; selSlot = null; selDate = null; monthAvail = null;
-  show("screen-pick");
-}
-function goPickScreen()    { show("screen-pick"); }
-function goBookingScreen() { clearDetailsExtras(); show("screen-booking"); }
-
-function clearDetailsExtras() {
-  document.getElementById("inp-notes").value = "";
-  removeFile({ preventDefault:()=>{}, stopPropagation:()=>{}, target: {} });
-}
-
-// ── Pick clinic ──────────────────────────────────────
-async function pickClinic(id) {
-  clinic  = CLINICS.find(c=>c.id===id);
-  selDate = null; selSlot = null; monthAvail = null; loadingAvail = true;
-
-  document.getElementById("info-event").textContent = clinic.title;
-  document.getElementById("info-dur").textContent   = `${clinic.duration}m`;
-  document.getElementById("info-price").textContent = clinic.price;
-
-  // Populate timezone dropdown (include local TZ if not already in list)
-  const tzSel = document.getElementById("tz-select");
-  const allTZs = TZ_LIST.includes(userTZ) ? TZ_LIST : [userTZ, ...TZ_LIST];
-  tzSel.innerHTML = allTZs.map(tz =>
-    `<option value="${tz}"${tz===userTZ?" selected":""}>${tz.replace(/_/g," ")}</option>`
-  ).join("");
-
-  const now = new Date();
-  calYear = now.getFullYear(); calMonth = now.getMonth();
-
-  show("screen-booking");
-  renderMonth(); // renders with loadingAvail=true → all days non-clickable
-
-  await loadMonthAvailability(calYear, calMonth); // sets loadingAvail=false when done
-  renderMonth();    // re-render with real availability
-  autoSelectFirst();
+// ── redeem ──
+async function checkCredits(){
+  const email=document.getElementById("rd-email").value.trim().toLowerCase();
+  const err=document.getElementById("rd-err"); err.style.display="none";
+  if(!/.+@.+\..+/.test(email)){ err.textContent="Please enter a valid email."; err.style.display="block"; return; }
+  const btn=document.getElementById("rd-btn"); btn.disabled=true; btn.innerHTML='<span class="spin dk"></span> Checking…';
+  try{
+    const res=await fetch(`${FN}/lesson-credits?email=${encodeURIComponent(email)}`,{headers:AUTH});
+    const data=await res.json();
+    if((data.remaining||0)<=0){ err.textContent="No lessons found for that email. If you've just bought a package, give it a minute and try again."; err.style.display="block"; return; }
+    if(!EVENT_1HR){ err.textContent="Lesson booking isn't quite set up yet, please contact Matthew to schedule."; err.style.display="block"; return; }
+    redeemEmail=email; redeemRemaining=data.remaining||0; basket=[]; mode="redeem"; clinic=PRODUCTS.l60; startBooking();
+  }catch(e){ err.textContent="Something went wrong, please try again."; err.style.display="block"; }
+  finally{ btn.disabled=false; btn.innerHTML="Check my lessons →"; }
 }
 
-function setFmt(f) {
-  timeFmt = f;
-  document.getElementById("fmt12").classList.toggle("on", f===12);
-  document.getElementById("fmt24").classList.toggle("on", f===24);
-  if (selDate) loadDaySlots(selDate);
+// ── calendar / slots (ported from the Practice Room booking engine) ──
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS=["SUN","MON","TUE","WED","THU","FRI","SAT"];
+function navPrev(){ shiftMonth(-1); } function navNext(){ shiftMonth(1); }
+function shiftMonth(d){ calMonth+=d; if(calMonth>11){calMonth=0;calYear++;} if(calMonth<0){calMonth=11;calYear--;}
+  selDate=null; loadingAvail=true; clearSlots(); renderMonth();
+  loadMonthAvailability(calYear,calMonth).then(()=>{ renderMonth(); autoSelectFirst(); }); }
+async function loadMonthAvailability(year,month){
+  loadingAvail=true; monthAvail=null;
+  const startDate=`${year}-${pad(month+1)}-01`; const last=new Date(year,month+1,0).getDate(); const endDate=`${year}-${pad(month+1)}-${pad(last)}`;
+  try{
+    const p=new URLSearchParams({action:"slots",eventTypeId:String(clinic.id),startDate,endDate,timeZone:userTZ});
+    const res=await fetch(`${FN}/clinic-slots?${p}`,{headers:AUTH}); const data=await res.json();
+    if(data.error||!data.data){ monthAvail=null; return; }
+    let all=[]; if(data.data?.slots) all=Object.values(data.data.slots).flat(); else if(Array.isArray(data.data)) all=data.data;
+    const set=new Set(); all.forEach(s=>{ const t=s.time||s; set.add(new Date(t).toLocaleDateString("en-CA",{timeZone:userTZ})); }); monthAvail=set;
+  }catch(e){ monthAvail=null; } finally{ loadingAvail=false; }
 }
-
-async function changeTZ(tz) {
-  userTZ = tz;
-  // Re-fetch month availability for new tz then re-render
-  selDate = null; selSlot = null; monthAvail = null; loadingAvail = true;
-  clearSlotsPanel();
-  renderMonth();
-  await loadMonthAvailability(calYear, calMonth);
-  renderMonth();
-  autoSelectFirst();
-}
-
-function navPrev() { shiftMonth(-1); }
-function navNext() { shiftMonth( 1); }
-
-// ── Month availability (pre-fetch whole month) ───────
-async function loadMonthAvailability(year, month) {
-  loadingAvail = true;
-  monthAvail = null;
-  const startDate = `${year}-${pad(month+1)}-01`;
-  const lastDay   = new Date(year, month+1, 0).getDate();
-  const endDate   = `${year}-${pad(month+1)}-${pad(lastDay)}`;
-  try {
-    const params = new URLSearchParams({
-      action:"slots", eventTypeId:String(clinic.id),
-      startDate, endDate, timeZone:userTZ
-    });
-    const res  = await fetch(`${FN}/clinic-slots?${params}`, { headers:AUTH });
-    const data = await res.json();
-
-    // If the function returned an error (e.g. not yet redeployed), stay null so all days remain clickable
-    if (data.error || !data.data) return;
-
-    let all = [];
-    if (data.data?.slots)              all = Object.values(data.data.slots).flat();
-    else if (Array.isArray(data.data)) all = data.data;
-
-    // Build the set of available dates from returned slots.
-    // Empty result is still a *successful* response from Cal.com — meaning
-    // there genuinely is no availability this month — so we set an EMPTY
-    // set (not null) and renderMonth() will grey out every day.
-    const set = new Set();
-    all.forEach(s => {
-      const t = s.time || s;
-      set.add(new Date(t).toLocaleDateString("en-CA", { timeZone:userTZ }));
-    });
-    monthAvail = set;
-  } catch(e) {
-    monthAvail = null; // network error — fall back to clickable so user can still try
-  } finally {
-    loadingAvail = false;
+function renderMonth(){
+  const today=todayISO(); const now=new Date();
+  document.getElementById("cal-range").textContent=`${MONTHS[calMonth]} ${calYear}`;
+  document.getElementById("nav-prev").disabled = calYear===now.getFullYear() && calMonth===now.getMonth();
+  const firstDow=new Date(calYear,calMonth,1).getDay(); const days=new Date(calYear,calMonth+1,0).getDate();
+  const limit=new Date(); limit.setDate(limit.getDate()+60); const limitISO=toISO(limit);
+  let html=DAYS.map(d=>`<div class="cal-dname">${d}</div>`).join("");
+  for(let i=0;i<firstDow;i++) html+=`<div class="cal-day empty"></div>`;
+  for(let d=1;d<=days;d++){
+    const iso=`${calYear}-${pad(calMonth+1)}-${pad(d)}`; const past=iso<today; const beyond=iso>limitISO; const sel=iso===selDate;
+    const has=monthAvail?monthAvail.has(iso):(!past&&!beyond);
+    let cls="cal-day"; if(sel)cls+=" selected"; else if(past||beyond)cls+=" past"; else if(loadingAvail)cls+=" loading"; else if(!has)cls+=" noSlots"; else cls+=" avail";
+    const ok=!loadingAvail&&!past&&!beyond&&has;
+    html+=`<div class="${cls}"${ok?` onclick="onDay('${iso}')"`:""}>${d}</div>`;
   }
+  document.getElementById("cal-grid").innerHTML=html;
 }
-
-// ── Month view ───────────────────────────────────────
-const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const DAY_NAMES   = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
-
-function shiftMonth(dir) {
-  calMonth += dir;
-  if (calMonth>11){ calMonth=0; calYear++; }
-  if (calMonth<0) { calMonth=11; calYear--; }
-  selDate = null; loadingAvail = true;
-  clearSlotsPanel();
-  renderMonth(); // immediately show non-clickable state while fetching
-  loadMonthAvailability(calYear, calMonth).then(() => {
-    renderMonth();
-    autoSelectFirst();
-  });
+function autoSelectFirst(){
+  const today=todayISO();
+  if(today.startsWith(`${calYear}-${pad(calMonth+1)}`) && (!monthAvail||monthAvail.has(today))){ onDay(today); return; }
+  if(monthAvail){ const last=new Date(calYear,calMonth+1,0).getDate();
+    for(let d=1;d<=last;d++){ const iso=`${calYear}-${pad(calMonth+1)}-${pad(d)}`; if(iso>=today&&monthAvail.has(iso)){ onDay(iso); return; } } }
 }
-
-function autoSelectFirst() {
-  // Try to select today, otherwise first available day in current month
-  const today = todayISO();
-  const todayInMonth = today.startsWith(`${calYear}-${pad(calMonth+1)}`);
-  if (todayInMonth && (!monthAvail || monthAvail.has(today))) {
-    onMonthDay(today);
-    return;
+async function onDay(date){
+  selDate=date; selSlot=null; renderMonth();
+  const d=new Date(date+"T12:00:00");
+  document.getElementById("slots-empty-state").style.display="none";
+  document.getElementById("slots-day-hdr").style.display="";
+  document.getElementById("slots-day-lbl").textContent=d.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+  document.getElementById("slots-list").innerHTML=`<div class="slot-empty"><span class="spin"></span> Loading…</div>`;
+  const slots=await fetchSlots(date);
+  if(!slots){ document.getElementById("slots-list").innerHTML=`<div class="slot-empty" style="color:#c0392b">Error loading times.</div>`; return; }
+  if(!slots.length){ document.getElementById("slots-list").innerHTML=`<div class="slot-empty">No times available this day.</div>`; return; }
+  document.getElementById("slots-list").innerHTML=slots.map(t=>`<button class="slot-btn${basket.indexOf(t)>-1?" sel":""}" data-iso="${t}" onclick="onSlot('${t}',this)">${fmtTime(t)}</button>`).join("");
+}
+async function fetchSlots(date){
+  try{ const p=new URLSearchParams({action:"slots",eventTypeId:String(clinic.id),date,timeZone:userTZ});
+    const res=await fetch(`${FN}/clinic-slots?${p}`,{headers:AUTH}); const data=await res.json();
+    let all=[]; if(data.data?.slots) all=Object.values(data.data.slots).flat(); else if(Array.isArray(data.data)) all=data.data;
+    return all.map(s=>s.time||s).filter(t=>new Date(t).toLocaleDateString("en-CA",{timeZone:userTZ})===date);
+  }catch(e){ return null; }
+}
+function clearSlots(){ document.getElementById("slots-empty-state").style.display=""; document.getElementById("slots-day-hdr").style.display="none"; document.getElementById("slots-list").innerHTML=""; }
+function onSlot(iso,btn){
+  window.mcTrack && window.mcTrack("slot_select");
+  if(mode==="redeem"){ toggleBasket(iso,btn); return; }
+  selSlot=iso; document.querySelectorAll(".slot-btn").forEach(b=>b.classList.remove("sel")); btn.classList.add("sel"); openDetails(iso);
+}
+function toggleBasket(iso,btn){
+  const i=basket.indexOf(iso);
+  if(i>-1){ basket.splice(i,1); btn&&btn.classList.remove("sel"); }
+  else{
+    if(basket.length>=redeemRemaining){ flashBasketCap(); return; }
+    basket.push(iso); btn&&btn.classList.add("sel");
   }
-  if (monthAvail) {
-    const firstDay = new Date();
-    // Find first available day this month from today
-    const lastDay = new Date(calYear, calMonth+1, 0).getDate();
-    for (let d=1; d<=lastDay; d++) {
-      const iso = `${calYear}-${pad(calMonth+1)}-${pad(d)}`;
-      if (iso >= today && monthAvail.has(iso)) {
-        onMonthDay(iso);
-        return;
-      }
-    }
-  }
+  renderBasket();
 }
-
-function renderMonth() {
-  const today = todayISO();
-  const now   = new Date();
-  document.getElementById("cal-range").textContent = `${MONTH_NAMES[calMonth]} ${calYear}`;
-  document.getElementById("nav-prev").disabled =
-    calYear===now.getFullYear() && calMonth===now.getMonth();
-
-  const firstDow = new Date(calYear, calMonth, 1).getDay();
-  const days     = new Date(calYear, calMonth+1, 0).getDate();
-
-  let html = DAY_NAMES.map(d=>`<div class="cal-dname">${d}</div>`).join("");
-  for (let i=0; i<firstDow; i++) html += `<div class="cal-day empty"></div>`;
-
-  const limitDate = new Date();
-  limitDate.setDate(limitDate.getDate() + 30);
-  const limitISO = toISO(limitDate);
-
-  for (let d=1; d<=days; d++) {
-    const iso     = `${calYear}-${pad(calMonth+1)}-${pad(d)}`;
-    const past    = iso < today;
-    const beyond  = iso > limitISO;
-    const sel     = iso === selDate;
-    const hasSlots = monthAvail ? monthAvail.has(iso) : (!past && !beyond);
-
-    let cls = "cal-day";
-    if (sel)               cls += " selected";
-    else if (past||beyond) cls += " past";
-    else if (loadingAvail) cls += " loading";
-    else if (!hasSlots)    cls += " noSlots";
-    else                   cls += " avail";
-    if (iso===today && !sel) cls += " today-dot";
-
-    const clickable = !loadingAvail && !past && !beyond && hasSlots;
-    html += `<div class="${cls}"${clickable ? ` onclick="onMonthDay('${iso}')"` : ""}>${d}</div>`;
-  }
-  document.getElementById("cal-grid").innerHTML = html;
+function flashBasketCap(){
+  const bar=document.getElementById("basket-bar"); if(!bar) return;
+  let note=document.getElementById("basket-cap");
+  if(!note){ note=document.createElement("div"); note.id="basket-cap"; note.style.cssText="color:#e0a93f;font-size:.82rem;margin-bottom:8px"; bar.insertBefore(note,bar.firstChild); }
+  note.textContent=`That's all ${redeemRemaining} of your lessons. Remove one to swap it.`;
+  clearTimeout(window._capT); window._capT=setTimeout(()=>{ note&&note.remove(); },2600);
 }
-
-async function onMonthDay(date) {
-  selDate = date; selSlot = null;
-  renderMonth();
-
-  const d = new Date(date+"T12:00:00");
-  const lbl = d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
-  document.getElementById("slots-empty-state").style.display = "none";
-  document.getElementById("slots-day-hdr").style.display = "";
-  document.getElementById("slots-day-lbl").textContent = lbl;
-  document.getElementById("month-slots-list").innerHTML =
-    `<div class="slot-loading"><div class="spin"></div> Loading…</div>`;
-
-  await loadDaySlots(date);
+function renderBasket(){
+  const bar=document.getElementById("basket-bar"); if(!bar) return;
+  if(mode!=="redeem" || !basket.length){ bar.style.display="none"; return; }
+  bar.style.display="block";
+  const chips=document.getElementById("basket-chips");
+  chips.innerHTML=[...basket].sort().map(t=>{
+    const lbl=new Date(t).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",timeZone:userTZ})+", "+fmtTime(t);
+    return `<span style="display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border-2);border-radius:999px;padding:6px 8px 6px 13px;font-size:.83rem;color:var(--text)">${lbl}<button type="button" aria-label="Remove" onclick="removeFromBasket('${t}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;line-height:1;padding:0">&times;</button></span>`;
+  }).join("");
+  document.getElementById("basket-continue").textContent=`Continue with ${basket.length} lesson${basket.length===1?"":"s"} →`;
 }
-
-async function loadDaySlots(date) {
-  const slots = await fetchSlots(date);
-  if (!slots) {
-    document.getElementById("month-slots-list").innerHTML =
-      `<div class="slot-empty" style="color:#f87171">Error loading times</div>`;
-    return;
-  }
-  if (!slots.length) {
-    document.getElementById("month-slots-list").innerHTML =
-      `<div class="slot-empty">No times available on this day.</div>`;
-    return;
-  }
-  document.getElementById("month-slots-list").innerHTML =
-    slots.map(t => slotHTML(t)).join("");
+function removeFromBasket(iso){
+  const i=basket.indexOf(iso); if(i>-1) basket.splice(i,1);
+  const btn=document.querySelector(`.slot-btn[data-iso="${iso}"]`); if(btn) btn.classList.remove("sel");
+  renderBasket();
 }
-
-function clearSlotsPanel() {
-  document.getElementById("slots-empty-state").style.display = "";
-  document.getElementById("slots-day-hdr").style.display = "none";
-  document.getElementById("month-slots-list").innerHTML = "";
-}
-
-// ── Slot fetch ───────────────────────────────────────
-async function fetchSlots(date) {
-  try {
-    const p = new URLSearchParams({ action:"slots", eventTypeId:String(clinic.id), date, timeZone:userTZ });
-    const res  = await fetch(`${FN}/clinic-slots?${p}`, { headers:AUTH });
-    const data = await res.json();
-    let all = [];
-    if (data.data?.slots)          all = Object.values(data.data.slots).flat();
-    else if (Array.isArray(data.data)) all = data.data;
-    return all
-      .map(s => s.time || s)
-      .filter(t => new Date(t).toLocaleDateString("en-CA",{timeZone:userTZ})===date);
-  } catch(e) { return null; }
-}
-
-// ── Slot buttons ─────────────────────────────────────
-function slotHTML(isoTime) {
-  const sel = isoTime===selSlot ? " sel" : "";
-  return `<button class="slot-btn${sel}" onclick="onSlotClick('${isoTime}',this)">
-    <div class="sdot"></div>${fmtTime(isoTime)}
-  </button>`;
-}
-
-function onSlotClick(isoTime, btn) {
-  selSlot = isoTime;
-  document.querySelectorAll(".slot-btn").forEach(b => b.classList.remove("sel"));
-  btn.classList.add("sel");
-  openDetails(isoTime);
-}
-
-function selectSlot(isoTime) { // called from grid blocks
-  selSlot = isoTime;
-  openDetails(isoTime);
-}
-
-function openDetails(isoTime) {
-  const dateStr = new Date(isoTime).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:userTZ});
-  const timeStr = fmtTime(isoTime);
-  document.getElementById("det-event").textContent = clinic.title;
-  document.getElementById("det-dur").textContent   = `${clinic.duration}m`;
-  document.getElementById("det-price").textContent = clinic.price;
-  document.getElementById("det-date").textContent  = `${dateStr} · ${timeStr}`;
-  document.getElementById("det-meta").textContent  = `${clinic.title} · ${clinic.price} · ${dateStr} at ${timeStr}`;
-  document.getElementById("err-msg").style.display = "none";
-  document.getElementById("pay-btn").disabled = false;
-  document.getElementById("pay-btn").innerHTML = "Confirm booking →";
+window.removeFromBasket=removeFromBasket; window.openRedeemReview=openRedeemReview;
+function openRedeemReview(){
+  if(!basket.length) return;
+  const sorted=[...basket].sort();
+  document.getElementById("det-title").textContent = sorted.length>1 ? `${sorted.length} lessons (package)` : "1-hour lesson (package)";
+  document.getElementById("det-meta").innerHTML = sorted.map(t=>{
+    const d=new Date(t).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",timeZone:userTZ});
+    return `${d} at ${fmtTime(t)} ${tzShort()}`.trim();
+  }).join("<br>");
+  document.getElementById("inp-email").value=redeemEmail; document.getElementById("inp-email").readOnly=true;
+  document.getElementById("err-msg").style.display="none";
+  const b=document.getElementById("pay-btn"); b.disabled=false; b.innerHTML = sorted.length>1 ? `Book my ${sorted.length} lessons →` : "Book my lesson →";
   show("screen-details");
 }
-
-// ── File attachment ───────────────────────────────────
-let selFiles = []; // multiple files
-
-function handleFileClick(e) {
-  if (e.target.closest(".file-remove")) return;
-  document.getElementById("inp-file").click();
+function openDetails(iso){
+  const dateStr=new Date(iso).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:userTZ});
+  document.getElementById("det-title").textContent = mode==="redeem" ? "1-hour lesson (package)" : `${clinic.title} · ${clinic.price}`;
+  document.getElementById("det-meta").textContent = `${dateStr} at ${fmtTime(iso)} ${tzShort()}`.trim();
+  if(mode==="redeem"){ document.getElementById("inp-email").value=redeemEmail; document.getElementById("inp-email").readOnly=true; }
+  else { document.getElementById("inp-email").readOnly=false; }
+  document.getElementById("err-msg").style.display="none";
+  const b=document.getElementById("pay-btn"); b.disabled=false; b.innerHTML = mode==="redeem" ? "Book my lesson →" : "Confirm booking →";
+  show("screen-details");
 }
-
-function onFileChange(input) {
-  const files = Array.from(input.files);
-  if (!files.length) return;
-  const oversized = files.find(f => f.size > 10 * 1024 * 1024);
-  if (oversized) { showErr(`"${oversized.name}" exceeds 10 MB.`); input.value = ""; return; }
-  selFiles = files;
-  const label = files.length === 1 ? files[0].name : `${files.length} files selected`;
-  document.getElementById("file-drop-name").textContent = label;
-  document.getElementById("file-drop-label").classList.add("has-file");
-  document.getElementById("file-remove").style.display = "";
+// ── files + checkout ──
+function onFileChange(input){
+  const files=Array.from(input.files); if(!files.length) return;
+  const big=files.find(f=>f.size>10*1024*1024); if(big){ showErr(`"${big.name}" exceeds 10 MB.`); input.value=""; return; }
+  selFiles=files; document.getElementById("file-name").textContent = files.length===1?files[0].name:`${files.length} files`;
+  document.getElementById("file-label").classList.add("has");
 }
-
-function removeFile(e) {
-  e.preventDefault(); e.stopPropagation();
-  selFiles = [];
-  document.getElementById("inp-file").value = "";
-  document.getElementById("file-drop-name").textContent = "Click to upload files";
-  document.getElementById("file-drop-label").classList.remove("has-file");
-  document.getElementById("file-remove").style.display = "none";
+async function uploadAttachment(file){
+  const ext=file.name.split(".").pop(); const path=`${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const res=await fetch(`${SUPABASE_URL}/storage/v1/object/clinic-files/${path}`,{method:"POST",headers:{"Authorization":`Bearer ${SUPABASE_ANON}`,"Content-Type":file.type},body:file});
+  if(!res.ok) throw new Error("upload failed"); return `${SUPABASE_URL}/storage/v1/object/public/clinic-files/${path}`;
 }
-
-async function uploadAttachment(file) {
-  const ext  = file.name.split(".").pop();
-  const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-  const res  = await fetch(`${SUPABASE_URL}/storage/v1/object/clinic-files/${path}`, {
-    method:  "POST",
-    headers: { "Authorization": `Bearer ${SUPABASE_ANON}`, "Content-Type": file.type },
-    body: file,
-  });
-  if (!res.ok) throw new Error(`Upload failed for ${file.name}`);
-  return `${SUPABASE_URL}/storage/v1/object/public/clinic-files/${path}`;
-}
-
-// ── Checkout ─────────────────────────────────────────
-async function startCheckout() {
-  const fname = document.getElementById("inp-fname").value.trim();
-  const lname = document.getElementById("inp-lname").value.trim();
-  const email = document.getElementById("inp-email").value.trim();
-  const notes = document.getElementById("inp-notes").value.trim();
-  const name  = `${fname} ${lname}`.trim();
-  document.getElementById("err-msg").style.display = "none";
-
-  if (!fname)                         { showErr("Please enter your first name.");        return; }
-  if (!email || !email.includes("@")) { showErr("Please enter a valid email address."); return; }
-
-  const btn = document.getElementById("pay-btn");
-  btn.disabled = true;
-  btn.innerHTML = `<div class="spin dk"></div> Preparing checkout…`;
-
-  try {
-    let fileUrl = null;
-    if (selFiles.length) {
-      btn.innerHTML = `<div class="spin dk"></div> Uploading files…`;
-      try {
-        const urls = await Promise.all(selFiles.map(uploadAttachment));
-        fileUrl = urls.join(", ");
-      } catch(e) { console.warn("Attachment upload failed:", e); /* non-blocking */ }
+function showErr(m){ const e=document.getElementById("err-msg"); e.textContent=m; e.style.display="block"; }
+async function confirmBooking(){
+  const fname=document.getElementById("inp-fname").value.trim();
+  const email=document.getElementById("inp-email").value.trim();
+  const notes=document.getElementById("inp-notes").value.trim();
+  document.getElementById("err-msg").style.display="none";
+  if(!fname){ showErr("Please enter your first name."); return; }
+  if(!/.+@.+\..+/.test(email)){ showErr("Please enter a valid email."); return; }
+  const btn=document.getElementById("pay-btn"); btn.disabled=true; btn.innerHTML='<span class="spin dk"></span> Working…';
+  try{
+    let fileUrl=null;
+    if(selFiles.length){ try{ fileUrl=(await Promise.all(selFiles.map(uploadAttachment))).join(", "); }catch(_){} }
+    if(mode==="redeem"){
+      const slots = (basket.length ? basket : [selSlot]).map(t=>new Date(t).toISOString());
+      const res=await fetch(`${FN}/lesson-redeem`,{method:"POST",headers:AUTH,body:JSON.stringify({ email, eventTypeId:clinic.id, slots, name:fname, timeZone:userTZ, notes:notes||undefined, fileUrl:fileUrl||undefined })});
+      const data=await res.json();
+      if(!res.ok || data.error) throw new Error(data.error||"Booking failed");
+      const n=data.booked||slots.length;
+      let msg=`${n>1?`Your ${n} lessons are`:"Your lesson is"} confirmed, check your email for the details.`;
+      if(data.failed) msg+=` ${data.failed} time${data.failed===1?"":"s"} had just been taken and ${data.failed===1?"was":"were"} skipped.`;
+      msg+=` You have ${data.remaining} lesson${data.remaining===1?"":"s"} left in your package.`;
+      basket=[];
+      result(IC_DONE, n>1?"You're all booked in!":"You're booked in!", msg);
+    } else {
+      window.mcTrack && window.mcTrack("lesson_checkout_click");
+      const res=await fetch(`${FN}/clinic-checkout`,{method:"POST",headers:AUTH,body:JSON.stringify({ eventTypeId:clinic.id, startTime:new Date(selSlot).toISOString(), duration:clinic.duration, name:fname, email, timeZone:userTZ, currency:CURRENCY, vid:window.mcVid, notes:notes||undefined, fileUrl:fileUrl||undefined, pageUrl:location.href.split("?")[0] })});
+      const data=await res.json();
+      if(data.url) goCheckout(data.url); else throw new Error(data.error||"Error");
     }
+  }catch(e){ showErr(e.message); btn.disabled=false; btn.innerHTML = mode==="redeem" ? "Book my lesson →" : "Confirm booking →"; }
+}
+const IC_DONE='<svg width="58" height="58" viewBox="0 0 24 24" fill="none" stroke="#f5c518" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.4 12.4l2.5 2.5 4.7-5.7"/></svg>';
+const IC_UNDO='<svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="#9a9aa2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5v5h5"/><path d="M3.6 13.5a9 9 0 1 0 2.1-9.4L3 8.5"/></svg>';
+function result(icon,title,msg){ document.getElementById("res-emoji").innerHTML=icon; document.getElementById("res-title").textContent=title; document.getElementById("res-msg").textContent=msg; show("screen-result"); }
 
-    const res  = await fetch(`${FN}/clinic-checkout`, {
-      method:"POST", headers:AUTH,
-      body: JSON.stringify({
-        eventTypeId: clinic.id,
-        startTime:   new Date(selSlot).toISOString(),
-        duration:    clinic.duration,
-        name, email, timeZone: userTZ,
-        notes:   notes   || undefined,
-        fileUrl: fileUrl || undefined,
-        pageUrl: window.location.href.split("?")[0],
-      }),
-    });
-    const data = await res.json();
-    if (data.url) { window.location.href = data.url; }
-    else { throw new Error(data.error || "Unknown error"); }
-  } catch(e) {
-    showErr(e.message);
-    btn.disabled = false;
-    btn.innerHTML = "Confirm booking →";
+// ── boot: handle Stripe return + render packages ──
+(function(){
+  renderPackages();
+  loadPrices();
+  const q=new URLSearchParams(location.search);
+  if(q.get("success")) result(IC_DONE,"Payment received!","Thanks, your booking is confirmed and you'll get an email with the details shortly. If you bought a package, the email explains how to book each lesson.");
+  else if(q.get("cancelled")) result(IC_UNDO,"Checkout cancelled","No payment was taken. You can pick another time whenever you're ready.");
+  else if(q.get("redeem")){
+    const em=(q.get("redeem")||"").trim().toLowerCase();
+    if(/.+@.+\..+/.test(em)){ document.getElementById("rd-email").value=em; show("screen-redeem-email"); checkCredits(); }
   }
+})();
+
+// ── Your booked lessons (signed-in member; reads bookings via self-read RLS) ──
+const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function showMyLessons(db, email){
+  show("screen-mine");
+  const list=document.getElementById("mine-list");
+  list.innerHTML=`<div class="mine-empty"><span class="spin"></span> Loading…</div>`;
+  let rows="";
+  try{
+    const nowISO=new Date().toISOString();
+    const { data } = await db.from("bookings").select("cal_uid,start_time,meeting_url,kind,status").gte("start_time",nowISO).order("start_time",{ascending:true});
+    (data||[]).forEach(b=>{
+      if(!b.start_time || (b.status||"").toLowerCase()==="cancelled") return;
+      const when=new Date(b.start_time).toLocaleString("en-GB",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:userTZ});
+      const zoom=b.meeting_url?`<a class="lk" href="${esc(b.meeting_url)}" target="_blank" rel="noopener">Join →</a>`:"";
+      const manage=b.cal_uid?`<a class="lk ghost" href="https://matthewcawood.com/manage/?uid=${encodeURIComponent(b.cal_uid)}" target="_blank" rel="noopener">Manage</a>`:"";
+      rows+=`<div class="mine-row"><div class="mr-main"><div class="mr-t">${esc(b.kind||"Lesson")}</div><div class="mr-m">${esc(when)} · ${esc(tzShort())}</div></div>${zoom}${manage}</div>`;
+    });
+  }catch(e){}
+  let creditLine="Your upcoming one-to-one sessions.";
+  try{
+    const r=await fetch(`${FN}/lesson-credits?email=${encodeURIComponent(email)}`,{headers:AUTH});
+    const d=await r.json();
+    if((d.remaining||0)>0) creditLine=`You have <b style="color:var(--gold-dim)">${d.remaining}</b> lesson${d.remaining===1?"":"s"} left in your package.`;
+  }catch(e){}
+  document.getElementById("mine-sub").innerHTML=creditLine;
+  list.innerHTML = rows || `<div class="mine-empty">No upcoming lessons yet. Book one below.</div>`;
+}
+function showMineSignedOut(){
+  show("screen-mine");
+  document.getElementById("mine-sub").textContent="Your upcoming one-to-one sessions.";
+  document.getElementById("mine-list").innerHTML=`<div class="mine-empty">Sign in to the Practice Room app to see your booked lessons, or manage them on <a href="https://matthewcawood.com/account/" style="color:var(--gold-dim)">your account</a>.</div>`;
 }
 
-function showErr(msg) {
-  const el = document.getElementById("err-msg");
-  el.textContent = msg; el.style.display = "block";
-}
-
-boot();
-
-// ── Shared header (if user is logged in) ────────────────────────────────────
+// ── App shared header + (optional) my-lessons view ──
 (async () => {
+  const wantMine = new URLSearchParams(location.search).get("view")==="mine";
   try {
-    const SUPA_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
-    const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
-    const _db = supabase.createClient(SUPA_URL, SUPA_ANON);
+    const _db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
     const { data: { session } } = await _db.auth.getSession();
-    if (!session) return;
+    if (!session) { if (wantMine) showMineSignedOut(); return; }
     const myEmail = session.user.email;
     const { data: ae } = await _db.from("allowed_emails").select("name, avatar_url").eq("email", myEmail).maybeSingle();
     const myName = ae?.name || myEmail.split("@")[0];
     const isAdmin = myEmail.toLowerCase() === "matthew@matthewcawood.com";
     initSharedHeader({ db: _db, myEmail, myName, isAdmin, activePage: "studio", avatarUrl: ae?.avatar_url || null });
-  } catch(e) { /* header is best-effort on this public page */ }
+    if (wantMine) showMyLessons(_db, myEmail);
+  } catch(e) { if (wantMine) showMineSignedOut(); }
 })();
 </script>
 </body>
