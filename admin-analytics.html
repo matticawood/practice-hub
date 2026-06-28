@@ -722,7 +722,7 @@ async function renderAcquisition() {
   if (!el) return;
 
   const [evRes, convRes] = await Promise.all([
-    db.from("signup_events").select("vid,event,ts,referrer,utm_source,device,scroll_pct,dur_ms,country,cta"),
+    db.from("signup_events").select("vid,event,ts,referrer,utm_source,utm_content,device,scroll_pct,dur_ms,country,cta"),
     db.from("signup_conversions").select("vid,email,currency,ts"),
   ]);
   const events = evRes.data || [];
@@ -748,8 +748,9 @@ async function renderAcquisition() {
   const engaged   = new Set(Object.keys(maxScroll).filter(v => maxScroll[v] >= 50));
   const ctaVids   = new Set(events.filter(e => e.event === "cta_click" && /^join/.test(e.cta || "")).map(e => e.vid));
   const playVids  = new Set(events.filter(e => e.event === "video_play").map(e => e.vid));
-  const convVids  = new Set(convs.map(c => c.vid));
+  const convVids  = new Set(convs.filter(c => c.vid).map(c => c.vid));  // traced to a /signup visitor
   const nConv = convVids.size;
+  const nConvTotal = convs.length;   // all members who converted (source optional)
 
   // Median time on page (from leave events)
   const vidDur = {};
@@ -830,7 +831,7 @@ async function renderAcquisition() {
   h += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 22px">
     ${tile("Visitors", N, "#60a5fa", "unique")}
     ${tile("Join clicks", ctaVids.size, "#f5c518", `${pctOf(ctaVids.size, N)}% of visitors`)}
-    ${tile("Conversions", nConv, "#4ade80", "attributed to /signup")}
+    ${tile("Conversions", nConvTotal, "#4ade80", `${nConv} traced to /signup`)}
     ${tile("Conversion rate", pctOf(nConv, N) + "%", "#4ade80", "members ÷ visitors")}
     ${tile("Median time", fmtDur(medDur), "#cbd5e1", "on page")}
     ${tile("Video play", pctOf(playVids.size, N) + "%", "#a78bfa", "pressed play")}
@@ -869,6 +870,61 @@ async function renderAcquisition() {
     </div>`;
   }
   h += `</div>`;
+
+  // ── YouTube: which video & which link ──────────────────────────────────────
+  // Combines signup-link clicks (signup_events) with store/brand-link clicks
+  // (site_events) — both tagged utm_content=<videoId> from the descriptions — so
+  // you can see which video drives traffic and which description link they clicked.
+  try {
+    const siteRes = await db.from("site_events").select("vid,utm_content,path").eq("utm_source", "youtube").eq("event", "view");
+    const siteYT = siteRes.data || [];
+    const destOf = p => !p ? "Other"
+      : p.startsWith("/store") ? "Store"
+      : p.startsWith("/book-a-lesson") ? "Book a lesson"
+      : p.startsWith("/monday") ? "Mailing"
+      : (p === "/" || p === "") ? "Home" : "Signup";
+    const vidYT = {};
+    const addV = (c, v, dest) => { if (!c) return; const o = vidYT[c] = vidYT[c] || { tot: new Set(), dest: {} }; o.tot.add(v); (o.dest[dest] = o.dest[dest] || new Set()).add(v); };
+    for (const e of views) if (e.utm_content) addV(e.utm_content, e.vid, "Signup");      // signup_events = the Signup link
+    for (const e of siteYT) addV(e.utm_content, e.vid, destOf(e.path));                  // site_events = store/brand links
+    // conversions per video (signup-side vid → utm_content; sparse until vid threading is fixed)
+    const vidContent = {};
+    for (const e of views) if (e.utm_content && vidContent[e.vid] === undefined) vidContent[e.vid] = e.utm_content;
+    const convPerVideo = {};
+    for (const v of convVids) { const c = vidContent[v]; if (c) convPerVideo[c] = (convPerVideo[c] || 0) + 1; }
+
+    const vidsSorted = Object.entries(vidYT).map(([c, o]) => [c, o.tot.size, o.dest]).sort((a, b) => b[1] - a[1]).slice(0, 20);
+    if (vidsSorted.length) {
+      // overall "which link" totals
+      const linkTot = {};
+      const addL = (d, v) => { (linkTot[d] = linkTot[d] || new Set()).add(v); };
+      for (const e of views) if (e.utm_content) addL("Signup", e.vid);
+      for (const e of siteYT) addL(destOf(e.path), e.vid);
+      const linkSorted = Object.entries(linkTot).map(([d, s]) => [d, s.size]).sort((a, b) => b[1] - a[1]);
+      h += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('share','#f5c518')}YouTube videos &amp; links <span class="section-meta">which video · which description link · conversions</span></h2>`;
+      h += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 14px">`;
+      for (const [d, n] of linkSorted) h += `<div style="background:#0d1525;border:1px solid #1e2d4a;border-radius:8px;padding:8px 14px;font-size:.82rem"><b style="color:#f5c518">${n}</b> <span style="color:#94a3b8">${esc(d)} link</span></div>`;
+      h += `</div>`;
+      h += `<div style="font-size:.72rem;color:#64748b;margin:0 0 12px">Top videos by visitors (last 30 days). Click a video id to open it. Bracketed = which link in that video's description they clicked.</div>`;
+      const vMax = vidsSorted[0][1];
+      h += `<div style="display:flex;flex-direction:column;gap:9px;margin:0 0 28px">`;
+      for (const [content, total, dest] of vidsSorted) {
+        const w = Math.max(2, Math.round(total / vMax * 100));
+        const destStr = Object.entries(dest).sort((a, b) => b[1].size - a[1].size).map(([d, s]) => `${esc(d)} ${s.size}`).join(" · ");
+        const conv = convPerVideo[content] || 0;
+        h += `<div style="font-size:.85rem">
+          <div style="display:flex;align-items:center;gap:10px">
+            <a href="https://youtu.be/${esc(content)}" target="_blank" rel="noopener" style="flex:0 0 120px;color:#60a5fa;text-decoration:none;font-family:monospace;font-size:.76rem" title="open video">${esc(content)} ↗</a>
+            <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${w}%;height:100%;background:linear-gradient(90deg,#f5c518,#caa413)"></div></div>
+            <div style="flex:0 0 50px;text-align:right;color:#f5c518;font-weight:700">${total}</div>
+            <div style="flex:0 0 70px;text-align:right;color:#4ade80" title="conversions traced to this video">${conv} conv</div>
+          </div>
+          <div style="color:#64748b;font-size:.72rem;margin:2px 0 0 130px">${destStr}</div>
+        </div>`;
+      }
+      h += `</div>`;
+    }
+  } catch (e) { console.warn("YouTube video breakdown failed:", e); }
 
   // Device split + scroll depth, side by side (devAgg computed above)
   const scrollBuckets = [25, 50, 75, 100].map(m => ({ m, n: Object.values(maxScroll).filter(x => x >= m).length }));
@@ -1343,8 +1399,8 @@ async function renderFunnels() {
   const memberStrip = `<h2 class="section-header" style="margin-top:30px">${ico('users','#a78bfa')}Membership activity <span class="section-meta">from the app heartbeat</span></h2>`
     + `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 8px">${statCard(memberEmails.size,"members")}${statCard(onlineNow.size,"online now")}${statCard(active7.size,"active 7d")}${statCard(active30.size,"active 30d")}${statCard(hours30+"h","active time 30d")}${statCard(avgMin30+"m","avg / active member")}</div>`;
   const sViews = new Set(sev.filter(e => e.event==="view").map(e => e.vid));
-  const sConvV = new Set(sconv.map(c => c.vid));
-  metrics.acquisition = { signupVisitors: sViews.size, signupConversions: sConvV.size, signupConvRate: pct(sConvV.size, sViews.size) };
+  const sConvV = new Set(sconv.filter(c => c.vid).map(c => c.vid));   // traced to a /signup visit
+  metrics.acquisition = { signupVisitors: sViews.size, signupConversionsTotal: sconv.length, signupConversionsTraced: sConvV.size, signupConvRate: pct(sConvV.size, sViews.size) };
 
   // ── SMART INSIGHTS (computed highlights + on-demand AI, whole dashboard) — rendered FIRST ──
   let insightsHtml = `<h2 class="section-header" style="margin-top:8px">${ico('warn','#f5c518')}Smart insights <span class="section-meta">whole-business read</span></h2>`;
