@@ -721,12 +721,25 @@ async function renderAcquisition() {
   const el = document.getElementById("analytics-content");
   if (!el) return;
 
-  const [evRes, convRes] = await Promise.all([
-    db.from("signup_events").select("vid,event,ts,referrer,utm_source,utm_content,device,scroll_pct,dur_ms,country,cta"),
-    db.from("signup_conversions").select("vid,email,currency,ts"),
+  // Paginate past PostgREST's 1000-row cap. Without this we'd get only the OLDEST
+  // 1000 events — which predate the UTM-tagged YouTube links, so Signup showed 0.
+  const fetchAll = async (table, cols, filter) => {
+    let out = [], from = 0;
+    for (;;) {
+      let q = db.from(table).select(cols).range(from, from + 999);
+      if (filter) q = filter(q);
+      const { data, error } = await q;
+      if (error || !data || !data.length) break;
+      out.push(...data);
+      if (data.length < 1000) break;
+      from += 1000;
+    }
+    return out;
+  };
+  const [events, convs] = await Promise.all([
+    fetchAll("signup_events", "vid,event,ts,referrer,utm_source,utm_content,device,scroll_pct,dur_ms,country,cta"),
+    fetchAll("signup_conversions", "vid,email,currency,ts"),
   ]);
-  const events = evRes.data || [];
-  const convs  = convRes.data || [];
 
   const esc = s => String(s == null ? "" : s).replace(/</g, "&lt;");
   const refDomain = r => { try { return new URL(r).hostname.replace(/^www\./, ""); } catch { return ""; } };
@@ -876,8 +889,7 @@ async function renderAcquisition() {
   // (site_events) — both tagged utm_content=<videoId> from the descriptions — so
   // you can see which video drives traffic and which description link they clicked.
   try {
-    const siteRes = await db.from("site_events").select("vid,utm_content,path").eq("utm_source", "youtube").eq("event", "view");
-    const siteYT = siteRes.data || [];
+    const siteYT = await fetchAll("site_events", "vid,utm_content,path", q => q.eq("utm_source", "youtube").eq("event", "view"));
     const destOf = p => !p ? "Other"
       : p.startsWith("/store") ? "Store"
       : p.startsWith("/book-a-lesson") ? "Book a lesson"
@@ -907,7 +919,7 @@ async function renderAcquisition() {
       const allList = Object.entries(vidYT).map(([c, o]) => [c, o.tot.size]).sort((a, b) => b[1] - a[1]).slice(0, 15);
 
       const ytTable = (list, showConv) => {
-        if (!list.length) return `<div style="color:#64748b;font-size:.82rem;padding:12px 0">No clicks to this link yet (last 30 days).</div>`;
+        if (!list.length) return `<div style="color:#64748b;font-size:.82rem;padding:12px 0">No clicks to this link yet.</div>`;
         const mx = list[0][1] || 1;
         return list.map(([content, count]) => {
           const w = Math.max(2, Math.round(count / mx * 100));
@@ -931,7 +943,7 @@ async function renderAcquisition() {
 
       h += `<style>.ytv-tab{background:#0d1525;border:1px solid #1e2d4a;border-radius:8px;padding:8px 14px;font-size:.82rem;color:#94a3b8;cursor:pointer;font-family:inherit}.ytv-tab:hover{border-color:#3b4d6e}.ytv-tab.active{background:rgba(245,197,24,.14);border-color:#f5c518;color:#f5c518}.ytv-tab b{color:#f5c518}</style>`;
       h += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('share','#f5c518')}YouTube videos &amp; links <span class="section-meta">which videos drive each description link</span></h2>`;
-      h += `<div style="font-size:.74rem;color:#64748b;margin:8px 0 12px">Pick a link to see which videos drove clicks to it (last 30 days). Click a video to open it.</div>`;
+      h += `<div style="font-size:.74rem;color:#64748b;margin:8px 0 12px">Pick a link to see which videos drove clicks to it. Click a video to open it.</div>`;
       h += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px">`;
       h += `<button class="ytv-tab active" onclick="_ytShowDest('All',this)">All links <b>${allTotal.size}</b></button>`;
       for (const d of DESTS) h += `<button class="ytv-tab" onclick="_ytShowDest('${slug(d)}',this)">${esc(d)} <b>${linkTot[d] ? linkTot[d].size : 0}</b></button>`;
