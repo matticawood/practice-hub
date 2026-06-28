@@ -87,6 +87,8 @@ Deno.serve(async (req) => {
           title: it.snippet?.title || "",
           publishedAt: it.snippet?.publishedAt || "",
           views: parseInt(it.statistics?.viewCount || "0", 10),
+          likes: parseInt(it.statistics?.likeCount || "0", 10),
+          comments: parseInt(it.statistics?.commentCount || "0", 10),
           durationSec: d,
           isShort: d > 0 && d <= 60,   // heuristic: <=60s is a Short
           thumb: (th.high || th.medium || th.default || {}).url || "",
@@ -107,7 +109,7 @@ Deno.serve(async (req) => {
       top: longs.slice(0, 24),          // top long-form (with thumbnails) for grounding + thumbnail analysis
       topShorts: shorts.slice(0, 12),   // top shorts
       recent: vids.slice().sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1)).slice(0, 20),
-      all: vids.map(v => ({ title: v.title, views: v.views, date: (v.publishedAt || "").slice(0, 10), sec: v.durationSec, short: v.isShort })),
+      all: vids.map(v => ({ videoId: v.videoId, title: v.title, views: v.views, likes: v.likes, comments: v.comments, date: (v.publishedAt || "").slice(0, 10), sec: v.durationSec, short: v.isShort })),
     });
   } catch (e) {
     return jsonRes(502, { error: String((e as Error).message || e) });

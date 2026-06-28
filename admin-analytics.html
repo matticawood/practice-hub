@@ -914,7 +914,7 @@ async function renderAcquisition() {
         const conv = convPerVideo[content] || 0;
         h += `<div style="font-size:.85rem">
           <div style="display:flex;align-items:center;gap:10px">
-            <a href="https://youtu.be/${esc(content)}" target="_blank" rel="noopener" style="flex:0 0 120px;color:#60a5fa;text-decoration:none;font-family:monospace;font-size:.76rem" title="open video">${esc(content)} ↗</a>
+            <a href="https://youtu.be/${esc(content)}" target="_blank" rel="noopener" class="yt-vtitle" data-vid="${esc(content)}" style="flex:0 0 230px;color:#60a5fa;text-decoration:none;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(content)}">${esc(content)} ↗</a>
             <div style="flex:1;background:#0d1525;border-radius:6px;overflow:hidden;height:18px"><div style="width:${w}%;height:100%;background:linear-gradient(90deg,#f5c518,#caa413)"></div></div>
             <div style="flex:0 0 50px;text-align:right;color:#f5c518;font-weight:700">${total}</div>
             <div style="flex:0 0 70px;text-align:right;color:#4ade80" title="conversions traced to this video">${conv} conv</div>
@@ -968,6 +968,23 @@ async function renderAcquisition() {
   h += `</div><div style="display:flex;justify-content:space-between;font-size:.68rem;color:#64748b;margin-bottom:28px"><span>${days[0][0]}</span><span>${days[days.length-1][0]}</span></div>`;
 
   el.insertAdjacentHTML("beforeend", h);
+
+  // Resolve YouTube video ids -> titles (owner-only yt-channel fn; server-side key, cached).
+  // Progressive: the panel already rendered with ids, swap in titles once they load.
+  (async () => {
+    const links = el.querySelectorAll("a.yt-vtitle[data-vid]");
+    if (!links.length) return;
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/yt-channel`, {
+        headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${session.access_token}` },
+      });
+      const j = await r.json();
+      const map = {};
+      for (const arr of [j.all, j.top, j.recent, j.topShorts]) for (const v of (arr || [])) if (v && v.videoId && v.title) map[v.videoId] = v.title;
+      links.forEach(a => { const t = map[a.getAttribute("data-vid")]; if (t) { a.textContent = t + " ↗"; a.title = t; } });
+    } catch (e) { /* leave ids if titles can't load */ }
+  })();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
