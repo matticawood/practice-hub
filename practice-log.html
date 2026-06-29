@@ -8716,38 +8716,7 @@ async function loadData() {
     }
   } catch (e) { /* timezone persist is best-effort, never block load */ }
 
-  // Merge in per-session focus ratings (get_my_sessions doesn't return them yet),
-  // so the focus-quality insights have data to work with.
-  if (allSessions.length && allSessions[0].focus_rating === undefined) {
-    try {
-      const { data: frRows } = await db.from("practice_sessions")
-        .select("id, focus_rating").eq("email", viewingEmail).not("focus_rating", "is", null);
-      if (frRows && frRows.length) {
-        const fm = new Map(frRows.map(r => [r.id, r.focus_rating]));
-        allSessions.forEach(s => { if (fm.has(s.id)) s.focus_rating = fm.get(s.id); });
-      }
-    } catch (e) { /* focus insights simply won't fire */ }
-  }
-
-  // Trainer scores (Note/Chord Recognition, Passage Fixer) + collection status,
-  // for the competence-progress and finish-a-piece insights.
-  try {
-    const [nr, cr, pg, uc] = await Promise.all([
-      db.from("note_game_scores").select("score, created_at").eq("email", viewingEmail),
-      db.from("chord_game_scores").select("score, created_at").eq("email", viewingEmail),
-      db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
-      db.from("user_collections").select("status, created_at").eq("email", viewingEmail)
-    ]);
-    const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
-    _insightTrainers = {
-      note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at })),
-      chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at })),
-      passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at }))
-    };
-    _insightCollections = uc.data || [];
-  } catch (e) { _insightTrainers = null; _insightCollections = null; }
-
-  // Pre-fetch piece titles for any practice items linked to a library piece
+  // ── CORE (needed before first paint): piece titles for session names ──
   const linkedIds = [...new Set(
     allSessions.flatMap(s => s.practice_items || [])
       .map(i => i.piece_id).filter(Boolean)
@@ -8759,47 +8728,79 @@ async function loadData() {
     linkedPiecesMap = {};
   }
 
-  // Load extra data for reading/library/game achievements (parallel, non-blocking)
-  await loadAchievementExtras();
-
-  // NOTE: previously we auto-applied streak saves here proactively on every
-  // page load. That created bogus saves on days the user later backdated a
-  // session to (race: save lands → user logs yesterday → both rows for that
-  // date). Removed. Saves are now applied only when the user actually logs a
-  // new session (saveSession bridges the gap), or when the admin explicitly
-  // clicks "Apply saves" for a student. The trigger
-  // trg_clear_streak_save_on_session catches any remaining edge cases.
-
-  // Show admin "Apply saves" button when viewing a student who has saves available
+  // Admin-only buttons (no fetch, cheap).
   const adminSavesBtn = document.getElementById("admin-apply-saves-btn");
   if (adminSavesBtn) {
     adminSavesBtn.style.display =
       (isOwner() && viewingEmail !== myEmail && (streakData?.balance ?? 0) > 0) ? "" : "none";
   }
-
-  // Show admin "Billing" test button when viewing another user
   const adminBillingBtn = document.getElementById("admin-test-billing-btn");
   if (adminBillingBtn) {
     adminBillingBtn.style.display = (isOwner() && viewingEmail !== myEmail) ? "" : "none";
   }
 
-  // Load which sessions this user has already shared to the community
-  if (viewingEmail === myEmail) {
-    const { data: sharedPosts } = await db.from("community_posts")
-      .select("session_id")
-      .eq("email", myEmail)
-      .eq("type", "practice_log")
-      .not("session_id", "is", null);
-    _sharedSessionIds = new Set((sharedPosts || []).map(p => p.session_id));
-  }
-
+  // ── PAINT NOW ── the dashboard only needs sessions + tokens + piece titles.
+  // Everything below (insights, badges, share-icons) belongs to other tabs and
+  // used to block this first paint for ~4 extra round-trips. It now streams in
+  // the background and re-renders whatever is on screen when it lands.
   switchMainLbTab('dashboard');
   renderSessions(true);
   renderLeaderboard();
   loadWeeklyGoal();
   loadPieceGoals();
-  // Silently check if any requested pieces have since been added to the library
   syncRequestedPieces();
+
+  // ── SECONDARY data in the background (best-effort, never blocks the paint) ──
+  (async () => {
+    // Per-session focus ratings (focus-quality insights + session cards).
+    try {
+      if (allSessions.length && allSessions[0].focus_rating === undefined) {
+        const { data: frRows } = await db.from("practice_sessions")
+          .select("id, focus_rating").eq("email", viewingEmail).not("focus_rating", "is", null);
+        if (frRows && frRows.length) {
+          const fm = new Map(frRows.map(r => [r.id, r.focus_rating]));
+          allSessions.forEach(s => { if (fm.has(s.id)) s.focus_rating = fm.get(s.id); });
+        }
+      }
+    } catch (e) { /* focus insights simply won't fire */ }
+
+    // Trainer scores + collection status (competence / finish-a-piece insights).
+    try {
+      const [nr, cr, pg, uc] = await Promise.all([
+        db.from("note_game_scores").select("score, created_at").eq("email", viewingEmail),
+        db.from("chord_game_scores").select("score, created_at").eq("email", viewingEmail),
+        db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
+        db.from("user_collections").select("status, created_at").eq("email", viewingEmail)
+      ]);
+      const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
+      _insightTrainers = {
+        note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at })),
+        chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at })),
+        passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at }))
+      };
+      _insightCollections = uc.data || [];
+    } catch (e) { _insightTrainers = null; _insightCollections = null; }
+
+    // Reading/library/game achievement extras (Badges tab).
+    try { await loadAchievementExtras(); } catch (e) { /* badges fill in later */ }
+
+    // Which sessions are already shared to the community (share icon).
+    try {
+      if (viewingEmail === myEmail) {
+        const { data: sharedPosts } = await db.from("community_posts")
+          .select("session_id").eq("email", myEmail).eq("type", "practice_log").not("session_id", "is", null);
+        _sharedSessionIds = new Set((sharedPosts || []).map(p => p.session_id));
+      }
+    } catch (e) { /* share icons fill in later */ }
+
+    // Refresh anything already on screen that uses the secondary data.
+    try { renderSessions(true); } catch (e) {}
+    try {
+      const act = document.querySelector('.msn-item.active')?.dataset.msnVal;
+      if (act === 'stats') renderStats();
+      else if (act === 'achievements') renderAchievements();
+    } catch (e) {}
+  })();
 }
 
 // ── Auto-link requested pieces once they're in the library ───────
