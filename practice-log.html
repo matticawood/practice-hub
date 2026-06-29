@@ -8095,6 +8095,7 @@
   </div>
 </div>
 
+<script src="/shared-streak.js?v=1"></script>
 <script src="/shared-achievements.js?v=6"></script>
 <script>
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -8675,67 +8676,16 @@ window.adminApplyStreakSaves = async function() {
 };
 
 async function autoApplyStreakSaves(adminOverride = false) {
+  // Streak saves are applied server-side by the canonical replay (hourly cron +
+  // on every session save). This now just triggers an immediate recompute for the
+  // viewed member and refreshes the local copy — no client-side token maths.
   if (!adminOverride && viewingEmail !== myEmail) return;
-  if (!streakData || (streakData.balance ?? 0) <= 0) return;
-
-  const sessionDates = new Set(allSessions.map(s => s.session_date));
-  let savedDates = new Set(streakData.saved_dates || []);
-  let balance = streakData.balance ?? 0;
-
-  const today = new Date();
-
-  // Don't apply saves if today is already covered — no gap yet
-  if (sessionDates.has(toDateStr(today)) || savedDates.has(toDateStr(today))) return;
-
-  // Find most recent real session date — only bridge between there and yesterday
-  const sortedSessions = [...sessionDates].sort();
-  if (!sortedSessions.length) return;
-  const mostRecentSession = sortedSessions[sortedSessions.length - 1];
-
-  // Calculate streak before bridging to detect milestone crossings
-  const allDatesBeforeBridge = new Set([...sessionDates, ...savedDates]);
-  const oldStreak = calculateStreak([...sessionDates], [...savedDates]);
-
-  let changed = false;
-  let d = new Date(today);
-  d.setDate(d.getDate() - 1); // start at yesterday
-
-  // Only walk back as far as the most recent real session
-  while (balance > 0 && toDateStr(d) > mostRecentSession) {
-    const ds = toDateStr(d);
-    if (!savedDates.has(ds)) {
-      savedDates.add(ds);
-      balance = Math.max(0, balance - 1);
-      changed = true;
-    }
-    d.setDate(d.getDate() - 1);
-  }
-
-  if (!changed) return;
-
-  // Award milestone tokens for any 5-day boundaries crossed by the bridging
-  const MAX_SAVES = 15;
-  const newStreak = calculateStreak([...sessionDates], [...savedDates]);
-  const milestonesGained = Math.floor(newStreak / 5) - Math.floor(oldStreak / 5);
-  let totalEarned = streakData.total_earned ?? 0;
-  if (milestonesGained > 0 && balance < MAX_SAVES) {
-    const tokensToAward = Math.min(milestonesGained, MAX_SAVES - balance);
-    balance = Math.min(balance + tokensToAward, MAX_SAVES);
-    totalEarned += tokensToAward;
-  }
-
-  const prevBalance = streakData.balance ?? 0;
-  const { error } = await db.from("streak_tokens").upsert({
-    email: viewingEmail,
-    balance,
-    total_earned: totalEarned,
-    saved_dates: [...savedDates],
-    updated_at: new Date().toISOString()
-  }, { onConflict: "email" });
-
-  if (!error) {
-    streakData = { ...streakData, balance, total_earned: totalEarned, saved_dates: [...savedDates], _prevBalance: prevBalance };
-  }
+  const prevBalance = streakData?.balance ?? 0;
+  try {
+    await db.rpc("recompute_streak_tokens", { p_email: viewingEmail });
+    const { data } = await db.from("streak_tokens").select("*").eq("email", viewingEmail).maybeSingle();
+    if (data) streakData = { ...data, _prevBalance: prevBalance };
+  } catch (e) { console.warn("recompute failed:", e?.message); }
 }
 
 async function loadData() {
@@ -8754,6 +8704,15 @@ async function loadData() {
 
   allSessions = (sessionsResult.data || []);
   streakData = streakResult.data;
+
+  // Persist the member's timezone (once / on change) so the server's end-of-day
+  // auto-apply uses their real local midnight. Table is server-written, so via RPC.
+  if (viewingEmail === myEmail && window.StreakCalc) {
+    const _tz = StreakCalc.captureTimezone();
+    if (_tz && _tz !== (streakData?.timezone)) {
+      db.rpc("set_my_timezone", { p_tz: _tz }).catch(() => {});
+    }
+  }
 
   // Merge in per-session focus ratings (get_my_sessions doesn't return them yet),
   // so the focus-quality insights have data to work with.
@@ -12383,10 +12342,14 @@ function renderMonthlyChart() {
 
 function renderStats() {
   const sessionDates = allSessions.map(s => s.session_date);
-  const savedDates = streakData?.saved_dates || [];
 
-  const streak = calculateStreak(sessionDates, savedDates);
-  const balance = streakData?.balance || 0;
+  // Single source of truth: the same replay the server uses (shared-streak.js),
+  // computed live here so the number is always current. Falls back to the stored
+  // streak_tokens row if the module hasn't loaded.
+  const _tz = (streakData?.timezone) || (window.StreakCalc ? StreakCalc.captureTimezone() : "UTC");
+  const _d  = window.StreakCalc ? StreakCalc.deriveStreakState(sessionDates, _tz) : null;
+  const streak  = _d ? _d.current_streak : (streakData?.current_streak || 0);
+  const balance = _d ? _d.balance        : (streakData?.balance || 0);
 
   document.getElementById("stat-streak").textContent = streak === 0 ? "0 days" : `${streak} day${streak !== 1 ? "s" : ""}`;
   const MAX_SAVES = 15;
@@ -18887,42 +18850,10 @@ async function saveSession() {
   saveBtn.classList.add("btn-saving");
 
   try {
-    // ── Streak token logic ────────────────────────────────────────
-    const existingDates = allSessions.map(s => s.session_date);
-    const savedDates = streakData?.saved_dates || [];
-    const oldStreak = calculateStreak(existingDates, savedDates);
-
-    let newSavedDates = [...savedDates];
-    let newBalance = streakData?.balance ?? 0;
-    let newTotalEarned = streakData?.total_earned ?? 0;
-
-    // Check if we should auto-burn a streak save
-    // Only for NEW sessions (not editing), and only if we're not already saved
-    if (!editingSessionId) {
-      const today = new Date();
-      const todayS = toDateStr(today);
-      const yesterdayD = new Date(today);
-      yesterdayD.setDate(yesterdayD.getDate() - 1);
-      const yesterdayS = toDateStr(yesterdayD);
-      const dayBeforeD = new Date(today);
-      dayBeforeD.setDate(dayBeforeD.getDate() - 2);
-      const dayBeforeS = toDateStr(dayBeforeD);
-
-      // Gap bridging: if new session is today, yesterday is missing from all dates, but day before is present
-      const allExistingDates = new Set([...existingDates, ...savedDates]);
-      const isLoggingToday = dateVal === todayS;
-      const yesterdayMissing = !allExistingDates.has(yesterdayS);
-      const dayBeforePresent = allExistingDates.has(dayBeforeS);
-
-      if (isLoggingToday && yesterdayMissing && dayBeforePresent && newBalance > 0) {
-        // Auto-save yesterday
-        newSavedDates = [...new Set([...newSavedDates, yesterdayS])];
-        newBalance = Math.max(0, newBalance - 1);
-      }
-    }
-
+    // ── Session insert / update ───────────────────────────────────
     let savedSessionId = editingSessionId || null;
     let _saveStreak = 0; // current streak after this save (for the success moment)
+    const _prevBalance = streakData?.balance ?? 0;
 
     if (editingSessionId) {
       // Update existing session
@@ -18952,34 +18883,25 @@ async function saveSession() {
           .insert(itemDataList.map(item => ({ ...item, session_id: newSession.id })));
         if (itemErr) throw itemErr;
       }
+    }
 
-      // Calculate old and new streak to detect genuine milestone crossings
-      const oldStreak  = calculateStreak(existingDates, newSavedDates);
-      const newAllDates = [...existingDates, dateVal];
-      const newStreak  = calculateStreak(newAllDates, newSavedDates);
-      _saveStreak = newStreak;
-
-      // Check for token earn: only when the streak genuinely crosses a new 5-day milestone
-      const MAX_SAVES = 15;
-      if (newStreak > 0 && Math.floor(newStreak / 5) > Math.floor(oldStreak / 5)) {
-        if (newBalance < MAX_SAVES) {
-          newBalance++;
-          newTotalEarned++;
-          showToast(`Streak milestone! You've earned a streak save token (${newBalance} / ${MAX_SAVES})`, 5000);
-        } else {
-          showToast(`Streak milestone reached — save tokens at maximum (${MAX_SAVES})!`, 5000);
+    // ── Streak + saves: recompute authoritatively on the server ────
+    // Single source of truth is the SQL replay (recompute_streak_tokens),
+    // mirrored by shared-streak.js. No client-side token maths — that drift
+    // (stale snapshots, double-counting) was the recurring over-award bug.
+    try {
+      const _tz = (streakData?.timezone) || (window.StreakCalc ? StreakCalc.captureTimezone() : "UTC");
+      const _dates = [...new Set([...allSessions.map(s => s.session_date), dateVal])];
+      if (window.StreakCalc) _saveStreak = StreakCalc.deriveStreakState(_dates, _tz).current_streak;
+      await db.rpc("recompute_streak_tokens", { p_email: myEmail });
+      const { data: freshTok } = await db.from("streak_tokens").select("*").eq("email", myEmail).maybeSingle();
+      if (freshTok) {
+        streakData = freshTok;
+        if (!editingSessionId && (freshTok.balance ?? 0) > _prevBalance) {
+          showToast(`Streak milestone! You've earned a streak save token (${freshTok.balance} / 15)`, 5000);
         }
       }
-
-      // Upsert streak tokens
-      await db.from("streak_tokens").upsert({
-        email: myEmail,
-        balance: newBalance,
-        total_earned: newTotalEarned,
-        saved_dates: newSavedDates,
-        updated_at: new Date().toISOString()
-      }, { onConflict: "email" });
-    }
+    } catch (e) { console.warn("streak recompute failed:", e?.message); }
 
     // Saving a practice is a definitive "I'm here right now" signal — refresh
     // presence immediately so the admin's "who's online" reflects real activity,
