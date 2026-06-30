@@ -51,9 +51,13 @@
     if (!force && (seen || (typeof opts.when === "function" && !opts.when()))) return;
     var first = (opts.steps && opts.steps[0] && opts.steps[0].sel) || null;
     var tries = 0;
+    function _vis(el) { if (!el) return false; var r = el.getBoundingClientRect(); return !!(r.width || r.height); }
     (function wait() {
       if (document.getElementById("sh-welcome-backdrop")) { setTimeout(wait, 600); return; }
-      if (!first || document.querySelector(first)) { window.startSpotlightTour(Object.assign({}, opts, { force: force })); return; }
+      // Wait until the first target is actually visible (non-zero box), not just
+      // present in the DOM — some targets (e.g. the Key Explorer SVG) exist in the
+      // markup before their panel is opened and drawn.
+      if (!first || _vis(document.querySelector(first))) { window.startSpotlightTour(Object.assign({}, opts, { force: force })); return; }
       if (tries++ < 40) setTimeout(wait, 250);
     })();
   };
