@@ -11930,30 +11930,37 @@ function _pathTour(force) {
     { sel: "#journey-card .rg-recs",     title: "My picks for you",          text: "A few pieces I recommend at your level. Tap one to open it in the library." },
     { sel: "#log-fab",                   title: "The one habit that matters", text: "Log your practice here. It is what fills everything in and carries you forward.", openLog: true },
   ];
-  const steps = RAW.map(s => Object.assign({}, s, { el: document.querySelector(s.sel) }))
-    .filter(s => s.el && s.el.offsetParent !== null);
-  if (!steps.length) return;
+  // Keep SELECTORS only and re-query each step: the card re-renders when its
+  // background data lands (detaching captured nodes) and Matt's picks appear late.
+  const STEPS = RAW;
   let i = 0;
   const mk = (id, cls) => { const d = document.createElement("div"); d.id = id; d.className = cls; document.body.appendChild(d); return d; };
   const mask = mk("rg-tour-mask", "rg-tour-mask");
   const spot = mk("rg-tour-spot", "rg-tour-spot");
   const pop  = mk("rg-tour-pop", "rg-tour-pop");
   mask.addEventListener("click", e => e.stopPropagation());
+  const cur = () => (i < STEPS.length ? document.querySelector(STEPS[i].sel) : null);
 
   function place() {
-    const r = steps[i].el.getBoundingClientRect(), pad = 8;
+    const elx = cur(); if (!elx) return;
+    const r = elx.getBoundingClientRect();
+    if (!r.width && !r.height) return;                 // detached / hidden right now
+    const pad = 8;
     spot.style.left = (r.left - pad) + "px"; spot.style.top = (r.top - pad) + "px";
     spot.style.width = (r.width + pad * 2) + "px"; spot.style.height = (r.height + pad * 2) + "px";
+    spot.style.opacity = "1";
     const ph = pop.offsetHeight, pw = pop.offsetWidth, vh = window.innerHeight, vw = window.innerWidth;
     const top = (r.bottom + 12 + ph < vh - 8) ? r.bottom + 12 : Math.max(8, r.top - ph - 12);
     const left = Math.min(Math.max(8, r.left), vw - pw - 8);
     pop.style.top = top + "px"; pop.style.left = left + "px"; pop.style.opacity = "1";
   }
   function render() {
-    const s = steps[i], last = i === steps.length - 1;
-    pop.style.opacity = "0";
+    while (i < STEPS.length && !document.querySelector(STEPS[i].sel)) i++;   // skip targets not on the page
+    if (i >= STEPS.length) { end(); return; }
+    const s = STEPS[i], last = i === STEPS.length - 1;
+    pop.style.opacity = "0"; spot.style.opacity = "0";
     pop.innerHTML = `<h4>${escHtml(s.title)}</h4><p>${escHtml(s.text)}</p>
-      <div class="rg-tour-foot"><span class="rg-tour-dots">${i + 1} / ${steps.length}</span>
+      <div class="rg-tour-foot"><span class="rg-tour-dots">${i + 1} / ${STEPS.length}</span>
       <div class="rg-tour-btns"><button type="button" class="rg-tour-skip">Skip</button>
       <button type="button" class="rg-tour-next">${last ? (s.openLog ? "Log my practice" : "Done") : "Next"}</button></div></div>`;
     pop.querySelector(".rg-tour-skip").onclick = end;
@@ -11961,11 +11968,16 @@ function _pathTour(force) {
       if (last) { const ol = s.openLog; end(); if (ol && typeof openWizard === "function") openWizard(); return; }
       i++; render();
     };
-    try { s.el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {}
-    setTimeout(place, 340);
+    try { cur().scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {}
+    setTimeout(place, 360);
   }
   function onResize() { place(); }
+  // Re-position if the card re-renders (background data) while the tour is open.
+  const card = document.getElementById("journey-card");
+  const obs = card ? new MutationObserver(() => place()) : null;
+  if (obs) obs.observe(card, { childList: true, subtree: true });
   function end() {
+    if (obs) obs.disconnect();
     window.removeEventListener("resize", onResize);
     mask.remove(); spot.remove(); pop.remove();
     if (!force) { try { localStorage.setItem("rm_path_tour_v1", "1"); } catch (e) {} }
