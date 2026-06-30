@@ -210,6 +210,16 @@
     .rg-roll-head { font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
       margin: 9px 2px 2px; padding-top: 10px; border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
     .rg-card .jc-jars { margin-top: 14px; }
+    /* Matt's piece picks — recommendation cards that link into the library. */
+    .rg-recs { margin-top: 14px; padding-top: 13px; border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+    .rg-recs-head { font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; color: #c8860a; margin-bottom: 8px; }
+    .rg-recs-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+    .rg-rec { display: flex; flex-direction: column; gap: 2px; padding: 9px 11px; border-radius: 11px; text-decoration: none; color: inherit;
+      background: color-mix(in srgb, var(--accent, #8b5cf6) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+      transition: transform .14s ease, border-color .14s ease; }
+    .rg-rec:hover { transform: translateY(-1px); border-color: color-mix(in srgb, #8b5cf6 45%, var(--border)); }
+    .rg-rec-t { font-size: .78rem; font-weight: 700; color: var(--text); line-height: 1.25; }
+    .rg-rec-c { font-size: .68rem; font-weight: 500; color: var(--text-muted); line-height: 1.2; }
     /* Wide layout: a single horizontal band — trophy | stage+bar (flex) | jars
        grouped right — so the width is used rather than stretched thin. Switches at
        1101px, the same point the dashboard's content cards go multi-column (the
@@ -8857,14 +8867,15 @@ async function loadData() {
 
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
-      const [nr, cr, pg, er, uc, thL, thP] = await Promise.all([
+      const [nr, cr, pg, er, uc, thL, thP, ap] = await Promise.all([
         db.from("note_game_scores").select("score, created_at, clef, accidentals, key_signature").eq("email", viewingEmail),
         db.from("chord_game_scores").select("score, created_at, tier, mode, key_signature").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
         db.from("ear_game_scores").select("score, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
-        db.from("user_collections").select("status, created_at, pieces(difficulty)").eq("email", viewingEmail),
+        db.from("user_collections").select("status, created_at, piece_id, pieces(difficulty)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, status").eq("course", "theory"),
-        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true)
+        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true),
+        db.from("pieces").select("id, title, composer, difficulty, kind")
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
@@ -8874,10 +8885,16 @@ async function loadData() {
         ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type, key_signature: r.key_signature }))
       };
       _insightCollections = uc.data || [];
-      // Completed-piece difficulty tiers, for "learn N pieces at tier X" goals.
+      // Completed-piece tiers (for "learn N pieces"), all-collection tiers (for "add a
+      // piece to your learning"), and the set of piece_ids the member already has.
       _goalPieceTiers = (uc.data || [])
         .filter(r => r.status === "completed" && r.pieces && r.pieces.difficulty != null)
         .map(r => r.pieces.difficulty);
+      _goalCollectionTiers = (uc.data || [])
+        .filter(r => r.pieces && r.pieces.difficulty != null)
+        .map(r => r.pieces.difficulty);
+      _goalCollectionIds = new Set((uc.data || []).map(r => r.piece_id).filter(Boolean));
+      _goalAllPieces = ap.data || [];
       // Theory completion per level (published lessons only): begin = >=1 done; complete = all done.
       const lv = {}, totals = {}, done = {};
       (thL.data || []).forEach(l => {
@@ -8887,7 +8904,7 @@ async function loadData() {
       (thP.data || []).forEach(p => { const L = lv[p.lesson_id]; if (L != null) done[L] = (done[L] || 0) + 1; });
       _goalTheory = { totals, done };
       _pathTheoryStarted = Object.values(done).some(n => n > 0);
-    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; }
+    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _goalCollectionTiers = null; _goalCollectionIds = null; _goalAllPieces = null; }
 
     // Reading/library/game achievement extras (Badges tab).
     try { await loadAchievementExtras(); } catch (e) { /* badges fill in later */ }
@@ -11519,7 +11536,9 @@ function _renderJourneyCard() {
         return (g.match && g.match.keys)
           ? keysHit(g).length >= g.match.keys.length      // a score at target in EVERY prescribed key
           : bestMatch(g.type, g.match) >= g.target;
-      case "piece": return pieces(g.tier) >= g.count;
+      case "piece": return (g.mode === "added"
+        ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length
+        : pieces(g.tier)) >= g.count;
       case "theory": return g.mode === "complete" ? thDone(g.level) : thBegin(g.level);
       case "self":  return selfDone(g.key);
       default: return false;
@@ -11582,6 +11601,24 @@ function _renderJourneyCard() {
     </div>`;
   }).join("");
 
+  // ── Matt's piece picks for this level — a few library pieces at the stage's
+  // difficulty the member doesn't already have, linking straight into the library.
+  // As pieces are added/finished they drop out and the next ones surface.
+  let recsHtml = "";
+  if (_goalAllPieces && _goalAllPieces.length) {
+    const have = _goalCollectionIds || new Set();
+    const recs = _goalAllPieces
+      .filter(p => p.kind === "piece" && p.difficulty === stage.tier && !have.has(p.id))
+      .slice(0, 3);
+    if (recs.length) {
+      const cards = recs.map(p => `<a class="rg-rec" href="/resources.html?piece=${encodeURIComponent(p.id)}">
+        <span class="rg-rec-t">${escHtml(p.title || "Untitled")}</span>
+        <span class="rg-rec-c">${escHtml(p.composer || "")}</span>
+      </a>`).join("");
+      recsHtml = `<div class="rg-recs"><div class="rg-recs-head">Matt's picks for this level</div><div class="rg-recs-row">${cards}</div></div>`;
+    }
+  }
+
   el.innerHTML = `<div class="path-card rg-card">
     <a class="rg-head" href="/practice-log.html?goto=roadmap" aria-label="Open your roadmap">
       <div class="jc-trophy${isNew ? " jc-trophy--veiled" : ""}" style="--trophy:url('${trophy}')"><img src="${trophy}" alt="" draggable="false"></div>
@@ -11596,6 +11633,7 @@ function _renderJourneyCard() {
     <div class="rg-sub">By the end of ${escHtml(stage.name)}, you can&hellip; <strong>${doneCount}/${goals.length}</strong></div>
     <div class="rg-goals">${goalRows}${rolled.length ? `<div class="rg-roll-head">Still to catch up from earlier</div>${rolledRows}` : ""}</div>
     <div class="jc-jars">${jars}</div>
+    ${recsHtml}
   </div>`;
 }
 function renderStatsHero() {
@@ -11779,6 +11817,9 @@ function _emojiToSvg(e, size = 15) {
 let _insightTrainers = null, _insightCollections = null; // loaded in loadData
 let _pathTheoryStarted = false; // has the member completed any theory lesson
 let _goalPieceTiers = null;     // difficulties of the member's completed pieces (roadmap goals)
+let _goalCollectionTiers = null;// difficulties of every piece in the collection (any status)
+let _goalCollectionIds = null;  // Set of piece_ids already in the member's collection
+let _goalAllPieces = null;      // library pieces (id,title,composer,difficulty,kind) for recs
 let _goalTheory = null;         // { totals:{level:n}, done:{level:n} } published theory lessons
 // Self-check roadmap objectives (scales, ear/improv) the member ticks themselves.
 // PLACEHOLDER persistence: localStorage. Phase 2 moves these to a DB column so they
@@ -21987,7 +22028,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
-<script src="/roadmap-levels.js?v=7"></script>
+<script src="/roadmap-levels.js?v=8"></script>
 
 <script>
   if ('serviceWorker' in navigator) {

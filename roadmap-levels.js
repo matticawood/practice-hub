@@ -152,8 +152,8 @@
       { icon: "days",   group: "days",   label: "Reach 100 days of practice", type: "days", target: 100 },
       { icon: "scales", group: "scales", label: "C, G, D and F major with tonic triads and arpeggios", type: "self", key: "s2-scales" },
       { icon: "note",   group: "note",   label: "Score 12 in Note Recognition in each of C, G, D and F major", type: "note", target: 12, match: { keys: ["C", "G", "D", "F"] } },
-      { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition (triads within a key)", type: "chord", target: 10, match: { tier: 1 } },
-      { icon: "ear",    group: "ear",    label: "Score 15 in the Ear Training tool (major versus minor)", type: "ear", target: 15, match: { set: "major_minor" } },
+      { icon: "chord",  group: "chord",  label: "Score 8 in Chord Recognition in each of C, G, D and F (triads in the key)", type: "chord", target: 8, match: { keys: ["C", "G", "D", "F"], tier: 1 } },
+      { icon: "ear",    group: "ear",    label: "Score 10 in the Ear Training tool in each of C, G, D and F (major versus minor)", type: "ear", target: 10, match: { keys: ["C", "G", "D", "F"], set: "major_minor" } },
       { icon: "improv", group: "improv", label: "Spend 3 hours improvising, starting with simple triads and a melody", type: "hours", category: "improvisation", target: 3 },
       { icon: "theory", group: "theory", label: "Complete Theory Level 1", type: "theory", level: 1, mode: "complete" },
       { icon: "piece",  group: "piece",  label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 }
@@ -189,7 +189,7 @@
     ],
     [ // 7 Performer
       { icon: "perform", group: "perform", label: "Prepare and perform a balanced Advanced programme", type: "self", key: "s7-prog" },
-      { icon: "piece",   group: "piece",   label: "Begin reaching into Expert repertoire", type: "piece", tier: 5, count: 1 }
+      { icon: "piece",   group: "piece",   label: "Add an Expert piece into your learning", type: "piece", tier: 5, count: 1, mode: "added" }
     ],
     [ // 8 Artist
       { icon: "expert", group: "piece", label: "Learn an Expert work and make it your own", type: "self", key: "s8-expert" }
