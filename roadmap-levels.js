@@ -165,7 +165,7 @@
       { icon: "days",   group: "days",   label: "Practice on another 200 days this level", type: "days", target: 200 },
       { icon: "scales", group: "scales", label: "A, B♭ and E♭ major scales", type: "self", key: "s3-scales" },
       { icon: "scales", group: "arps",   label: "A, B♭ and E♭ major arpeggios", type: "self", key: "s3-arps" },
-      { icon: "scales", group: "minors", label: "Begin natural minor scales in A, E and D", type: "self", key: "s3-minors" },
+      { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in A, E and D", type: "self", key: "s3-minors" },
       { icon: "note",   group: "note",   label: "Score 14 in Note Recognition in each of A, B♭ and E♭ major", type: "note", target: 14, match: { keys: ["A", "Bb", "Eb"] } },
       { icon: "chord",  group: "chord",  label: "Score 16 in Chord Recognition (triads and inversions, any key)", type: "chord", target: 16, match: { tier: 2, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 24 in the Ear Training tool (triads: major, minor, diminished, augmented)", type: "ear", target: 24, match: { set: "triads" } },
@@ -176,7 +176,7 @@
     [ // 4 Intermediate
       { icon: "scales", group: "scales", label: "All major scales secure, hands together, two octaves", type: "self", key: "s4-scales" },
       { icon: "scales", group: "arps",   label: "All major arpeggios secure", type: "self", key: "s4-arps" },
-      { icon: "scales", group: "minors", label: "Natural and harmonic minor scales in A, E and D", type: "self", key: "s4-minors" },
+      { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in B, G and C", type: "self", key: "s4-minors" },
       { icon: "note",   group: "note",   label: "Score 46 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 46, match: { clef: "mixed", acc: true } },
       { icon: "chord",  group: "chord",  label: "Score 22 in Chord Recognition (sevenths and inversions, any key)", type: "chord", target: 22, match: { tier: 3, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 30 in the Ear Training tool (sevenths)", type: "ear", target: 30, match: { set: "sevenths" } },
@@ -185,8 +185,8 @@
       { icon: "piece",  group: "piece",  label: "Learn 2 to 3 Lower Intermediate pieces", type: "piece", tier: 2, count: 3 }
     ],
     [ // 5 Confident
-      { icon: "scales", group: "scales", label: "Major and minor scales across more keys, faster and musical", type: "self", key: "s5-scales" },
-      { icon: "scales", group: "arps",   label: "Major and minor arpeggios across more keys", type: "self", key: "s5-arps" },
+      { icon: "scales", group: "scales", label: "All major and minor scales, in every key, faster and musical", type: "self", key: "s5-scales" },
+      { icon: "scales", group: "arps",   label: "All major and minor arpeggios, in every key", type: "self", key: "s5-arps" },
       { icon: "note",   group: "note",   label: "Hold Note Recognition near the top (mixed clef, sharps and flats)", type: "note", target: 48, match: { clef: "mixed", acc: true } },
       { icon: "ear",    group: "ear",    label: "Hold the Ear Training tool near the top (sevenths)", type: "ear", target: 30, match: { set: "sevenths" } },
       { icon: "chord",  group: "chord",  label: "Hold Chord Recognition near the top (sevenths, any key)", type: "chord", target: 24, match: { tier: 3, mode: "free" } },
