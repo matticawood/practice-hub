@@ -142,7 +142,7 @@
   //  type 'self'  → member self-checks it (persisted; placeholder localStorage for now)
   const GOALS = [
     [ // 1 First Steps
-      { icon: "days",   group: "days",   label: "Reach your first 30 days of practice", type: "days", target: 30 },
+      { icon: "days",   group: "days",   label: "Reach your first 50 days of practice", type: "days", target: 50 },
       { icon: "scales", group: "scales", label: "C and G major scales, hands together, two octaves", type: "self", key: "s1-scales" },
       { icon: "note",   group: "note",   label: "Score 10 in Note Recognition in both C and G major", type: "note", target: 10, match: { keys: ["C", "G"] } },
       { icon: "theory", group: "theory", label: "Begin Theory Level 1", type: "theory", level: 1, mode: "begin" },
@@ -150,7 +150,7 @@
       { icon: "piece",  group: "piece",  label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 }
     ],
     [ // 2 Beginner
-      { icon: "days",   group: "days",   label: "Reach 100 days of practice", type: "days", target: 100 },
+      { icon: "days",   group: "days",   label: "Reach 150 days of practice", type: "days", target: 150 },
       { icon: "scales", group: "scales", label: "C, G, D and F major scales, hands together, two octaves", type: "self", key: "s2-scales" },
       { icon: "scales", group: "arps",   label: "C, G, D and F major arpeggios", type: "self", key: "s2-arps" },
       { icon: "note",   group: "note",   label: "Score 12 in Note Recognition in each of C, G, D and F major", type: "note", target: 12, match: { keys: ["C", "G", "D", "F"] } },
@@ -162,7 +162,7 @@
       { icon: "piece",  group: "piece",  label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 }
     ],
     [ // 3 Foundations
-      { icon: "days",   group: "days",   label: "Reach 250 days of practice", type: "days", target: 250 },
+      { icon: "days",   group: "days",   label: "Reach 350 days of practice", type: "days", target: 350 },
       { icon: "scales", group: "scales", label: "A, B♭ and E♭ major scales", type: "self", key: "s3-scales" },
       { icon: "scales", group: "arps",   label: "A, B♭ and E♭ major arpeggios", type: "self", key: "s3-arps" },
       { icon: "scales", group: "minors", label: "Begin natural minor scales in A, E and D", type: "self", key: "s3-minors" },
