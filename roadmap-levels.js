@@ -150,7 +150,7 @@
       { icon: "piece",  group: "piece",  label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 }
     ],
     [ // 2 Beginner
-      { icon: "days",   group: "days",   label: "Practise on another 100 days this level", type: "days", target: 100 },
+      { icon: "days",   group: "days",   label: "Practice on another 100 days this level", type: "days", target: 100 },
       { icon: "scales", group: "scales", label: "C, G, D and F major scales, hands together, two octaves", type: "self", key: "s2-scales" },
       { icon: "scales", group: "arps",   label: "C, G, D and F major arpeggios", type: "self", key: "s2-arps" },
       { icon: "note",   group: "note",   label: "Score 12 in Note Recognition in each of C, G, D and F major", type: "note", target: 12, match: { keys: ["C", "G", "D", "F"] } },
@@ -162,7 +162,7 @@
       { icon: "piece",  group: "piece",  label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 }
     ],
     [ // 3 Foundations
-      { icon: "days",   group: "days",   label: "Practise on another 200 days this level", type: "days", target: 200 },
+      { icon: "days",   group: "days",   label: "Practice on another 200 days this level", type: "days", target: 200 },
       { icon: "scales", group: "scales", label: "A, B♭ and E♭ major scales", type: "self", key: "s3-scales" },
       { icon: "scales", group: "arps",   label: "A, B♭ and E♭ major arpeggios", type: "self", key: "s3-arps" },
       { icon: "scales", group: "minors", label: "Begin natural minor scales in A, E and D", type: "self", key: "s3-minors" },
