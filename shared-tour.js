@@ -45,7 +45,11 @@
   // Waits for the first step's element (and lets a #sh-welcome-backdrop close first).
   window.maybeStartSpotlightTour = function (opts) {
     opts = opts || {};
-    var force = new URLSearchParams(location.search).get("tour") === "1";
+    // ?tour=1 forces the tour. Make it "sticky" for the page session: SPA
+    // navigation between sections rewrites the URL and drops the query param, so
+    // remember it on window once seen, so every section previews as you click.
+    var force = new URLSearchParams(location.search).get("tour") === "1" || window.__shTourForce === true;
+    if (force) window.__shTourForce = true;
     var seen = false;
     try { seen = opts.key && localStorage.getItem(opts.key) === "1"; } catch (e) {}
     if (!force && (seen || (typeof opts.when === "function" && !opts.when()))) return;
