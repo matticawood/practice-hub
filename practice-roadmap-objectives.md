@@ -126,6 +126,14 @@ N logged hours" is meaningless. **External pedagogy benchmarks** were used inste
 (Only mild external note: all 12 major scales mastered ~200-300h, so the 7-major target by
 end of Foundations/350h is, if anything, slightly generous — fine.)
 
+### Game objectives are now PRESCRIPTIVE (difficulty-aware)
+The score tables record the play settings, so each objective prescribes the difficulty and
+only ticks when a score at that setting (or harder) is achieved — "10 in triads in a key" is
+not the same as "22 in sevenths, any key". Difficulty axes: Note `clef` (treble/bass → mixed)
++ `accidentals`; Chord `tier` (1→6, inversions/sevenths) + `mode` (in a key → free/any key);
+Ear `chord_set` (major_minor → triads → sevenths → extensions). The live card labels carry the
+prescribed mode for each level; tune the wording/targets here.
+
 ### Game-score targets (best-score-per-member distribution — absolute skill, hours-independent)
 Front-loaded into the productive Beginner→Foundations bands, then maintained (non-linear pacing):
 Note (**max 50**): First Steps 12 → Beginner 30 → Foundations 40 → Intermediate 46 → maintain ~48.
