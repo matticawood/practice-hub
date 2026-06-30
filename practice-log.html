@@ -204,6 +204,8 @@
     .rg-goal.done .rg-label { color: var(--text-muted); }
     .rg-self-hint { flex-shrink: 0; font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
       color: color-mix(in srgb, #f0a500 80%, var(--text-muted)); opacity: .7; }
+    .rg-keys { flex-shrink: 0; font-size: .62rem; font-weight: 800; padding: 2px 7px; border-radius: 99px;
+      color: #b07c08; background: color-mix(in srgb, #f5c518 18%, transparent); }
     .rg-goal.done .rg-self-hint { display: none; }
     .rg-roll-head { font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
       margin: 9px 2px 2px; padding-top: 10px; border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
@@ -8856,20 +8858,20 @@ async function loadData() {
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
       const [nr, cr, pg, er, uc, thL, thP] = await Promise.all([
-        db.from("note_game_scores").select("score, created_at, clef, accidentals").eq("email", viewingEmail),
-        db.from("chord_game_scores").select("score, created_at, tier, mode").eq("email", viewingEmail),
+        db.from("note_game_scores").select("score, created_at, clef, accidentals, key_signature").eq("email", viewingEmail),
+        db.from("chord_game_scores").select("score, created_at, tier, mode, key_signature").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
-        db.from("ear_game_scores").select("score, created_at, chord_set, answer_type").eq("email", viewingEmail),
+        db.from("ear_game_scores").select("score, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
         db.from("user_collections").select("status, created_at, pieces(difficulty)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, status").eq("course", "theory"),
         db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true)
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
-        note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at, clef: r.clef, accidentals: r.accidentals })),
-        chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at, tier: r.tier, mode: r.mode })),
+        note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at, clef: r.clef, accidentals: r.accidentals, key_signature: r.key_signature })),
+        chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at, tier: r.tier, mode: r.mode, key_signature: r.key_signature })),
         passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at })),
-        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type }))
+        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type, key_signature: r.key_signature }))
       };
       _insightCollections = uc.data || [];
       // Completed-piece difficulty tiers, for "learn N pieces at tier X" goals.
@@ -11501,6 +11503,10 @@ function _renderJourneyCard() {
     return true;
   };
   const bestMatch = (k, mt) => ((_insightTrainers && _insightTrainers[k]) || []).reduce((m, r) => scoreQualifies(k, r, mt) ? Math.max(m, r.v || 0) : m, 0);
+  // Best score achieved while the game was set to a specific key (to "live with" that key).
+  const bestInKey = (k, key, mt) => ((_insightTrainers && _insightTrainers[k]) || []).reduce((m, r) => (r.key_signature === key && scoreQualifies(k, r, mt)) ? Math.max(m, r.v || 0) : m, 0);
+  // How many of a key-set objective's keys are at target (for "2/4 keys" progress).
+  const keysHit = g => (g.match && g.match.keys ? g.match.keys.filter(key => bestInKey(g.type, key, g.match) >= g.target) : []);
   const pieces = tier => (_goalPieceTiers || []).filter(d => d >= tier).length;
   // Hours logged in a practice category (e.g. improvisation), from the practice log.
   const catMins = cat => (allSessions || []).reduce((sum, s) =>
@@ -11512,7 +11518,10 @@ function _renderJourneyCard() {
     switch (g.type) {
       case "days":  return days >= g.target;
       case "hours": return catMins(g.category) / 60 >= g.target;
-      case "note": case "chord": case "ear": return bestMatch(g.type, g.match) >= g.target;
+      case "note": case "chord": case "ear":
+        return (g.match && g.match.keys)
+          ? keysHit(g).length >= g.match.keys.length      // a score at target in EVERY prescribed key
+          : bestMatch(g.type, g.match) >= g.target;
       case "piece": return pieces(g.tier) >= g.count;
       case "theory": return g.mode === "complete" ? thDone(g.level) : thBegin(g.level);
       case "self":  return selfDone(g.key);
@@ -11543,7 +11552,8 @@ function _renderJourneyCard() {
   const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
   const renderGoal = g => {
     const done = goalDone(g);
-    const inner = `<span class="rg-tick">${done ? CHECK : ""}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(g.label)}</span>`;
+    const prog = (g.match && g.match.keys && !done) ? `<span class="rg-keys">${keysHit(g).length}/${g.match.keys.length} keys</span>` : "";
+    const inner = `<span class="rg-tick">${done ? CHECK : ""}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(g.label)}</span>${prog}`;
     return g.type === "self"
       ? `<button type="button" class="rg-goal self${done ? " done" : ""}" onclick="_toggleGoalSelf('${g.key}',event)">${inner}<span class="rg-self-hint">${done ? "" : "tap when done"}</span></button>`
       : `<div class="rg-goal${done ? " done" : ""}">${inner}</div>`;
@@ -21994,7 +22004,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
-<script src="/roadmap-levels.js?v=6"></script>
+<script src="/roadmap-levels.js?v=7"></script>
 
 <script>
   if ('serviceWorker' in navigator) {

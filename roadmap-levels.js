@@ -144,14 +144,14 @@
     [ // 1 First Steps
       { icon: "days",   group: "days",   label: "Reach your first 30 days of practice", type: "days", target: 30 },
       { icon: "scales", group: "scales", label: "Play C and G major, hands together, two octaves", type: "self", key: "s1-scales" },
-      { icon: "note",   group: "note",   label: "Score 12 in Note Recognition (treble clef to start)", type: "note", target: 12 },
+      { icon: "note",   group: "note",   label: "Score 10 in Note Recognition in both C and G major", type: "note", target: 10, match: { keys: ["C", "G"] } },
       { icon: "theory", group: "theory", label: "Begin Theory Level 1", type: "theory", level: 1, mode: "begin" },
       { icon: "piece",  group: "piece",  label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 }
     ],
     [ // 2 Beginner
       { icon: "days",   group: "days",   label: "Reach 100 days of practice", type: "days", target: 100 },
       { icon: "scales", group: "scales", label: "C, G, D and F major with tonic triads and arpeggios", type: "self", key: "s2-scales" },
-      { icon: "note",   group: "note",   label: "Score 30 in Note Recognition (mixed treble and bass clef)", type: "note", target: 30, match: { clef: "mixed" } },
+      { icon: "note",   group: "note",   label: "Score 12 in Note Recognition in each of C, G, D and F major", type: "note", target: 12, match: { keys: ["C", "G", "D", "F"] } },
       { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition (triads within a key)", type: "chord", target: 10, match: { tier: 1 } },
       { icon: "ear",    group: "ear",    label: "Score 15 in the Ear Training tool (major versus minor)", type: "ear", target: 15, match: { set: "major_minor" } },
       { icon: "improv", group: "improv", label: "Spend 3 hours improvising, starting with simple triads and a melody", type: "hours", category: "improvisation", target: 3 },
@@ -161,7 +161,7 @@
     [ // 3 Foundations
       { icon: "days",   group: "days",   label: "Reach 250 days of practice", type: "days", target: 250 },
       { icon: "scales", group: "scales", label: "A, B♭ and E♭ major; begin natural minors A, E, D", type: "self", key: "s3-scales" },
-      { icon: "note",   group: "note",   label: "Score 40 in Note Recognition (mixed clef, with sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
+      { icon: "note",   group: "note",   label: "Score 14 in Note Recognition in each of A, B♭ and E♭ major", type: "note", target: 14, match: { keys: ["A", "Bb", "Eb"] } },
       { icon: "chord",  group: "chord",  label: "Score 16 in Chord Recognition (triads and inversions, any key)", type: "chord", target: 16, match: { tier: 2, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 24 in the Ear Training tool (triads: major, minor, diminished, augmented)", type: "ear", target: 24, match: { set: "triads" } },
       { icon: "theory", group: "theory", label: "Complete Theory Level 2", type: "theory", level: 2, mode: "complete" },
