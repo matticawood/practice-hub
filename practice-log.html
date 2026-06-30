@@ -220,23 +220,7 @@
       transition: border-color .15s ease, color .15s ease, background .15s ease; }
     .rg-baseline:hover { color: #b07c08; border-color: color-mix(in srgb, #f0a500 55%, transparent); background: color-mix(in srgb, #f5c518 10%, transparent); }
     .rg-baseline svg { width: 12px; height: 12px; flex-shrink: 0; }
-    /* First-run spotlight tour: dim everything, light up one element + a callout. */
-    .rg-tour-mask { position: fixed; inset: 0; z-index: 100000; }
-    .rg-tour-spot { position: fixed; z-index: 100001; border-radius: 14px; pointer-events: none;
-      box-shadow: 0 0 0 9999px rgba(20,16,10,.74), 0 0 0 2px rgba(245,197,24,.95); transition: all .28s cubic-bezier(.4,0,.2,1); }
-    .rg-tour-pop { position: fixed; z-index: 100002; max-width: 290px; background: #fff; color: #4a443b; border-radius: 14px;
-      padding: 15px 16px 13px; box-shadow: 0 18px 44px -12px rgba(0,0,0,.55); opacity: 0;
-      transition: top .28s cubic-bezier(.4,0,.2,1), left .28s cubic-bezier(.4,0,.2,1), opacity .2s ease; }
-    .rg-tour-pop h4 { margin: 0 0 5px; font-size: .92rem; font-weight: 800; color: #1a1410; line-height: 1.25; }
-    .rg-tour-pop p { margin: 0; font-size: .8rem; line-height: 1.45; color: #6b6256; }
-    .rg-tour-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 13px; }
-    .rg-tour-dots { font-size: .66rem; font-weight: 700; color: #b0a392; }
-    .rg-tour-btns { display: flex; gap: 7px; }
-    .rg-tour-skip { background: none; border: none; font: inherit; font-size: .72rem; font-weight: 700; color: #8a8275; cursor: pointer; padding: 6px 4px; }
-    .rg-tour-skip:hover { color: #2a2620; }
-    .rg-tour-next { background: linear-gradient(135deg, #f7cb33, #f0a500); color: #2a1d00; border: none; border-radius: 9px;
-      padding: 7px 14px; font: inherit; font-size: .78rem; font-weight: 800; cursor: pointer; }
-    .rg-tour-next:hover { filter: brightness(1.04); }
+    /* (Spotlight tour styles now live in shared-tour.js as .sp-tour-*) */
     /* Matt's piece picks — a horizontal shelf of "book" cards, like the pieces library. */
     .rg-recs { margin-top: 14px; padding-top: 14px; border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
     .rg-recs-head { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
@@ -11917,87 +11901,24 @@ function _toggleGoalSelf(key, e) {
   try { _renderJourneyCard(); } catch (_) {}
 }
 
-// ── First-run guided spotlight tour of the dashboard ───────────────────────
-// Dims the screen, lights up one element at a time with a callout, and steps
-// through the card. Runs once for a brand-new member (or on demand via ?tour=1).
-function _pathTour(force) {
-  if (document.getElementById("rg-tour-mask")) return;
-  const RAW = [
-    { sel: "#journey-card .rg-head",     title: "Your path",                 text: "This shows your current level and how close you are to the next. Tap it any time to open the full roadmap." },
-    { sel: "#journey-card .rg-baseline", title: "Already played before?",    text: "Add your prior practice hours here, so you start at the right level rather than from scratch." },
-    { sel: "#journey-card .rg-goals",    title: "What to work on",           text: "A clear checklist for your level. Most tick off on their own as you practice; tap the dashed ones once you can do them." },
-    { sel: "#journey-card .jc-jars",     title: "Your skill areas",          text: "How you are progressing in each area. Tap any jar to see what it covers and what to focus on." },
-    { sel: "#journey-card .rg-recs",     title: "My picks for you",          text: "A few pieces I recommend at your level. Tap one to open it in the library." },
-    { sel: "#log-fab",                   title: "The one habit that matters", text: "Log your practice here. It is what fills everything in and carries you forward.", openLog: true },
-  ];
-  // Keep SELECTORS only and re-query each step: the card re-renders when its
-  // background data lands (detaching captured nodes) and Matt's picks appear late.
-  const STEPS = RAW;
-  let i = 0;
-  const mk = (id, cls) => { const d = document.createElement("div"); d.id = id; d.className = cls; document.body.appendChild(d); return d; };
-  const mask = mk("rg-tour-mask", "rg-tour-mask");
-  const spot = mk("rg-tour-spot", "rg-tour-spot");
-  const pop  = mk("rg-tour-pop", "rg-tour-pop");
-  mask.addEventListener("click", e => e.stopPropagation());
-  const cur = () => (i < STEPS.length ? document.querySelector(STEPS[i].sel) : null);
-
-  function place() {
-    const elx = cur(); if (!elx) return;
-    const r = elx.getBoundingClientRect();
-    if (!r.width && !r.height) return;                 // detached / hidden right now
-    const pad = 8;
-    spot.style.left = (r.left - pad) + "px"; spot.style.top = (r.top - pad) + "px";
-    spot.style.width = (r.width + pad * 2) + "px"; spot.style.height = (r.height + pad * 2) + "px";
-    spot.style.opacity = "1";
-    const ph = pop.offsetHeight, pw = pop.offsetWidth, vh = window.innerHeight, vw = window.innerWidth;
-    const top = (r.bottom + 12 + ph < vh - 8) ? r.bottom + 12 : Math.max(8, r.top - ph - 12);
-    const left = Math.min(Math.max(8, r.left), vw - pw - 8);
-    pop.style.top = top + "px"; pop.style.left = left + "px"; pop.style.opacity = "1";
-  }
-  function render() {
-    while (i < STEPS.length && !document.querySelector(STEPS[i].sel)) i++;   // skip targets not on the page
-    if (i >= STEPS.length) { end(); return; }
-    const s = STEPS[i], last = i === STEPS.length - 1;
-    pop.style.opacity = "0"; spot.style.opacity = "0";
-    pop.innerHTML = `<h4>${escHtml(s.title)}</h4><p>${escHtml(s.text)}</p>
-      <div class="rg-tour-foot"><span class="rg-tour-dots">${i + 1} / ${STEPS.length}</span>
-      <div class="rg-tour-btns"><button type="button" class="rg-tour-skip">Skip</button>
-      <button type="button" class="rg-tour-next">${last ? (s.openLog ? "Log my practice" : "Done") : "Next"}</button></div></div>`;
-    pop.querySelector(".rg-tour-skip").onclick = end;
-    pop.querySelector(".rg-tour-next").onclick = () => {
-      if (last) { const ol = s.openLog; end(); if (ol && typeof openWizard === "function") openWizard(); return; }
-      i++; render();
-    };
-    try { cur().scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {}
-    setTimeout(place, 360);
-  }
-  function onResize() { place(); }
-  // Re-position if the card re-renders (background data) while the tour is open.
-  const card = document.getElementById("journey-card");
-  const obs = card ? new MutationObserver(() => place()) : null;
-  if (obs) obs.observe(card, { childList: true, subtree: true });
-  function end() {
-    if (obs) obs.disconnect();
-    window.removeEventListener("resize", onResize);
-    mask.remove(); spot.remove(); pop.remove();
-    if (!force) { try { localStorage.setItem("rm_path_tour_v1", "1"); } catch (e) {} }
-  }
-  window.addEventListener("resize", onResize);
-  render();
-}
-// Decide whether to auto-start the tour: brand-new member, not seen before, and
-// not while the welcome modal is still up. ?tour=1 forces it (for previewing).
+// First-run guided spotlight tour of the dashboard — engine lives in shared-tour.js.
+// Runs once for a brand-new member (no logged sessions), or on demand via ?tour=1.
 function _maybeStartPathTour() {
-  const force = new URLSearchParams(location.search).get("tour") === "1";
-  let seen = false; try { seen = localStorage.getItem("rm_path_tour_v1") === "1"; } catch (e) {}
-  const isNew = (typeof allSessions !== "undefined") && (allSessions || []).length === 0;
-  if (!force && (seen || !isNew)) return;
-  let tries = 0;
-  (function wait() {
-    if (document.getElementById("sh-welcome-backdrop")) { setTimeout(wait, 600); return; }   // let the welcome modal go first
-    if (document.querySelector("#journey-card .rg-goals")) { _pathTour(force); return; }
-    if (tries++ < 40) setTimeout(wait, 250);
-  })();
+  if (typeof window.maybeStartSpotlightTour !== "function") return;
+  window.maybeStartSpotlightTour({
+    key: "rm_path_tour_v1",
+    when: () => (typeof allSessions !== "undefined") && (allSessions || []).length === 0,   // new members
+    observe: "#journey-card",
+    steps: [
+      { sel: "#journey-card .rg-head",     title: "Your path",                  text: "This shows your current level and how close you are to the next. Tap it any time to open the full roadmap." },
+      { sel: "#journey-card .rg-baseline", title: "Already played before?",     text: "Add your prior practice hours here, so you start at the right level rather than from scratch." },
+      { sel: "#journey-card .rg-goals",    title: "What to work on",            text: "A clear checklist for your level. Most tick off on their own as you practice; tap the dashed ones once you can do them." },
+      { sel: "#journey-card .jc-jars",     title: "Your skill areas",           text: "How you are progressing in each area. Tap any jar to see what it covers and what to focus on." },
+      { sel: "#journey-card .rg-recs",     title: "My picks for you",           text: "A few pieces I recommend at your level. Tap one to open it in the library." },
+      { sel: "#log-fab",                   title: "The one habit that matters", text: "Log your practice here. It is what fills everything in and carries you forward.",
+        primary: "Log my practice", onPrimary: () => { if (typeof openWizard === "function") openWizard(); } },
+    ],
+  });
 }
 
 function renderInsights() {
@@ -22197,6 +22118,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
+<script src="/shared-tour.js?v=1"></script>
 <script src="/roadmap-levels.js?v=15"></script>
 
 <script>
