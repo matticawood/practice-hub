@@ -86,10 +86,13 @@
       pop.style.top = top + "px"; pop.style.left = left + "px"; pop.style.opacity = "1";
     }
     function render() {
-      // skip steps whose target is missing OR not currently visible (zero layout box)
+      // skip steps whose target is missing OR not currently visible (zero layout
+      // box). Use getBoundingClientRect, not offsetWidth/Height — the latter is
+      // undefined on SVG elements (e.g. the circle-of-fifths), which would wrongly
+      // skip an SVG-targeted step.
       while (i < STEPS.length) {
         var e0 = document.querySelector(STEPS[i].sel);
-        if (e0 && (e0.offsetWidth || e0.offsetHeight)) break;
+        if (e0) { var r0 = e0.getBoundingClientRect(); if (r0.width || r0.height) break; }
         i++;
       }
       if (i >= STEPS.length) { end(); return; }
