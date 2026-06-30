@@ -35,7 +35,14 @@ band advances a little less per hour as pieces lengthen and gains cost more (the
 curve the grade research confirms). Objective loading per band reflects this S-curve, not even spacing.
 
 Each objective auto-ticks from data unless marked **(self-check)**. Sources/calibration at the bottom.
-Owner: edit anything. Nothing is wired up yet — this is the content sign-off.
+
+**Roll-over:** a member who skipped levels (e.g. by adding prior hours and jumping ahead)
+sees any un-completed objective from earlier levels carried into their current card under
+"Still to catch up from earlier" — UNLESS it is superseded by a same-group objective at their
+level (scales, note, chord, ear, days, theory, piece each absorb into the current, higher target).
+A goal unique to a skipped level rolls forward until it's done.
+
+Owner: edit anything. This drives the live "Your Path" card on dev (placeholder content).
 
 Legend: habit · scales (self-check) · Note Recognition · Chord Recognition ·
  Ear Training · play-by-ear/improv (self-check) · piece · theory.
@@ -57,7 +64,7 @@ Legend: habit · scales (self-check) · Note Recognition · Chord Recognition ·
 - Reach **15+** in Ear Training.
 - Complete **Theory Level 1** and **begin Level 2**.
 - Learn **4 Beginner pieces**.
-- **(self-check)** Work out a simple tune by ear, and improvise using the notes of C major.
+- Spend **3 hours improvising**, starting with simple triads and a melody (logged in your practice log).
 
 ## 3. Foundations
 - Reach **250 days of practice** — consistency is now part of who you are.
@@ -75,7 +82,7 @@ Legend: habit · scales (self-check) · Note Recognition · Chord Recognition ·
 - Reach **22+** in Chord Recognition.
 - Reach **30+** in Ear Training.
 - Learn **2–3 Lower Intermediate pieces**, shaping phrasing and voicing with intention.
-- **(self-check)** Improvise over a simple chord progression.
+- Spend **5 hours improvising** over simple chord progressions (logged in your practice log).
 - Deepen your understanding (theory sheets + the *Art of Understanding Music* course). *(No Theory Level 3 built yet — this is guidance, not a tick.)*
 
 ## 5. Confident *(beyond your built theory content — estimate)*
@@ -106,7 +113,7 @@ Legend: habit · scales (self-check) · Note Recognition · Chord Recognition ·
 | Note Recognition | best `note_game_scores.score` | best ≥ target |
 | Chord Recognition | best `chord_game_scores.score` | best ≥ target |
 | Ear Training | best `ear_game_scores.score` | best ≥ target *(add ear to the trainer loader)* |
-| Play-by-ear / improv | **self-check** | member ticks |
+| Improv (hours) | sum of `practice_items.duration_minutes` where `item_type='improvisation'` | logged improv hours ≥ target (prescribed: what to improvise on) |
 | Piece | `user_collections.status='completed'` × `pieces.difficulty` tier | completed pieces at/above the stage tier ≥ required count |
 | Theory | `lesson_progress.completed` ∩ `lessons.course='theory'` | all lessons in the target level completed |
 
