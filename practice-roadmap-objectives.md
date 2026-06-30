@@ -134,6 +134,12 @@ not the same as "22 in sevenths, any key". Difficulty axes: Note `clef` (treble/
 Ear `chord_set` (major_minor → triads → sevenths → extensions). The live card labels carry the
 prescribed mode for each level; tune the wording/targets here.
 
+**Key-specific recognition (to "live with" the keys being learned):** the tables also store
+`key_signature`, so a recognition objective can require a target score in EACH key the member
+is studying that level. Live now for Note Recognition: First Steps = C and G, Beginner = C/G/D/F,
+Foundations = A/B♭/E♭ — it only ticks once a score at target exists in every prescribed key, and
+shows "n/4 keys" progress meanwhile. The same key-set pattern can extend to Chord and Ear.
+
 ### Game-score targets (best-score-per-member distribution — absolute skill, hours-independent)
 Front-loaded into the productive Beginner→Foundations bands, then maintained (non-linear pacing):
 Note (**max 50**): First Steps 12 → Beginner 30 → Foundations 40 → Intermediate 46 → maintain ~48.
