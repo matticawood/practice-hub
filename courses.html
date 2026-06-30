@@ -112,6 +112,27 @@
   .course-card.soon .course-ic { background:var(--surface-2); color:var(--text-muted); }
   .course-card.soon .nm { color:var(--text-muted); }
   .cc-soonfoot { font-size:.82rem; color:var(--text-muted); font-weight:600; margin-top:18px; display:flex; align-items:center; gap:8px; }
+  /* Big feature card — shown when a single course is live, fills the space */
+  .course-feature { background:var(--surface); border:1px solid var(--border); border-radius:22px; padding:30px; box-shadow:var(--shadow); position:relative; overflow:hidden; cursor:pointer; transition:box-shadow .2s,transform .2s,border-color .2s; }
+  .course-feature::before { content:""; position:absolute; left:0; top:0; height:5px; width:100%; background:var(--cc-accent,var(--accent)); }
+  .course-feature:hover { border-color:var(--accent); box-shadow:var(--shadow-lift); }
+  .cf-head { display:flex; gap:18px; align-items:flex-start; }
+  .cf-ic { flex:0 0 auto; }
+  .cf-eyebrow { font-size:.66rem; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--cc-accent,var(--accent)); }
+  .cf-title { font-size:1.7rem; font-weight:800; letter-spacing:-.02em; margin-top:3px; }
+  .cf-blurb { color:var(--text-muted); font-size:.98rem; line-height:1.5; margin-top:6px; }
+  .cf-stats { display:flex; gap:12px; margin:22px 0; }
+  .cf-stat { flex:1; background:var(--surface-2); border:1px solid var(--border); border-radius:14px; padding:14px 10px; text-align:center; }
+  .cf-stat b { display:block; font-size:1.55rem; font-weight:800; letter-spacing:-.02em; line-height:1; }
+  .cf-stat span { font-size:.68rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-top:5px; display:block; }
+  .cf-levels-h { font-size:.7rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); margin:4px 0 12px; }
+  .cf-levels { display:flex; flex-direction:column; gap:14px; }
+  .cf-level-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .cf-level-name { font-size:.92rem; font-weight:700; }
+  .cf-level-meta { font-size:.78rem; color:var(--text-muted); font-weight:600; }
+  .cf-cta { margin-top:26px; width:100%; display:flex; align-items:center; justify-content:center; gap:8px; background:linear-gradient(90deg,#f7d24a,#f5c518); color:#3a2a08; border:none; border-radius:14px; padding:15px; font-size:1rem; font-weight:800; cursor:pointer; font-family:inherit; box-shadow:0 5px 16px -7px rgba(240,165,0,.55); }
+  .cf-cta:hover { opacity:.93; }
+  .cf-cta svg { width:18px; height:18px; }
   .cc-soonfoot .dot { width:7px; height:7px; border-radius:50%; background:var(--text-muted); opacity:.5; }
 
   /* Levels + lessons */
@@ -276,30 +297,60 @@ function renderOverview(push) {
   }
 
   // ── Premium course cards: full vertical units with progress bar + CTA ──
-  const cards = COURSES.map(c => {
+  // Only show courses that actually have published lessons — no "coming soon".
+  const liveCourses = COURSES.filter(c => LESSONS.some(l => l.course === c.key));
+
+  // Compact grid card (used when there are 2+ live courses).
+  function courseCard(c) {
     const ls = LESSONS.filter(l => l.course === c.key);
     const done = ls.filter(l => PROGRESS[l.id] && PROGRESS[l.id].completed).length;
     const pct = ls.length ? Math.round(done / ls.length * 100) : 0;
     const maxLv = ls.length ? Math.max(...ls.map(l => l.level)) : 0;
-    const planned = PLANNED_LEVELS[c.key] || maxLv;
-    const top = `<div class="cc-top"><div class="course-ic">${c.icon}</div>${
-      ls.length ? `<div class="cc-badge">Level ${maxLv} of ${planned}</div>` : `<div class="soon-badge">Soon</div>`}</div>`;
-    const foot = ls.length
-      ? `<div class="cc-prog"><div class="cc-bar"><i style="width:${pct}%"></i></div>
-          <div class="cc-foot"><span class="cc-meta">${done} of ${ls.length} lesson${ls.length === 1 ? "" : "s"} done</span><span class="cc-go">${ARROW_ICON}</span></div></div>`
-      : `<div class="cc-soonfoot"><span class="dot"></span>Lessons coming soon</div>`;
-    return `<div class="course-card${ls.length ? "" : " soon"}" data-course="${c.key}" style="--cc-accent:${c.color};--cc-tint:${c.color}1f">
-      ${top}<div class="nm">${c.label}</div><div class="ds">${c.blurb}</div>${foot}</div>`;
-  }).join("");
+    return `<div class="course-card" data-course="${c.key}" style="--cc-accent:${c.color};--cc-tint:${c.color}1f">
+      <div class="cc-top"><div class="course-ic">${c.icon}</div><div class="cc-badge">${maxLv} level${maxLv === 1 ? "" : "s"}</div></div>
+      <div class="nm">${c.label}</div><div class="ds">${c.blurb}</div>
+      <div class="cc-prog"><div class="cc-bar"><i style="width:${pct}%"></i></div>
+        <div class="cc-foot"><span class="cc-meta">${done} of ${ls.length} lesson${ls.length === 1 ? "" : "s"} done</span><span class="cc-go">${ARROW_ICON}</span></div></div></div>`;
+  }
 
-  v.innerHTML = hero + resume + `<div class="ov-sec">Your courses</div><div class="course-grid">` + cards + `</div>`;
+  // Big space-filling feature card (used when only one course is live, so the
+  // page reads as a rich, full offering rather than one lonely card).
+  function featureCard(c) {
+    const ls = LESSONS.filter(l => l.course === c.key);
+    const done = ls.filter(l => PROGRESS[l.id] && PROGRESS[l.id].completed).length;
+    const byLv = {}; ls.forEach(l => (byLv[l.level] = byLv[l.level] || []).push(l));
+    const levels = Object.keys(byLv).map(Number).sort((a, b) => a - b);
+    const levelRows = levels.map(lv => {
+      const lv2 = byLv[lv];
+      const ld = lv2.filter(l => PROGRESS[l.id] && PROGRESS[l.id].completed).length;
+      const lp = lv2.length ? Math.round(ld / lv2.length * 100) : 0;
+      return `<div class="cf-level"><div class="cf-level-top"><span class="cf-level-name">Level ${lv}</span>
+        <span class="cf-level-meta">${ld}/${lv2.length} lesson${lv2.length === 1 ? "" : "s"}</span></div>
+        <div class="cc-bar"><i style="width:${lp}%"></i></div></div>`;
+    }).join("");
+    return `<div class="course-feature" data-course="${c.key}" style="--cc-accent:${c.color};--cc-tint:${c.color}1f">
+      <div class="cf-head"><div class="course-ic cf-ic">${c.icon}</div>
+        <div class="cf-head-text"><div class="cf-eyebrow">Course</div><div class="cf-title">${c.label}</div>
+          <div class="cf-blurb">${c.blurb}</div></div></div>
+      <div class="cf-stats">
+        <div class="cf-stat"><b>${ls.length}</b><span>lesson${ls.length === 1 ? "" : "s"}</span></div>
+        <div class="cf-stat"><b>${levels.length}</b><span>level${levels.length === 1 ? "" : "s"}</span></div>
+        <div class="cf-stat"><b>${done}</b><span>done</span></div>
+      </div>
+      <div class="cf-levels-h">Lessons by level</div>
+      <div class="cf-levels">${levelRows}</div>
+      <button class="cf-cta">${done > 0 ? "Continue learning" : "Start the course"}${ARROW_ICON}</button></div>`;
+  }
+
+  const coursesHTML = liveCourses.length === 1
+    ? featureCard(liveCourses[0])
+    : `<div class="course-grid">${liveCourses.map(courseCard).join("")}</div>`;
+
+  v.innerHTML = hero + resume + `<div class="ov-sec">Your course${liveCourses.length === 1 ? "" : "s"}</div>` + coursesHTML;
 
   const rc = v.querySelector(".resume-card[data-lesson]");
   if (rc) rc.onclick = () => openLesson(rc.dataset.lesson, rc.dataset.course);
-  v.querySelectorAll(".course-card").forEach(el => el.onclick = () => {
-    if (!LESSONS.some(l => l.course === el.dataset.course)) { showToast("Lessons for this course are coming soon."); return; }
-    renderCourse(el.dataset.course);
-  });
+  v.querySelectorAll(".course-card, .course-feature").forEach(el => el.onclick = () => renderCourse(el.dataset.course));
   scrollTop();
 }
 
@@ -326,22 +377,10 @@ function renderCourse(courseKey, push) {
     return `<div class="level-group"><div class="level-h"><span class="lvl">Level ${lv}</span><span class="ln"></span></div><div class="lesson-grid">${rows}</div></div>`;
   }).join("");
 
-  // "Coming soon" placeholders for the planned-but-unpublished levels.
-  const planned = PLANNED_LEVELS[courseKey] || 0;
-  let soon = "";
-  for (let lv = 1; lv <= planned; lv++) {
-    if (byLevel[lv]) continue;                 // already has published lessons
-    soon += `<div class="level-group soon-group">
-      <div class="level-h"><span class="lvl">Level ${lv}</span><span class="ln"></span></div>
-      <div class="lesson-grid"><div class="lesson-row soon"><div class="lock">${LOCK_ICON}</div>
-        <div class="lt"><div class="t">Coming soon</div><div class="s">More lessons are on the way.</div></div></div></div>
-    </div>`;
-  }
-
   v.innerHTML = `
     <div class="crumbs"><a data-home>Courses</a><span class="sep">/</span><span>${c.label}</span></div>
     ${pageHead(c.icon, "Course", c.label, c.blurb, c.color)}
-    ${groups || (soon ? "" : `<div class="empty">No lessons published yet.</div>`)}${soon}`;
+    ${groups || `<div class="empty">No lessons published yet.</div>`}`;
   v.querySelector("[data-home]").onclick = renderOverview;
   v.querySelectorAll(".lesson-row").forEach(r => r.onclick = () => openLesson(r.dataset.id, courseKey));
   scrollTop();
