@@ -170,6 +170,13 @@
     .ph-step-sub { font-size: .72rem; font-weight: 500; color: var(--text-muted); line-height: 1.25; }
     .ph-step-arrow { width: 17px; height: 17px; flex-shrink: 0; color: var(--text-muted); opacity: .6; }
     @media (max-width: 480px) { .ph-title { font-size: 1.1rem; } .ph-step-label { font-size: .85rem; } }
+    /* Owner-only preview toggle (sits under the card, never shown to members). */
+    .jc-owner-toggle { display: block; margin: -8px auto 14px; padding: 5px 13px; border-radius: 99px;
+      font-size: .68rem; font-weight: 700; letter-spacing: .02em; cursor: pointer;
+      color: var(--text-muted); background: color-mix(in srgb, var(--border) 22%, transparent);
+      border: 1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent); transition: color .15s ease, border-color .15s ease, background .15s ease; }
+    .jc-owner-toggle:hover { color: #b07c08; border-color: color-mix(in srgb, #f0a500 55%, transparent); background: color-mix(in srgb, #f5c518 10%, transparent); }
+    @media (min-width: 1101px) { #dashboard-content #journey-card .jc-owner-toggle { margin-top: 0; } }
     /* Wide layout: a single horizontal band — trophy | stage+bar (flex) | jars
        grouped right — so the width is used rather than stretched thin. Switches at
        1101px, the same point the dashboard's content cards go multi-column (the
@@ -11428,9 +11435,14 @@ function _renderJourneyCard() {
     { done: hasPiece,   label: "Add a piece you want to learn", sub: "Browse the Pieces Library.", act: 'onclick="document.getElementById(\'library-tab-btn\')?.click();return false"', tag: "button" },
   ];
   const doneCount = steps.filter(s => s.done).length;
-  // ?path=start lets the owner preview the new-member checklist on any account.
-  const _forceStart = (new URLSearchParams(location.search).get("path") === "start");
+  // Owner can preview the new-member checklist on their own established account,
+  // either via ?path=start or the on-card toggle (persisted in _previewStartHere).
+  const _forceStart = (new URLSearchParams(location.search).get("path") === "start") || (isOwner() && _previewStartHere);
   const showStartHere = _forceStart || (ownCard && (mins.total / 60 < 50) && doneCount < steps.length);
+  // Owner-only control to flip between the real card and the new-member preview.
+  const ownerToggle = isOwner()
+    ? `<button type="button" class="jc-owner-toggle" onclick="_togglePathPreview(event)">${showStartHere ? "&larr; Back to my dashboard" : "Preview new-member view"}</button>`
+    : "";
 
   if (showStartHere) {
     const rows = steps.map((s, i) => `<${s.tag} class="ph-step${s.done ? " done" : ""}" ${s.act}>
@@ -11449,7 +11461,7 @@ function _renderJourneyCard() {
         </div>
       </div>
       <div class="ph-steps">${rows}</div>
-    </div>`;
+    </div>${ownerToggle}`;
     return;
   }
 
@@ -11497,7 +11509,7 @@ function _renderJourneyCard() {
     </div>
     ${focusHtml}
     <div class="jc-jars">${jars}</div>
-  </a>`;
+  </a>${ownerToggle}`;
 }
 function renderStatsHero() {
   const el = document.getElementById('stats-hero');
@@ -11679,6 +11691,15 @@ function _emojiToSvg(e, size = 15) {
 
 let _insightTrainers = null, _insightCollections = null; // loaded in loadData
 let _pathTheoryStarted = false; // has the member opened a theory lesson (Start-Here checklist)
+// Owner-only: preview the new-member "Start Here" card on your own established
+// account. Persisted so it survives reloads until you toggle it back off.
+let _previewStartHere = (() => { try { return localStorage.getItem("rm_preview_starthere") === "1"; } catch (e) { return false; } })();
+function _togglePathPreview(e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  _previewStartHere = !_previewStartHere;
+  try { localStorage.setItem("rm_preview_starthere", _previewStartHere ? "1" : "0"); } catch (_) {}
+  try { _renderJourneyCard(); } catch (_) {}
+}
 function renderInsights() {
   const el = document.getElementById('stats-insights');
   if (!el) return;
