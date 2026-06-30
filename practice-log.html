@@ -11518,10 +11518,27 @@ function _renderJourneyCard() {
   const thBegin = L => !!(_goalTheory && (_goalTheory.done[L] || 0) >= 1);
   const thDone  = L => !!(_goalTheory && (_goalTheory.totals[L] || 0) > 0 && (_goalTheory.done[L] || 0) >= _goalTheory.totals[L]);
   const selfDone = key => { try { return localStorage.getItem("rm_goal_" + key) === "1"; } catch (e) { return false; } };
-  const goalDone = g => {
+  const grpOf = g => g.group || g.icon;
+  // Accumulating goals (days, sight-reading & improv minutes) store their OWN per-level
+  // target; the tick threshold is the sum of that group's targets across all levels up
+  // to the goal's level, so the displayed number stays small/per-level while the tick
+  // still uses the member's cumulative logged total.
+  const cumSum = (grp, lvl, kind) => {
+    let s = 0;
+    for (let i = 0; i < lvl; i++) {
+      (window.ROADMAP.levels.total[i].goals || []).forEach(x => {
+        if (grpOf(x) !== grp) return;
+        if (kind === "days" && x.type === "days")  s += (x.target || 0);
+        if (kind === "min"  && x.type === "hours") s += (x.targetMin != null ? x.targetMin : (x.target || 0) * 60);
+      });
+    }
+    return s;
+  };
+  const goalDone = (g, lvl) => {
+    lvl = lvl || stage.level;
     switch (g.type) {
-      case "days":  return days >= g.target;
-      case "hours": return catMins(g.category) >= (g.targetMin != null ? g.targetMin : (g.target || 0) * 60);
+      case "days":  return days >= cumSum(grpOf(g), lvl, "days");
+      case "hours": return catMins(g.category) >= cumSum(grpOf(g), lvl, "min");
       case "note": case "chord": case "ear":
         return (g.match && g.match.keys)
           ? keysHit(g).length >= g.match.keys.length      // a score at target in EVERY prescribed key
@@ -11540,7 +11557,6 @@ function _renderJourneyCard() {
   // is "superseded" when the current level (or a higher earlier level) already has a
   // goal in the same group, so e.g. scales/note absorb into the current target; a
   // goal unique to a skipped level rolls into the current card until it's done.
-  const grpOf = g => g.group || g.icon;
   const rolled = [];
   {
     const seen = new Set(goals.map(grpOf));
@@ -11549,23 +11565,23 @@ function _renderJourneyCard() {
         const grp = grpOf(g);
         if (seen.has(grp)) return;       // covered by current or a higher earlier level
         seen.add(grp);
-        if (!goalDone(g)) rolled.push(g);
+        if (!goalDone(g, i + 1)) rolled.push({ g, level: i + 1 });
       });
     }
   }
 
-  const doneCount = goals.filter(goalDone).length;
+  const doneCount = goals.filter(g => goalDone(g, stage.level)).length;
   const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
-  const renderGoal = g => {
-    const done = goalDone(g);
+  const renderGoal = (g, lvl) => {
+    const done = goalDone(g, lvl);
     const prog = (g.match && g.match.keys && !done) ? `<span class="rg-keys">${keysHit(g).length}/${g.match.keys.length} keys</span>` : "";
     const inner = `<span class="rg-tick">${done ? CHECK : ""}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(g.label)}</span>${prog}`;
     return g.type === "self"
       ? `<button type="button" class="rg-goal self${done ? " done" : ""}" onclick="_toggleGoalSelf('${g.key}',event)">${inner}<span class="rg-self-hint">${done ? "" : "tap when done"}</span></button>`
       : `<div class="rg-goal${done ? " done" : ""}">${inner}</div>`;
   };
-  const goalRows = goals.map(renderGoal).join("");
-  const rolledRows = rolled.map(renderGoal).join("");
+  const goalRows = goals.map(g => renderGoal(g, stage.level)).join("");
+  const rolledRows = rolled.map(r => renderGoal(r.g, r.level)).join("");
 
   // ── header (trophy + stage + progress to next) ────────────────────────────
   const pct = Math.round(T.progress * 100);
@@ -22018,7 +22034,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
-<script src="/roadmap-levels.js?v=12"></script>
+<script src="/roadmap-levels.js?v=13"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
