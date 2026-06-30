@@ -144,16 +144,16 @@
     [ // 1 First Steps
       { icon: "days",   group: "days",   label: "Reach your first 30 days of practice", type: "days", target: 30 },
       { icon: "scales", group: "scales", label: "Play C and G major, hands together, two octaves", type: "self", key: "s1-scales" },
-      { icon: "note",   group: "note",   label: "Reach 12 in Note Recognition", type: "note", target: 12 },
+      { icon: "note",   group: "note",   label: "Score 12 in Note Recognition (treble clef to start)", type: "note", target: 12 },
       { icon: "theory", group: "theory", label: "Begin Theory Level 1", type: "theory", level: 1, mode: "begin" },
       { icon: "piece",  group: "piece",  label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 }
     ],
     [ // 2 Beginner
       { icon: "days",   group: "days",   label: "Reach 100 days of practice", type: "days", target: 100 },
       { icon: "scales", group: "scales", label: "C, G, D and F major with tonic triads and arpeggios", type: "self", key: "s2-scales" },
-      { icon: "note",   group: "note",   label: "Reach 30 in Note Recognition", type: "note", target: 30 },
-      { icon: "chord",  group: "chord",  label: "Reach 10 in Chord Recognition", type: "chord", target: 10 },
-      { icon: "ear",    group: "ear",    label: "Reach 15 in the Ear Training tool", type: "ear", target: 15 },
+      { icon: "note",   group: "note",   label: "Score 30 in Note Recognition (mixed treble and bass clef)", type: "note", target: 30, match: { clef: "mixed" } },
+      { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition (triads within a key)", type: "chord", target: 10, match: { tier: 1 } },
+      { icon: "ear",    group: "ear",    label: "Score 15 in the Ear Training tool (major versus minor)", type: "ear", target: 15, match: { set: "major_minor" } },
       { icon: "improv", group: "improv", label: "Spend 3 hours improvising, starting with simple triads and a melody", type: "hours", category: "improvisation", target: 3 },
       { icon: "theory", group: "theory", label: "Complete Theory Level 1", type: "theory", level: 1, mode: "complete" },
       { icon: "piece",  group: "piece",  label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 }
@@ -161,26 +161,26 @@
     [ // 3 Foundations
       { icon: "days",   group: "days",   label: "Reach 250 days of practice", type: "days", target: 250 },
       { icon: "scales", group: "scales", label: "A, B♭ and E♭ major; begin natural minors A, E, D", type: "self", key: "s3-scales" },
-      { icon: "note",   group: "note",   label: "Reach 40 in Note Recognition", type: "note", target: 40 },
-      { icon: "chord",  group: "chord",  label: "Reach 16 in Chord Recognition", type: "chord", target: 16 },
-      { icon: "ear",    group: "ear",    label: "Reach 24 in the Ear Training tool", type: "ear", target: 24 },
+      { icon: "note",   group: "note",   label: "Score 40 in Note Recognition (mixed clef, with sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
+      { icon: "chord",  group: "chord",  label: "Score 16 in Chord Recognition (triads and inversions, any key)", type: "chord", target: 16, match: { tier: 2, mode: "free" } },
+      { icon: "ear",    group: "ear",    label: "Score 24 in the Ear Training tool (triads: major, minor, diminished, augmented)", type: "ear", target: 24, match: { set: "triads" } },
       { icon: "theory", group: "theory", label: "Complete Theory Level 2", type: "theory", level: 2, mode: "complete" },
       { icon: "piece",  group: "piece",  label: "Learn 1 to 2 Lower Intermediate pieces", type: "piece", tier: 2, count: 2 },
       { icon: "sightread", group: "sightread", label: "Sight-read a new easy piece weekly, read once", type: "self", key: "s3-sr" }
     ],
     [ // 4 Intermediate
       { icon: "scales", group: "scales", label: "Majors plus natural and harmonic minors secure", type: "self", key: "s4-scales" },
-      { icon: "note",   group: "note",   label: "Reach 46 in Note Recognition", type: "note", target: 46 },
-      { icon: "chord",  group: "chord",  label: "Reach 22 in Chord Recognition", type: "chord", target: 22 },
-      { icon: "ear",    group: "ear",    label: "Reach 30 in the Ear Training tool", type: "ear", target: 30 },
+      { icon: "note",   group: "note",   label: "Score 46 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 46, match: { clef: "mixed", acc: true } },
+      { icon: "chord",  group: "chord",  label: "Score 22 in Chord Recognition (sevenths and inversions, any key)", type: "chord", target: 22, match: { tier: 3, mode: "free" } },
+      { icon: "ear",    group: "ear",    label: "Score 30 in the Ear Training tool (sevenths)", type: "ear", target: 30, match: { set: "sevenths" } },
       { icon: "improv", group: "improv", label: "Spend 5 hours improvising over simple chord progressions", type: "hours", category: "improvisation", target: 5 },
       { icon: "piece",  group: "piece",  label: "Learn 2 to 3 Lower Intermediate pieces", type: "piece", tier: 2, count: 3 }
     ],
     [ // 5 Confident
       { icon: "scales", group: "scales", label: "Scales, minors and arpeggios across more keys, faster", type: "self", key: "s5-scales" },
-      { icon: "note",   group: "note",   label: "Hold Note Recognition near the ceiling", type: "note", target: 48 },
-      { icon: "ear",    group: "ear",    label: "Hold the Ear Training tool near the ceiling", type: "ear", target: 30 },
-      { icon: "chord",  group: "chord",  label: "Hold Chord Recognition near the ceiling", type: "chord", target: 24 },
+      { icon: "note",   group: "note",   label: "Hold Note Recognition near the top (mixed clef, sharps and flats)", type: "note", target: 48, match: { clef: "mixed", acc: true } },
+      { icon: "ear",    group: "ear",    label: "Hold the Ear Training tool near the top (sevenths)", type: "ear", target: 30, match: { set: "sevenths" } },
+      { icon: "chord",  group: "chord",  label: "Hold Chord Recognition near the top (sevenths, any key)", type: "chord", target: 24, match: { tier: 3, mode: "free" } },
       { icon: "piece",  group: "piece",  label: "Learn 1 Upper Intermediate piece", type: "piece", tier: 3, count: 1 }
     ],
     [ // 6 Advanced

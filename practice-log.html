@@ -8856,20 +8856,20 @@ async function loadData() {
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
       const [nr, cr, pg, er, uc, thL, thP] = await Promise.all([
-        db.from("note_game_scores").select("score, created_at").eq("email", viewingEmail),
-        db.from("chord_game_scores").select("score, created_at").eq("email", viewingEmail),
+        db.from("note_game_scores").select("score, created_at, clef, accidentals").eq("email", viewingEmail),
+        db.from("chord_game_scores").select("score, created_at, tier, mode").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
-        db.from("ear_game_scores").select("score, created_at").eq("email", viewingEmail),
+        db.from("ear_game_scores").select("score, created_at, chord_set, answer_type").eq("email", viewingEmail),
         db.from("user_collections").select("status, created_at, pieces(difficulty)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, status").eq("course", "theory"),
         db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true)
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
-        note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at })),
-        chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at })),
+        note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at, clef: r.clef, accidentals: r.accidentals })),
+        chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at, tier: r.tier, mode: r.mode })),
         passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at })),
-        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at }))
+        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type }))
       };
       _insightCollections = uc.data || [];
       // Completed-piece difficulty tiers, for "learn N pieces at tier X" goals.
@@ -11490,7 +11490,17 @@ function _renderJourneyCard() {
 
   // ── measure each objective ────────────────────────────────────────────────
   const days = new Set((allSessions || []).map(s => s.session_date).filter(Boolean)).size;
-  const best = k => ((_insightTrainers && _insightTrainers[k]) || []).reduce((m, r) => Math.max(m, r.v || 0), 0);
+  // Best game score among plays at the PRESCRIBED difficulty or harder (so "10 in
+  // triads in a key" and "10 in sevenths, any key" are scored separately).
+  const EAR_SET = { major_minor: 0, triads: 1, sevenths: 2, extensions: 3 };
+  const scoreQualifies = (k, r, mt) => {
+    if (!mt) return true;
+    if (k === "note")  { if (mt.clef === "mixed" && r.clef !== "mixed") return false; if (mt.acc && !r.accidentals) return false; }
+    if (k === "chord") { if (mt.tier && !(Number(r.tier) >= mt.tier)) return false; if (mt.mode === "free" && r.mode !== "free") return false; }
+    if (k === "ear")   { if (mt.set && !((EAR_SET[r.chord_set] || 0) >= (EAR_SET[mt.set] || 0))) return false; }
+    return true;
+  };
+  const bestMatch = (k, mt) => ((_insightTrainers && _insightTrainers[k]) || []).reduce((m, r) => scoreQualifies(k, r, mt) ? Math.max(m, r.v || 0) : m, 0);
   const pieces = tier => (_goalPieceTiers || []).filter(d => d >= tier).length;
   // Hours logged in a practice category (e.g. improvisation), from the practice log.
   const catMins = cat => (allSessions || []).reduce((sum, s) =>
@@ -11502,7 +11512,7 @@ function _renderJourneyCard() {
     switch (g.type) {
       case "days":  return days >= g.target;
       case "hours": return catMins(g.category) / 60 >= g.target;
-      case "note": case "chord": case "ear": return best(g.type) >= g.target;
+      case "note": case "chord": case "ear": return bestMatch(g.type, g.match) >= g.target;
       case "piece": return pieces(g.tier) >= g.count;
       case "theory": return g.mode === "complete" ? thDone(g.level) : thBegin(g.level);
       case "self":  return selfDone(g.key);
@@ -21984,7 +21994,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
-<script src="/roadmap-levels.js?v=5"></script>
+<script src="/roadmap-levels.js?v=6"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
