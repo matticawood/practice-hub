@@ -109,16 +109,23 @@
       setTimeout(place, 360);
     }
     function onResize() { place(); }
+    // Re-position continuously while the page scrolls (capture phase catches
+    // scrolls inside nested containers too). This keeps the callout glued to its
+    // target all the way through a smooth scrollIntoView, so it never gets left
+    // behind off-screen if the one-shot place() fires mid-scroll.
+    function onScroll() { place(); }
     var obsEl = opts.observe ? document.querySelector(opts.observe) : null;
     var obs = obsEl ? new MutationObserver(function () { place(); }) : null;
     if (obs) obs.observe(obsEl, { childList: true, subtree: true });
     function end() {
       if (obs) obs.disconnect();
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onScroll, true);
       mask.remove(); spot.remove(); pop.remove();
       if (opts.key && !opts.force) { try { localStorage.setItem(opts.key, "1"); } catch (e) {} }
     }
     window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onScroll, true);
     render();
   };
 })();
