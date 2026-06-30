@@ -177,6 +177,33 @@
       border: 1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent); transition: color .15s ease, border-color .15s ease, background .15s ease; }
     .jc-owner-toggle:hover { color: #b07c08; border-color: color-mix(in srgb, #f0a500 55%, transparent); background: color-mix(in srgb, #f5c518 10%, transparent); }
     @media (min-width: 1101px) { #dashboard-content #journey-card .jc-owner-toggle { margin-top: 0; } }
+    /* ── "Your Path" objectives card (always-on: current level's goals + jars) ── */
+    .rg-head { display: flex; align-items: center; gap: 16px; text-decoration: none; color: inherit; }
+    .rg-head-info { flex: 1; min-width: 0; }
+    .rg-sub { font-size: .74rem; font-weight: 700; color: var(--text-muted); margin: 15px 2px 9px; }
+    .rg-sub strong { color: #c8860a; }
+    .rg-goals { display: flex; flex-direction: column; gap: 7px; max-height: 268px; overflow-y: auto; padding-right: 4px;
+      scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text-muted) 35%, transparent) transparent; }
+    .rg-goals::-webkit-scrollbar { width: 7px; }
+    .rg-goals::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-muted) 32%, transparent); border-radius: 99px; }
+    .rg-goals::-webkit-scrollbar-track { background: transparent; }
+    .rg-goal { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 9px 12px; border-radius: 11px;
+      font: inherit; color: inherit; background: color-mix(in srgb, var(--border) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+    button.rg-goal { cursor: pointer; transition: transform .14s ease, border-color .14s ease, background .14s ease; }
+    button.rg-goal:hover { transform: translateY(-1px); border-color: color-mix(in srgb, #f0a500 45%, var(--border)); background: color-mix(in srgb, #f5c518 8%, var(--surface)); }
+    .rg-goal.done { background: color-mix(in srgb, #10b981 8%, transparent); border-color: color-mix(in srgb, #10b981 28%, transparent); }
+    .rg-tick { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+      color: var(--text-muted); border: 1.5px solid color-mix(in srgb, var(--text-muted) 45%, transparent); }
+    .rg-goal.self .rg-tick { border-style: dashed; }
+    .rg-goal.done .rg-tick { color: #fff; background: linear-gradient(135deg, #10b981, #0d9c6e); border-color: transparent; }
+    .rg-tick svg { width: 13px; height: 13px; }
+    .rg-label { flex: 1; min-width: 0; font-size: .82rem; font-weight: 600; line-height: 1.3; color: var(--text); }
+    .rg-goal.done .rg-label { color: var(--text-muted); }
+    .rg-self-hint { flex-shrink: 0; font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+      color: color-mix(in srgb, #f0a500 80%, var(--text-muted)); opacity: .7; }
+    .rg-goal.done .rg-self-hint { display: none; }
+    .rg-card .jc-jars { margin-top: 14px; }
     /* Wide layout: a single horizontal band — trophy | stage+bar (flex) | jars
        grouped right — so the width is used rather than stretched thin. Switches at
        1101px, the same point the dashboard's content cards go multi-column (the
@@ -8822,22 +8849,39 @@ async function loadData() {
       }
     } catch (e) { /* focus insights simply won't fire */ }
 
-    // Trainer scores + collection status (competence / finish-a-piece insights).
+    // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
-      const [nr, cr, pg, uc] = await Promise.all([
+      const [nr, cr, pg, er, uc, thL, thP] = await Promise.all([
         db.from("note_game_scores").select("score, created_at").eq("email", viewingEmail),
         db.from("chord_game_scores").select("score, created_at").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
-        db.from("user_collections").select("status, created_at").eq("email", viewingEmail)
+        db.from("ear_game_scores").select("score, created_at").eq("email", viewingEmail),
+        db.from("user_collections").select("status, created_at, pieces(difficulty)").eq("email", viewingEmail),
+        db.from("lessons").select("id, level, status").eq("course", "theory"),
+        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true)
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
         note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at })),
         chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at })),
-        passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at }))
+        passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at })),
+        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at }))
       };
       _insightCollections = uc.data || [];
-    } catch (e) { _insightTrainers = null; _insightCollections = null; }
+      // Completed-piece difficulty tiers, for "learn N pieces at tier X" goals.
+      _goalPieceTiers = (uc.data || [])
+        .filter(r => r.status === "completed" && r.pieces && r.pieces.difficulty != null)
+        .map(r => r.pieces.difficulty);
+      // Theory completion per level (published lessons only): begin = >=1 done; complete = all done.
+      const lv = {}, totals = {}, done = {};
+      (thL.data || []).forEach(l => {
+        if (l.status && l.status !== "published") return;   // ignore drafts in totals
+        lv[l.id] = l.level; totals[l.level] = (totals[l.level] || 0) + 1;
+      });
+      (thP.data || []).forEach(p => { const L = lv[p.lesson_id]; if (L != null) done[L] = (done[L] || 0) + 1; });
+      _goalTheory = { totals, done };
+      _pathTheoryStarted = Object.values(done).some(n => n > 0);
+    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; }
 
     // Reading/library/game achievement extras (Badges tab).
     try { await loadAchievementExtras(); } catch (e) { /* badges fill in later */ }
@@ -8850,12 +8894,6 @@ async function loadData() {
         _sharedSessionIds = new Set((sharedPosts || []).map(p => p.session_id));
       }
     } catch (e) { /* share icons fill in later */ }
-
-    // Has the member started the Theory course? (powers the Start-Here checklist)
-    try {
-      const { count } = await db.from("lesson_progress").select("lesson_id", { count: "exact", head: true }).eq("email", viewingEmail);
-      _pathTheoryStarted = (count || 0) > 0;
-    } catch (e) { /* leave as default */ }
 
     // Refresh anything already on screen that uses the secondary data.
     try { renderSessions(true); } catch (e) {}
@@ -11424,55 +11462,48 @@ function _renderJourneyCard() {
   const T = _rmLevelFor("total", mins.total / 60);
   if (!T || !T.cur) { el.innerHTML = ""; return; }
 
-  // ── "Start Here" first-steps checklist for genuinely-new members ──────────
-  // Only the member's own card gets the actionable checklist (the owner's
-  // "view as" CTAs would otherwise act on the owner's own app).
-  const ownCard = (viewingEmail === myEmail);
-  const hasSession = (allSessions || []).length > 0;
-  const hasGame    = !!(_insightTrainers && ((_insightTrainers.note || []).length || (_insightTrainers.chord || []).length || (_insightTrainers.passage || []).length));
-  const hasTheory  = !!_pathTheoryStarted;
-  const hasPiece   = !!(_insightCollections && _insightCollections.length);
-  const steps = [
-    { done: hasSession, label: "Log your first practice session", sub: "Even ten minutes counts.", act: 'onclick="openWizard();return false"', tag: "button" },
-    { done: hasGame,    label: "Try a one-minute Note Recognition game", sub: "Start training your reading.", act: 'href="/tools.html?section=note"', tag: "a" },
-    { done: hasTheory,  label: "Open the Music Theory course", sub: "Begin with Lesson 1.", act: 'href="/courses.html"', tag: "a" },
-    { done: hasPiece,   label: "Add a piece you want to learn", sub: "Browse the Pieces Library.", act: 'onclick="document.getElementById(\'library-tab-btn\')?.click();return false"', tag: "button" },
-  ];
-  const doneCount = steps.filter(s => s.done).length;
-  // Owner can preview the new-member checklist on their own established account,
-  // either via ?path=start or the on-card toggle (persisted in _previewStartHere).
-  const _forceStart = (new URLSearchParams(location.search).get("path") === "start") || (isOwner() && _previewStartHere);
-  const showStartHere = _forceStart || (ownCard && (mins.total / 60 < 50) && doneCount < steps.length);
-  // Owner-only control to flip between the real card and the new-member preview.
-  const ownerToggle = isOwner()
-    ? `<button type="button" class="jc-owner-toggle" onclick="_togglePathPreview(event)">${showStartHere ? "&larr; Back to my dashboard" : "Preview new-member view"}</button>`
-    : "";
+  // Owner-only: preview the entry-level (First Steps) card on an established
+  // account, via ?path=start or the on-card toggle (persisted in _previewStartHere).
+  const previewL1 = (new URLSearchParams(location.search).get("path") === "start") || (isOwner() && _previewStartHere);
+  const stage = previewL1 ? window.ROADMAP.levels.total[0] : T.cur;
+  const goals = stage.goals || [];
 
-  if (showStartHere) {
-    const rows = steps.map((s, i) => `<${s.tag} class="ph-step${s.done ? " done" : ""}" ${s.act}>
-      <span class="ph-step-tick">${s.done ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : (i + 1)}</span>
-      <span class="ph-step-text"><span class="ph-step-label">${s.label}</span><span class="ph-step-sub">${s.sub}</span></span>
-      ${s.done ? "" : '<svg class="ph-step-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>'}
-    </${s.tag}>`).join("");
-    el.innerHTML = `<div class="path-card">
-      <div class="ph-head">
-        <div class="ph-statue jc-trophy jc-trophy--veiled" style="--trophy:url('/statue-veiled.webp')"><img src="/statue-veiled.webp" alt="" draggable="false"></div>
-        <div class="ph-head-text">
-          <div class="ph-eyebrow">Start here</div>
-          <div class="ph-title">Your first steps</div>
-          <div class="ph-subline">New to the Practice Room? Do these four and you're up and running. <strong>${doneCount} of ${steps.length} done.</strong></div>
-          <div class="ph-prog"><i style="width:${Math.round(doneCount / steps.length * 100)}%"></i></div>
-        </div>
-      </div>
-      <div class="ph-steps">${rows}</div>
-    </div>${ownerToggle}`;
-    return;
-  }
+  // ── measure each objective ────────────────────────────────────────────────
+  const days = new Set((allSessions || []).map(s => s.session_date).filter(Boolean)).size;
+  const best = k => ((_insightTrainers && _insightTrainers[k]) || []).reduce((m, r) => Math.max(m, r.v || 0), 0);
+  const pieces = tier => (_goalPieceTiers || []).filter(d => d >= tier).length;
+  const thBegin = L => !!(_goalTheory && (_goalTheory.done[L] || 0) >= 1);
+  const thDone  = L => !!(_goalTheory && (_goalTheory.totals[L] || 0) > 0 && (_goalTheory.done[L] || 0) >= _goalTheory.totals[L]);
+  const selfDone = key => { try { return localStorage.getItem("rm_goal_" + key) === "1"; } catch (e) { return false; } };
+  const goalDone = g => {
+    switch (g.type) {
+      case "days":  return days >= g.target;
+      case "note": case "chord": case "ear": return best(g.type) >= g.target;
+      case "piece": return pieces(g.tier) >= g.count;
+      case "theory": return g.mode === "complete" ? thDone(g.level) : thBegin(g.level);
+      case "self":  return selfDone(g.key);
+      default: return false;
+    }
+  };
+  const doneCount = goals.filter(goalDone).length;
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
+  const goalRows = goals.map(g => {
+    const done = goalDone(g);
+    const inner = `<span class="rg-tick">${done ? CHECK : ""}</span><span class="rg-label">${g.icon} ${escHtml(g.label)}</span>`;
+    return g.type === "self"
+      ? `<button type="button" class="rg-goal self${done ? " done" : ""}" onclick="_toggleGoalSelf('${g.key}',event)">${inner}<span class="rg-self-hint">${done ? "" : "tap when done"}</span></button>`
+      : `<div class="rg-goal${done ? " done" : ""}">${inner}</div>`;
+  }).join("");
 
-  // ── Established member: stage + "focus right now" + skill jars ─────────────
+  // ── header (trophy + stage + progress to next) ────────────────────────────
   const pct = Math.round(T.progress * 100);
-  const isNew = !(mins.total > 0);
-  const trophy = isNew ? "/statue-veiled.webp" : ("/statue-l" + T.cur.level + ".webp");
+  const isNew = !(mins.total > 0) && !previewL1;
+  const trophy = isNew ? "/statue-veiled.webp" : ("/statue-l" + stage.level + ".webp");
+  const nextLine = isNew
+    ? "Log your first practice to begin your journey"
+    : (T.next ? `${pct}% &middot; ${_rmFmtHrs((T.next.hours * 60) - mins.total)} to ${T.next.name}` : "Highest stage reached");
+
+  // ── skill jars (per-track progress) ───────────────────────────────────────
   const AREA = { repertoire:"#f5c518", technique:"#6366f1", sight_reading:"#10b981", musicianship:"#a855f7" };
   const AREA_LBL = { repertoire:"Repertoire", technique:"Technique", sight_reading:"Sight-reading", musicianship:"Musicianship" };
   const jars = Object.keys(AREA).map(k => {
@@ -11487,33 +11518,27 @@ function _renderJourneyCard() {
       <div class="jc-jar-lbl">${AREA_LBL[k]}</div>
     </div>`;
   }).join("");
-  const nextLine = isNew
-    ? "Log your first practice to begin your journey"
-    : (T.next
-      ? `${pct}% &middot; ${_rmFmtHrs((T.next.hours * 60) - mins.total)} to ${T.next.name}`
-      : "Highest stage reached");
-  // The roadmap's per-stage "what to focus on now" guidance, trimmed to the
-  // first couple of sentences for the dashboard (full text lives on the roadmap).
-  let focusHtml = "";
-  if (T.cur.focus) {
-    const parts = String(T.cur.focus).split(". ");
-    const shortFocus = parts.slice(0, 2).join(". ").replace(/\.?$/, ".");
-    focusHtml = `<div class="jc-focus"><div class="jc-focus-h">Focus right now</div><div class="jc-focus-t">${escHtml(shortFocus)}</div></div>`;
-  }
-  el.innerHTML = `<a class="journey-card" href="/practice-log.html?goto=roadmap" aria-label="Open your roadmap">
-    <div class="jc-top">
+
+  const ownerToggle = isOwner()
+    ? `<button type="button" class="jc-owner-toggle" onclick="_togglePathPreview(event)">${previewL1 ? "&larr; Back to my level" : "Preview First Steps view"}</button>`
+    : "";
+
+  el.innerHTML = `<div class="path-card rg-card">
+    <a class="rg-head" href="/practice-log.html?goto=roadmap" aria-label="Open your roadmap">
       <div class="jc-trophy${isNew ? " jc-trophy--veiled" : ""}" style="--trophy:url('${trophy}')"><img src="${trophy}" alt="" draggable="false"></div>
-      <div class="jc-info">
-        <div class="jc-eyebrow">Your Journey</div>
-        <div class="jc-stage">${T.cur.name}</div>
+      <div class="rg-head-info">
+        <div class="jc-eyebrow">Your Path</div>
+        <div class="jc-stage">${escHtml(stage.name)}</div>
         <div class="jc-bar"><i style="width:${T.next ? pct : 100}%"></i></div>
         <div class="jc-next">${nextLine}</div>
       </div>
       <svg class="jc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-    </div>
-    ${focusHtml}
+    </a>
+    <div class="rg-sub">By the end of ${escHtml(stage.name)}, you can&hellip; <strong>${doneCount}/${goals.length}</strong></div>
+    <div class="rg-goals">${goalRows}</div>
     <div class="jc-jars">${jars}</div>
-  </a>${ownerToggle}`;
+    ${ownerToggle}
+  </div>`;
 }
 function renderStatsHero() {
   const el = document.getElementById('stats-hero');
@@ -11694,7 +11719,9 @@ function _emojiToSvg(e, size = 15) {
 }
 
 let _insightTrainers = null, _insightCollections = null; // loaded in loadData
-let _pathTheoryStarted = false; // has the member opened a theory lesson (Start-Here checklist)
+let _pathTheoryStarted = false; // has the member completed any theory lesson
+let _goalPieceTiers = null;     // difficulties of the member's completed pieces (roadmap goals)
+let _goalTheory = null;         // { totals:{level:n}, done:{level:n} } published theory lessons
 // Owner-only: preview the new-member "Start Here" card on your own established
 // account. Persisted so it survives reloads until you toggle it back off.
 let _previewStartHere = (() => { try { return localStorage.getItem("rm_preview_starthere") === "1"; } catch (e) { return false; } })();
@@ -11702,6 +11729,16 @@ function _togglePathPreview(e) {
   if (e) { e.preventDefault(); e.stopPropagation(); }
   _previewStartHere = !_previewStartHere;
   try { localStorage.setItem("rm_preview_starthere", _previewStartHere ? "1" : "0"); } catch (_) {}
+  try { _renderJourneyCard(); } catch (_) {}
+}
+// Self-check roadmap objectives (scales, ear/improv) the member ticks themselves.
+// PLACEHOLDER persistence: localStorage. Phase 2 moves these to a DB column so they
+// follow the member across devices.
+function _toggleGoalSelf(key, e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  const k = "rm_goal_" + key;
+  let on = false;
+  try { on = localStorage.getItem(k) === "1"; localStorage.setItem(k, on ? "0" : "1"); } catch (_) {}
   try { _renderJourneyCard(); } catch (_) {}
 }
 function renderInsights() {
@@ -21901,7 +21938,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
-<script src="/roadmap-levels.js?v=2"></script>
+<script src="/roadmap-levels.js?v=3"></script>
 
 <script>
   if ('serviceWorker' in navigator) {

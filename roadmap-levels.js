@@ -132,6 +132,71 @@
     }
   };
 
+  // ── Per-stage objectives ("by the end of this level, you can…") ──────────────
+  // PLACEHOLDER CONTENT (2026-06-30) — see practice-roadmap-objectives.md. Drives the
+  // dashboard "Your Path" card. Each goal: { icon, label, type, ...params }.
+  //  type 'days'  → distinct practice days >= target
+  //  type 'note'|'chord'|'ear' → best game score >= target
+  //  type 'piece' → completed pieces at difficulty tier >= count
+  //  type 'theory'→ theory course level: mode 'begin' (>=1 lesson) or 'complete' (all)
+  //  type 'self'  → member self-checks it (persisted; placeholder localStorage for now)
+  const GOALS = [
+    [ // 1 First Steps
+      { icon: "🔁", label: "Reach your first 30 days practised", type: "days", target: 30 },
+      { icon: "🎹", label: "Play C and G major, hands together, two octaves", type: "self", key: "s1-scales" },
+      { icon: "👁️", label: "Reach 12 in Note Recognition", type: "note", target: 12 },
+      { icon: "📖", label: "Begin Theory Level 1", type: "theory", level: 1, mode: "begin" },
+      { icon: "🎼", label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 }
+    ],
+    [ // 2 Beginner
+      { icon: "🔁", label: "Reach 100 days practised", type: "days", target: 100 },
+      { icon: "🎹", label: "C, G, D and F major with tonic triads and arpeggios", type: "self", key: "s2-scales" },
+      { icon: "👁️", label: "Reach 30 in Note Recognition", type: "note", target: 30 },
+      { icon: "🎵", label: "Reach 10 in Chord Recognition", type: "chord", target: 10 },
+      { icon: "👂", label: "Reach 15 in Ear Training", type: "ear", target: 15 },
+      { icon: "📖", label: "Complete Theory Level 1", type: "theory", level: 1, mode: "complete" },
+      { icon: "🎼", label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 },
+      { icon: "🎧", label: "Work out a tune by ear and improvise in C", type: "self", key: "s2-ear" }
+    ],
+    [ // 3 Foundations
+      { icon: "🔁", label: "Reach 250 days practised", type: "days", target: 250 },
+      { icon: "🎹", label: "A, B♭ and E♭ major; begin natural minors A, E, D", type: "self", key: "s3-scales" },
+      { icon: "👁️", label: "Reach 40 in Note Recognition", type: "note", target: 40 },
+      { icon: "🎵", label: "Reach 16 in Chord Recognition", type: "chord", target: 16 },
+      { icon: "👂", label: "Reach 24 in Ear Training", type: "ear", target: 24 },
+      { icon: "📖", label: "Complete Theory Level 2", type: "theory", level: 2, mode: "complete" },
+      { icon: "🎼", label: "Learn 1 to 2 Lower Intermediate pieces", type: "piece", tier: 2, count: 2 },
+      { icon: "🎧", label: "Sight-read a new easy piece weekly, read once", type: "self", key: "s3-sr" }
+    ],
+    [ // 4 Intermediate
+      { icon: "🎹", label: "Majors plus natural and harmonic minors secure", type: "self", key: "s4-scales" },
+      { icon: "👁️", label: "Reach 46 in Note Recognition", type: "note", target: 46 },
+      { icon: "🎵", label: "Reach 22 in Chord Recognition", type: "chord", target: 22 },
+      { icon: "👂", label: "Reach 30 in Ear Training", type: "ear", target: 30 },
+      { icon: "🎼", label: "Learn 2 to 3 Lower Intermediate pieces", type: "piece", tier: 2, count: 3 },
+      { icon: "🎧", label: "Improvise over a simple chord progression", type: "self", key: "s4-improv" },
+      { icon: "📖", label: "Deepen your understanding (theory sheets + the courses)", type: "self", key: "s4-theory" }
+    ],
+    [ // 5 Confident
+      { icon: "🎹", label: "Scales, minors and arpeggios across more keys, faster", type: "self", key: "s5-scales" },
+      { icon: "👁️", label: "Hold Note Recognition near the ceiling", type: "note", target: 48 },
+      { icon: "👂", label: "Hold Ear Training near the ceiling", type: "ear", target: 30 },
+      { icon: "🎵", label: "Hold Chord Recognition near the ceiling", type: "chord", target: 24 },
+      { icon: "🎼", label: "Learn 1 Upper Intermediate piece", type: "piece", tier: 3, count: 1 }
+    ],
+    [ // 6 Advanced
+      { icon: "🎹", label: "Scales and arpeggios fluent in all keys", type: "self", key: "s6-scales" },
+      { icon: "🎼", label: "Learn 1 Advanced piece", type: "piece", tier: 4, count: 1 }
+    ],
+    [ // 7 Performer
+      { icon: "🎼", label: "Prepare and perform a balanced Advanced programme", type: "self", key: "s7-prog" },
+      { icon: "🎼", label: "Begin reaching into Expert repertoire", type: "piece", tier: 5, count: 1 }
+    ],
+    [ // 8 Artist
+      { icon: "🎼", label: "Learn an Expert work and make it your own", type: "self", key: "s8-expert" }
+    ]
+  ];
+
   // Track metadata: which logged item types feed each track.
   const TRACKS = [
     { key: "total",         label: "Total Practice", itemTypes: null /* everything */ },
@@ -153,7 +218,8 @@
       tier: t.tier[i],
       tierLabel: (t.tier[i] != null) ? TIER_LABELS[t.tier[i]] : null,
       canDo: t.canDo[i],
-      focus: t.focus[i]
+      focus: t.focus[i],
+      goals: (key === "total") ? GOALS[i] : null
     }));
   }
 
