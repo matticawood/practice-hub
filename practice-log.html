@@ -205,6 +205,8 @@
     .rg-self-hint { flex-shrink: 0; font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
       color: color-mix(in srgb, #f0a500 80%, var(--text-muted)); opacity: .7; }
     .rg-goal.done .rg-self-hint { display: none; }
+    .rg-roll-head { font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
+      margin: 9px 2px 2px; padding-top: 10px; border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
     .rg-card .jc-jars { margin-top: 14px; }
     /* Wide layout: a single horizontal band — trophy | stage+bar (flex) | jars
        grouped right — so the width is used rather than stretched thin. Switches at
@@ -11490,12 +11492,16 @@ function _renderJourneyCard() {
   const days = new Set((allSessions || []).map(s => s.session_date).filter(Boolean)).size;
   const best = k => ((_insightTrainers && _insightTrainers[k]) || []).reduce((m, r) => Math.max(m, r.v || 0), 0);
   const pieces = tier => (_goalPieceTiers || []).filter(d => d >= tier).length;
+  // Hours logged in a practice category (e.g. improvisation), from the practice log.
+  const catMins = cat => (allSessions || []).reduce((sum, s) =>
+    sum + (s.practice_items || []).reduce((a, it) => a + (it.item_type === cat ? (it.duration_minutes || 0) : 0), 0), 0);
   const thBegin = L => !!(_goalTheory && (_goalTheory.done[L] || 0) >= 1);
   const thDone  = L => !!(_goalTheory && (_goalTheory.totals[L] || 0) > 0 && (_goalTheory.done[L] || 0) >= _goalTheory.totals[L]);
   const selfDone = key => { try { return localStorage.getItem("rm_goal_" + key) === "1"; } catch (e) { return false; } };
   const goalDone = g => {
     switch (g.type) {
       case "days":  return days >= g.target;
+      case "hours": return catMins(g.category) / 60 >= g.target;
       case "note": case "chord": case "ear": return best(g.type) >= g.target;
       case "piece": return pieces(g.tier) >= g.count;
       case "theory": return g.mode === "complete" ? thDone(g.level) : thBegin(g.level);
@@ -11503,15 +11509,37 @@ function _renderJourneyCard() {
       default: return false;
     }
   };
+
+  // ── roll-over: pull forward un-superseded, incomplete goals from earlier
+  // levels a member skipped (e.g. by adding prior hours and jumping levels). A goal
+  // is "superseded" when the current level (or a higher earlier level) already has a
+  // goal in the same group, so e.g. scales/note absorb into the current target; a
+  // goal unique to a skipped level rolls into the current card until it's done.
+  const grpOf = g => g.group || g.icon;
+  const rolled = [];
+  if (!previewL1) {
+    const seen = new Set(goals.map(grpOf));
+    for (let i = stage.level - 2; i >= 0; i--) {
+      (window.ROADMAP.levels.total[i].goals || []).forEach(g => {
+        const grp = grpOf(g);
+        if (seen.has(grp)) return;       // covered by current or a higher earlier level
+        seen.add(grp);
+        if (!goalDone(g)) rolled.push(g);
+      });
+    }
+  }
+
   const doneCount = goals.filter(goalDone).length;
   const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
-  const goalRows = goals.map(g => {
+  const renderGoal = g => {
     const done = goalDone(g);
     const inner = `<span class="rg-tick">${done ? CHECK : ""}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(g.label)}</span>`;
     return g.type === "self"
       ? `<button type="button" class="rg-goal self${done ? " done" : ""}" onclick="_toggleGoalSelf('${g.key}',event)">${inner}<span class="rg-self-hint">${done ? "" : "tap when done"}</span></button>`
       : `<div class="rg-goal${done ? " done" : ""}">${inner}</div>`;
-  }).join("");
+  };
+  const goalRows = goals.map(renderGoal).join("");
+  const rolledRows = rolled.map(renderGoal).join("");
 
   // ── header (trophy + stage + progress to next) ────────────────────────────
   const pct = Math.round(T.progress * 100);
@@ -11553,7 +11581,7 @@ function _renderJourneyCard() {
       <svg class="jc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </a>
     <div class="rg-sub">By the end of ${escHtml(stage.name)}, you can&hellip; <strong>${doneCount}/${goals.length}</strong></div>
-    <div class="rg-goals">${goalRows}</div>
+    <div class="rg-goals">${goalRows}${rolled.length ? `<div class="rg-roll-head">Still to catch up from earlier</div>${rolledRows}` : ""}</div>
     <div class="jc-jars">${jars}</div>
     ${ownerToggle}
   </div>`;
@@ -21956,7 +21984,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <!-- ── Shared header (navigation, bell, notifications) ── -->
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
-<script src="/roadmap-levels.js?v=4"></script>
+<script src="/roadmap-levels.js?v=5"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
