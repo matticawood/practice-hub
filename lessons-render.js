@@ -197,9 +197,24 @@
     let out = "", list = null, para = [];
     const flushPara = () => { if (para.length) { out += "<p>" + inline(para.join(" ")) + "</p>"; para = []; } };
     const flushList = () => { if (list) { out += "</" + list + ">"; list = null; } };
-    for (const raw of lines) {
-      const line = raw.trim();
+    const cells = r => r.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
       if (!line) { flushPara(); flushList(); continue; }
+      // GFM table: a "| … |" header row, a "|---|---|" separator, then body rows.
+      const next = (lines[i + 1] || "").trim();
+      if (line.indexOf("|") !== -1 && /^[|\s:-]+$/.test(next) && next.indexOf("-") !== -1 && next.indexOf("|") !== -1) {
+        flushPara(); flushList();
+        const th = cells(line).map(c => `<th>${inline(c)}</th>`).join("");
+        const body = [];
+        i += 1; // skip separator
+        while (i + 1 < lines.length && lines[i + 1].trim() && lines[i + 1].indexOf("|") !== -1) {
+          i += 1;
+          body.push(`<tr>${cells(lines[i]).map(c => `<td>${inline(c)}</td>`).join("")}</tr>`);
+        }
+        out += `<div class="lr-tablewrap"><table class="lr-table"><thead><tr>${th}</tr></thead><tbody>${body.join("")}</tbody></table></div>`;
+        continue;
+      }
       const ul = line.match(/^[-*]\s+(.*)$/);
       const ol = line.match(/^\d+\.\s+(.*)$/);
       if (ul) { flushPara(); if (list !== "ul") { flushList(); out += "<ul>"; list = "ul"; } out += "<li>" + inline(ul[1]) + "</li>"; continue; }
@@ -508,6 +523,11 @@
     .lr-text{font-size:1rem;margin:0 0 4px}
     .lr-text p{margin:0 0 12px} .lr-text ul,.lr-text ol{margin:0 0 12px;padding-left:22px}
     .lr-text li{margin:4px 0} .lr-text code{background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-size:.9em}
+    .lr-tablewrap{overflow-x:auto;margin:8px 0 16px}
+    .lr-table{border-collapse:collapse;width:100%;font-size:.92rem}
+    .lr-table th,.lr-table td{padding:9px 13px;text-align:left;vertical-align:top;border:1px solid var(--border,#e3e1e6)}
+    .lr-table th{background:var(--surface-2,#f5f2ee);font-weight:700;color:var(--text,#1a1410);white-space:nowrap}
+    .lr-table td strong{color:var(--accent-dark,#9a6f12)}
     .lr-callout{border-radius:12px;padding:14px 16px;margin:16px 0;border:1px solid var(--border,#e3e1e6);background:var(--surface,#fff)}
     .lr-callout-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
     .lr-callout-key{border-left:3px solid var(--accent,#f5c518)}
