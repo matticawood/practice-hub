@@ -148,16 +148,27 @@ at 7; Ear major/minor median 28 but triads 11). The old targets assumed every ga
 easy note-reading and asked for chord/ear scores nobody had ever hit. Recalibrated (owner-approved):
 
 - **Note** — one fluency standard held across keys (A major is not discounted vs C; equal
- fluency is the goal). First Steps **10** (C, G) → Beginner **15** (C, G, D, F) → Foundations
- **15** (A, B♭, E♭, same standard, harder keys) → Intermediate **34** (mixed clef + accidentals)
+ fluency is the goal). First Steps **10** (C, G) → Beginner **18** (C, G, D, F) → Foundations
+ **18** (A, B♭, E♭, same standard, harder keys) → Intermediate **34** (mixed clef + accidentals)
  → Confident maintain **40**.
 - **Chord** (inherently hardest — you must read/hear stacked notes, so numbers are much lower):
- Beginner **8** (tier 1, in key) → Foundations **10** (tier 1, any key) → Intermediate **9**
+ Beginner **10** (tier 1, in key) → Foundations **10** (tier 1, any key) → Intermediate **9**
  (tier 2, inversions) → Confident **7** (tier 3, sevenths). Numbers DROP as the tier climbs,
  by design — sevenths-in-any-key is genuinely slow, and the label says so.
-- **Ear** (harder than note, easier than chord — one sound at a time): Beginner **10**
+- **Ear** (harder than note, easier than chord — one sound at a time): Beginner **12**
  (major vs minor) → Foundations **16** (triads) → Intermediate **12** (sevenths) → Confident
  maintain **14** (sevenths).
+
+### Difficulty policy (how hard a target should be) — evidenced 2026-06-30
+Measured, per objective, the share of current players (best score, at that exact setting) already
+at/above the target. Policy: **mid "achieve" objectives ≈ top third already there (~25–35%);
+top/maintain objectives ≈ top quarter (~20–25%); beginner objectives = gentle floors.** Current
+upper targets land right there — Intermediate note 34 = 31% (4/13), Confident note 40 = 23% (3/13),
+chord/ear stretches ~33%. Beginner tiles read as 90–100% "pass" only because **the only members
+with scores are veterans** — a true beginner is far below that floor, so they're deliberately gentle
+(nudged to note 18 / chord 10 / ear 12 for a mild stretch, not veteran-hard). The game score is ONE
+tile, not a gate — a fast player can max it before being pianistically at that level, which is fine.
+**Under-sampled:** sevenths-ear (Int/Conf) has only 1 player ever — those two targets are provisional.
 
 ### Content gaps flagged by the research (decisions / future work)
 1. **Theory built only to Level 2.** Concrete theory objectives stop at Foundations; Intermediate+ is guidance until you author Level 3+. The minor-key lessons (L2 #6–9) are written but still **draft/unpublished** — the Intermediate scale objective leans on them, so publishing those would make it real.
