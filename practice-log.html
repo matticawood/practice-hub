@@ -11714,7 +11714,10 @@ function _renderJourneyCard() {
   // used to fill a ring around the tick, so members SEE it creep up as they practise.
   const goalStat = (g, lvl) => {
     if (g.match && g.match.keys) { const h = keysHit(g).length, n = g.match.keys.length; return { txt: `${h}/${n} keys`, frac: n ? h / n : 0 }; }
-    if (g.type === "days")  { const need = g.target; const have = Math.max(0, Math.min(need, days - (cumThresh(g, lvl, "days") - need))); return { txt: `${have}/${need} days`, frac: need ? have / need : 0 }; }
+    // Days: no "X/N" chip — the countdown lives in the label ("Practice another N
+    // days at this level"). The ring fills toward the cumulative target so it, and
+    // the countdown, both move a step every day the member practises (never frozen).
+    if (g.type === "days")  { const thr = cumThresh(g, lvl, "days"); return { txt: "", frac: thr ? Math.min(1, days / thr) : 0 }; }
     if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const have = Math.max(0, Math.min(need, catMins(g.category) - (cumThresh(g, lvl, "min") - need))); return { txt: `${Math.round(have / 60)}/${Math.round(need / 60)} h`, frac: need ? have / need : 0 }; }
     if (g.type === "piece") { const have = Math.min(g.count, (g.mode === "added" ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length : pieces(g.tier))); return { txt: `${have}/${g.count}`, frac: g.count ? have / g.count : 0 }; }
     if (g.type === "note" || g.type === "chord" || g.type === "ear") { const b = bestMatch(g.type, g.match); return { txt: `best ${b}/${g.target}`, frac: g.target ? Math.min(1, b / g.target) : 0 }; }
@@ -11724,12 +11727,20 @@ function _renderJourneyCard() {
   const renderGoal = (g, lvl) => {
     const done = goalDone(g, lvl);
     const st = done ? null : goalStat(g, lvl);
+    // Days goal: the label IS the countdown. remaining = cumulative target minus days
+    // done, so any days still owed from earlier levels push it above the level's own
+    // number (finish First Steps in 30 of 50 days → Beginner reads "another 120 days").
+    let labelText = g.label;
+    if (g.type === "days" && !done) {
+      const remain = Math.max(0, cumThresh(g, lvl, "days") - days);
+      labelText = `Practice another ${remain} day${remain === 1 ? "" : "s"} at this level`;
+    }
     const prog = (st && st.txt) ? `<span class="rg-keys">${st.txt}</span>` : "";
     const ring = (st && st.frac > 0)
       ? `<svg class="rg-ring" viewBox="0 0 24 24"><circle class="rg-ring-bg" cx="12" cy="12" r="9"/><circle class="rg-ring-fg" cx="12" cy="12" r="9" style="stroke-dashoffset:${(RING_C * (1 - Math.min(1, st.frac))).toFixed(1)}"/></svg>`
       : "";
     const tickCls = ring ? "rg-tick rg-tick--ring" : "rg-tick";
-    const inner = `<span class="${tickCls}">${done ? CHECK : ring}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(g.label)}</span>${prog}`;
+    const inner = `<span class="${tickCls}">${done ? CHECK : ring}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(labelText)}</span>${prog}`;
     return g.type === "self"
       ? `<button type="button" class="rg-goal self${done ? " done" : ""}" onclick="_toggleGoalSelf('${g.key}',event)">${inner}<span class="rg-self-hint">${done ? "" : "tap when done"}</span></button>`
       : `<div class="rg-goal${done ? " done" : ""}">${inner}</div>`;
