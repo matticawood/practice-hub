@@ -210,6 +210,22 @@
     ]
   ];
 
+  // Matt's picks — an ORDERED hierarchy of recommended pieces per level (by
+  // pieces.id). The card shows the first 3 the member hasn't added to their
+  // collection yet; as they add one, the next in line surfaces. 6 per level so
+  // there's always a fresh one to reveal. Owner: reorder / swap IDs freely.
+  // (Draft set — matched to each level's difficulty tier, easiest/most motivating first.)
+  const PICKS = [
+    [134, 130, 5, 132, 9, 135],   // 1 First Steps   (tier 0 + easiest tier 1)
+    [94, 12, 86, 7, 11, 131],     // 2 Beginner      (tier 1)
+    [27, 3, 2, 17, 46, 10],       // 3 Foundations   (tier 2, approachable)
+    [43, 13, 19, 18, 20, 21],     // 4 Intermediate  (tier 2, meatier)
+    [16, 31, 23, 25, 34, 4],      // 5 Confident     (tier 3)
+    [1, 51, 106, 54, 62, 52],     // 6 Advanced      (tier 4)
+    [73, 69, 70, 55, 75, 235],    // 7 Performer     (tier 5)
+    [122, 124, 79, 81, 125, 123]  // 8 Artist        (tier 5, hardest)
+  ];
+
   // Track metadata: which logged item types feed each track.
   const TRACKS = [
     { key: "total",         label: "Total Practice", itemTypes: null /* everything */ },
@@ -241,6 +257,7 @@
     tierLabels: TIER_LABELS,
     tracks: TRACKS,
     levels: levels,
+    picks: PICKS,
     note: "A guide, not a finish line. Everyone's journey is different, and hours are only part of the story."
   };
 })();
