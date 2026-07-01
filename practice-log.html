@@ -11591,6 +11591,12 @@ function _renderJourneyCard() {
     _rmLoadBaseline().then(_renderJourneyCard);
     return;
   }
+  // Pull the DB-backed self-checks (non-blocking: render now off the localStorage
+  // mirror, then repaint once the authoritative row arrives).
+  if (typeof _selfChecks !== "undefined" && _selfChecks === null && typeof _rmLoadSelfChecks === "function") {
+    _selfChecks = false;
+    _rmLoadSelfChecks().then(() => { try { _renderJourneyCard(); } catch (_) {} });
+  }
   const mins = _rmTrackMinutes();
   const T = _rmLevelFor("total", mins.total / 60);
   if (!T || !T.cur) { el.innerHTML = ""; return; }
@@ -11621,7 +11627,12 @@ function _renderJourneyCard() {
     sum + (s.practice_items || []).reduce((a, it) => a + (it.item_type === cat ? (it.duration_minutes || 0) : 0), 0), 0);
   const thBegin = L => !!(_goalTheory && (_goalTheory.done[L] || 0) >= 1);
   const thDone  = L => !!(_goalTheory && (_goalTheory.totals[L] || 0) > 0 && (_goalTheory.done[L] || 0) >= _goalTheory.totals[L]);
-  const selfDone = key => { try { return localStorage.getItem("rm_goal_" + key) === "1"; } catch (e) { return false; } };
+  // DB-backed self-checks are authoritative once loaded; before that (or on load
+  // failure) fall back to the localStorage mirror so ticks still paint instantly.
+  const selfDone = key => {
+    if (_selfChecks && typeof _selfChecks === "object") return !!_selfChecks[key];
+    try { return localStorage.getItem("rm_goal_" + key) === "1"; } catch (e) { return false; }
+  };
   const grpOf = g => g.group || g.icon;
   // Accumulating goals (days, sight-reading & improv minutes) store their OWN per-level
   // target; the tick threshold is the sum of that group's targets across all levels up
@@ -12096,9 +12107,16 @@ let _goalTheory = null;         // { totals:{level:n}, done:{level:n} } publishe
 // follow the member across devices.
 function _toggleGoalSelf(key, e) {
   if (e) { e.preventDefault(); e.stopPropagation(); }
-  const k = "rm_goal_" + key;
-  let on = false;
-  try { on = localStorage.getItem(k) === "1"; localStorage.setItem(k, on ? "0" : "1"); } catch (_) {}
+  if (!_selfChecks || typeof _selfChecks !== "object") _selfChecks = {};
+  const next = !_selfChecks[key];
+  if (next) _selfChecks[key] = true; else delete _selfChecks[key];
+  // Only persist for the member's OWN account. Under owner "view as" this is a visual
+  // echo only — we never write another member's ticks (or pollute the owner's row).
+  const own = !viewingEmail || viewingEmail === myEmail;
+  if (own) {
+    try { if (next) localStorage.setItem("rm_goal_" + key, "1"); else localStorage.removeItem("rm_goal_" + key); } catch (_) {}
+    _rmSaveSelfChecks().catch(() => {});
+  }
   try { _renderJourneyCard(); } catch (_) {}
 }
 // Show all / show fewer objectives (remembers the choice), then re-render.
@@ -19783,6 +19801,8 @@ async function switchViewingEmail(email) {
   // Reset the roadmap prior-hours baseline so it re-fetches for the new user
   // (otherwise the Journey card / roadmap show the previous user's baseline).
   if (typeof _practiceBaseline !== "undefined") _practiceBaseline = null;
+  // Same for the DB-backed self-checks, so they re-fetch for the newly-viewed member.
+  if (typeof _selfChecks !== "undefined") _selfChecks = null;
 
   // Always switch back to the log/hub tab when changing user
   document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.mainTab === "log"));
@@ -23169,6 +23189,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 </style>
 <script>
   let _practiceBaseline = null;   // null = not loaded; false = loading; object/0 = loaded
+  let _selfChecks = null;         // null = not loaded; false = loading; object {key:true} = loaded
   const _RM_TYPE_TO_TRACK = { piece:"repertoire", book:"repertoire", technique:"technique", sightreading:"sight_reading", theory:"musicianship", eartraining:"musicianship", improvisation:"musicianship" };
 
   async function _rmLoadBaseline() {
@@ -23179,6 +23200,52 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       if (error) throw error;
       _practiceBaseline = data || 0;
     } catch (e) { console.warn("baseline load failed:", e?.message || e); _practiceBaseline = 0; }
+  }
+
+  // Durable "tap when done" self-checks (scales/arps/minors fluency, perform goals).
+  // DB-backed so they follow a member across devices; mirrored to localStorage for
+  // instant paint on the next load. Owner "view as" reads the viewed member's row.
+  async function _rmLoadSelfChecks() {
+    const who = (typeof viewingEmail === "string" && viewingEmail) ? viewingEmail : myEmail;
+    if (!who) { _selfChecks = {}; return; }
+    try {
+      const { data, error } = await db.from("member_self_checks").select("checks").eq("email", who).maybeSingle();
+      if (error) throw error;
+      _selfChecks = (data && data.checks && typeof data.checks === "object") ? { ...data.checks } : {};
+      // Own account only: mirror to localStorage for instant next paint, and do a
+      // one-time migration of any pre-existing localStorage ticks (older builds stored
+      // these only in the browser) into the DB-backed set so nobody loses a tick.
+      // Never for "view as", or the owner's card would inherit another member's ticks.
+      if (who === myEmail) {
+        let migrated = false;
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const lk = localStorage.key(i);
+            if (lk && lk.indexOf("rm_goal_") === 0 && localStorage.getItem(lk) === "1") {
+              const gk = lk.slice("rm_goal_".length);
+              if (gk && !_selfChecks[gk]) { _selfChecks[gk] = true; migrated = true; }
+            }
+          }
+        } catch (_) {}
+        if (migrated) _rmSaveSelfChecks().catch(() => {});
+        try { Object.keys(_selfChecks).forEach(k => { if (_selfChecks[k]) localStorage.setItem("rm_goal_" + k, "1"); }); } catch (_) {}
+      }
+    } catch (e) {
+      // Leave _selfChecks falsy so selfDone falls back to the localStorage mirror —
+      // never blank out ticks just because the row/table couldn't be read (e.g. the
+      // migration isn't applied yet, or a transient network error).
+      console.warn("self-checks load failed:", e?.message || e); _selfChecks = false;
+    }
+  }
+
+  async function _rmSaveSelfChecks() {
+    if (!myEmail) return;
+    const checks = (_selfChecks && typeof _selfChecks === "object") ? _selfChecks : {};
+    try {
+      const { error } = await db.from("member_self_checks").upsert(
+        { email: myEmail, checks, updated_at: new Date().toISOString() }, { onConflict: "email" });
+      if (error) throw error;
+    } catch (e) { console.warn("self-checks save failed:", e?.message || e); }
   }
 
   function _rmTrackMinutes() {
