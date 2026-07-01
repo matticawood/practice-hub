@@ -182,16 +182,16 @@
       { icon: "ear",    group: "ear",    label: "Score 12 in the Ear Training tool (sevenths)", type: "ear", target: 12, match: { set: "sevenths" } },
       { icon: "improv", group: "improv", label: "Spend another 5 hours improvising over simple chord progressions", type: "hours", category: "improvisation", target: 5 },
       { icon: "sightread", group: "sightread", label: "Sight-read Lower Intermediate pieces, read once: 3,500 minutes (10 minutes a day for 350 days)", type: "hours", category: "sightreading", targetMin: 3500 },
-      { icon: "piece",  group: "piece",  label: "Learn 2 to 3 Lower Intermediate pieces", type: "piece", tier: 2, count: 3 }
+      { icon: "piece",  group: "piece",  label: "Learn 5 intermediate pieces (Lower to Upper Intermediate)", type: "piece", tier: 2, count: 5 }
     ],
     [ // 5 Confident
-      { icon: "scales", group: "scales", label: "All major and minor scales, in every key, faster and musical", type: "self", key: "s5-scales" },
+      { icon: "scales", group: "scales", label: "All major and minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales" },
       { icon: "scales", group: "arps",   label: "All major and minor arpeggios, in every key", type: "self", key: "s5-arps" },
       { icon: "note",   group: "note",   label: "Hold Note Recognition near the top: score 40 (mixed clef, sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
       { icon: "ear",    group: "ear",    label: "Hold the Ear Training tool steady: score 14 (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
       { icon: "chord",  group: "chord",  label: "Hold Chord Recognition steady: score 7 (sevenths, any key)", type: "chord", target: 7, match: { tier: 3, mode: "free" } },
       { icon: "sightread", group: "sightread", label: "Sight-read Upper Intermediate pieces, read once: 5,000 minutes (10 minutes a day for 500 days)", type: "hours", category: "sightreading", targetMin: 5000 },
-      { icon: "piece",  group: "piece",  label: "Learn 1 Upper Intermediate piece", type: "piece", tier: 3, count: 1 }
+      { icon: "piece",  group: "piece",  label: "Learn 6 Upper Intermediate pieces", type: "piece", tier: 3, count: 6 }
     ],
     [ // 6 Advanced
       { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales" },
