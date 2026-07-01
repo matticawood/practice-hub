@@ -11650,8 +11650,26 @@ function _renderJourneyCard() {
   const baseLvlIdx = hasBaseline
     ? (_rmLevelFor("total", (Number(_practiceBaseline.total_minutes) || 0) / 60).idx || 0)
     : 0;
-  const cumThresh = (g, lvl, kind) =>
-    cumSum(grpOf(g), lvl, kind, kind === "days" ? baseLvlIdx : 0);
+  const cumThresh = (g, lvl, kind) => {
+    let t = cumSum(grpOf(g), lvl, kind, kind === "days" ? baseLvlIdx : 0);
+    // Prorate the DAYS goal at the level a baseline DROPPED the member into. Prior
+    // hours can place someone most of the way through a level, so owing the whole
+    // level's days would be absurd (e.g. 10h left of the level but "another 200 days").
+    // Scale that level's day target to the slice of the level still ahead of them by
+    // hours at the point their baseline placed them. Only at the floor level itself,
+    // and only for baseline members — a member who climbed here on real practice, or
+    // whose baseline sits at the very start of the level, owes the full amount.
+    if (kind === "days" && g.type === "days" && hasBaseline && (lvl - 1) === baseLvlIdx) {
+      const Lcur = window.ROADMAP.levels.total[baseLvlIdx];
+      const Lnext = window.ROADMAP.levels.total[baseLvlIdx + 1];
+      if (Lcur && Lnext && Lnext.hours > Lcur.hours) {
+        const baseHrs = (Number(_practiceBaseline.total_minutes) || 0) / 60;
+        const fracRemain = Math.min(1, Math.max(0, (Lnext.hours - baseHrs) / (Lnext.hours - Lcur.hours)));
+        t = Math.max(1, Math.round((g.target || t) * fracRemain));
+      }
+    }
+    return t;
+  };
   const goalDone = (g, lvl) => {
     lvl = lvl || stage.level;
     switch (g.type) {
