@@ -222,7 +222,7 @@
     [32, 43, 13, 19, 18, 21, 20, 17], // 4 Intermediate (Chopin Prelude in Em leads; Handel before Schubert; +Gnossienne)
     [4, 16, 31, 23, 25, 34],      // 5 Confident     (Moonlight 1st mvt leads — a crowd-pleaser)
     [1, 51, 106, 54, 52, 234],        // 6 Advanced   (bridge pieces; +Nightingale, Rach Prelude up to Performer)
-    [47, 73, 69, 55, 75, 62],         // 7 Performer  (Pathetique mvt 1 opener; +Rach Prelude; Winter Wind & Op.10/1 up to Artist)
+    [47, 73, 69, 55, 75, 62, 57],     // 7 Performer  (Pathetique mvt 1 opener; +Rach Prelude, +Brahms Rhapsody in Bm; Winter Wind & Op.10/1 up to Artist)
     [122, 124, 79, 81, 125, 123, 235, 70] // 8 Artist (the monsters; +Winter Wind, +Op.10/1)
   ];
 
