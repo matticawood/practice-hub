@@ -11625,9 +11625,9 @@ function _renderJourneyCard() {
   // target; the tick threshold is the sum of that group's targets across all levels up
   // to the goal's level, so the displayed number stays small/per-level while the tick
   // still uses the member's cumulative logged total.
-  const cumSum = (grp, lvl, kind) => {
+  const cumSum = (grp, lvl, kind, from) => {
     let s = 0;
-    for (let i = 0; i < lvl; i++) {
+    for (let i = (from || 0); i < lvl; i++) {
       (window.ROADMAP.levels.total[i].goals || []).forEach(x => {
         if (grpOf(x) !== grp) return;
         if (kind === "days" && x.type === "days")  s += (x.target || 0);
@@ -11636,18 +11636,22 @@ function _renderJourneyCard() {
     }
     return s;
   };
-  // Members who added prior-experience HOURS skipped levels without logging days,
-  // so a cumulative threshold would make them "catch up" phantom earlier-level DAYS.
-  // Days measures regularity (distinct practice dates) — dumping in hours can't earn
-  // days retroactively, so for a baseline member the DAYS goal counts from now toward
-  // THIS level's own per-level target only. HOURS is different: it measures real
-  // logged volume, and the baseline hours ARE genuine practice already in their total
-  // (whether spread over many days or a few long sessions), so hours stay cumulative
-  // for everyone — the baseline hours legitimately count toward the accumulated target.
+  // A manual-hours BASELINE lets a member type in prior experience and jump straight
+  // to a level. They never earned the DAYS for the levels below where that entry
+  // dropped them, so the DAYS goal counts fresh FROM that level and then accumulates
+  // upward as they genuinely practise and climb (regularity has to be built over
+  // time). baseLvlIdx = the 0-based level that the baseline hours ALONE place them at;
+  // it's 0 for everyone else, so days accumulate from level 1 as normal — including
+  // members who reached a level through real logged hours, however few days those
+  // hours spanned (their days legitimately have to catch up). HOURS always accumulate
+  // from level 1: they measure real logged volume, and the baseline hours are genuine
+  // practice already in the member's total.
   const hasBaseline = !!(_practiceBaseline && typeof _practiceBaseline === "object" && Number(_practiceBaseline.total_minutes) > 0);
-  const cumThresh = (g, lvl, kind) => (hasBaseline && kind === "days")
-    ? (g.target || 0)
-    : cumSum(grpOf(g), lvl, kind);
+  const baseLvlIdx = hasBaseline
+    ? (_rmLevelFor("total", (Number(_practiceBaseline.total_minutes) || 0) / 60).idx || 0)
+    : 0;
+  const cumThresh = (g, lvl, kind) =>
+    cumSum(grpOf(g), lvl, kind, kind === "days" ? baseLvlIdx : 0);
   const goalDone = (g, lvl) => {
     lvl = lvl || stage.level;
     switch (g.type) {
