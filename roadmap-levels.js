@@ -187,9 +187,9 @@
     [ // 5 Confident
       { icon: "scales", group: "scales", label: "All major and minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales", all: true },
       { icon: "scales", group: "arps",   label: "All major and minor arpeggios, in every key", type: "self", key: "s5-arps", all: true },
-      { icon: "note",   group: "note",   label: "Hold Note Recognition near the top: score 40 (mixed clef, sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
-      { icon: "ear",    group: "ear",    label: "Hold the Ear Training tool steady: score 14 (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
-      { icon: "chord",  group: "chord",  label: "Hold Chord Recognition steady: score 7 (sevenths, any key)", type: "chord", target: 7, match: { tier: 3, mode: "free" } },
+      { icon: "note",   group: "note",   label: "Score 40 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
+      { icon: "ear",    group: "ear",    label: "Score 14 in the Ear Training tool (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
+      { icon: "chord",  group: "chord",  label: "Score 7 in Chord Recognition (sevenths, any key)", type: "chord", target: 7, match: { tier: 3, mode: "free" } },
       { icon: "sightread", group: "sightread", label: "Sight-read Upper Intermediate pieces, read once: 5,000 minutes (10 minutes a day for 500 days)", type: "hours", category: "sightreading", targetMin: 5000 },
       { icon: "piece",  group: "piece",  label: "Learn 6 Upper Intermediate pieces", type: "piece", tier: 3, count: 6 }
     ],
