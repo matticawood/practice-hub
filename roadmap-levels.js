@@ -197,12 +197,12 @@
       { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales" },
       { icon: "scales", group: "arps",   label: "All arpeggios fluent in every key", type: "self", key: "s6-arps" },
       { icon: "sightread", group: "sightread", label: "Sight-read Advanced pieces, read once: 8,000 minutes (10 minutes a day for 800 days)", type: "hours", category: "sightreading", targetMin: 8000 },
-      { icon: "piece",  group: "piece",  label: "Learn 1 Advanced piece", type: "piece", tier: 4, count: 1 }
+      { icon: "piece",  group: "piece",  label: "Learn 6 Advanced pieces", type: "piece", tier: 4, count: 6 }
     ],
     [ // 7 Performer
       { icon: "sightread", group: "sightread", label: "Sight-read advanced pieces across styles, read once: 15,000 minutes (10 minutes a day for 1,500 days)", type: "hours", category: "sightreading", targetMin: 15000 },
       { icon: "perform", group: "perform", label: "Prepare and perform a balanced Advanced programme", type: "self", key: "s7-prog" },
-      { icon: "piece",   group: "piece",   label: "Add an Expert piece into your learning", type: "piece", tier: 5, count: 1, mode: "added" }
+      { icon: "piece",   group: "piece",   label: "Learn another 5 advanced-to-expert pieces", type: "piece", tier: 4, count: 11 }
     ],
     [ // 8 Artist
       { icon: "sightread", group: "sightread", label: "Keep sight-reading any style, 10 minutes a day, including accompaniments", type: "self", key: "s8-sr" },
