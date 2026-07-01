@@ -143,7 +143,7 @@
   const GOALS = [
     [ // 1 First Steps
       { icon: "days",   group: "days",   label: "Reach your first 50 days of practice", type: "days", target: 50 },
-      { icon: "scales", group: "scales", label: "C and G major scales, hands together, two octaves", type: "self", key: "s1-scales" },
+      { icon: "scales", group: "scales", label: "C and G major scales, hands together, two octaves", type: "self", key: "s1-scales", keys: ["C", "G"] },
       { icon: "note",   group: "note",   label: "Score 10 in Note Recognition in both C and G major", type: "note", target: 10, match: { keys: ["C", "G"] } },
       { icon: "theory", group: "theory", label: "Begin Theory Level 1", type: "theory", level: 1, mode: "begin" },
       { icon: "sightread", group: "sightread", label: "Sight-read very simple single lines, read once: 500 minutes (10 minutes a day for 50 days)", type: "hours", category: "sightreading", targetMin: 500 },
@@ -151,8 +151,8 @@
     ],
     [ // 2 Beginner
       { icon: "days",   group: "days",   label: "Practice another 100 days at this level", type: "days", target: 100 },
-      { icon: "scales", group: "scales", label: "C, G, D and F major scales, hands together, two octaves", type: "self", key: "s2-scales" },
-      { icon: "scales", group: "arps",   label: "C, G, D and F major arpeggios", type: "self", key: "s2-arps" },
+      { icon: "scales", group: "scales", label: "C, G, D and F major scales, hands together, two octaves", type: "self", key: "s2-scales", keys: ["C", "G", "D", "F"] },
+      { icon: "scales", group: "arps",   label: "C, G, D and F major arpeggios", type: "self", key: "s2-arps", keys: ["C", "G", "D", "F"] },
       { icon: "note",   group: "note",   label: "Score 18 in Note Recognition in each of C, G, D and F major", type: "note", target: 18, match: { keys: ["C", "G", "D", "F"] } },
       { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition in each of C, G, D and F (triads in the key)", type: "chord", target: 10, match: { keys: ["C", "G", "D", "F"], tier: 1 } },
       { icon: "ear",    group: "ear",    label: "Score 12 in the Ear Training tool in each of C, G, D and F (major versus minor)", type: "ear", target: 12, match: { keys: ["C", "G", "D", "F"], set: "major_minor" } },
@@ -163,9 +163,9 @@
     ],
     [ // 3 Foundations
       { icon: "days",   group: "days",   label: "Practice another 200 days at this level", type: "days", target: 200 },
-      { icon: "scales", group: "scales", label: "A, B♭ and E♭ major scales", type: "self", key: "s3-scales" },
-      { icon: "scales", group: "arps",   label: "A, B♭ and E♭ major arpeggios", type: "self", key: "s3-arps" },
-      { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in A, E and D", type: "self", key: "s3-minors" },
+      { icon: "scales", group: "scales", label: "A, B♭ and E♭ major scales", type: "self", key: "s3-scales", keys: ["A", "Bb", "Eb"] },
+      { icon: "scales", group: "arps",   label: "A, B♭ and E♭ major arpeggios", type: "self", key: "s3-arps", keys: ["A", "Bb", "Eb"] },
+      { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in A, E and D", type: "self", key: "s3-minors", keys: ["A", "E", "D"] },
       { icon: "note",   group: "note",   label: "Score 18 in Note Recognition in each of A, B♭ and E♭ major", type: "note", target: 18, match: { keys: ["A", "Bb", "Eb"] } },
       { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition (triads in any key, with no key to lean on)", type: "chord", target: 10, match: { tier: 1, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 16 in the Ear Training tool (triads: major, minor, diminished, augmented)", type: "ear", target: 16, match: { set: "triads" } },
@@ -174,9 +174,9 @@
       { icon: "sightread", group: "sightread", label: "Sight-read Beginner-level pieces, read once: 2,000 minutes (10 minutes a day for 200 days)", type: "hours", category: "sightreading", targetMin: 2000 }
     ],
     [ // 4 Intermediate
-      { icon: "scales", group: "scales", label: "All major scales secure, hands together, two octaves", type: "self", key: "s4-scales" },
-      { icon: "scales", group: "arps",   label: "All major arpeggios secure", type: "self", key: "s4-arps" },
-      { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in B, G and C", type: "self", key: "s4-minors" },
+      { icon: "scales", group: "scales", label: "All major scales secure, hands together, two octaves", type: "self", key: "s4-scales", all: true },
+      { icon: "scales", group: "arps",   label: "All major arpeggios secure", type: "self", key: "s4-arps", all: true },
+      { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in B, G and C", type: "self", key: "s4-minors", keys: ["B", "G", "C"] },
       { icon: "note",   group: "note",   label: "Score 34 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 34, match: { clef: "mixed", acc: true } },
       { icon: "chord",  group: "chord",  label: "Score 9 in Chord Recognition (triads and inversions, any key)", type: "chord", target: 9, match: { tier: 2, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 12 in the Ear Training tool (sevenths)", type: "ear", target: 12, match: { set: "sevenths" } },
@@ -185,8 +185,8 @@
       { icon: "piece",  group: "piece",  label: "Learn 5 intermediate pieces (Lower to Upper Intermediate)", type: "piece", tier: 2, count: 5 }
     ],
     [ // 5 Confident
-      { icon: "scales", group: "scales", label: "All major and minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales" },
-      { icon: "scales", group: "arps",   label: "All major and minor arpeggios, in every key", type: "self", key: "s5-arps" },
+      { icon: "scales", group: "scales", label: "All major and minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales", all: true },
+      { icon: "scales", group: "arps",   label: "All major and minor arpeggios, in every key", type: "self", key: "s5-arps", all: true },
       { icon: "note",   group: "note",   label: "Hold Note Recognition near the top: score 40 (mixed clef, sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
       { icon: "ear",    group: "ear",    label: "Hold the Ear Training tool steady: score 14 (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
       { icon: "chord",  group: "chord",  label: "Hold Chord Recognition steady: score 7 (sevenths, any key)", type: "chord", target: 7, match: { tier: 3, mode: "free" } },
@@ -194,8 +194,8 @@
       { icon: "piece",  group: "piece",  label: "Learn 6 Upper Intermediate pieces", type: "piece", tier: 3, count: 6 }
     ],
     [ // 6 Advanced
-      { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales" },
-      { icon: "scales", group: "arps",   label: "All arpeggios fluent in every key", type: "self", key: "s6-arps" },
+      { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales", all: true },
+      { icon: "scales", group: "arps",   label: "All arpeggios fluent in every key", type: "self", key: "s6-arps", all: true },
       { icon: "sightread", group: "sightread", label: "Sight-read Advanced pieces, read once: 8,000 minutes (10 minutes a day for 800 days)", type: "hours", category: "sightreading", targetMin: 8000 },
       { icon: "piece",  group: "piece",  label: "Learn 6 Advanced pieces", type: "piece", tier: 4, count: 6 }
     ],
