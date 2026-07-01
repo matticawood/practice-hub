@@ -218,7 +218,7 @@
   const PICKS = [
     [134, 132, 5, 11, 7, 135],    // 1 First Steps   (2 absolute-beginner books + Petzold show first)
     [7, 12, 86, 94, 67, 3, 32],   // 2 Beginner      (Clementi first; crosses over into tier 2/3 aspirational picks)
-    [27, 3, 2, 17, 46, 10],       // 3 Foundations   (tier 2, approachable)
+    [3, 2, 17, 46, 10, 27],       // 3 Foundations   (River Flows in You demoted to last)
     [32, 43, 13, 19, 18, 21, 20, 17], // 4 Intermediate (Chopin Prelude in Em leads; Handel before Schubert; +Gnossienne)
     [16, 31, 23, 25, 34, 4],      // 5 Confident     (tier 3)
     [1, 51, 106, 54, 62, 52],     // 6 Advanced      (tier 4)
