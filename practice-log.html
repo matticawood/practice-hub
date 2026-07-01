@@ -8903,6 +8903,13 @@ async function loadData() {
 
   // ── SECONDARY data in the background (best-effort, never blocks the paint) ──
   (async () => {
+    // Matt's picks only need the library list, so fetch that first and re-render
+    // the card straight away — the picks shouldn't wait on the heavier trainer /
+    // theory / collection queries below. (Collection filtering refines when those land.)
+    db.from("pieces").select("id, title, composer, difficulty, kind").then(res => {
+      _goalAllPieces = res.data || [];
+      try { _renderJourneyCard(); } catch (e) {}
+    }).catch(() => {});
     // Per-session focus ratings (focus-quality insights + session cards).
     try {
       if (allSessions.length && allSessions[0].focus_rating === undefined) {
@@ -8917,15 +8924,14 @@ async function loadData() {
 
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
-      const [nr, cr, pg, er, uc, thL, thP, ap] = await Promise.all([
+      const [nr, cr, pg, er, uc, thL, thP] = await Promise.all([
         db.from("note_game_scores").select("score, created_at, clef, accidentals, key_signature").eq("email", viewingEmail),
         db.from("chord_game_scores").select("score, created_at, tier, mode, key_signature").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
         db.from("ear_game_scores").select("score, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
         db.from("user_collections").select("status, created_at, piece_id, pieces(difficulty)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, status").eq("course", "theory"),
-        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true),
-        db.from("pieces").select("id, title, composer, difficulty, kind")
+        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true)
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
@@ -8944,7 +8950,7 @@ async function loadData() {
         .filter(r => r.pieces && r.pieces.difficulty != null)
         .map(r => r.pieces.difficulty);
       _goalCollectionIds = new Set((uc.data || []).map(r => r.piece_id).filter(Boolean));
-      _goalAllPieces = ap.data || [];
+      // _goalAllPieces is loaded up-front (see the fast pieces fetch above).
       // Theory completion per level (published lessons only): begin = >=1 done; complete = all done.
       const lv = {}, totals = {}, done = {};
       (thL.data || []).forEach(l => {
@@ -8954,7 +8960,7 @@ async function loadData() {
       (thP.data || []).forEach(p => { const L = lv[p.lesson_id]; if (L != null) done[L] = (done[L] || 0) + 1; });
       _goalTheory = { totals, done };
       _pathTheoryStarted = Object.values(done).some(n => n > 0);
-    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _goalCollectionTiers = null; _goalCollectionIds = null; _goalAllPieces = null; }
+    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _goalCollectionTiers = null; _goalCollectionIds = null; /* _goalAllPieces kept — loaded separately */ }
 
     // Reading/library/game achievement extras (Badges tab).
     try { await loadAchievementExtras(); } catch (e) { /* badges fill in later */ }
@@ -22213,7 +22219,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <script src="/shared-header.js?v=2026062410"></script>
 <script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-tour.js?v=5"></script>
-<script src="/roadmap-levels.js?v=30"></script>
+<script src="/roadmap-levels.js?v=31"></script>
 
 <script>
   if ('serviceWorker' in navigator) {

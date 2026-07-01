@@ -205,8 +205,9 @@
       { icon: "piece",   group: "piece",   label: "Learn another 5 advanced-to-expert pieces", type: "piece", tier: 4, count: 11 }
     ],
     [ // 8 Artist
-      { icon: "sightread", group: "sightread", label: "Keep sight-reading any style, 10 minutes a day, including accompaniments", type: "self", key: "s8-sr" },
-      { icon: "expert", group: "piece", label: "Learn an Expert work and make it your own", type: "self", key: "s8-expert" }
+      { icon: "perform", group: "perform", label: "Prepare and perform a full programme of expert pieces", type: "self", key: "s8-programme" },
+      { icon: "expert", group: "piece", label: "Learn an Expert work and make it your own", type: "self", key: "s8-expert" },
+      { icon: "sightread", group: "sightread", label: "Keep sight-reading any style, 10 minutes a day, including accompaniments", type: "self", key: "s8-sr" }
     ]
   ];
 
