@@ -1108,6 +1108,7 @@ function _shBuildChrome() {
           </button>
           <div class="sh-user-menu" id="sh-user-menu">
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
+            <a class="sh-user-menu-item" href="/practice-log.html?tour=1">Take the tour again</a>
             <a class="sh-user-menu-item" href="/updates.html">What's New</a>
             <a class="sh-user-menu-item" href="/billing.html">Billing</a>
             <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>

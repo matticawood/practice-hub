@@ -35,6 +35,12 @@
   .err{color:#f3a;font-size:.85rem}
   .hide{display:none}
   .idea-h{font-size:1.2rem;font-weight:800;color:var(--gold);margin:0 0 4px}
+  #chatThread{display:flex;flex-direction:column;gap:8px;max-height:380px;overflow:auto;margin:8px 0}
+  .chat-msg{padding:8px 11px;border-radius:11px;font-size:.86rem;line-height:1.5;max-width:88%;word-wrap:break-word}
+  .chat-msg.user{align-self:flex-end;background:var(--surface-2,#222);color:var(--text,#f0f0f0)}
+  .chat-msg.ai{align-self:flex-start;background:rgba(245,197,24,.08);border:1px solid rgba(245,197,24,.25)}
+  .chat-who{display:block;font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;opacity:.55;margin-bottom:3px}
+  .chat-note{margin-top:6px;font-size:.72rem;color:var(--gold);opacity:.9}
   ol.beats{margin:8px 0 0;padding-left:20px}
   ol.beats li{margin:5px 0}
   .field{flex:1;min-width:180px}
@@ -82,15 +88,18 @@
     <div class="panel">
       <div class="topbar" style="align-items:flex-start">
         <div>
-          <h2>What's working on your channel</h2>
-          <p class="sub" id="chanSub">Connect your videos to ground ideas in what your audience responds to.</p>
+          <h2>Your channel at a glance</h2>
+          <p class="sub" id="chanSub">Loading your latest video and channel health...</p>
         </div>
         <div class="row">
           <label style="margin:0"><input type="checkbox" id="useChan" style="width:auto" checked> use as context</label>
-          <button id="loadChan" class="ghost sm">Load videos</button>
+          <button id="loadChan" class="ghost sm">Refresh</button>
         </div>
       </div>
-      <div id="chanBox" class="chan-list hide" style="margin-top:10px"></div>
+      <div id="dash" style="margin-top:14px"></div>
+      <details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">All recent videos</summary>
+        <div id="chanBox" class="chan-list hide" style="margin-top:10px"></div>
+      </details>
       <p id="chanErr" class="err"></p>
     </div>
 
@@ -111,11 +120,12 @@
 
     <!-- BRAINSTORM -->
     <div id="paneBrainstorm" class="panel">
-      <h2>Brainstorm vehicles</h2>
-      <p class="sub">A vehicle is a concrete, fascinating musical thing. We find the human mystery hiding inside it.</p>
-      <div class="row" style="margin-top:12px">
-        <div class="field"><label>Theme or feeling (optional)</label><input id="bsTheme" placeholder="e.g. longing, hope, why we cry"></div>
-        <div style="width:90px"><label>How many</label><input id="bsCount" type="number" value="8" min="3" max="14"></div>
+      <h2>Brainstorm ideas</h2>
+      <p class="sub">Each idea comes out in three parts: the <b>idea</b> (what you teach), the <b>vehicle</b> (the famous piece you build it around), and the <b>packaging</b> (title options and a thumbnail concept). Grounded in your live channel data and spread across the packaging shapes working for you now.</p>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label>What do you want to teach? (optional)</label><input id="bsTeach" placeholder="e.g. left-hand arpeggios shape the emotion"></div>
+        <div class="field"><label>Theme or feeling (optional)</label><input id="bsTheme" placeholder="e.g. longing, hope, tension"></div>
+        <div style="width:80px"><label>How many</label><input id="bsCount" type="number" value="6" min="3" max="12"></div>
         <button id="bsGo" style="align-self:flex-end">Brainstorm</button>
       </div>
       <p id="bsErr" class="err"></p>
@@ -132,6 +142,17 @@
       </div>
       <p id="dvErr" class="err"></p>
       <div id="dvOut" style="margin-top:16px"></div>
+      <div id="dvChat" style="margin-top:18px;border-top:1px solid rgba(255,255,255,.1);padding-top:14px">
+        <h3 style="margin:0 0 2px;font-size:1rem;color:var(--gold)">Discuss</h3>
+        <p class="sub" style="margin:0 0 6px">Talk it through. Ask for a different direction, fresh angles, or to replace the idea entirely. You can brainstorm here before developing anything; when the direction changes, the idea above updates.</p>
+        <div id="chatThread"></div>
+        <div class="row" style="margin-top:6px">
+          <textarea id="chatIn" rows="2" placeholder="e.g. This angle feels weak. What else could this vehicle reveal about people?" style="flex:1"></textarea>
+          <button id="chatGo" style="align-self:flex-end">Send</button>
+        </div>
+        <button id="chatClear" class="sm ghost" style="margin-top:6px">Clear discussion</button>
+        <p id="chatErr" class="err"></p>
+      </div>
     </div>
 
     <!-- BACKLOG -->
@@ -214,6 +235,10 @@ async function enter(){
   await token0(); if(!token) return;
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   loadBacklog();
+  // Auto-pull the channel history so every brainstorm/develop is grounded in what
+  // is actually working, not just the generic "piano channel" line. Non-blocking;
+  // fails quietly (e.g. if the YouTube API key is restricted) without breaking the studio.
+  loadChannel().catch(() => {});
 }
 db.auth.getSession().then(({ data:{ session } }) => { if(session){ token = session.access_token; enter(); } });
 
@@ -283,23 +308,127 @@ function extractJson(text){
 }
 
 // ── channel ──
-async function loadChannel(){
+function tileD(label,val){ return `<div style="flex:1;min-width:120px;background:#0d1525;border:1px solid #1e2d4a;border-radius:10px;padding:12px 14px"><div style="font-size:1.1rem;font-weight:800;color:#e8e8e8;line-height:1.1">${val}</div><div style="font-size:.66rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">${label}</div></div>`; }
+function svgRetention(curve, durSec, dropSec){
+  if(!curve || !curve.length) return "";
+  const W=320,H=120,padL=20,padB=16,padT=10;
+  const xs=t=>padL+t*(W-padL-6);
+  const ys=w=>{ const cl=Math.max(0,Math.min(1.1,w)); return H-padB-cl/1.1*(H-padB-padT); };
+  const d=curve.map((p,i)=>`${i?'L':'M'}${xs(p.t).toFixed(1)} ${ys(p.w).toFixed(1)}`).join(' ');
+  const fmt=s=>`${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
+  const dropT=durSec?Math.max(0,Math.min(1,dropSec/durSec)):0;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:#0b1220;border-radius:8px;margin:8px 0">
+    <line x1="${padL}" y1="${H-padB}" x2="${W-6}" y2="${H-padB}" stroke="#1e2d4a"/>
+    ${[0,.25,.5,.75,1].map(t=>`<text x="${xs(t)}" y="${H-4}" fill="#64748b" font-size="8" text-anchor="middle">${Math.round(t*100)}%</text>`).join('')}
+    <path d="${d}" fill="none" stroke="var(--gold)" stroke-width="2"/>
+    <line x1="${xs(dropT)}" y1="${padT}" x2="${xs(dropT)}" y2="${H-padB}" stroke="#fbbf24" stroke-dasharray="3 2" opacity=".6"/>
+    <text x="${Math.min(W-34,xs(dropT)+2)}" y="${padT+7}" fill="#fbbf24" font-size="8">drop ${fmt(dropSec)}</text>
+  </svg>`;
+}
+function cmpD(cur, base, unit, higherGood){
+  if(base==null||cur==null||!base) return "";
+  const dd=cur-base, up=dd>=0, good=higherGood?up:!up;
+  return `<span style="color:${good?'#4ade80':'#f87171'};font-size:.74rem">${up?'▲':'▼'}${Math.abs(dd).toFixed(unit==='%'?0:1)}${unit}</span>`;
+}
+function statTile(val, label, extra){ return `<div style="flex:1;min-width:118px;background:#0d1525;border:1px solid #1e2d4a;border-radius:10px;padding:12px 14px"><div style="font-size:1.1rem;font-weight:800;color:#e8e8e8;line-height:1.1">${val}</div><div style="font-size:.66rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">${label} ${extra||""}</div></div>`; }
+function renderDashboard(){
+  const an = window._analytics, el = $("#dash"); if(!el) return;
+  if(!an || !an.videos || !an.videos.length){ el.innerHTML = ""; return; }
+  const num = n => Number(n||0).toLocaleString();
+  const fmt = s => `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
+  const det = an.videos.filter(v => v.retention && v.date).sort((a,b)=> a.date<b.date?1:-1);
+  const latest = det[0], c = an.channel || {};
+  const recent8 = det.slice(1,9);
+  const mean = (a,f)=> a.length ? a.reduce((x,v)=>x+(f(v)||0),0)/a.length : 0;
+  const avgRet = mean(recent8, v=>v.avgViewPct), avgSub = mean(recent8, v=>v.subsPer1k);
+  const R = latest && latest.retention ? latest.retention : null;
+  const relTxt = R && R.relWhole!=null ? (R.relWhole>=0.5 ? "above typical for its length" : "below typical for its length") : "";
+  const sugg=[];
+  if(R && R.relWhole!=null){
+    if(R.relWhole < 0.48 && (R.relOpening==null || R.relOpening >= R.relWhole-0.02))
+      sugg.push(`Your last video held <b>${relTxt}</b> (${R.relWhole}, where 0.5 is average), and its opening benchmarks fine (${R.relOpening}). The leak is the <b>body</b>, not the hook. Tighten the middle or add a re-hook.`);
+    else if(R.relWhole >= 0.55) sugg.push(`Your last video held <b>${relTxt}</b> (${R.relWhole}). Whatever its pacing and structure are doing, do more of it.`);
+    else sugg.push(`Your last video held about typical for its length (${R.relWhole}).`);
+  }
+  const sug = (c.traffic||[]).find(t=>/suggest/i.test(t.source));
+  sugg.push(sug
+    ? `Suggested is only <b>${sug.pct}%</b> of your views. Home carries you; Suggested is the untapped lever for new reach, and packaging that ties a video to bigger ones is how you grow it.`
+    : `Suggested traffic is barely registering, your untapped lever for new reach.`);
+  const best = det.slice(0,10).filter(v=>v.views>500).sort((a,b)=>(b.subsPer1k||0)-(a.subsPer1k||0))[0];
+  if(best && best!==latest) sugg.push(`<b>${esc(best.title)}</b> recruited subscribers best lately (${(best.subsPer1k||0).toFixed(1)} per 1k views). Its packaging shape is worth repeating.`);
+  el.innerHTML = `
+    ${latest ? `<div style="background:#0d1525;border:1px solid #1e2d4a;border-radius:12px;padding:15px 18px;margin-bottom:12px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Latest video</div>
+      <div style="font-weight:700;margin:4px 0 6px">${esc(latest.title)}</div>
+      ${ R && R.relWhole!=null ? `<div class="small muted" style="margin-bottom:2px">Retention vs similar videos: opening <b style="color:#cfcfcf">${R.relOpening}</b>, whole <b style="color:#cfcfcf">${R.relWhole}</b> <span style="opacity:.7">(0.5 = typical)</span></div>`:"" }
+      ${ latest.curve ? svgRetention(latest.curve, latest.durationSec, R?R.biggestDropAtSec:0) : (R?`<div class="small muted" style="margin:6px 0">Biggest drop-off at ${fmt(R.biggestDropAtSec)} · full curve loads when quota is available</div>`:"") }
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        ${statTile(num(latest.views),"Views","")}
+        ${statTile(Math.round(latest.avgViewPct)+"%","Retention",cmpD(latest.avgViewPct, avgRet, '%', true))}
+        ${statTile((latest.subsPer1k||0).toFixed(1),"Subs / 1k",cmpD(latest.subsPer1k, avgSub, '', true))}
+        ${statTile(num(latest.subsGained),"Subs gained","")}
+      </div>
+      ${ (latest.traffic&&latest.traffic.length) ? `<div class="small muted" style="margin-top:8px"><b style="color:#cfcfcf">Came from:</b> ${latest.traffic.slice(0,4).map(t=>`${esc(t.source)} ${t.pct}%`).join("  ·  ")}</div>`:"" }
+    </div>`:""}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${tileD("Recent retention", Math.round(avgRet)+"%")}
+      ${tileD("New viewers", (c.newPct!=null?c.newPct+"%":"-"))}
+      ${tileD("Top source", (c.traffic&&c.traffic[0])?`${esc(c.traffic[0].source)} ${c.traffic[0].pct}%`:"-")}
+      ${tileD("Mostly on", (c.devices&&c.devices[0])?esc(c.devices[0].device):"-")}
+    </div>
+    <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:6px">What your data is telling you</div>
+    ${sugg.slice(0,3).map(s=>`<div style="background:#0d1525;border-left:3px solid var(--gold);border-radius:6px;padding:9px 13px;font-size:.85rem;color:#cbd5e1;margin-bottom:6px;line-height:1.45">${s}</div>`).join("")}`;
+}
+async function loadChannel(force){
   $("#chanErr").textContent = ""; $("#loadChan").disabled = true; $("#loadChan").textContent = "Loading...";
   try{
-    await token0();
-    const r = await fetch(`${SUPABASE_URL}/functions/v1/yt-channel`, { headers:{ Authorization:`Bearer ${token}` } });
-    const d = await r.json();
-    if(d.error) throw new Error(d.error);
+    // Reuse a 2-hour client cache so opening the page again doesn't re-spend the
+    // (shared, limited) YouTube quota. The Refresh button forces a fresh pull.
+    const FRESH = 2*60*60*1000;
+    let d = null, an = null;
+    if(!force){
+      try{ const cc = JSON.parse(localStorage.getItem("idea_cache")||"null"); if(cc && cc.d && (Date.now()-cc.ts) < FRESH){ d = cc.d; an = cc.an || null; } }catch(_){}
+    }
+    if(!d){
+      await token0();
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/yt-channel`, { headers:{ Authorization:`Bearer ${token}` } });
+      d = await r.json();
+      if(d.error) throw new Error(d.error);
+      // Pull the calibrated analytics brain too (retention, traffic, subs, drop-offs).
+      try { const ar = await fetch(`${SUPABASE_URL}/functions/v1/yt-analytics`, { headers:{ Authorization:`Bearer ${token}` } }); an = await ar.json(); if(an && an.error) an = null; } catch(_){ an = null; }
+      try{ localStorage.setItem("idea_cache", JSON.stringify({ ts: Date.now(), d, an })); }catch(_){}
+    }
     window._chan = d;
     $("#chanSub").textContent = `${d.channelTitle} · ${Number(d.subscribers).toLocaleString()} subscribers · ${d.videoCount} videos`;
+    window._analytics = an;
+    const aBy = {}; if(an && an.videos) an.videos.forEach(v => { aBy[v.videoId] = v; });
+    const num = n => Number(n||0).toLocaleString();
+    // his recent long-form (current direction); d.recent carries videoId for the merge
+    const pick = ((d.recent||[]).filter(v => !v.isShort).length ? (d.recent||[]).filter(v => !v.isShort) : (d.top||[])).slice(0, 15);
+    channelCtx = pick.map(v => {
+      const a = aBy[v.videoId] || {};
+      const ret  = a.avgViewPct != null ? `, ${Math.round(a.avgViewPct)}% retention` : "";
+      const subs = a.subsGained != null ? `, ${num(a.subsGained)} subs` : "";
+      const traf = (a.traffic && a.traffic.length) ? `, from ${a.traffic.slice(0,3).map(t=>`${t.source} ${t.pct}%`).join("/")}` : "";
+      const drop = (a.retention && a.retention.biggestDropAtSec != null) ? `, biggest drop-off ${a.retention.biggestDropAtSec}s in` : "";
+      const date = String(v.publishedAt || v.date || "").slice(0,10);
+      return `- "${v.title}" (${num(v.views)} views${ret}${subs}${traf}${drop}${date?`, ${date}`:""})`;
+    }).join("\n");
+    if (an && an.channel) {
+      const c = an.channel;
+      const tr = (c.traffic||[]).slice(0,5).map(t=>`${t.source} ${t.pct}%`).join(", ");
+      const dv = (c.devices||[]).map(t=>`${t.device} ${t.pct}%`).join(", ");
+      channelCtx += `\n\nCHANNEL (last 90 days): traffic = ${tr}; devices = ${dv}; viewers = ${c.newPct}% new / ${c.returningPct}% returning.`;
+    }
     const box = $("#chanBox"); box.classList.remove("hide");
-    box.innerHTML = d.top.map(v => `<div><span>${esc(v.title)}</span><span class="muted">${Number(v.views).toLocaleString()}</span></div>`).join("");
-    channelCtx = d.top.slice(0,25).map(v => `- "${v.title}" (${Number(v.views).toLocaleString()} views)`).join("\n");
+    box.innerHTML = pick.map(v => { const a = aBy[v.videoId]||{}; return `<div><span>${esc(v.title)}</span><span class="muted">${num(v.views)}${a.avgViewPct!=null?` · ${Math.round(a.avgViewPct)}% ret`:""}${a.subsGained!=null?` · ${num(a.subsGained)} subs`:""}</span></div>`; }).join("");
+    $("#chanSub").textContent = `${d.channelTitle} · ${num(d.subscribers)} subscribers`;
+    try { renderDashboard(); } catch(_) {}
     return d;
   }catch(e){ $("#chanErr").textContent = "Could not load channel: " + e.message + " (check the YouTube API key restrictions)"; throw e; }
   finally{ $("#loadChan").disabled = false; $("#loadChan").textContent = "Reload videos"; }
 }
-$("#loadChan").onclick = () => loadChannel().catch(()=>{});
+$("#loadChan").onclick = () => loadChannel(true).catch(()=>{});
 const ctxOpt = () => ($("#useChan").checked && channelCtx) ? channelCtx : null;
 
 // ── channel insights ──
@@ -374,50 +503,101 @@ $("#tcGo").onclick = async () => {
 };
 
 // ── brainstorm ──
+let developApproach = "vehicle";   // kept for the develop pipeline (always story-led now)
+// Everything ever shown (concepts + hero/supporting pieces), persisted so reloading
+// the studio does not resurface the same Goldberg Variations every single time.
+window._seen = (() => { try { return JSON.parse(localStorage.getItem("ideaSeen") || "[]"); } catch(e) { return []; } })();
+const rememberSeen = () => { try { localStorage.setItem("ideaSeen", JSON.stringify(window._seen.slice(-400))); } catch(e){} };
+// Rotating creative lens that varies each run so brainstorms stop repeating themselves.
+const LENSES = ["grief and loss","joy and exhilaration","longing and missing someone","fear and dread","hope and resilience","love and tenderness","memory and the past","home and belonging","time passing and endings","defiance and anger","awe and the sublime","obsession and fixation","loneliness","the relief when tension finally breaks"];
+const randLens = () => LENSES[Math.floor(Math.random()*LENSES.length)];
+const avoidList = () => [...new Set([...(window._backlog||[]).map(i=>i.vehicle).filter(Boolean), ...window._seen])].slice(-60);
+
 $("#bsGo").onclick = async () => {
   $("#bsErr").textContent = ""; const btn = $("#bsGo"); btn.disabled = true; btn.textContent = "Thinking...";
   try{
-    const avoid = (window._backlog||[]).map(i => i.vehicle).filter(Boolean);
-    const d = await callAI({ mode:"vehicles", count: parseInt($("#bsCount").value)||8, theme: $("#bsTheme").value.trim()||undefined, avoid, channelContext: ctxOpt() });
-    $("#bsOut").innerHTML = arr(d.vehicles).map((v,i) => `
-      <div class="card" data-i="${i}">
-        <span class="kind">${esc(v.kind)}</span>
-        <div class="veh">${esc(v.vehicle)}</div>
-        <div class="small">${esc(v.fascination)}</div>
-        <div class="small muted" style="margin-top:6px"><b style="color:#cfcfcf">Mystery:</b> ${esc(v.mysteryHint)}</div>
+    const count = parseInt($("#bsCount").value)||6, theme = $("#bsTheme").value.trim()||undefined, teach = ($("#bsTeach")&&$("#bsTeach").value.trim())||undefined;
+    const d = await callAI({ mode:"ideas", count, theme, teach, lens: randLens(), avoid: avoidList(), channelContext: ctxOpt() });
+    const vs = arr(d.ideas); window._ideas = vs;
+    vs.forEach(v => { [v.idea, v.vehicle, ...arr(v.titles)].forEach(x => { if(x) window._seen.push(x); }); });
+    rememberSeen();
+    $("#bsOut").innerHTML = vs.map((v,i) => `
+      <div class="card" data-i="${i}" data-ap="idea">
+        <span class="kind">${esc(v.pattern || "idea")}</span>
+        <div class="veh">${esc(v.idea)}</div>
+        <div class="small" style="margin-top:7px"><b style="color:var(--gold)">Vehicle:</b> ${esc(v.vehicle)}</div>
+        <div class="small" style="margin-top:9px"><b style="color:#cfcfcf">Titles</b></div>
+        <div class="small">${arr(v.titles).map(t=>"&bull; "+esc(t)).join("<br>")}</div>
+        <div class="small muted" style="margin-top:9px"><b style="color:#cfcfcf">Thumbnail:</b> ${esc(v.thumbnail)}</div>
+        <div class="small muted" style="margin-top:5px"><b style="color:#cfcfcf">Why:</b> ${esc(v.why)}${v.basedOn?` <span style="opacity:.65">(from: ${esc(v.basedOn)})</span>`:""}</div>
         <div class="row" style="margin-top:10px">
           <button class="sm" data-act="develop">Develop</button>
           <button class="sm ghost" data-act="save">Save</button>
         </div>
       </div>`).join("");
-    window._vehicles = arr(d.vehicles);
   }catch(e){ $("#bsErr").textContent = e.message; }
   finally{ btn.disabled = false; btn.textContent = "Brainstorm"; }
 };
+
 $("#bsOut").onclick = e => {
   const btn = e.target.closest("button"); if(!btn) return;
-  const v = window._vehicles[+btn.closest(".card").dataset.i]; if(!v) return;
-  if(btn.dataset.act==="develop"){
-    editId = null;   // brainstormed vehicle -> a fresh idea
+  const card = btn.closest(".card"); if(!card) return;
+  const seed = (window._ideas||[])[+card.dataset.i]; if(!seed) return;
+  if(btn.dataset.act === "develop"){
+    editId = null; developApproach = "vehicle"; window._developPieces = null; window._developHero = seed.vehicle || null;
     document.querySelector('.seg button[data-mode="develop"]').click();
-    $("#dvVehicle").value = v.vehicle; $("#dvAngle").value = v.mysteryHint || "";
+    $("#dvVehicle").value = seed.idea;
+    $("#dvAngle").value = (arr(seed.titles)[0] || "");
     $("#dvGo").click();
   } else {
-    saveIdea({ vehicle:v.vehicle, kind:v.kind, question:v.mysteryHint, status:"idea" }, btn);
+    saveIdea({ vehicle:seed.idea, question:seed.why, status:"idea" }, btn);
   }
 };
 
 // ── develop / refine ──
+// Typing a thread by hand drops any seed pieces; clicking a seed card sets them.
+$("#dvVehicle").addEventListener("input", () => { developApproach = "vehicle"; window._developPieces = null; window._developHero = null; });
 $("#dvGo").onclick = async () => {
-  const vehicle = $("#dvVehicle").value.trim(); if(!vehicle){ $("#dvErr").textContent="Enter a vehicle."; return; }
+  const vehicle = $("#dvVehicle").value.trim(); if(!vehicle){ $("#dvErr").textContent="Enter an idea or thread."; return; }
   $("#dvErr").textContent = ""; const btn = $("#dvGo"); btn.disabled = true; btn.textContent = "Developing...";
   try{
-    const d = await callAI({ mode:"develop", vehicle, angle: $("#dvAngle").value.trim()||undefined, channelContext: ctxOpt() });
-    currentIdea = Object.assign({ vehicle }, d);
+    const d = await callAI({ mode:"develop", vehicle, approach: developApproach, hero: window._developHero || undefined, pieces: window._developPieces || undefined, angle: $("#dvAngle").value.trim()||undefined, channelContext: ctxOpt() });
+    currentIdea = Object.assign({ vehicle, approach: developApproach }, d);
     renderIdea();
+    discussion = []; renderChat();   // fresh idea -> fresh discussion
   }catch(e){ $("#dvErr").textContent = e.message; }
   finally{ btn.disabled = false; btn.textContent = "Develop"; }
 };
+
+// ── discuss (back-and-forth) ──
+let discussion = [];
+function renderChat(){
+  const el = $("#chatThread"); if(!el) return;
+  el.innerHTML = discussion.map(m =>
+    `<div class="chat-msg ${m.role==="user"?"user":"ai"}"><span class="chat-who">${m.role==="user"?"You":"AI"}</span>${esc(m.content).replace(/\n/g,"<br>")}${m.note?`<div class="chat-note">${esc(m.note)}</div>`:""}</div>`
+  ).join("");
+  el.scrollTop = el.scrollHeight;
+}
+async function sendChat(){
+  const ta = $("#chatIn"); const text = ta.value.trim(); if(!text) return;
+  discussion.push({ role:"user", content:text }); ta.value = ""; renderChat();
+  const b = $("#chatGo"); b.disabled = true; b.textContent = "..."; $("#chatErr").textContent = "";
+  try{
+    const r = await callAI({ mode:"discuss", messages: discussion.map(m=>({ role:m.role, content:m.content })), idea: currentIdea || null, channelContext: ctxOpt() });
+    const changed = !!(r && r.changed && r.idea);
+    discussion.push({ role:"assistant", content: (r && r.reply) || "(no reply)", note: changed ? "Updated the idea above." : "" });
+    if(changed){
+      currentIdea = Object.assign({ vehicle: r.idea.vehicle || (currentIdea && currentIdea.vehicle), facts: currentIdea && currentIdea.facts, approach: currentIdea && currentIdea.approach }, r.idea);
+      renderIdea();
+    }
+    renderChat();
+  }catch(e){ $("#chatErr").textContent = e.message; }
+  finally{ b.disabled = false; b.textContent = "Send"; }
+}
+$("#chatGo").onclick = sendChat;
+$("#chatClear").onclick = () => { discussion = []; renderChat(); };
+$("#chatIn").addEventListener("keydown", e => { if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); sendChat(); } });
+
 function renderIdea(){
   const d = currentIdea;
   $("#dvOut").innerHTML = `
@@ -450,7 +630,7 @@ function renderIdea(){
     try{
       const d2 = await callAI({ mode:"refine", idea: currentIdea, instruction });
       // carry the saved facts across a develop step (the vehicle's facts still hold)
-      currentIdea = Object.assign({ vehicle: currentIdea.vehicle, facts: currentIdea.facts }, d2);
+      currentIdea = Object.assign({ vehicle: currentIdea.vehicle, facts: currentIdea.facts, approach: currentIdea.approach }, d2);
       renderIdea();
     }
     catch(e){ $("#dvErr2").textContent = e.message; b.disabled=false; b.textContent="Develop"; }
@@ -509,7 +689,7 @@ function renderFacts(f){
     rev.disabled = true; rev.textContent = "Revising...";
     try{
       const d2 = await callAI({ mode:"revise_facts", idea: currentIdea, facts: currentIdea.facts });
-      currentIdea = Object.assign({ vehicle: currentIdea.vehicle, facts: currentIdea.facts }, d2);
+      currentIdea = Object.assign({ vehicle: currentIdea.vehicle, facts: currentIdea.facts, approach: currentIdea.approach }, d2);
       renderIdea();
     }catch(e){ rev.disabled = false; rev.textContent = "Revise the idea to fit these facts"; $("#dvErr2").textContent = e.message; }
   };
@@ -592,12 +772,14 @@ $("#blOut").onclick = async e => {
   else if(e.target.dataset.develop !== undefined && e.target.hasAttribute("data-develop")){
     const i = (window._backlog||[]).find(x => x.id === id); if(!i) return;
     editId = id;   // develop this saved item; Save will update it in place
+    // infer the framework from the saved kind (concept kinds vs vehicle kinds)
+    developApproach = ["technique","theory","skill","insight"].includes(i.kind) ? "concept" : "vehicle";
     document.querySelector('.seg button[data-mode="develop"]').click();
     $("#dvVehicle").value = i.vehicle || ""; $("#dvAngle").value = i.question || "";
     if(i.question && ((i.titles&&i.titles.length) || (i.outline&&i.outline.length))){
       // already developed -> restore it (with saved facts + outline), don't re-run the AI
       currentIdea = { vehicle:i.vehicle, kind:i.kind, question:i.question, mystery:i.mystery,
-        titles:i.titles||[], outline:i.outline||[], payoff:i.payoff,
+        titles:i.titles||[], outline:i.outline||[], payoff:i.payoff, approach:developApproach,
         facts:i.facts||null, filmOutline:i.film_outline||null };
       renderIdea();
     } else {

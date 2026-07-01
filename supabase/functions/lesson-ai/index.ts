@@ -88,14 +88,49 @@ e.g. "note: add a photo of the hand crossing here".
 `.trim();
 
 const STYLE_RULES = `
-Write for a complete beginner adult learner. Hard rules:
-- Assume NO prior knowledge. The first time you use any musical term (interval,
-  tonic, triad, semitone, etc.), define it in plain language.
+Write for an adult beginner learner. Hard rules:
+
+VOICE & STYLE
 - Short sentences. Warm, encouraging, plain English. No unexplained jargon.
-- Use concrete, at-the-piano examples ("play C, then the next white note up...").
-- NEVER use em dashes. Use commas, full stops, or "and".
-- NEVER use emojis anywhere (no decorative symbols in headings, callouts, or body).
-- This is a draft for human review; accuracy matters more than length.
+- Use concrete at-the-piano examples ("play C, then the next white key up").
+- NEVER use em dashes (use commas, full stops, or "and"). NEVER use emojis.
+- NEVER mention "the exam", ABRSM, or any exam. This is not exam preparation.
+- Do not write "met"/"meet" (e.g. "you will meet X"); use learn/see/use/find/hear.
+
+BUILD ON PRIOR LESSONS, DO NOT RE-TEACH (the most important rule)
+- This lesson sits in a sequence. Anything covered in an earlier lesson (see the
+  prior-lessons note above) is ALREADY KNOWN. Recap it in ONE short line
+  ("In a previous lesson you learned X"), never re-define or re-teach it.
+- Refer to earlier material generically ("in a previous lesson", "in Level 1"),
+  NEVER by lesson title (learners do not remember titles).
+- Teach only the genuinely NEW part. Define each new term ONCE, then reuse it.
+  Do not repeat the same point across sections. One example + one short check per
+  idea. A small topic should read short, do not pad it.
+
+NOTE & REST NAMES (American-primary, British in brackets on FIRST use only)
+- "quarter note (crotchet)", "half note (minim)", "eighth note (quaver)",
+  "whole note (semibreve)", "sixteenth note (semiquaver)"; rests "quarter rest",
+  "whole rest". After first use, bare American. NEVER put the British word first
+  ("crotchet (quarter note)" is WRONG; "quarter note (crotchet)" is right).
+
+NOTATION (abc) MUST BE METRICALLY CORRECT
+- Every bar fills its time signature exactly (notes + rests sum to the bar); never
+  over- or under-fill. For a plain note display with no rhythm (a scale, or notes
+  to name), use M:none so there is no bar-fill expectation.
+- A whole-bar rest is ONE rest that exactly fills the bar (z4 in 4/4 at L:1/4, z6
+  in 6/8). NEVER use Z (that renders as a multi-measure rest).
+- Match the L: unit to the durations written (with L:1/4, "C" is a quarter note).
+- Beams exist ONLY on eighth notes and shorter; never beam quarter or half notes.
+- A grand staff is ONE tune with two voices (V:1 clef=treble / V:2 clef=bass),
+  NEVER two separate X: tunes.
+- ABC octave: C = middle C (C4), C, = C3, C,, = C2, c = C5, c' = C6.
+
+AUDIO (play blocks)
+- play.notes are absolute pitches ("C4", "F#3"); a rest is "r".
+- For real rhythm use beats[] (quarter=1, eighth=0.5, half=2, triplet-eighth=1/3);
+  beats[].length must equal notes[].length and sum to the bar. Include rests as "r".
+
+This is a draft for human review; accuracy matters more than length.
 `.trim();
 
 const SKELETON_NOTE = `
@@ -119,7 +154,7 @@ const OUTLINE_TOOL = {
       title:       { type: "string", description: "A clear, specific lesson title." },
       summary:     { type: "string", description: "One sentence on what the learner can do after this lesson." },
       objectives:  { type: "array", description: "1 to 3 plain-language learning objectives, each phrased as something the learner can DO by the end (e.g. 'Name any note on the treble stave').", items: { type: "string" } },
-      est_minutes: { type: "integer", description: "Rough minutes to complete, 5 to 30." },
+      est_minutes: { type: "integer", description: "Rough minutes to complete (reading + audio/notation/quizzes), 15 to 40. A focused single-concept lesson is ~20; a lesson with several scales/keys/examples is ~35." },
       sections: {
         type: "array",
         description: "4 to 7 sections, in teaching order, each building on the last.",
@@ -171,7 +206,7 @@ function buildRequest(body: any) {
   if (body.mode === "outline") {
     const titleHint = (body.title || "").trim();
     const system = baseSystem(course, level, body.priorConcepts) +
-      `\n\nPlan a single, comprehensive but beginner-friendly lesson. Cover the topic completely and in a logical order. Return ONLY by calling emit_outline.`;
+      `\n\nPlan a single, focused, bite-sized lesson that teaches only the genuinely NEW material for this step, in a logical order. Recap (do not re-teach) anything from prior lessons. If the topic is large (e.g. several keys or intervals), prefer splitting it rather than one bloated lesson. Return ONLY by calling emit_outline.`;
     const user = titleHint
       ? `Plan a ${c} lesson for level ${level} on: "${titleHint}".${body.topic ? " Extra guidance: " + body.topic : ""}`
       : `Plan a ${c} lesson for level ${level} on: ${body.topic || "an appropriate next topic for this level"}.`;
