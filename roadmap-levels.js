@@ -216,7 +216,7 @@
   // there's always a fresh one to reveal. Owner: reorder / swap IDs freely.
   // (Draft set — matched to each level's difficulty tier, easiest/most motivating first.)
   const PICKS = [
-    [134, 130, 5, 132, 9, 135],   // 1 First Steps   (tier 0 + easiest tier 1)
+    [134, 132, 5, 11, 7, 135],    // 1 First Steps   (2 absolute-beginner books + Petzold show first)
     [94, 12, 86, 7, 11, 131],     // 2 Beginner      (tier 1)
     [27, 3, 2, 17, 46, 10],       // 3 Foundations   (tier 2, approachable)
     [43, 13, 19, 18, 20, 21],     // 4 Intermediate  (tier 2, meatier)
