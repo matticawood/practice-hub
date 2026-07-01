@@ -11636,11 +11636,19 @@ function _renderJourneyCard() {
     }
     return s;
   };
+  // Members who added prior-experience HOURS skipped levels without logging days,
+  // so the cumulative threshold would make them "catch up" phantom earlier-level
+  // days/hours. For them, an accumulating goal counts from now toward THIS level's
+  // own per-level target only (not the sum of skipped levels).
+  const hasBaseline = !!(_practiceBaseline && typeof _practiceBaseline === "object" && Number(_practiceBaseline.total_minutes) > 0);
+  const cumThresh = (g, lvl, kind) => hasBaseline
+    ? (kind === "days" ? (g.target || 0) : (g.targetMin != null ? g.targetMin : (g.target || 0) * 60))
+    : cumSum(grpOf(g), lvl, kind);
   const goalDone = (g, lvl) => {
     lvl = lvl || stage.level;
     switch (g.type) {
-      case "days":  return days >= cumSum(grpOf(g), lvl, "days");
-      case "hours": return catMins(g.category) >= cumSum(grpOf(g), lvl, "min");
+      case "days":  return days >= cumThresh(g, lvl, "days");
+      case "hours": return catMins(g.category) >= cumThresh(g, lvl, "min");
       case "note": case "chord": case "ear":
         return (g.match && g.match.keys)
           ? keysHit(g).length >= g.match.keys.length      // a score at target in EVERY prescribed key
@@ -11697,8 +11705,8 @@ function _renderJourneyCard() {
   // used to fill a ring around the tick, so members SEE it creep up as they practise.
   const goalStat = (g, lvl) => {
     if (g.match && g.match.keys) { const h = keysHit(g).length, n = g.match.keys.length; return { txt: `${h}/${n} keys`, frac: n ? h / n : 0 }; }
-    if (g.type === "days")  { const need = g.target; const have = Math.max(0, Math.min(need, days - (cumSum(grpOf(g), lvl, "days") - need))); return { txt: `${have}/${need} days`, frac: need ? have / need : 0 }; }
-    if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const have = Math.max(0, Math.min(need, catMins(g.category) - (cumSum(grpOf(g), lvl, "min") - need))); return { txt: `${Math.round(have / 60)}/${Math.round(need / 60)} h`, frac: need ? have / need : 0 }; }
+    if (g.type === "days")  { const need = g.target; const have = Math.max(0, Math.min(need, days - (cumThresh(g, lvl, "days") - need))); return { txt: `${have}/${need} days`, frac: need ? have / need : 0 }; }
+    if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const have = Math.max(0, Math.min(need, catMins(g.category) - (cumThresh(g, lvl, "min") - need))); return { txt: `${Math.round(have / 60)}/${Math.round(need / 60)} h`, frac: need ? have / need : 0 }; }
     if (g.type === "piece") { const have = Math.min(g.count, (g.mode === "added" ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length : pieces(g.tier))); return { txt: `${have}/${g.count}`, frac: g.count ? have / g.count : 0 }; }
     if (g.type === "note" || g.type === "chord" || g.type === "ear") { const b = bestMatch(g.type, g.match); return { txt: `best ${b}/${g.target}`, frac: g.target ? Math.min(1, b / g.target) : 0 }; }
     return { txt: "", frac: 0 };
