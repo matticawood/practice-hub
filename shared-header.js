@@ -2214,6 +2214,47 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // Wire the command palette (global ⌘K / "/" search).
   try { _shInitPalette(db); } catch (e) {}
 
+  // ── Guided-tour state (cross-device, per member) ──────────────────────────
+  // Decide new-vs-existing from the account's JOIN DATE against a fixed cutoff
+  // (not a rolling age): members who joined on/after the cutoff, plus all future
+  // joiners, are treated as new and get the full section tour. And mirror each
+  // member's "seen" tours between the DB and localStorage, so a tour shows once
+  // EVER per member rather than once per browser. Degrades to localStorage-only
+  // if the migration/RPCs aren't present yet.
+  (function _shTourState() {
+    var CUTOFF = Date.parse("2026-06-23T00:00:00Z");  // owner: bump to ~7 days before launch
+    window._rmTourReady = false;
+    var doneA = false, doneB = false;
+    function check() { if (doneA && doneB) window._rmTourReady = true; }
+    setTimeout(function () { window._rmTourReady = true; }, 4000);  // never block tours forever
+    try {
+      db.auth.getSession().then(function (res) {
+        var c = res && res.data && res.data.session && res.data.session.user && res.data.session.user.created_at;
+        window._rmIsNewMember = c ? (Date.parse(c) >= CUTOFF) : false;
+        doneA = true; check();
+      }, function () { window._rmIsNewMember = false; doneA = true; check(); });
+    } catch (e) { window._rmIsNewMember = false; doneA = true; check(); }
+    try {
+      db.rpc("get_tours_seen").then(function (res) {
+        var seen = (res && res.data) || {};
+        // DB -> localStorage: suppress tours already seen on another device.
+        try { Object.keys(seen).forEach(function (k) { if (seen[k]) localStorage.setItem(k, "1"); }); } catch (e) {}
+        // localStorage -> DB: remember this browser's history everywhere too.
+        try {
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && /_tour_/.test(k) && localStorage.getItem(k) === "1" && !seen[k]) {
+              try { db.rpc("mark_tour_seen", { p_key: k }).then(function () {}, function () {}); } catch (e) {}
+            }
+          }
+        } catch (e) {}
+        doneB = true; check();
+      }, function () { doneB = true; check(); });
+    } catch (e) { doneB = true; check(); }
+    // Persist one tour key as seen for this member (called by shared-tour.js).
+    window._rmTourPersist = function (key) { try { db.rpc("mark_tour_seen", { p_key: key }).then(function () {}, function () {}); } catch (e) {} };
+  })();
+
   // basePage is what the page declared; _resolveSection re-detects for pages
   // where multiple sections share the same URL (practice-log.html).
   const basePage = activePage;

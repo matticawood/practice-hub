@@ -50,13 +50,17 @@
     // remember it on window once seen, so every section previews as you click.
     var force = new URLSearchParams(location.search).get("tour") === "1" || window.__shTourForce === true;
     if (force) window.__shTourForce = true;
-    var seen = false;
-    try { seen = opts.key && localStorage.getItem(opts.key) === "1"; } catch (e) {}
-    if (!force && (seen || (typeof opts.when === "function" && !opts.when()))) return;
     var first = (opts.steps && opts.steps[0] && opts.steps[0].sel) || null;
-    var tries = 0;
+    var tries = 0, syncTries = 0;
     function _vis(el) { if (!el) return false; var r = el.getBoundingClientRect(); return !!(r.width || r.height); }
     (function wait() {
+      // Hold until the cross-device seen-state has synced in from the DB and the
+      // session (new-member flag) has resolved, so the checks below are accurate.
+      // (window._rmTourReady is set by shared-header; undefined = no gate.)
+      if (window._rmTourReady === false && syncTries++ < 60) { setTimeout(wait, 150); return; }
+      var seen = false;
+      try { seen = opts.key && localStorage.getItem(opts.key) === "1"; } catch (e) {}
+      if (!force && (seen || (typeof opts.when === "function" && !opts.when()))) return;
       if (document.getElementById("sh-welcome-backdrop")) { setTimeout(wait, 600); return; }
       // Wait until the first target is actually visible (non-zero box), not just
       // present in the DOM — some targets (e.g. the Key Explorer SVG) exist in the
@@ -133,7 +137,11 @@
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onScroll, true);
       mask.remove(); spot.remove(); pop.remove();
-      if (opts.key && !opts.force) { try { localStorage.setItem(opts.key, "1"); } catch (e) {} }
+      if (opts.key && !opts.force) {
+        try { localStorage.setItem(opts.key, "1"); } catch (e) {}
+        // Persist to the member's DB record too, so it's seen-once across devices.
+        if (typeof window._rmTourPersist === "function") { try { window._rmTourPersist(opts.key); } catch (e) {} }
+      }
     }
     window.addEventListener("resize", onResize);
     window.addEventListener("scroll", onScroll, true);
