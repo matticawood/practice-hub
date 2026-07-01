@@ -217,7 +217,7 @@
   // (Draft set — matched to each level's difficulty tier, easiest/most motivating first.)
   const PICKS = [
     [134, 132, 5, 11, 7, 135],    // 1 First Steps   (2 absolute-beginner books + Petzold show first)
-    [94, 12, 86, 7, 11, 131],     // 2 Beginner      (tier 1)
+    [7, 12, 86, 94, 67, 3, 32],   // 2 Beginner      (Clementi first; crosses over into tier 2/3 aspirational picks)
     [27, 3, 2, 17, 46, 10],       // 3 Foundations   (tier 2, approachable)
     [43, 13, 19, 18, 20, 21],     // 4 Intermediate  (tier 2, meatier)
     [16, 31, 23, 25, 34, 4],      // 5 Confident     (tier 3)
