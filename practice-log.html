@@ -202,6 +202,13 @@
     .rg-goal.self .rg-tick { border-style: dashed; }
     .rg-goal.done .rg-tick { color: #fff; background: linear-gradient(135deg, #10b981, #0d9c6e); border-color: transparent; }
     .rg-tick svg { width: 13px; height: 13px; }
+    /* Progress ring around an in-progress objective's tick (fills as they practise). */
+    .rg-tick--ring { border-color: transparent !important; }
+    .rg-tick .rg-ring { width: 22px; height: 22px; transform: rotate(-90deg); }
+    .rg-ring circle { fill: none; stroke-width: 2.4; }
+    .rg-ring-bg { stroke: color-mix(in srgb, var(--text-muted) 28%, transparent); }
+    .rg-ring-fg { stroke: #f0a500; stroke-linecap: round; stroke-dasharray: 56.5;
+      transition: stroke-dashoffset .6s cubic-bezier(.4,0,.2,1); }
     .rg-ico { flex-shrink: 0; width: 16px; height: 16px; color: var(--text-muted); }
     .rg-goal.done .rg-ico { color: color-mix(in srgb, #10b981 65%, var(--text-muted)); }
     .rg-label { flex: 1; min-width: 0; font-size: .82rem; font-weight: 600; line-height: 1.3; color: var(--text); }
@@ -11655,21 +11662,26 @@ function _renderJourneyCard() {
 
   const doneCount = goals.filter(g => goalDone(g, stage.level)).length;
   const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
-  // Live progress readout for an objective still in progress, so members see how
-  // close they are (and it moves as they practise) instead of a silent tick.
-  const goalProg = (g, lvl) => {
-    if (g.match && g.match.keys) return `${keysHit(g).length}/${g.match.keys.length} keys`;
-    if (g.type === "days")  { const need = g.target; const have = Math.max(0, Math.min(need, days - (cumSum(grpOf(g), lvl, "days") - need))); return `${have}/${need} days`; }
-    if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const have = Math.max(0, Math.min(need, catMins(g.category) - (cumSum(grpOf(g), lvl, "min") - need))); return `${Math.round(have / 60)}/${Math.round(need / 60)} h`; }
-    if (g.type === "piece") { const have = (g.mode === "added" ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length : pieces(g.tier)); return `${Math.min(have, g.count)}/${g.count}`; }
-    if (g.type === "note" || g.type === "chord" || g.type === "ear") return `best ${bestMatch(g.type, g.match)}/${g.target}`;
-    return "";
+  // Live progress for an in-progress objective: a text readout AND a 0–1 fraction
+  // used to fill a ring around the tick, so members SEE it creep up as they practise.
+  const goalStat = (g, lvl) => {
+    if (g.match && g.match.keys) { const h = keysHit(g).length, n = g.match.keys.length; return { txt: `${h}/${n} keys`, frac: n ? h / n : 0 }; }
+    if (g.type === "days")  { const need = g.target; const have = Math.max(0, Math.min(need, days - (cumSum(grpOf(g), lvl, "days") - need))); return { txt: `${have}/${need} days`, frac: need ? have / need : 0 }; }
+    if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const have = Math.max(0, Math.min(need, catMins(g.category) - (cumSum(grpOf(g), lvl, "min") - need))); return { txt: `${Math.round(have / 60)}/${Math.round(need / 60)} h`, frac: need ? have / need : 0 }; }
+    if (g.type === "piece") { const have = Math.min(g.count, (g.mode === "added" ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length : pieces(g.tier))); return { txt: `${have}/${g.count}`, frac: g.count ? have / g.count : 0 }; }
+    if (g.type === "note" || g.type === "chord" || g.type === "ear") { const b = bestMatch(g.type, g.match); return { txt: `best ${b}/${g.target}`, frac: g.target ? Math.min(1, b / g.target) : 0 }; }
+    return { txt: "", frac: 0 };
   };
+  const RING_C = 56.5;  // 2·π·9, the ring circumference
   const renderGoal = (g, lvl) => {
     const done = goalDone(g, lvl);
-    const pr = done ? "" : goalProg(g, lvl);
-    const prog = pr ? `<span class="rg-keys">${pr}</span>` : "";
-    const inner = `<span class="rg-tick">${done ? CHECK : ""}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(g.label)}</span>${prog}`;
+    const st = done ? null : goalStat(g, lvl);
+    const prog = (st && st.txt) ? `<span class="rg-keys">${st.txt}</span>` : "";
+    const ring = (st && st.frac > 0)
+      ? `<svg class="rg-ring" viewBox="0 0 24 24"><circle class="rg-ring-bg" cx="12" cy="12" r="9"/><circle class="rg-ring-fg" cx="12" cy="12" r="9" style="stroke-dashoffset:${(RING_C * (1 - Math.min(1, st.frac))).toFixed(1)}"/></svg>`
+      : "";
+    const tickCls = ring ? "rg-tick rg-tick--ring" : "rg-tick";
+    const inner = `<span class="${tickCls}">${done ? CHECK : ring}</span>${_rgIcon(g.icon)}<span class="rg-label">${escHtml(g.label)}</span>${prog}`;
     return g.type === "self"
       ? `<button type="button" class="rg-goal self${done ? " done" : ""}" onclick="_toggleGoalSelf('${g.key}',event)">${inner}<span class="rg-self-hint">${done ? "" : "tap when done"}</span></button>`
       : `<div class="rg-goal${done ? " done" : ""}">${inner}</div>`;
