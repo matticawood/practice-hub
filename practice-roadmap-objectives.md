@@ -140,11 +140,24 @@ is studying that level. Live now for Note Recognition: First Steps = C and G, Be
 Foundations = A/B♭/E♭ — it only ticks once a score at target exists in every prescribed key, and
 shows "n/4 keys" progress meanwhile. The same key-set pattern can extend to Chord and Ear.
 
-### Game-score targets (best-score-per-member distribution — absolute skill, hours-independent)
-Front-loaded into the productive Beginner→Foundations bands, then maintained (non-linear pacing):
-Note (**max 50**): First Steps 12 → Beginner 30 → Foundations 40 → Intermediate 46 → maintain ~48.
-Chord (**max 27**): Beginner 10 → Foundations 16 → Intermediate 22 → maintain ~24.
-Ear (**max 34**): Beginner 15 → Foundations 24 → Intermediate 30 → maintain.
+### Game-score targets — CALIBRATED against real best-score-per-member data (2026-06-30)
+A 60s sprint = correct answers in the minute; there is no hard cap, so "max" = observed
+ceiling. **Setting dominates score far more than skill** (Note single-key median 36–42 vs
+mixed+accidentals 31; Chord tier1-in-key median 12 but tier2-free tops out at 13 and tier3-free
+at 7; Ear major/minor median 28 but triads 11). The old targets assumed every game scaled like
+easy note-reading and asked for chord/ear scores nobody had ever hit. Recalibrated (owner-approved):
+
+- **Note** — one fluency standard held across keys (A major is not discounted vs C; equal
+ fluency is the goal). First Steps **10** (C, G) → Beginner **15** (C, G, D, F) → Foundations
+ **15** (A, B♭, E♭, same standard, harder keys) → Intermediate **34** (mixed clef + accidentals)
+ → Confident maintain **40**.
+- **Chord** (inherently hardest — you must read/hear stacked notes, so numbers are much lower):
+ Beginner **8** (tier 1, in key) → Foundations **10** (tier 1, any key) → Intermediate **9**
+ (tier 2, inversions) → Confident **7** (tier 3, sevenths). Numbers DROP as the tier climbs,
+ by design — sevenths-in-any-key is genuinely slow, and the label says so.
+- **Ear** (harder than note, easier than chord — one sound at a time): Beginner **10**
+ (major vs minor) → Foundations **16** (triads) → Intermediate **12** (sevenths) → Confident
+ maintain **14** (sevenths).
 
 ### Content gaps flagged by the research (decisions / future work)
 1. **Theory built only to Level 2.** Concrete theory objectives stop at Foundations; Intermediate+ is guidance until you author Level 3+. The minor-key lessons (L2 #6–9) are written but still **draft/unpublished** — the Intermediate scale objective leans on them, so publishing those would make it real.
