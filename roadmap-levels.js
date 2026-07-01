@@ -217,7 +217,7 @@
   // there's always a fresh one to reveal. Owner: reorder / swap IDs freely.
   // (Draft set — matched to each level's difficulty tier, easiest/most motivating first.)
   const PICKS = [
-    [134, 132, 5, 11, 7, 135],    // 1 First Steps   (2 absolute-beginner books + Petzold show first)
+    [132, 134, 5, 11, 7, 135],    // 1 First Steps   (Bartók first, then Czerny; both absolute-beginner)
     [7, 12, 86, 94, 67, 3, 32],   // 2 Beginner      (Clementi first; crosses over into tier 2/3 aspirational picks)
     [3, 2, 17, 46, 10, 27],       // 3 Foundations   (River Flows in You demoted to last)
     [32, 43, 13, 19, 18, 21, 20, 17], // 4 Intermediate (Chopin Prelude in Em leads; Handel before Schubert; +Gnossienne)
