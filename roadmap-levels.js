@@ -227,6 +227,53 @@
     [122, 235, 70, 124, 79, 81, 125, 123] // 8 Artist (Liszt Sonata, then Winter Wind & Op.10/1, then the rest)
   ];
 
+  // ── Optional "Extra" objectives ─────────────────────────────────────────────
+  // Per level, keyed by the baseline GROUP they extend, an ORDERED CHAIN of stretch
+  // objectives. On the dashboard: once a baseline goal is ticked (goes green, sinks),
+  // the FRONT of its chain surfaces in its place; tick that and the next surfaces.
+  // Each tier is coloured up the ladder (teal → violet → rose → gold). Optional: they
+  // never gate the level (hours do) — they keep a keen member moving while the hours
+  // catch up. Each item is a normal goal object (so goalDone works) + a stable `key`
+  // for self-checks. FIRST-PASS DRAFT CONTENT — refine scale order / targets freely.
+  const EXTRAS = [
+    { // 1 First Steps
+      scales: [ { group: "scales", type: "self", key: "x1-scales-1", keys: ["D", "A"], label: "D and A major scales, hands together, two octaves" },
+                { group: "scales", type: "self", key: "x1-scales-2", keys: ["E", "B"], label: "E and B major scales, hands together, two octaves" } ],
+      note:   [ { group: "note", type: "note", target: 15, match: { keys: ["C", "G"] }, label: "Score 15 in Note Recognition in C and G major" } ],
+      piece:  [ { group: "piece", type: "piece", tier: 0, count: 2, label: "Learn a second Absolute Beginner piece" } ]
+    },
+    { // 2 Beginner
+      scales: [ { group: "scales", type: "self", key: "x2-scales-1", keys: ["A", "E"], label: "A and E major scales, hands together, two octaves" },
+                { group: "scales", type: "self", key: "x2-scales-2", keys: ["B", "F#"], label: "B and F sharp major scales, hands together, two octaves" } ],
+      note:   [ { group: "note", type: "note", target: 25, match: { keys: ["C", "G", "D", "F"] }, label: "Score 25 in Note Recognition in C, G, D and F major" },
+                { group: "note", type: "note", target: 32, match: { keys: ["C", "G", "D", "F"] }, label: "Score 32 in Note Recognition in C, G, D and F major" } ],
+      piece:  [ { group: "piece", type: "piece", tier: 1, count: 5, label: "Learn a fifth Beginner piece, or try a Lower Intermediate one" } ]
+    },
+    { // 3 Foundations
+      scales: [ { group: "scales", type: "self", key: "x3-scales-1", keys: ["E", "B"], label: "E and B major scales, hands together, two octaves" } ],
+      minors: [ { group: "minors", type: "self", key: "x3-minors-1", keys: ["G", "C"], label: "Natural, harmonic and melodic minor scales in G and C" } ],
+      ear:    [ { group: "ear", type: "ear", target: 20, match: { set: "triads" }, label: "Score 20 in the Ear Training tool (triads)" } ]
+    },
+    { // 4 Intermediate
+      minors: [ { group: "minors", type: "self", key: "x4-minors-1", label: "All minor scales secure, hands together, two octaves" } ],
+      note:   [ { group: "note", type: "note", target: 40, match: { clef: "mixed", acc: true }, label: "Score 40 in Note Recognition (mixed clef, sharps and flats)" } ],
+      piece:  [ { group: "piece", type: "piece", tier: 3, count: 1, label: "Learn a piece reaching into Upper Intermediate" } ]
+    },
+    { // 5 Confident
+      chord:  [ { group: "chord", type: "chord", target: 10, match: { tier: 3, mode: "free" }, label: "Score 10 in Chord Recognition (sevenths, any key)" } ],
+      piece:  [ { group: "piece", type: "piece", tier: 3, count: 7, label: "Learn a seventh Upper Intermediate piece" } ]
+    },
+    { // 6 Advanced
+      piece:  [ { group: "piece", type: "piece", tier: 4, count: 7, label: "Learn a seventh Advanced piece" } ]
+    },
+    { // 7 Performer
+      piece:  [ { group: "piece", type: "piece", tier: 4, count: 12, label: "Learn another advanced-to-expert piece" } ]
+    },
+    { // 8 Artist
+      piece:  [ { group: "piece", type: "self", key: "x8-expert-2", label: "Take on a second Expert work and make it your own" } ]
+    }
+  ];
+
   // Track metadata: which logged item types feed each track.
   const TRACKS = [
     { key: "total",         label: "Total Practice", itemTypes: null /* everything */ },
@@ -259,6 +306,7 @@
     tracks: TRACKS,
     levels: levels,
     picks: PICKS,
+    extras: EXTRAS,
     note: "A guide, not a finish line. Everyone's journey is different, and hours are only part of the story."
   };
 })();

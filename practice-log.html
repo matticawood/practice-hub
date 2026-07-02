@@ -223,6 +223,16 @@
     .rg-keys { flex-shrink: 0; font-size: .62rem; font-weight: 800; padding: 2px 7px; border-radius: 99px;
       color: #b07c08; background: color-mix(in srgb, #f5c518 18%, transparent); }
     .rg-goal.done .rg-self-hint { display: none; }
+    /* Optional "Extra" tier objectives — coloured up the tier ladder via per-row --ex-* vars. */
+    .rg-goal--x { background: var(--ex-bg, var(--surface)); border-color: var(--ex-border); }
+    .rg-goal--x .rg-tick { color: var(--ex-tick); border-color: var(--ex-border); }
+    .rg-goal--x .rg-label { color: var(--ex-text); }
+    .rg-goal--x .rg-keys { color: var(--ex-chip-text); background: var(--ex-chip-bg); }
+    .rg-goal--x .rg-self-hint { color: var(--ex-hint); opacity: 1; }
+    .rg-x-col { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .rg-x-tag { font-size: .55rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+      padding: 2px 8px; border-radius: 99px; color: var(--ex-tag-text); background: var(--ex-tag-bg); }
+    .rg-goal--x.done .rg-x-tag { display: none; }
     .rg-roll-head { font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
       margin: 9px 2px 2px; padding-top: 10px; border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
     .rg-card .jc-jars { margin-top: 11px; }
@@ -11761,7 +11771,18 @@ function _renderJourneyCard() {
     return { txt: "", frac: 0 };
   };
   const RING_C = 56.5;  // 2·π·9, the ring circumference
-  const renderGoal = (g, lvl) => {
+  // Extra-tier colour ladder (tier 1..N). White card; coloured border/tick/text, a
+  // solid tag and matched indicators (set as per-row --ex-* vars).
+  const RM_TIERS = [ null,
+    { b: "color-mix(in srgb, #0d9488 48%, transparent)", tk: "#0d9488", tx: "#0f5f57", tg: "#0d9488", tgt: "#fff", cb: "color-mix(in srgb, #14b8a6 20%, transparent)", ct: "#0b5a52", h: "#0d9488" },
+    { b: "color-mix(in srgb, #7c3aed 44%, transparent)", tk: "#7c3aed", tx: "#4c2f8a", tg: "#7c3aed", tgt: "#fff", cb: "color-mix(in srgb, #a78bfa 26%, transparent)", ct: "#5b3aa8", h: "#7c3aed" },
+    { b: "color-mix(in srgb, #e11d48 42%, transparent)", tk: "#e11d48", tx: "#8a2540", tg: "#e11d48", tgt: "#fff", cb: "color-mix(in srgb, #fb7185 22%, transparent)", ct: "#a3234a", h: "#e11d48" },
+    { b: "color-mix(in srgb, #f0a500 46%, transparent)", tk: "#d19a15", tx: "#5c4a1e", tg: "#eaa50c", tgt: "#3f2d00", cb: "color-mix(in srgb, #f5c518 18%, transparent)", ct: "#b07c08", h: "#b8880f" }
+  ];
+  const tierStyle = (tier) => { const t = RM_TIERS[tier] || RM_TIERS[RM_TIERS.length - 1];
+    return `--ex-border:${t.b};--ex-tick:${t.tk};--ex-text:${t.tx};--ex-tag-bg:${t.tg};--ex-tag-text:${t.tgt};--ex-chip-bg:${t.cb};--ex-chip-text:${t.ct};--ex-hint:${t.h};`; };
+  const renderGoal = (g, lvl, tier) => {
+    tier = tier || 0;
     const done = goalDone(g, lvl);
     const st = done ? null : goalStat(g, lvl);
     // Days goal: the label IS the countdown. remaining = cumulative target minus days
@@ -11772,7 +11793,7 @@ function _renderJourneyCard() {
       const remain = Math.max(0, cumThresh(g, lvl, "days") - days);
       labelText = `Practice another ${remain} day${remain === 1 ? "" : "s"} at this level`;
     }
-    const prog = (st && st.txt) ? `<span class="rg-keys">${st.txt}</span>` : "";
+    const chip = (st && st.txt) ? `<span class="rg-keys">${st.txt}</span>` : "";
     const ring = (st && st.frac > 0)
       ? `<svg class="rg-ring" viewBox="0 0 24 24"><circle class="rg-ring-bg" cx="12" cy="12" r="9"/><circle class="rg-ring-fg" cx="12" cy="12" r="9" style="stroke-dashoffset:${(RING_C * (1 - Math.min(1, st.frac))).toFixed(1)}"/></svg>`
       : "";
@@ -11788,22 +11809,49 @@ function _renderJourneyCard() {
       piece: "/resources.html",
     };
     const href = GOAL_DEST[g.type] || null;
-    const inner = `<span class="${tickCls}">${done ? CHECK : ring}</span><span class="rg-label">${escHtml(labelText)}</span>${prog}${href ? '<span class="rg-go" aria-hidden="true">&#8250;</span>' : ""}`;
+
+    // ── Optional EXTRA tier: coloured card, Extra tag stacked above its indicator ──
+    if (tier >= 1) {
+      const style = done ? "" : ` style="${tierStyle(tier)}"`;
+      const ind = (g.type === "self")
+        ? `<span class="rg-self-hint">${done ? "" : "tap when done"}</span>`
+        : chip;
+      const innerX = `<span class="${tickCls}">${done ? CHECK : ring}</span><span class="rg-label">${escHtml(labelText)}</span><span class="rg-x-col"><span class="rg-x-tag">Extra</span>${ind}</span>`;
+      const cls = `rg-goal rg-goal--x${g.type === "self" ? " self" : ""}${done ? " done" : ""}`;
+      if (g.type === "self")
+        return `<button type="button" class="${cls}"${style} onclick="_toggleGoalSelf('${g.key}',event)">${innerX}</button>`;
+      if (href)
+        return `<a class="${cls} rg-goal--link"${style} href="${href}">${innerX}</a>`;
+      return `<div class="${cls}"${style}>${innerX}</div>`;
+    }
+
+    // ── baseline row ──
+    const inner = `<span class="${tickCls}">${done ? CHECK : ring}</span><span class="rg-label">${escHtml(labelText)}</span>${chip}${href ? '<span class="rg-go" aria-hidden="true">&#8250;</span>' : ""}`;
     if (g.type === "self")
       return `<button type="button" class="rg-goal self${done ? " done" : ""}" onclick="_toggleGoalSelf('${g.key}',event)">${inner}<span class="rg-self-hint">${done ? "" : "tap when done"}</span></button>`;
     if (href)
       return `<a class="rg-goal rg-goal--link${done ? " done" : ""}" href="${href}">${inner}</a>`;
     return `<div class="rg-goal${done ? " done" : ""}">${inner}</div>`;
   };
-  // Completed objectives sink to the bottom so the still-to-do ones bubble up into
-  // the collapsed (first 4) view — the visible slots are always the next things to
-  // work on, not a tick you've already earned. Stable: original order kept within
-  // the done and not-done groups.
-  const orderedGoals = goals
-    .map((g, idx) => ({ g, idx, done: goalDone(g, stage.level) }))
-    .sort((a, b) => (a.done === b.done) ? (a.idx - b.idx) : (a.done ? 1 : -1))
-    .map(x => x.g);
-  const goalRows = orderedGoals.map(g => renderGoal(g, stage.level)).join("");
+  // Each baseline goal is the head of a chain: baseline + its optional Extra tiers.
+  // Walk each chain — done items (baseline + any cleared Extras) sink to the bottom
+  // as green; the FIRST undone item is the active one shown in the group's slot, and
+  // later tiers stay hidden until it's cleared. So the active list always shows the
+  // next thing per skill, and the done ones stack green below.
+  const _extras = (window.ROADMAP.extras && window.ROADMAP.extras[stage.level - 1]) || {};
+  const activeItems = [];  // { g, tier, idx }
+  const doneItems = [];    // { g, tier, idx }
+  goals.forEach((g, idx) => {
+    const chain = [g].concat(_extras[grpOf(g)] || []);
+    for (let t = 0; t < chain.length; t++) {
+      if (goalDone(chain[t], stage.level)) doneItems.push({ g: chain[t], tier: t, idx });
+      else { activeItems.push({ g: chain[t], tier: t, idx }); break; }
+    }
+  });
+  activeItems.sort((a, b) => a.idx - b.idx);
+  doneItems.sort((a, b) => (a.idx - b.idx) || (a.tier - b.tier));
+  const goalRows = activeItems.map(x => renderGoal(x.g, stage.level, x.tier)).join("")
+                 + doneItems.map(x => renderGoal(x.g, stage.level, x.tier)).join("");
   const rolledRows = rolled.map(r => renderGoal(r.g, r.level)).join("");
 
   // ── header (trophy + stage + progress to next) ────────────────────────────
@@ -11886,7 +11934,7 @@ function _renderJourneyCard() {
     }
   }
 
-  const totalGoals = goals.length + rolled.length;
+  const totalGoals = activeItems.length + doneItems.length + rolled.length;
   const manyGoals = totalGoals > 4;
   let goalsExpanded = false;
   try { goalsExpanded = localStorage.getItem("rm_goals_expanded") === "1"; } catch (_) {}
@@ -22379,7 +22427,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <script src="/shared-header.js?v=2026070101"></script>
 <script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-tour.js?v=6"></script>
-<script src="/roadmap-levels.js?v=35"></script>
+<script src="/roadmap-levels.js?v=36"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
