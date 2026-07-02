@@ -875,13 +875,19 @@ async function loadAchievementExtras() {
     }
   } catch { _achExtras.maxPostComments = 0; }
 
-  // Streak saves — "used" = total ever earned minus what's still in the bank.
-  // Using saved_dates.length was wrong: the cron could populate saved_dates for
-  // users who never missed a day, falsely triggering Safety Net.
+  // Streak saves USED = the number of missed days actually bridged by spending a
+  // token = saved_dates.length. The rebuilt derive (20260629_streak_recompute)
+  // only appends to saved_dates when balance>0 bridges a genuinely missed day, so
+  // its length is the true used-count, and get_user_streak_saves returns exactly
+  // that (jsonb_array_length(saved_dates)).
+  //
+  // DO NOT use `total_earned - balance`: balance is capped at 15 (MAX_SAVES) while
+  // total_earned grows unbounded, so any member past a ~75-day streak who NEVER
+  // missed a day shows earned-balance > 0 and gets Safety Net/Resilient/Never Give
+  // Up falsely. That capping bug is why this kept regressing. saved_dates.length
+  // is the only correct source. See [[streak-saves-architecture]].
   if (isOwn) {
-    const earned  = streakData?.total_earned || 0;
-    const balance = streakData?.balance      || 0;
-    _achExtras.streakSaves = Math.max(0, earned - balance);
+    _achExtras.streakSaves = Array.isArray(streakData?.saved_dates) ? streakData.saved_dates.length : 0;
   } else {
     try {
       const { data: savesCount } = await db.rpc("get_user_streak_saves", { p_email: email });
