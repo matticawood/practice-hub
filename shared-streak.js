@@ -4,9 +4,13 @@
 //
 // Rules (replay day-by-day from first practice day to the member's LOCAL today):
 //   - practiced day: streak++
-//   - fully-elapsed missed day (date < local-today): spend a save if balance>0
-//     (balance--, record saved date, streak++), else streak resets to 0
-//   - today, not yet practiced: leave streak alone (never burn a save for today)
+//   - missed day elapsed BEYOND a one-day grace (date < local-today - 1): spend a save
+//     if balance>0 (balance--, record saved date, streak++), else streak resets to 0
+//   - today OR yesterday, not yet practiced: leave streak alone (never burn yet). The
+//     one-day grace is what makes timezone bugs impossible: tz offsets span ~26h, so a
+//     wrong/stale/null stored tz can only put "today" a calendar day off. Never charging
+//     a save until a day is elapsed by a FULL extra day means no tz error can burn a save
+//     for a day still open in the member's real timezone.
 //   - on each counted day, every 5th day awards a token (total_earned++, balance++ capped at 15)
 //   - best_streak = max streak seen (bridged days included, so the leaderboard counts saves)
 // saves_used == saved_dates.length by construction (a save is only recorded on a real spend).
@@ -35,6 +39,7 @@
     var days = new Set(practiceDates);
     if (days.size === 0) return { current_streak: 0, best_streak: 0, balance: 0, total_earned: 0, saved_dates: [] };
     var today = todayInTz(tz, now);
+    var graceEnd = addDays(today, -1);     // yesterday: today AND yesterday are still "open"
     var sorted = Array.from(days).sort();
     var cur = sorted[0];
     var streak = 0, balance = 0, earned = 0, best = 0, saved = [];
@@ -42,10 +47,10 @@
       var counted = false;
       if (days.has(cur)) {
         streak++; counted = true;
-      } else if (cur < today) {            // a day that is fully over and was not practiced
+      } else if (cur < graceEnd) {         // a missed day elapsed beyond the one-day grace
         if (balance > 0) { balance--; saved.push(cur); streak++; counted = true; }
         else { streak = 0; }
-      }                                    // cur === today and unlogged: do nothing, today is still open
+      }                                    // cur is today or yesterday and unlogged: grace, leave open
       if (counted && streak % 5 === 0) { earned++; if (balance < MAX_SAVES) balance++; }
       if (streak > best) best = streak;
       cur = addDays(cur, 1);

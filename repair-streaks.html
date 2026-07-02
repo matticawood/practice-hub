@@ -280,19 +280,17 @@ async function applyFixes() {
   let fixed = 0, errors = 0;
 
   for (const r of toFix) {
-    const { error } = await db.from("streak_tokens").upsert({
-      email: r.email,
-      balance: r.correctBalance,
-      total_earned: r.correctTotalEarned,
-      // saved_dates left unchanged — we only fix earned/balance
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "email" });
+    // Single-writer rule: NEVER upsert streak_tokens directly — that leaves
+    // balance/total_earned inconsistent with saved_dates (the exact drift that
+    // caused false streak-save achievements). Recompute the whole row from the
+    // canonical replay instead, so every field stays correct-by-construction.
+    const { error } = await db.rpc("recompute_streak_tokens", { p_email: r.email });
 
     if (error) {
       log(`✗ ${r.email}: ${error.message}`, "err");
       errors++;
     } else {
-      log(`✓ ${r.email}: total_earned=${r.correctTotalEarned}, balance=${r.correctBalance}`, "ok");
+      log(`✓ ${r.email}: recomputed from practice history`, "ok");
       fixed++;
     }
   }
