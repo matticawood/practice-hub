@@ -986,6 +986,8 @@
                 <div class="nr-sdot" id="nr-dot-2"></div>
                 <div class="nr-sline"></div>
                 <div class="nr-sdot" id="nr-dot-3"></div>
+                <div class="nr-sline"></div>
+                <div class="nr-sdot" id="nr-dot-4"></div>
               </div>
 
               <!-- Step 1: Mode -->
@@ -1047,6 +1049,28 @@
                 </div>
                 <div id="nr-wiz-key" style="display:none">
                   <div id="nr-key-picker" class="nr-key-picker-wrap"></div>
+                </div>
+              </div>
+
+              <!-- Step 4: Range -->
+              <div class="nr-wiz-step" id="nr-wiz-4">
+                <div class="nr-step-heading">Note range</div>
+                <div class="nr-option-grid">
+                  <button class="nr-option-card active" data-range="stave" onclick="nrWizPickRange('stave')">
+                    <div class="nr-option-icon"><div class="nr-option-icon-text" style="font-size:0.8rem">stave</div></div>
+                    <div class="nr-option-card-title">In the stave</div>
+                    <div class="nr-option-card-desc">Notes on the lines and spaces</div>
+                  </button>
+                  <button class="nr-option-card" data-range="ledger" onclick="nrWizPickRange('ledger')">
+                    <div class="nr-option-icon"><div class="nr-option-icon-text" style="font-size:0.8rem">ledger</div></div>
+                    <div class="nr-option-card-title">Ledger lines</div>
+                    <div class="nr-option-card-desc">Only notes above and below the stave</div>
+                  </button>
+                  <button class="nr-option-card" data-range="full" onclick="nrWizPickRange('full')">
+                    <div class="nr-option-icon"><div class="nr-option-icon-text" style="font-size:0.8rem">full</div></div>
+                    <div class="nr-option-card-title">Full range</div>
+                    <div class="nr-option-card-desc">Stave and ledger lines together</div>
+                  </button>
                 </div>
               </div>
 
@@ -2133,6 +2157,7 @@ let nrClef        = "mixed";
 let nrAccidentals = true;
 let nrMode        = "normal"; // "normal" | "key"
 let nrKeyId       = "C";
+let nrRange       = "stave";  // "stave" | "ledger" | "full" — which band of the stave to read
 let nrPhase       = "setup";
 let nrTimeLeft    = 60;
 let nrTimerInt    = null;
@@ -2229,6 +2254,11 @@ function nrStartWithCountdown() {
   var mobileLb = document.getElementById("nr-lb-setup");
   if (mobileLb) mobileLb.style.display = "none";
 
+  // Ledger/full games need vertical room for notes above and below the stave;
+  // the stave-only game keeps the tighter default so the stave stays large.
+  var svg = document.getElementById("nr-svg");
+  if (svg) svg.setAttribute("viewBox", nrRange === "stave" ? "0 0 220 115" : "0 -20 220 160");
+
   nrBuildPiano();
 
   const overlay  = document.getElementById("nr-countdown");
@@ -2316,7 +2346,7 @@ var nrWizStep = 1;
 
 function nrWizGoTo(step) {
   nrWizStep = step;
-  [1,2,3].forEach(function(s) {
+  [1,2,3,4].forEach(function(s) {
     var stepEl = document.getElementById("nr-wiz-" + s);
     var dot    = document.getElementById("nr-dot-" + s);
     if (stepEl) stepEl.classList.toggle("active", s === step);
@@ -2329,7 +2359,7 @@ function nrWizGoTo(step) {
   var next = document.getElementById("nr-wiz-next");
   if (back) back.style.display = step === 1 ? "none" : "";
   if (next) {
-    if (step === 3) {
+    if (step === 4) {
       next.textContent = "Start";
       next.onclick     = nrStartWithCountdown;
     } else {
@@ -2347,18 +2377,19 @@ function nrWizGoTo(step) {
     if (head)   head.textContent     = isKey ? "Choose a key" : "Accidentals";
     if (isKey)  nrBuildKeyPicker();
   }
-  // Show leaderboard block only on step 3
+  // Show the leaderboard block on the choice steps (3 = accidentals/key, 4 = range);
+  // the board variant depends on both, so refresh whenever either is on screen.
   var mobileLb = document.getElementById("nr-lb-setup");
-  if (mobileLb) mobileLb.style.display = step === 3 ? "" : "none";
-  if (step === 3) nrRefreshLeaderboards(null);
+  if (mobileLb) mobileLb.style.display = (step === 3 || step === 4) ? "" : "none";
+  if (step === 3 || step === 4) nrRefreshLeaderboards(null);
 
-  // Show Help Sheet tab only in key mode
+  // Show Help Sheet tab only in key mode (its own step 3)
   var mHelpTab = document.getElementById("nr-mstab-help");
   if (mHelpTab) mHelpTab.style.display = (step === 3 && nrMode === "key") ? "" : "none";
   if (mHelpTab && mHelpTab.style.display === "none") nrShowMobileTab("lb");
 }
 
-function nrWizNext() { nrWizGoTo(Math.min(3, nrWizStep + 1)); }
+function nrWizNext() { nrWizGoTo(Math.min(4, nrWizStep + 1)); }
 function nrWizBack() { nrWizGoTo(Math.max(1, nrWizStep - 1)); }
 
 function nrWizPickMode(mode) {
@@ -2379,6 +2410,14 @@ function nrWizPickAcc(on) {
   nrAccidentals = on;
   document.querySelectorAll(".nr-option-card[data-acc]").forEach(function(b) {
     b.classList.toggle("active", (b.dataset.acc === "on") === on);
+  });
+  nrRefreshLeaderboards(null);
+}
+
+function nrWizPickRange(range) {
+  nrRange = range;
+  document.querySelectorAll(".nr-option-card[data-range]").forEach(function(b) {
+    b.classList.toggle("active", b.dataset.range === range);
   });
   nrRefreshLeaderboards(null);
 }
@@ -2446,18 +2485,58 @@ function nrSetKey(keyId) {
   nrBuildHelpContent();
 }
 
+// ── Note range (band of the stave) ────────────────────────────────────────────
+// The five staff lines sit at y 33/45/57/69/81; an octave is 42 units; each
+// diatonic step is 6; ledger LINES fall every 12 beyond the staff. A note's y and
+// its ledger lines fully determine where it renders, so a single base octave
+// (NR_*_NAT etc.) can be transposed to any octave and its ledgers recomputed.
+//   stave  — on the five lines / four spaces         → y in [33, 81]
+//   ledger — outside the stave, out to the note just
+//            past the 3rd ledger line each way        → y in [-9, 27] or [87, 123]
+//   full   — stave + ledger together                  → y in [-9, 123]
+function nrBand() {
+  if (nrRange === "stave")  return { lo: 33, hi: 81,  kind: "stave"  };
+  if (nrRange === "ledger") return { lo: -9, hi: 123, kind: "ledger" };
+  return { lo: -9, hi: 123, kind: "full" };
+}
+function nrInBand(y, band) {
+  if (band.kind === "stave")  return y >= 33 && y <= 81;
+  if (band.kind === "ledger") return y < 33 || y > 81;
+  return true; // full
+}
+// Ledger lines between the stave and a note at y (same rule as the chord tool).
+function nrLedgersFor(y) {
+  var L = [];
+  if (y > 81) for (var a = 93; a <= y; a += 12) L.push(a);
+  if (y < 33) for (var b = 21; b >= y; b -= 12) L.push(b);
+  return L;
+}
+// Every octave-transposition of a base note that lands inside the chosen band.
+// Stem flips at the middle line (y 57) per convention; ledgers recomputed per y.
+function nrSpreadOctaves(entry, clef, band) {
+  var out = [];
+  var push = function(y) {
+    if (y < band.lo || y > band.hi || !nrInBand(y, band)) return;
+    out.push(Object.assign({}, entry, { clef: clef, y: y, ledgers: nrLedgersFor(y), stemUp: y > 57 }));
+  };
+  for (var y = entry.y; y >= band.lo; y -= 42) push(y);
+  for (var y2 = entry.y + 42; y2 <= band.hi; y2 += 42) push(y2);
+  return out;
+}
+
 function nrGetPool() {
   if (nrMode === "key") return nrGetKeyPool();
+  const band  = nrBand();
   const clefs = nrClef === "mixed" ? ["treble","bass"] : [nrClef];
   const pool  = [];
   clefs.forEach(function(c) {
     const nat  = c === "treble" ? NR_TREBLE_NAT  : NR_BASS_NAT;
     const acc  = c === "treble" ? NR_TREBLE_ACC  : NR_BASS_ACC;
     const flat = c === "treble" ? NR_TREBLE_FLAT : NR_BASS_FLAT;
-    nat.forEach(function(n)  { pool.push(Object.assign({}, n, {clef:c})); });
+    nat.forEach(function(n)  { pool.push.apply(pool, nrSpreadOctaves(n, c, band)); });
     if (nrAccidentals) {
-      acc.forEach(function(n)  { pool.push(Object.assign({}, n, {clef:c})); });
-      flat.forEach(function(n) { pool.push(Object.assign({}, n, {clef:c})); });
+      acc.forEach(function(n)  { pool.push.apply(pool, nrSpreadOctaves(n, c, band)); });
+      flat.forEach(function(n) { pool.push.apply(pool, nrSpreadOctaves(n, c, band)); });
     }
   });
   return pool;
@@ -2466,6 +2545,7 @@ function nrGetPool() {
 function nrGetKeyPool() {
   const keySig = NR_KEYS.find(function(k){return k.id===nrKeyId;}) || NR_KEYS[0];
   const clefs  = nrClef === "mixed" ? ["treble","bass"] : [nrClef];
+  const band   = nrBand();
   const pool   = [];
 
   // Build set of sharpened/flatted letters for this key
@@ -2474,12 +2554,14 @@ function nrGetKeyPool() {
 
   clefs.forEach(function(c) {
     const nat = c === "treble" ? NR_TREBLE_NAT : NR_BASS_NAT;
+    // Build one octave of the key's diatonic notes, then transpose each across the
+    // chosen band (so a key game reads ledger notes too, spelled for the key).
     nat.forEach(function(n) {
       // Determine the actual piano key for this diatonic note
       var pianoKey = n.name;
       if (sharpSet.has(n.name)) pianoKey = n.name + "#";
       else if (flatSet.has(n.name)) pianoKey = NR_FLAT_TO_PIANO[n.name] || n.name;
-      pool.push(Object.assign({}, n, { clef:c, acc:null, key:pianoKey }));
+      pool.push.apply(pool, nrSpreadOctaves(Object.assign({}, n, { acc:null, key:pianoKey }), c, band));
     });
 
     // For minor keys: add raised 6th and 7th with accidental on note head
@@ -2489,12 +2571,11 @@ function nrGetKeyPool() {
         if (!raised) return;
         var base = yMap.find(function(n){ return n.name === raised.letter; });
         if (!base) return;
-        pool.push(Object.assign({}, base, {
-          clef: c,
+        pool.push.apply(pool, nrSpreadOctaves(Object.assign({}, base, {
           acc: raised.acc,
           key: raised.pianoKey,
           name: raised.letter
-        }));
+        }), c, band));
       });
     }
   });
@@ -2534,6 +2615,7 @@ async function nrSaveScore() {
     accidentals:   nrMode === "normal" ? nrAccidentals : false,
     attempts:      nrGameTotal,
     key_signature: nrMode === "key" ? nrKeyId : null,
+    range:         nrRange,
   });
 
   // Personal best → notify owner (skip when owner is the player).
@@ -2567,11 +2649,14 @@ async function nrSaveScore() {
   toolsCheckAchievements().catch(e => console.warn("toolsCheckAchievements failed:", e));
 }
 
-async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAcc, filterKey) {
+async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAcc, filterKey, filterRange) {
   if (justPlayedScore === undefined) justPlayedScore = null;
   if (filterClef === undefined) filterClef = null;
   if (filterAcc  === undefined) filterAcc  = null;
   if (filterKey  === undefined) filterKey  = null;
+  if (filterRange === undefined) filterRange = "stave";
+  // Human labels for the range facet ("stave" is the implicit default, no tag).
+  var NR_RANGE_LABEL = { ledger: "Ledgers", full: "Full range" };
 
   const el = document.getElementById(rowsElId);
   if (!el) return;
@@ -2586,7 +2671,8 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
   // deduped in-browser, so once a few players logged hundreds of games, lower players
   // fell below the 500-row cutoff and vanished even though they ranked in the Top 10.
   let q = db.from("note_game_leaderboard")
-    .select("email, name, score, clef, accidentals, key_signature, attempts, created_at");
+    .select("email, name, score, clef, accidentals, key_signature, range, attempts, created_at");
+  q = q.eq("range", filterRange);                          // range is its own board variant
   if (filterKey !== null) {
     q = q.eq("key_signature", filterKey);                  // key mode: separate board per key AND clef
     if (filterClef !== null) q = q.eq("clef", filterClef);
@@ -2618,6 +2704,7 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
   } else {
     formatLabel = clefLabel ? (clefLabel + (filterAcc ? " + ♯♭" : "")) : null;
   }
+  if (formatLabel && NR_RANGE_LABEL[filterRange]) formatLabel += " \xb7 " + NR_RANGE_LABEL[filterRange];
   const labelHtml = formatLabel
     ? '<div class="nr-lb-format-label">' + formatLabel + ' — Top 10</div>'
     : "";
@@ -2633,12 +2720,14 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
     const name    = r.name || (raw.charAt(0).toUpperCase() + raw.slice(1));
     const clefTag = r.clef === "mixed" ? "Mixed" : r.clef.charAt(0).toUpperCase() + r.clef.slice(1);
     const accTag  = r.accidentals ? "♯♭" : "";
+    const rangeTag = NR_RANGE_LABEL[r.range] || "";
     const mine    = myEmail && r.email.toLowerCase() === myEmail.toLowerCase();
     return '<div class="nr-lb-row' + (mine ? " nr-lb-mine" : "") + (extraClass ? " " + extraClass : "") + '">' +
       '<span class="nr-lb-rank">' + rank + '</span>' +
       '<span class="nr-lb-name">' + name + '</span>' +
       '<span class="nr-lb-tag">' + clefTag + '</span>' +
       (accTag ? '<span class="nr-lb-tag">' + accTag + '</span>' : "") +
+      (rangeTag ? '<span class="nr-lb-tag">' + rangeTag + '</span>' : "") +
       '<span class="nr-lb-score">' + r.score + '</span>' +
     '</div>';
   }
@@ -2690,12 +2779,13 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
 
 // ── Leaderboard helpers ───────────────────────────────────────────────────────
 function nrRefreshLeaderboards(justPlayed) {
-  var clef = nrClef;
-  var acc  = nrMode === "normal" ? nrAccidentals : null;
-  var key  = nrMode === "key"    ? nrKeyId       : null;
-  nrLoadLeaderboard("nr-lb-setup-rows",   justPlayed, clef, acc, key);
-  nrLoadLeaderboard("nr-lb-results-rows", justPlayed, clef, acc, key);
-  nrLoadLeaderboard("nr-sidebar-lb-rows", justPlayed, clef, acc, key);
+  var clef  = nrClef;
+  var acc   = nrMode === "normal" ? nrAccidentals : null;
+  var key   = nrMode === "key"    ? nrKeyId       : null;
+  var range = nrRange;
+  nrLoadLeaderboard("nr-lb-setup-rows",   justPlayed, clef, acc, key, range);
+  nrLoadLeaderboard("nr-lb-results-rows", justPlayed, clef, acc, key, range);
+  nrLoadLeaderboard("nr-sidebar-lb-rows", justPlayed, clef, acc, key, range);
 }
 
 function nrShowSidebarTab(tab) {
