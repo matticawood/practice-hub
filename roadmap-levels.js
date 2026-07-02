@@ -197,17 +197,21 @@
       { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales", all: true },
       { icon: "scales", group: "arps",   label: "All arpeggios fluent in every key", type: "self", key: "s6-arps", all: true },
       { icon: "sightread", group: "sightread", label: "Sight-read Upper Intermediate pieces, read once: 8,000 minutes (10 minutes a day for 800 days)", type: "hours", category: "sightreading", targetMin: 8000 },
-      { icon: "piece",  group: "piece",  label: "Learn 6 Advanced pieces", type: "piece", tier: 4, count: 6 }
+      { icon: "piece",  group: "piece",  label: "Learn 6 Advanced pieces", type: "piece", tier: 4, count: 6 },
+      { icon: "musicianship", group: "musicianship", label: "Analyse a piece you're learning (sketch its harmonic outline)", type: "self", key: "s6-analyse" },
+      { icon: "perform", group: "perform", label: "Record yourself and share it with someone (or in the community)", type: "self", key: "s6-perform" }
     ],
     [ // 7 Performer
       { icon: "sightread", group: "sightread", label: "Sight-read Advanced pieces across styles, read once: 15,000 minutes (10 minutes a day for 1,500 days)", type: "hours", category: "sightreading", targetMin: 15000 },
       { icon: "perform", group: "perform", label: "Prepare and perform a balanced Advanced programme", type: "self", key: "s7-prog" },
-      { icon: "piece",   group: "piece",   label: "Learn another 5 advanced-to-expert pieces", type: "piece", tier: 4, count: 11 }
+      { icon: "piece",   group: "piece",   label: "Learn another 5 advanced-to-expert pieces", type: "piece", tier: 4, count: 11 },
+      { icon: "musicianship", group: "musicianship", label: "Transpose a piece at sight", type: "self", key: "s7-transpose" }
     ],
     [ // 8 Artist
       { icon: "perform", group: "perform", label: "Prepare and perform a full programme of expert pieces", type: "self", key: "s8-programme" },
       { icon: "expert", group: "piece", label: "Learn an Expert work and make it your own", type: "self", key: "s8-expert" },
-      { icon: "sightread", group: "sightread", label: "Keep sight-reading any style, 10 minutes a day, including accompaniments", type: "self", key: "s8-sr" }
+      { icon: "sightread", group: "sightread", label: "Keep sight-reading any style, 10 minutes a day, including accompaniments", type: "self", key: "s8-sr" },
+      { icon: "musicianship", group: "musicianship", label: "Improvise a complete piece", type: "self", key: "s8-improvise" }
     ]
   ];
 
@@ -368,10 +372,8 @@
                 { group: "scales", type: "self", key: "x6-scales-7", label: "Russian-method scale routine (up two octaves, contrary motion out-and-in two octaves, up two more, down two, contrary out-and-in two, down two to finish)" } ],
       arps:   [ { group: "arps", type: "self", key: "x6-arps-1", label: "Dominant and diminished 7th arpeggios in all keys" },
                 { group: "arps", type: "self", key: "x6-arps-2", label: "Arpeggios a tenth apart" } ],
-      musicianship: [ { group: "musicianship", type: "self", key: "x6-mus-1", label: "Analyse a piece you're learning (sketch its harmonic outline)" },
-                      { group: "musicianship", type: "self", key: "x6-mus-2", label: "Reharmonise a short passage of a piece" } ],
-      perform: [ { group: "perform", type: "self", key: "x6-perf-1", label: "Record yourself and share it with someone (or in the community)" },
-                 { group: "perform", type: "self", key: "x6-perf-2", label: "Play a piece live for one person" },
+      musicianship: [ { group: "musicianship", type: "self", key: "x6-mus-2", label: "Reharmonise a short passage of a piece" } ],
+      perform: [ { group: "perform", type: "self", key: "x6-perf-2", label: "Play a piece live for one person" },
                  { group: "perform", type: "self", key: "x6-perf-3", label: "Play for a small group" } ],
       sightread: [ { group: "sightread", type: "self", key: "x6-sr-1", label: "Sight-read to 10,000 minutes total, reading new material" },
                    { group: "sightread", type: "self", key: "x6-sr-2", label: "Sight-read to 12,000 minutes total, reading new material" },
@@ -386,8 +388,7 @@
       perform: [ { group: "perform", type: "self", key: "x7-perf-1", label: "Perform your programme from memory" },
                  { group: "perform", type: "self", key: "x7-perf-2", label: "Perform to an audience, or record and share it" },
                  { group: "perform", type: "self", key: "x7-perf-3", label: "Prepare a themed programme (one composer or era)" } ],
-      musicianship: [ { group: "musicianship", type: "self", key: "x7-mus-1", label: "Transpose a piece at sight" },
-                      { group: "musicianship", type: "self", key: "x7-mus-2", label: "Reharmonise the melody of a piece you're playing" },
+      musicianship: [ { group: "musicianship", type: "self", key: "x7-mus-2", label: "Reharmonise the melody of a piece you're playing" },
                       { group: "musicianship", type: "self", key: "x7-mus-3", label: "Improvise in specific styles of your choice" } ],
       sightread: [ { group: "sightread", type: "self", key: "x7-sr-1", label: "Accompany another player or singer at sight" },
                    { group: "sightread", type: "self", key: "x7-sr-2", label: "Read an orchestral reduction at sight" } ],
@@ -400,8 +401,7 @@
       perform: [ { group: "perform", type: "self", key: "x8-perf-1", label: "Give a full recital" },
                  { group: "perform", type: "self", key: "x8-perf-2", label: "Give a themed recital" },
                  { group: "perform", type: "self", key: "x8-perf-3", label: "Teach or coach someone a piece" } ],
-      musicianship: [ { group: "musicianship", type: "self", key: "x8-mus-1", label: "Improvise a complete piece" },
-                      { group: "musicianship", type: "self", key: "x8-mus-2", label: "Compose a short original piece" },
+      musicianship: [ { group: "musicianship", type: "self", key: "x8-mus-2", label: "Compose a short original piece" },
                       { group: "musicianship", type: "self", key: "x8-mus-3", label: "Arrange a piece for another instrument" } ],
       piece:  [ { group: "piece", type: "self", key: "x8-piece-1", label: "Take on a second Expert work" },
                 { group: "piece", type: "self", key: "x8-piece-2", label: "Learn a large-scale work (a sonata or suite)" },
