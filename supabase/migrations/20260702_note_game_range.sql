@@ -16,7 +16,10 @@ UPDATE note_game_scores SET range = 'stave' WHERE range IS NULL;
 -- Rebuild the best-per-player-per-variant view to include the new facet, so a
 -- stave board and a ledger board never collapse into one another. Mirrors the
 -- existing DISTINCT ON keying (see 20260628_note_game_leaderboard_view.sql).
-CREATE OR REPLACE VIEW note_game_leaderboard
+-- DROP first: CREATE OR REPLACE cannot insert a column mid-list (range sits
+-- before attempts), so replace the view outright.
+DROP VIEW IF EXISTS note_game_leaderboard;
+CREATE VIEW note_game_leaderboard
   WITH (security_invoker = true) AS
 SELECT DISTINCT ON (lower(email), clef, accidentals, key_signature, range)
   email, name, score, clef, accidentals, key_signature, range, attempts, created_at
