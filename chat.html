@@ -2004,12 +2004,26 @@ async function inlineHandleImage(input, key) {
   }
 }
 
-function inlineHandleFile(input, key) {
+async function inlineHandleFile(input, key) {
   _inlineKey(key);
   const file = input.files[0];
   if (!file) return;
-  _inlineMedia[key].push({ type: "file", name: file.name, blob: file });
   input.value = "";
+  // Videos always go to Mux, not the 500 MB storage path.
+  if (file.type.startsWith("video/")) {
+    if (!_inlineMedia[key]) _inlineMedia[key] = [];
+    const pendingIdx = _inlineMedia[key].length;
+    _inlineMedia[key].push({ type: "mux", name: file.name, _uploading: true, _localUrl: URL.createObjectURL(file) });
+    _renderInlineMediaPreview(key);
+    const dims = await _getVideoDimensions(file);
+    _uploadVideoToMux(file, item => {
+      if (dims) { item.w = dims.w; item.h = dims.h; }
+      _inlineMedia[key][pendingIdx] = item;
+      _renderInlineMediaPreview(key);
+    });
+    return;
+  }
+  _inlineMedia[key].push({ type: "file", name: file.name, blob: file });
   _renderInlineMediaPreview(key);
 }
 

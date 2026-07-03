@@ -1412,8 +1412,21 @@
     }
   };
   window.tcHandleFile = function(input, key) {
-    _key(key);const file=input.files[0];if(!file)return;
-    _inlineMedia[key].push({type:"file",name:file.name,blob:file});input.value="";_renderPreview(key);
+    _key(key);const file=input.files[0];if(!file)return;input.value="";
+    // A video attached via the file button must go to Mux, not the 500 MB storage path.
+    if(file.type.startsWith("video/")){
+      const idx=_inlineMedia[key].length;
+      _inlineMedia[key].push({type:"mux",name:file.name,_uploading:true,_progress:"Uploading…"});
+      _renderPreview(key);
+      _uploadVideoToMux(file,item=>{
+        if(item._error){_inlineMedia[key][idx]={type:"mux",name:file.name,_uploading:false,_error:item._error};alert("Video upload failed: "+item._error);}
+        else if(item._progress){_inlineMedia[key][idx]._progress=item._progress;}
+        else{_inlineMedia[key][idx]=item;}
+        _renderPreview(key);
+      });
+      return;
+    }
+    _inlineMedia[key].push({type:"file",name:file.name,blob:file});_renderPreview(key);
   };
   window.tcHandleVideo = function(input, key) {
     const file=input.files[0];input.value="";if(!file)return;

@@ -3227,7 +3227,6 @@ let _activityAvatarMap   = {}; // email → {url,name}
 let _cmtMap = {};
 // Activity detail view state
 let _currentActivityDetail = null; // { eventType, itemId }
-let _activityCommentMedia = []; // pending media for activity comment
 let _feedItems = []; // all feed rows for detail view lookup
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -4313,8 +4312,11 @@ async function handleImageFiles(input) {
 function handleFileAttach(input) {
   const file = input.files[0];
   if (!file) return;
-  _composerMedia.push({ type: "file", name: file.name, blob: file });
   input.value = "";
+  // A video attached here (via "All files" in the picker or drag-drop) must go to
+  // Mux, not the 500 MB storage path, or large videos are rejected as "too large".
+  if (file.type.startsWith("video/")) { _uploadVideoToMux(file); return; }
+  _composerMedia.push({ type: "file", name: file.name, blob: file });
   _renderMediaPreview();
 }
 
@@ -4924,8 +4926,16 @@ function inlineHandleFile(input, key) {
   _inlineKey(key);
   const file = input.files[0];
   if (!file) return;
-  _inlineMedia[key].push({ type: "file", name: file.name, blob: file });
   input.value = "";
+  // A video attached here must go to Mux, not the 500 MB storage path.
+  if (file.type.startsWith("video/")) {
+    const pendingIdx = _inlineMedia[key].length;
+    _inlineMedia[key].push({ type: "mux", name: file.name, _uploading: true, _localUrl: URL.createObjectURL(file) });
+    _renderInlineMediaPreview(key);
+    _uploadVideoToMux(file, item => { _inlineMedia[key][pendingIdx] = item; _renderInlineMediaPreview(key); });
+    return;
+  }
+  _inlineMedia[key].push({ type: "file", name: file.name, blob: file });
   _renderInlineMediaPreview(key);
 }
 
@@ -8776,7 +8786,6 @@ function _refreshPostLikeBtn(safeKey, postId) {
 // ── Activity detail view ──────────────────────────────────────────────────────
 async function showActivityDetail(eventType, itemId, skipPush) {
   _currentActivityDetail = { eventType, itemId };
-  _activityCommentMedia = [];
   _feedScrollY = window.scrollY;          // remember the feed position to restore on back
 
   // Switch views
@@ -9155,26 +9164,6 @@ async function deleteActivityDetailComment(commentId, eventType, itemId) {
   if (error) { if (el) el.style.opacity = ""; return; }
   if (el) el.remove();
   await loadActivityDetailComments(eventType, itemId);
-}
-
-async function handleActivityInlineFile(input, type) {
-  const files = Array.from(input.files);
-  for (const file of files) {
-    const path = `comments/${Date.now()}_${file.name.replace(/[^a-z0-9.]/gi,'_')}`;
-    const { error } = await db.storage.from("community").upload(path, file, { upsert: true });
-    if (error) { alert("Upload failed: " + error.message); continue; }
-    const { data: { publicUrl } } = db.storage.from("community").getPublicUrl(path);
-    _activityCommentMedia.push({ type, url: publicUrl, name: file.name });
-    const prev = document.getElementById("activity-inline-preview");
-    if (prev) {
-      if (type === "image") {
-        prev.innerHTML += `<img src="${escHtml(publicUrl)}" style="max-height:80px;border-radius:6px;border:1px solid var(--border)">`;
-      } else {
-        prev.innerHTML += `<span style="font-size:.78rem;color:var(--text-muted);background:var(--surface-2);padding:3px 8px;border-radius:6px">${escHtml(file.name)}</span>`;
-      }
-    }
-  }
-  input.value = "";
 }
 
 function _updateCmtBtn(eventType, itemId, count) {
