@@ -84,6 +84,7 @@ As Levels 1–4, plus. This is the Grade 8 practical prerequisite — the solid 
 - **Transposition at the Octave** — rewriting a melody an octave higher/lower and between clefs.
 - **Transposing Instruments & Concert Pitch** — to/from concert pitch for instruments in B♭, A or F (interval given).
 - **All Keys up to 6 Sharps/Flats** — every major & minor key to six sharps/flats, both minor forms.
+- **The Modes** — what a mode is (a scale starting on a different degree of the major scale); the seven diatonic modes in order (Ionian, Dorian, Phrygian, Lydian, Mixolydian, Aeolian, Locrian); the white-key shortcut for finding each on the piano (C, D, E, F, G, A, B); how Ionian = the major scale and Aeolian = the natural minor; each mode's characteristic note and its mood from bright to dark; recognising and using modes by ear and when improvising.
 - **Simple & Compound Intervals from Any Note** — naming all intervals, including larger than an octave, from any start.
 - **Chords & Inversions** — root (a), 1st inversion (b), 2nd inversion (c); triads on tonic, supertonic, subdominant, dominant.
 - **Identifying Chords & Figured-Bass Basics** — recognising I, ii, IV, V etc.; intro to figured-bass / chord labelling.
@@ -92,5 +93,4 @@ As Levels 1–4, plus. This is the Grade 8 practical prerequisite — the solid 
 - **Ornaments (full set)** — the complete set of ornament signs and their realisation.
 - **Performance Directions & Foreign Terms** — full vocabulary across Italian, German, French.
 - **Music in Context: Analysing an Extract** — applying everything to a short passage (keys, chords, intervals, terms, structure).
-- **Review & Exam-Style Practice**
-- **The Modes** — what a mode is (a scale starting on a different degree of the major scale); the seven diatonic modes in order (Ionian, Dorian, Phrygian, Lydian, Mixolydian, Aeolian, Locrian); the white-key shortcut for finding each on the piano (C, D, E, F, G, A, B); how Ionian = the major scale and Aeolian = the natural minor; each mode's characteristic note and its mood from bright to dark; recognising and using modes by ear and when improvising.
+- **Review & Melody Questions**

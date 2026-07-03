@@ -61,8 +61,9 @@ B.forEach((b, i) => {
   if (!b.type || !KNOWN.has(b.type)) flag("STRUCT", `[${i}] unknown/missing type: ${b.type}`);
   if (b.type === "notation") { if (!b.abc) flag("STRUCT", `[${i}] notation has no abc`); else if (!/K:/.test(b.abc)) flag("STRUCT", `[${i}] notation missing K:`); }
   if (b.type === "play") {
-    (b.notes || []).forEach(n => { if (!noteRe.test(n)) flag("STRUCT", `[${i}] bad play note: "${n}"`); });
+    (b.notes || []).forEach(n => { if (n != null && !noteRe.test(n)) flag("STRUCT", `[${i}] bad play note: "${n}"`); }); // null = rest, allowed
     if (Array.isArray(b.beats) && b.beats.length !== (b.notes || []).length) flag("STRUCT", `[${i}] play beats(${b.beats.length}) != notes(${(b.notes||[]).length})`);
+    if (Array.isArray(b.gains) && b.gains.length !== (b.notes || []).length) flag("STRUCT", `[${i}] play gains(${b.gains.length}) != notes(${(b.notes||[]).length})`);
   }
   if (b.type === "keyboard" && (!b.from || !b.to)) flag("STRUCT", `[${i}] keyboard missing from/to`);
   if (b.type === "questions") (b.items || []).forEach((it, j) => {
@@ -101,7 +102,7 @@ B.forEach((b, i) => {
 
 // ── 3. PLAY vs NEAREST NOTATION (soft) ───────────────────────────────────────
 const PCS = ["C","C#/Db","D","D#/Eb","E","F","F#/Gb","G","G#/Ab","A","A#/Bb","B"];
-function playLetters(notes){ return new Set((notes||[]).filter(n=>n!=="r").map(n=>n.replace(/\d+$/,"").toUpperCase())); }
+function playLetters(notes){ return new Set((notes||[]).filter(n=>n!=null&&n!=="r").map(n=>n.replace(/\d+$/,"").toUpperCase())); }
 B.forEach((b, i) => {
   if (b.type !== "play") return;
   let ni = i - 1; while (ni >= 0 && B[ni].type !== "notation") ni--;
@@ -121,7 +122,10 @@ if (/—/.test(allText)) flag("STYLE", `em dash (—) present (count ${(allText.
 const emoji = allText.match(/[\u{1F300}-\u{1FAFF}\u{2700}-\u{27BF}\u{2B00}-\u{2BFF}]/gu);
 if (emoji) flag("STYLE", `emoji present: ${[...new Set(emoji)].join(" ")}`);
 const mm2 = allText.match(/\b(met|meet)\b/gi); if (mm2) flag("STYLE", `"met/meet" present (${mm2.length}) — reword to learn/see/use/find`);
-const abrsm = allText.match(/\b(ABRSM|exam)\b/gi); if (abrsm) flag("STYLE", `ABRSM/exam reference present (${abrsm.length}) — this is NOT an exam course`);
+const abrsm = allText.match(/\b(ABRSM|exam|grade)\b/gi); if (abrsm) flag("STYLE", `ABRSM/exam/grade reference present (${abrsm.length}) — this is NOT an exam/grades course`);
+const practise = allText.match(/\bpractis(e|ed|es|ing)\b/gi); if (practise) flag("STYLE", `"practise" (British "s") present (${practise.length}) — always spell "practice/practicing/practiced" with a C`);
+const staff = allText.match(/\bstaffs?\b/gi); if (staff) flag("STYLE", `"staff" present (${staff.length}) — use "stave" (plural "staves"), not "staff"`);
+if (/theory (paper|question|exercise|test)/i.test(allText)) flag("STYLE", `exam-paper framing ("theory paper/question/exercise") — this course is about reading music, not sitting a paper`);
 if (/curved bracket/i.test(allText)) flag("STYLE", `"curved bracket" — a bracket is square; say "bracket" or "slur/curved line"`);
 // British-primary terms NOT in brackets after an American term
 for (const m of allText.matchAll(/\b(crotchet|minim|quaver|semibreve|breve)s?\b/gi)) {

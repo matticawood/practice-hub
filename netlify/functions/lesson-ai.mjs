@@ -51,7 +51,11 @@ field and type-specific fields. These are the ONLY allowed block types:
              //   Sounds the notes on a real piano in the lesson. Note names are
              //   scientific pitch: C4 = middle C, sharps "#", flats "b" (e.g. "F#4","Bb3").
              //   style "chord" = all together; "sequence" = one after another (scales, melodies, intervals heard melodically).
-             //   USE THIS generously whenever the learner should HEAR something:
+             //   For a MELODY, use "sequence" and add a "beats" array with one number per note = its
+             //   length in beats (half note = 2, quarter = 1, eighth = 0.5), and put null in "notes"
+             //   for a REST (silent for its beats). This makes the played melody match the written
+             //   rhythm and rests exactly. "notes", "beats" (and optional "gains") must be equal length.
+             //   Optional "bpm". USE play generously whenever the learner should HEAR something:
              //   intervals, chords, scales, "listen to the difference between...". It needs no audio file.
 - keyboard:  { "type":"keyboard", "label":"C major triad", "highlight":["C4","E4","G4"], "from":"C4", "to":"C6" }
              //   An interactive piano: highlighted keys are coloured and the learner can
@@ -71,6 +75,14 @@ field and type-specific fields. These are the ONLY allowed block types:
              //   real notes; for a BLANK or illustrative stave (e.g. "count the lines and
              //   spaces") omit M: and fill a bar with INVISIBLE rests "x" so the empty stave
              //   still draws, with no time signature or visible rest, e.g. "X:1\\nK:C\\nx8 |]".
+             //   ACCURACY (a wrong stave draws a broken bar): in a sharp/flat key the key
+             //   signature already alters the notes, so write just the letter (K:G makes every F
+             //   an F#); add ^ (sharp) _ (flat) = (natural) ONLY for an accidental outside the
+             //   key, and NEVER write "#" or "b" after a note. Staccato is a dot BEFORE the note
+             //   (".C"), not a decoration name; dynamics are !p! !mf! !f! before the note; a tempo
+             //   word is Q:"Moderato". Every bar's note lengths MUST sum to the time signature (a
+             //   3/4 bar = three quarter-notes). A "play" block for the same music must match it
+             //   note-for-note (including rests as null entries).
              //   This is the most important block for theory reading.
 - questions: { "type":"questions", "mode":"inline", "title":"...", "items":[ <question>, ... ] }
              //   mode "inline" = each question checked as you go; "quiz" = scored at the end.
@@ -90,13 +102,36 @@ e.g. "note: add a photo of the hand crossing here".
 `.trim();
 
 const STYLE_RULES = `
-Write for a complete beginner adult learner. Hard rules:
-- Assume NO prior knowledge. The first time you use any musical term (interval,
-  tonic, triad, semitone, etc.), define it in plain language.
+Write for an adult learner in a structured course. Hard rules:
+- This course teaches READING and understanding music, NOT passing exams. NEVER
+  mention ABRSM, exams, grades, "theory papers", "theory questions/exercises", or
+  "exam questions". Frame practice as the SKILLS of reading music ("things you do
+  when you read a piece"), never as exam question-types.
+- Spelling/terminology: say "stave" not "staff" (plural "staves"). Spell
+  "practice"/"practicing"/"practiced" with a c always, even as a verb (never
+  "practise"). Note names American-primary with the British name in brackets on
+  FIRST use only, then American alone: "whole note (semibreve)", "half note (minim)",
+  "quarter note (crotchet)", "eighth note (quaver)", "sixteenth note (semiquaver)",
+  "thirty-second note (demisemiquaver)". Use the American name in titles and headings.
+- RECAP, do not RE-TEACH. If a term or idea was covered in an earlier lesson (see
+  prior concepts below), remind the learner in one line and USE it. Do NOT re-define
+  it from scratch. Only fully define a term the first time it is genuinely introduced
+  in the course. This matters most in review lessons.
+- Reuse the EXACT mnemonics/terminology already taught, never invent variants.
+  Standard mnemonics: treble lines "Every Good Boy Deserves Fun" (E G B D F), treble
+  spaces "FACE", bass lines "Good Boys Deserve Fun Always" (G B D F A), bass spaces
+  "All Cows Eat Grass" (A C E G).
+- Any "common mistakes" must be REAL errors learners make when reading (forgetting to
+  apply the key signature, reading a bass-clef note as treble, miscounting an interval
+  by not counting both ends, missing a dot or rest). Never invent contrived ones
+  (misspelling Italian terms, "naming a key without counting the sharps").
+- ACCURACY IS CHECKED. Every factual claim must be correct: note positions on the
+  stave (e.g. D5 is the 4th line of the treble stave; count lines E-G-B-D-F up), interval
+  counts (include BOTH end notes), key signatures, and EVERY quiz answer AND its
+  explanation. A "play" or "notation" block must match what the surrounding text says.
 - Short sentences. Warm, encouraging, plain English. No unexplained jargon.
-- Use concrete, at-the-piano examples ("play C, then the next white note up...").
-- NEVER use em dashes. Use commas, full stops, or "and".
-- NEVER use emojis anywhere (no decorative symbols in headings, callouts, or body).
+- Concrete at-the-piano examples ("play C, then the next white note up...").
+- NEVER use em dashes; use commas, full stops, or "and". NEVER use emojis.
 - This is a draft for human review; accuracy matters more than length.
 `.trim();
 
@@ -125,9 +160,9 @@ const OUTLINE_TOOL = {
     type: "object",
     properties: {
       title:       { type: "string", description: "A clear, specific lesson title." },
-      summary:     { type: "string", description: "One sentence on what the learner can do after this lesson." },
-      objectives:  { type: "array", description: "1 to 3 plain-language learning objectives, each phrased as something the learner can DO by the end (e.g. 'Name any note on the treble stave').", items: { type: "string" } },
-      est_minutes: { type: "integer", description: "Rough minutes to complete, 5 to 30." },
+      summary:     { type: "string", description: "One sentence in the SECOND PERSON ('you') on what the learner can do after this lesson, e.g. 'After this lesson, you can name any note on the treble stave'. Never write 'the learner'." },
+      objectives:  { type: "array", description: "1 to 3 plain-language learning objectives, each phrased in the SECOND PERSON as something YOU can DO by the end (e.g. 'You can name any note on the treble stave'). Never write 'the learner'.", items: { type: "string" } },
+      est_minutes: { type: "integer", description: "Estimated minutes to complete, computed from THIS lesson's own content (do NOT cap at 30): reading time at ~170 words/min across all text, plus audio, plus ~30 seconds per quiz question, plus time for any piano tasks. A short focused lesson may be 10 to 20; a large review with many questions and tasks can be 40 to 50." },
       sections: {
         type: "array",
         description: "4 to 7 sections, in teaching order, each building on the last.",
