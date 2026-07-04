@@ -504,17 +504,23 @@
        hover (desktop) and tap (mobile), since native title doesn't show on tap. */
     [data-tip] { cursor: help; }
     .smm-tip {
-      position: fixed; z-index: 2147483000;
+      position: fixed; z-index: 2147483000; box-sizing: border-box;
       background: #1f1813; color: #fff;
-      font-size: 0.72rem; font-weight: 600; letter-spacing: .01em;
-      padding: 5px 9px; border-radius: 7px;
+      font-size: 0.72rem; font-weight: 600; letter-spacing: .01em; line-height: 1.4;
+      padding: 6px 10px; border-radius: 7px;
       box-shadow: 0 6px 20px rgba(0,0,0,.28);
-      pointer-events: none; white-space: nowrap;
+      pointer-events: none;
+      /* Wrap long tips and never exceed the viewport (short tips still fit one line). */
+      white-space: normal; text-align: center;
+      width: max-content; max-width: min(260px, calc(100vw - 16px));
       transform: translate(-50%, calc(-100% - 9px));
       opacity: 0; transition: opacity .12s ease;
     }
     .smm-tip.show { opacity: 1; }
     .smm-tip::after { content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: #1f1813; }
+    /* Flip below the anchor when there isn't room above (e.g. near the top of the page). */
+    .smm-tip.smm-below { transform: translate(-50%, 9px); }
+    .smm-tip.smm-below::after { top: -5px; bottom: auto; border-top-color: transparent; border-bottom-color: #1f1813; }
     @media (max-width: 768px) {
       .member-modal-backdrop {
         align-items: center;
@@ -960,8 +966,20 @@
     if (!_tipEl) { _tipEl = document.createElement("div"); _tipEl.className = "smm-tip"; document.body.appendChild(_tipEl); }
     _tipEl.textContent = el.getAttribute("data-tip") || "";
     const r = el.getBoundingClientRect();
-    _tipEl.style.left = (r.left + r.width / 2) + "px";
-    _tipEl.style.top = r.top + "px";
+    // Center on the anchor, but keep the whole box (which is translated -50% in X)
+    // on screen so a long tip near an edge can't run off. Measure after setting text.
+    const tw = _tipEl.offsetWidth, th = _tipEl.offsetHeight;
+    let cx = r.left + r.width / 2;
+    cx = Math.max(tw / 2 + 8, Math.min(cx, window.innerWidth - tw / 2 - 8));
+    _tipEl.style.left = cx + "px";
+    // Above the anchor by default; flip below if it would clip the top of the screen.
+    if (r.top - th - 9 < 8) {
+      _tipEl.classList.add("smm-below");
+      _tipEl.style.top = r.bottom + "px";
+    } else {
+      _tipEl.classList.remove("smm-below");
+      _tipEl.style.top = r.top + "px";
+    }
     _tipEl.classList.add("show");
   }
   function _hideTip() { if (_tipEl) _tipEl.classList.remove("show"); }

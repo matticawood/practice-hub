@@ -3046,6 +3046,12 @@
       font-size: .68rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .08em; color: var(--text-muted);
     }
+    /* "At a glance" header row: label left, streak-save balance right. */
+    .dash-toplabel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .dash-glance-saves {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: .68rem; font-weight: 800; letter-spacing: .06em; color: var(--text-muted);
+    }
     .dash-section-title {
       font-size: .72rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .09em; color: var(--text-muted); margin-bottom: 10px;
@@ -3500,6 +3506,8 @@
     .dash-goal-eyebrow { font-size: .56rem; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; }
     .dash-goal-eyebrow .dash-streak { display: inline-flex; align-items: center; gap: 3px; color: #c2870a; font-weight: 800; }
     .dash-goal-eyebrow .dash-streak svg { color: #f1bf08; }
+    .dash-info { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; margin-left: 1px; padding: 0; border: 1px solid currentColor; border-radius: 50%; background: none; color: inherit; font-size: .5rem; font-weight: 800; font-style: normal; line-height: 1; text-transform: none; opacity: .6; cursor: pointer; }
+    .dash-info:hover { opacity: 1; }
     .dash-goal-weekly { border-bottom: none; }
     .dash-goal-divider { height: 1px; background: var(--border); margin: 8px 0 10px; }
     body.hub-mode .dash-goal-divider { background: #e3e1e6; }
@@ -5492,7 +5500,9 @@
     }
     .stats-recent-ach-item { cursor: pointer; }
     .badge-popup {
-      position: fixed; z-index: 9999; max-width: 240px;
+      position: fixed; z-index: 99999; box-sizing: border-box;
+      max-width: min(280px, calc(100vw - 16px)) !important;
+      white-space: normal !important; overflow-wrap: anywhere;
       background: var(--surface, #1a1410); border: 1px solid var(--border);
       border-radius: 12px; padding: 11px 14px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
       animation: dashFadeUp .18s ease both; pointer-events: none;
@@ -8848,15 +8858,21 @@ function calculateStreak(sessionDates, savedDates) {
 // save-bridged days always count — even when the stored streak_tokens row is stale
 // (e.g. between the hourly cron recomputes, just after local midnight). Falls back to the
 // local walk-back only if the module hasn't loaded. NEVER hand-roll streak maths again.
-function liveStreak(sessionDates) {
+function liveStreakState(sessionDates) {
   if (window.StreakCalc) {
     try {
       const tz = (streakData?.timezone) || StreakCalc.captureTimezone();
-      return StreakCalc.deriveStreakState(sessionDates, tz).current_streak;
+      return StreakCalc.deriveStreakState(sessionDates, tz);
     } catch (e) {}
   }
-  return calculateStreak(sessionDates, streakData?.saved_dates || []);
+  // Module not loaded — fall back to the local walk-back for the streak and the
+  // stored token row for the balance.
+  return {
+    current_streak: calculateStreak(sessionDates, streakData?.saved_dates || []),
+    balance: (streakData?.balance || 0)
+  };
 }
+function liveStreak(sessionDates) { return liveStreakState(sessionDates).current_streak; }
 
 // ── Load data for current viewing user ───────────────────────────
 // Auto-burn streak saves for any missed days, proactively on load.
@@ -10441,7 +10457,13 @@ async function renderDashboard() {
 
   // ── Quick stats ──────────────────────────────────────────────────
   const sessionDatesArr = allSessions.map(s => s.session_date);
-  const streak          = liveStreak(sessionDatesArr);
+  const _streakState    = liveStreakState(sessionDatesArr);
+  const streak          = _streakState.current_streak;
+  const saves           = _streakState.balance;
+  const _savesTip       = "A streak save protects your streak on a day you miss. You earn one for every 5 days you practice, up to 15.";
+  const savesGlanceHTML = (streak > 0 || saves > 0)
+    ? `<span class="dash-glance-saves">${saves} streak save${saves === 1 ? '' : 's'}<button type="button" class="dash-info" data-tip="${_savesTip}" aria-label="What is a streak save?">i</button></span>`
+    : '';
   const totalMins       = allSessions.reduce((s, sess) => s + (sess.duration_minutes || 0), 0);
   const monday  = getMonday(now);
   const sunday  = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23,59,59,999);
@@ -10605,7 +10627,7 @@ async function renderDashboard() {
       ? `${_wkCheck} ${formatMinutes(goal)} goal reached`
       : `${formatMinutes(weekMins)} of ${formatMinutes(goal)}`;
 
-    const _dashFlame = (typeof _emojiToSvg === 'function') ? _emojiToSvg('🔥', 11) : '';
+    const _dashFlame  = (typeof _emojiToSvg === 'function') ? _emojiToSvg('🔥', 11) : '';
     const weeklyHTML = `
       <div class="dash-goal-row dash-goal-weekly">
         <div class="dash-goal-eyebrow">This week${streak > 0 ? ` <span class="dash-streak">${_dashFlame}${streak}</span>` : ''}</div>
@@ -10682,7 +10704,7 @@ async function renderDashboard() {
     <!-- Your Journey: current roadmap trophy + progress + area jars (gated to launch with the roadmap) -->
     <div id="journey-card"></div>
 
-    <div class="dash-toplabel">At a glance</div>
+    <div class="dash-toplabel dash-toplabel-row"><span>At a glance</span>${savesGlanceHTML}</div>
     <div class="dash-quick-stats">
       <div class="dash-stat-card is-hero">
         <div class="dash-stat-value is-hero">${streak}</div>
@@ -12602,6 +12624,13 @@ function showMiniTip(ev, el) {
   if (!tip) return;
   const pop = document.createElement('div');
   pop.className = 'badge-popup badge-popup-mini';
+  // Hard-cap the width to the viewport inline so a long tip can never render as one
+  // wide line that runs off a phone screen (belt-and-braces over the CSS max-width).
+  // border-box so the cap includes padding+border (content-box let a 260 cap become
+  // a 284px box that overflowed the narrowest phones).
+  pop.style.boxSizing = 'border-box';
+  pop.style.maxWidth = Math.min(280, window.innerWidth - 16) + 'px';
+  pop.style.whiteSpace = 'normal';
   pop.innerHTML = `<div class="badge-popup-name">${escHtml(tip)}</div>`;
   document.body.appendChild(pop);
   _badgePopup = pop;
