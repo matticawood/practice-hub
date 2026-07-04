@@ -497,6 +497,11 @@
     #panel-library .pl-main { min-width:0; flex:1; }
     #panel-library .pl-card-title { font-size:1.0rem; font-weight:750; line-height:1.22; color:var(--pl-text); letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:30px; }
     #panel-library .pl-qa { position:absolute; top:12px; right:12px; width:26px; height:26px; padding:0; border-radius:8px; border:1px solid var(--pl-border); background:#fff; color:var(--pl-muted); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; transition:border-color .15s,color .15s,background .15s,transform .12s; }
+    #panel-library .pl-card-custom { cursor: default; }
+    #panel-library .pl-title-edit { position:absolute; top:12px; right:44px; width:26px; height:26px; padding:0; border-radius:8px; border:1px solid var(--pl-border); background:#fff; color:var(--pl-muted); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; transition:border-color .15s,color .15s,background .15s,transform .12s; }
+    #panel-library .pl-title-edit:hover { color:var(--pl-accent, #c8901a); border-color:var(--pl-accent, #c8901a); }
+    #panel-library .pl-card-custom .pl-card-title { padding-right: 64px; }
+    #panel-library .pl-card-custom .col-title-input { width: 100%; }
     #panel-library .pl-qa:hover { border-color:#d6c5a8; color:var(--pl-text); }
     #panel-library .pl-qa:active { transform:scale(.92); }
     #panel-library .pl-qa svg { width:15px; height:15px; }
@@ -1138,6 +1143,9 @@
     .col-piece-card    { background: var(--surface); border: 1.5px solid var(--border); border-radius: 10px; padding: 0; margin-bottom: 8px; display: flex; flex-direction: column; align-items: stretch; }
     .col-piece-info    { flex: 1; min-width: 0; }
     .col-piece-title   { font-size: 0.92rem; font-weight: 600; line-height: 1.3; }
+    .col-title-edit    { background: none; border: none; padding: 0 0 0 5px; margin: 0; cursor: pointer; color: var(--pl-muted, #8a8378); opacity: .5; vertical-align: middle; line-height: 1; display: inline-flex; }
+    .col-title-edit:hover { opacity: 1; color: var(--accent, #f5c518); }
+    .col-title-input   { font: inherit; font-size: 0.92rem; font-weight: 600; padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px; width: min(100%, 280px); max-width: 100%; box-sizing: border-box; background: var(--pl-surface, #fff); color: inherit; }
     .col-piece-meta-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
     .col-piece-composer { font-size: 0.75rem; color: var(--text-muted); }
     .col-piece-actions { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
@@ -1784,7 +1792,13 @@ function renderLibCard(piece, isBook) {
   const diffShort = hasDiff ? LIB_DIFF_SHORT[piece.difficulty] : "";
   const metaName = isBook && piece.composer ? 'Author: ' + escHtml(piece.composer) : escHtml(piece.composer || "");
   const spineComp = piece._custom ? '<div class="pl-spine-comp">Custom</div>' : (piece.composer ? '<div class="pl-spine-comp">' + escHtml(piece.composer) + '</div>' : '');
-  return '<div class="pl-card" data-lib-id="' + piece.id + '" onclick="showPieceModal(\'' + piece.id + '\')">' +
+  // Custom pieces have no library content, so the card doesn't open the modal — it's
+  // renamed via the pencil next to the bookmark chip instead.
+  const _cardClick = piece._custom ? "" : ' onclick="showPieceModal(\'' + piece.id + '\')"';
+  const _editBtn = piece._custom
+    ? '<button class="pl-title-edit" title="Edit title" aria-label="Edit title" onclick="event.stopPropagation();colEditCustomTitle(\'' + piece.id + '\')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>'
+    : '';
+  return '<div class="pl-card' + (piece._custom ? ' pl-card-custom' : '') + '" data-lib-id="' + piece.id + '"' + _cardClick + '>' +
     '<div class="pl-spine" style="--c:' + c + '">' + spineComp + '</div>' +
     '<div class="pl-main">' +
       '<div class="pl-card-title">' + escHtml(piece.title) + '</div>' +
@@ -1794,6 +1808,7 @@ function renderLibCard(piece, isBook) {
       '</div>' +
       (blurb ? '<div class="pl-card-blurb">' + escHtml(blurb) + '</div>' : '') +
     '</div>' +
+    _editBtn +
     libQaChipHTML(piece.id) +
   '</div>';
 }
@@ -1868,7 +1883,10 @@ function _plRenderLearning() {
   learning.forEach(function(p) {
     const c = (p.difficulty != null) ? LIB_DIFF_COLORS_LIGHT[p.difficulty] : "#b0a392";
     const cat = (p.difficulty != null) ? LIB_DIFF_SHORT[p.difficulty] : "";
-    html += '<a class="pl-learn-card" onclick="showPieceModal(' + p.id + ')" style="--c:' + c + '">' +
+    // Custom pieces must open by their string key ("u_<id>"), not the raw numeric id —
+    // otherwise findAnyLibPiece() resolves it to an unrelated library piece of that number.
+    const modalArg = p._custom ? "'" + customKey(p.id) + "'" : p.id;
+    html += '<a class="pl-learn-card" onclick="showPieceModal(' + modalArg + ')" style="--c:' + c + '">' +
       '<div class="pl-learn-spine">' + (p.composer ? '<div class="pl-learn-spine-comp">' + escHtml(p.composer) + '</div>' : '') + '</div>' +
       '<div class="pl-learn-info"><div class="pl-learn-cat">' + escHtml(cat) + '</div>' +
         '<div class="pl-learn-pt">' + escHtml(p.title) + '</div>' +
@@ -2132,7 +2150,7 @@ function showPieceModal(pieceId, skipPush) {
         '</div>' +
         libQaChipHTML(pieceId) +
       '</div>' +
-      (isOwner() ? '<div style="margin:2px 0 14px"><button type="button" class="pe-btn" style="font-size:0.8rem;padding:6px 14px" onclick="openEdit(' + JSON.stringify(piece.id) + ')">&#9998; Edit</button></div>' : '') +
+      (isOwner() && !piece._custom ? '<div style="margin:2px 0 14px"><button type="button" class="pe-btn" style="font-size:0.8rem;padding:6px 14px" onclick="openEdit(' + JSON.stringify(piece.id) + ')">&#9998; Edit</button></div>' : '') +
       '<div class="pm-article">' +
       (piece.background    ? '<div class="card-section"><div class="section-label">Background</div><div class="section-text">' + renderLibText(piece.background) + '</div></div>' : '') +
       (piece.pianist_notes ? '<div class="card-section"><div class="section-label">Pianist Notes</div><div class="section-text">' + renderLibText(piece.pianist_notes) + '</div></div>' : '') +
@@ -2302,8 +2320,12 @@ function renderCollectionCard(p) {
   const hasBody = p.background || p.pianist_notes || p.challenges || tags || p.sheet_music_url || (p.youtube_url && !p.youtube_reported);
   const customBadge = p._custom ? '<span style="font-size:0.68rem;color:var(--text-muted);margin-left:4px;opacity:0.7">(custom)</span>' : '';
   const colC = (p.difficulty != null) ? LIB_DIFF_COLORS_LIGHT[p.difficulty] : '#b0a392';
+  // Library pieces expand to show their notes; custom pieces have no body, so a tap
+  // on the card does nothing — renaming is via the pencil in the actions row only.
+  const rowOnclick = p._custom ? "" : ' onclick="if(!event.target.closest(\'.col-piece-actions\'))colToggleCard(\'' + safeId + '\')"';
+  const rowCursor  = hasBody ? "pointer" : "default";
   return '<div class="col-piece-card" id="col-card-' + safeId + '" style="--c:' + colC + '">' +
-    '<div class="col-piece-row" onclick="if(!event.target.closest(\'.col-piece-actions\'))colToggleCard(\'' + safeId + '\')" style="display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:' + (hasBody ? "pointer" : "default") + '">' +
+    '<div class="col-piece-row"' + rowOnclick + ' style="display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:' + rowCursor + '">' +
       '<div class="col-piece-info">' +
         '<div class="col-piece-title">' + escHtml(p.title) + customBadge + '</div>' +
         '<div class="col-piece-meta-row">' +
@@ -2317,6 +2339,7 @@ function renderCollectionCard(p) {
       '</div>' +
       '<div class="col-piece-actions">' +
         (p.difficulty != null ? '<span class="col-diff-mini">' + renderLibStars(p.difficulty) + '</span>' : '') +
+        (p._custom ? '<button class="col-title-edit" title="Edit title" aria-label="Edit title" onclick="event.stopPropagation();colEditCustomTitle(\'' + colKey + '\')"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>' : '') +
         '<button class="col-remove-btn" data-col-remove="' + escHtml(colKey) + '" title="Remove from collection">&times;</button>' +
         (hasBody ? '<span class="col-expand-chevron" id="col-chev-' + safeId + '" style="color:var(--text-muted);font-size:1.1rem;transition:transform 0.15s;line-height:1;margin-left:2px">&rsaquo;</span>' : '') +
       '</div>' +
@@ -2339,6 +2362,43 @@ function colToggleCard(safeId) {
   if (chev) chev.style.transform = open ? "" : "rotate(90deg)";
 }
 window.colToggleCard = colToggleCard;
+
+// Rename a custom collection piece inline. user_pieces is RLS-locked for writes,
+// so the rename goes through the owner-scoped update_user_piece_title RPC.
+window.colEditCustomTitle = function(colKey) {
+  const info = myCollection[colKey];
+  if (!info || !info._custom) return;
+  const card = document.querySelector('.pl-card[data-lib-id="' + colKey + '"]');
+  const titleEl = card && card.querySelector(".pl-card-title");
+  if (!titleEl || titleEl.querySelector("input")) return;
+  const cur  = info.title || titleEl.textContent || "";
+  const upId = userPieceIdFromKey(colKey);   // numeric user_pieces id for the RPC
+  const input = document.createElement("input");
+  input.className = "col-title-input";
+  input.value = cur;
+  input.maxLength = 120;
+  titleEl.innerHTML = "";
+  titleEl.appendChild(input);
+  input.addEventListener("click", function(e) { e.stopPropagation(); });
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async function(save) {
+    if (done) return; done = true;
+    const title = input.value.trim();
+    if (!save || !title || title === cur) { renderCollection(); return; }
+    const { error } = await db.rpc("update_user_piece_title", { p_id: upId, p_email: myEmail, p_title: title });
+    if (error) { showToast("Couldn't rename — please try again."); renderCollection(); return; }
+    info.title = title;
+    renderCollection();
+    showToast("✓ Title updated");
+  };
+  input.addEventListener("keydown", function(e) {
+    if (e.key === "Enter")       { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", function() { finish(true); });
+};
 
 function renderCollection() {
   const groups = { learning: [], aspire: [], completed: [] };
