@@ -14213,20 +14213,24 @@ async function updateGoalById(id) {
   const date     = dateInp?.value  || null;
   const hours    = hoursInp ? (parseFloat(hoursInp.value) || null) : null;
 
-  const updates = {};
-  if (date)  updates.target_date  = date;
-  if (hours) updates.target_hours = hours;
-
-  if (!Object.keys(updates).length) {
+  if (!date && !hours) {
     _pgEditingId = null;
     renderPieceGoals();
     return;
   }
 
-  // Save directly to table (works under RLS because user owns row)
-  const { error } = await db.from("piece_goals").update(updates).eq("id", id);
+  // piece_goals is RLS-locked; direct table writes match zero rows silently. Go
+  // through the SECURITY DEFINER RPC (same pattern as create/delete) so the edit
+  // actually persists — and so an admin editing another member's goal works too.
+  const { error } = await db.rpc("update_piece_goal", {
+    p_id:           id,
+    p_email:        viewingEmail || myEmail,
+    p_target_date:  date  || null,
+    p_target_hours: hours || null,
+  });
   if (error) {
     console.error("Update goal error:", error);
+    showToast("Couldn't save the change — please try again.");
     return;
   }
 
