@@ -8843,6 +8843,21 @@ function calculateStreak(sessionDates, savedDates) {
   return streak;
 }
 
+// Canonical current streak for display everywhere (dashboard, widgets, calendar strip).
+// Uses the same replay the server + Stats tab use (shared-streak.js), computed live so
+// save-bridged days always count — even when the stored streak_tokens row is stale
+// (e.g. between the hourly cron recomputes, just after local midnight). Falls back to the
+// local walk-back only if the module hasn't loaded. NEVER hand-roll streak maths again.
+function liveStreak(sessionDates) {
+  if (window.StreakCalc) {
+    try {
+      const tz = (streakData?.timezone) || StreakCalc.captureTimezone();
+      return StreakCalc.deriveStreakState(sessionDates, tz).current_streak;
+    } catch (e) {}
+  }
+  return calculateStreak(sessionDates, streakData?.saved_dates || []);
+}
+
 // ── Load data for current viewing user ───────────────────────────
 // Auto-burn streak saves for any missed days, proactively on load.
 // Walks backwards from yesterday, bridging gaps that are anchored to a
@@ -10426,8 +10441,7 @@ async function renderDashboard() {
 
   // ── Quick stats ──────────────────────────────────────────────────
   const sessionDatesArr = allSessions.map(s => s.session_date);
-  const savedDates      = streakData?.saved_dates || [];
-  const streak          = calculateStreak(sessionDatesArr, savedDates);
+  const streak          = liveStreak(sessionDatesArr);
   const totalMins       = allSessions.reduce((s, sess) => s + (sess.duration_minutes || 0), 0);
   const monday  = getMonday(now);
   const sunday  = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23,59,59,999);
@@ -12462,7 +12476,7 @@ function renderInsights() {
   }
 
   // ── Streak & coming back ──────────────────────────────────────────
-  const currentStreak = calculateStreak(sessions.map(s => s.session_date), streakData?.saved_dates || []);
+  const currentStreak = liveStreak(sessions.map(s => s.session_date));
   const bestStreak    = calculateBestStreak(sessions.map(s => s.session_date));
   if (currentStreak >= 3)
     insights.push({ prio: 52, icon: '🔥', text: `<strong>${currentStreak}-day streak</strong> and counting. Consistency like this is what turns practice into an automatic habit.`, why: 'Repeating practice in a consistent daily slot is what turns it into an automatic habit that sticks.', study: 'wood' });
@@ -12633,7 +12647,7 @@ function renderPersonalBests() {
   });
   const curDay    = dayMins[todayStr] || 0;
   const curWeek   = weekMins[thisWeekKey] || 0;
-  const curStreak = calculateStreak(sessions.map(s => s.session_date));
+  const curStreak = liveStreak(sessions.map(s => s.session_date));
 
   // icon, label, best display, best value, current value, formatter, context word
   const tile = (icon, label, best, bestVal, cur, fmt, ctx) => {
@@ -13288,7 +13302,7 @@ function renderCalendar() {
   // Feature stat strip above the heatmap — turns the calendar into a "picture".
   const stripEl = document.getElementById("cal-stat-strip");
   if (stripEl) {
-    const curStreak = calculateStreak(allSessions.map(s => s.session_date), streakData?.saved_dates || []);
+    const curStreak = liveStreak(allSessions.map(s => s.session_date));
     const cell = (num, lab, accent) => `<div class="cal-stat"><div class="cal-stat-num${accent ? ' accent' : ''}">${num}</div><div class="cal-stat-lab">${lab}</div></div>`;
     const flame = curStreak > 0 ? `<span class="cal-stat-flame">${_emojiToSvg('🔥', 18)}</span>` : '';
     stripEl.innerHTML =
@@ -13372,7 +13386,7 @@ function renderWeeklyGoalWidget() {
 
   // The weekly goal is a HABIT goal — pair it with the streak (its true engine).
   let streak = 0;
-  try { streak = calculateStreak((allSessions || []).map(s => s.session_date), streakData?.saved_dates || []); } catch (e) {}
+  try { streak = liveStreak((allSessions || []).map(s => s.session_date)); } catch (e) {}
 
   const _checkSVG  = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
   const _pencilSVG = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
