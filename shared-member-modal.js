@@ -882,7 +882,18 @@
       const ds = String(r.session_date || "").slice(0, 10);
       if (ds) _mmDayMin[ds] = (_mmDayMin[ds] || 0) + m;
     }
-    _mmStreak = _computeStreaks(new Set(Object.keys(_mmDayMin).filter(d => _mmDayMin[d] > 0)));
+    // Streak = the canonical server value (save-inclusive, member-local-tz), same as
+    // the dashboard/leaderboard. Fall back to a local day-count only if the RPC fails.
+    try {
+      const { data: sk, error: skErr } = await _db.rpc("get_member_streak", { p_email: email });
+      if (_mmEmail !== email) return;   // a newer profile was opened during the await
+      const row = Array.isArray(sk) ? sk[0] : sk;
+      _mmStreak = (!skErr && row)
+        ? { current: row.current_streak || 0, best: row.best_streak || 0 }
+        : _computeStreaks(new Set(Object.keys(_mmDayMin).filter(d => _mmDayMin[d] > 0)));
+    } catch (_) {
+      _mmStreak = _computeStreaks(new Set(Object.keys(_mmDayMin).filter(d => _mmDayMin[d] > 0)));
+    }
 
     const wrap = document.getElementById("mm-stats");
     if (wrap) {

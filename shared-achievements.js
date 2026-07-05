@@ -6,8 +6,15 @@ function _achTotalMins(s) {
   return s.reduce((t, ss) => t + (ss.duration_minutes || 0), 0);
 }
 function _achMaxStreak(s) {
-  const dates = [...new Set(s.map(ss => ss.session_date))].sort();
+  const dates = [...new Set(s.map(ss => ss.session_date))].filter(Boolean).sort();
   if (!dates.length) return 0;
+  // Save-inclusive best streak — matches the dashboard/leaderboard. A streak kept
+  // alive by a streak-save still counts toward these badges. Falls back to the raw
+  // consecutive-day count only if the shared streak module isn't loaded.
+  if (typeof window !== "undefined" && window.StreakCalc) {
+    try { return window.StreakCalc.deriveStreakState(dates, window.StreakCalc.captureTimezone()).best_streak; }
+    catch (e) {}
+  }
   let max = 1, cur = 1;
   for (let i = 1; i < dates.length; i++) {
     const diff = Math.round(
