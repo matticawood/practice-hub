@@ -509,7 +509,7 @@ async function loadAnalytics() {
       .order("session_date", { ascending: false }),
     db.from("practice_items")
       .select("id, session_id, item_type, piece_id, piece_label, label, duration_minutes"),
-    db.from("streak_tokens").select("email, saved_dates"),
+    db.from("streak_tokens").select("email, saved_dates, current_streak, best_streak, balance"),
     db.from("requests").select("id, email, type, title, done, created_at").order("created_at", { ascending: false }),
     db.from("pieces").select("id, title, composer"),
     db.from("passage_games").select("*").order("created_at", { ascending: false }),
@@ -1899,8 +1899,15 @@ function renderInsights2(d) {
 
   // Streaks — current_streak isn't stored; compute it from session dates + saved
   // dates, exactly like the app's calculateStreak (honours streak-saves).
-  const savedMap = {}; (d.allStreaks || []).forEach(s => savedMap[low(s.email)] = new Set((s.saved_dates || []).map(x => String(x).slice(0, 10))));
+  const savedMap = {}, curMap = {};
+  (d.allStreaks || []).forEach(s => {
+    savedMap[low(s.email)] = new Set((s.saved_dates || []).map(x => String(x).slice(0, 10)));
+    if (s.current_streak != null) curMap[low(s.email)] = s.current_streak;
+  });
   const calcStreak = (e) => {
+    // Canonical stored value (save-inclusive, member-local-tz) — matches the app. Fall
+    // back to a local merge-count only for rows that predate the stored column.
+    if (curMap[e] != null) return curMap[e];
     const all = new Set();
     if (pDays[e]) pDays[e].forEach(d => all.add(d));
     if (savedMap[e]) savedMap[e].forEach(d => all.add(d));
