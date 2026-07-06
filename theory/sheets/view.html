@@ -218,6 +218,7 @@
     @keyframes arlPulse{0%,100%{opacity:.45}50%{opacity:1}}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/shared-practice-autolog.js?v=3"></script>
   <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -424,7 +425,33 @@
   }
   window.goPage = function(d){ const n=currentContent.pages.length; _page=Math.max(0,Math.min(n-1,_page+d)); renderReader(); window.scrollTo({top:0,behavior:'smooth'}); };
   window.jumpPage = function(i){ _page=i; renderReader(); window.scrollTo({top:0,behavior:'smooth'}); };
-  window.finishArticle = async function(){ if(currentStatus!=='read'){ await setStatus('read'); } renderReader(); };
+  window.finishArticle = async function(){
+    if(currentStatus!=='read'){ await setStatus('read'); }
+    renderReader();
+    // Always offer the time adjust when Finish is pressed (standalone reader only —
+    // a modal inside the embedded practice-log iframe would be clipped). Works
+    // whether this read was just logged now or was already logged before.
+    if (_embedded || !window.PracticeAutolog || !window.openArticleTimeEditor
+        || !userEmail || !currentSheetId || !currentContent) return;
+    try {
+      const originRef = 'article:' + currentSheetId;
+      // No-op if already logged; ensures a session exists and gives us its id.
+      const res = await PracticeAutolog.logAppActivity(db, {
+        email: userEmail, source: 'app-article', originRef,
+        minutes: readMins(currentContent), itemType: 'theory',
+        label: currentContent.title || 'Article',
+        notes: 'Piano Practice Daily: ' + (currentContent.title || ''),
+      });
+      if (res.logged) { try { await db.rpc('recompute_streak_tokens', { p_email: userEmail }); } catch (_) {} }
+      let sid = res.sessionId;
+      if (!sid) {
+        const { data } = await db.from('practice_sessions').select('id')
+          .eq('email', userEmail).eq('source', 'app-article').eq('origin_ref', originRef).limit(1);
+        sid = data && data[0] && data[0].id;
+      }
+      if (sid) openArticleTimeEditor(sid, res.minutes || readMins(currentContent));
+    } catch (_) {}
+  };
 
   /* ============================================================
      A4 handout export (PDF + PNGs)
@@ -748,6 +775,7 @@
 
   async function setStatus(next){
     if (!userEmail || !currentSheetId) return;
+    const wasRead = currentStatus === 'read';
     if (next === 'none') {
       await db.from('reading_list').delete().eq('email', userEmail).eq('sheet_id', currentSheetId);
     } else if (currentStatus === 'none') {
@@ -756,6 +784,26 @@
       await db.from('reading_list').update({ status: next }).eq('email', userEmail).eq('sheet_id', currentSheetId);
     }
     updateStatusBtn(next);
+    // Auto-log the read toward practice when the article is finished; remove it if
+    // it's later un-marked. Deduped by origin_ref so it can only ever count once.
+    // Uses the same read-time estimate shown in the reader (readMins).
+    try {
+      if (window.PracticeAutolog && currentContent) {
+        const originRef = 'article:' + currentSheetId;
+        if (next === 'read' && !wasRead) {
+          const r = await PracticeAutolog.logAppActivity(db, {
+            email: userEmail, source: 'app-article', originRef,
+            minutes: readMins(currentContent), itemType: 'theory',
+            label: currentContent.title || 'Article',
+            notes: 'Piano Practice Daily: ' + (currentContent.title || ''),
+          });
+          if (r.logged) { try { await db.rpc('recompute_streak_tokens', { p_email: userEmail }); } catch (_) {} }
+        } else if (wasRead && next !== 'read') {
+          await PracticeAutolog.removeAppActivity(db, { email: userEmail, source: 'app-article', originRef });
+          try { await db.rpc('recompute_streak_tokens', { p_email: userEmail }); } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
   async function cycleSheetStatus() {
     if (!userEmail || !currentSheetId) return;
@@ -766,6 +814,72 @@
     if (!userEmail || !currentSheetId) return;
     await setStatus(currentStatus === 'none' ? 'reading' : 'none');
   }
+
+  /* ============================================================
+     Read-time editor — opens after Finish so the member can adjust the
+     auto-logged minutes (the read estimate is only a word-count guess). Mirrors
+     the course-lesson editor. Self-contained so it doesn't depend on app CSS.
+     ============================================================ */
+  (function(){
+    const css = `
+      .atm-back{position:fixed;inset:0;z-index:9000;background:rgba(20,16,8,.5);display:none;align-items:center;justify-content:center;padding:20px}
+      .atm-back.show{display:flex}
+      .atm{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:0 24px 60px -20px rgba(0,0,0,.4);padding:22px;text-align:center;font-family:inherit}
+      .atm-tick{width:44px;height:44px;border-radius:50%;background:rgba(245,197,24,.18);color:var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
+      .atm-tick svg{width:24px;height:24px}
+      .atm h3{margin:0 0 4px;font-size:1.05rem;color:var(--text)}
+      .atm p{margin:0 0 16px;color:var(--text-muted);font-size:.86rem;line-height:1.45}
+      .atm-step{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:18px}
+      .atm-step button{width:40px;height:40px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-size:1.3rem;font-weight:700;cursor:pointer;line-height:1;font-family:inherit}
+      .atm-step button:hover{border-color:#d6c5a8}
+      .atm-step .val{min-width:88px}
+      .atm-step .val input{width:64px;text-align:center;font-size:1.5rem;font-weight:800;color:var(--text);border:none;background:none;font-family:inherit;-moz-appearance:textfield}
+      .atm-step .val input::-webkit-outer-spin-button,.atm-step .val input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+      .atm-step .val .u{display:block;font-size:.7rem;color:var(--text-muted);font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-top:-2px}
+      .atm-done{width:100%;background:linear-gradient(180deg,#f7d24a,#f5c518);color:#3a2c00;border:none;border-radius:12px;padding:11px 14px;font-size:.88rem;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 7px 16px -7px rgba(245,197,24,.7)}
+      .atm-done:disabled{opacity:.6;cursor:default}`;
+    const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+    const back = document.createElement('div'); back.className = 'atm-back';
+    back.innerHTML =
+      '<div class="atm" role="dialog" aria-modal="true">'+
+        '<div class="atm-tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>'+
+        '<h3>Article read</h3>'+
+        '<p id="atm-sub">Added to your practice. Adjust the time if you spent more or less.</p>'+
+        '<div class="atm-step">'+
+          '<button type="button" id="atm-minus" aria-label="Less time">&minus;</button>'+
+          '<span class="val"><input type="number" id="atm-input" min="1" max="600" inputmode="numeric"><span class="u">minutes</span></span>'+
+          '<button type="button" id="atm-plus" aria-label="More time">+</button>'+
+        '</div>'+
+        '<button type="button" class="atm-done" id="atm-done">Done</button>'+
+      '</div>';
+    document.body.appendChild(back);
+    const input = back.querySelector('#atm-input'), doneBtn = back.querySelector('#atm-done');
+    let sid = null, orig = 0;
+    const clamp = n => { n = Math.round(Number(n)||0); return Math.max(1, Math.min(600, n)); };
+    window.openArticleTimeEditor = function(sessionId, minutes){
+      sid = sessionId; orig = clamp(minutes);
+      back.querySelector('#atm-sub').textContent = 'Added ' + orig + ' min to your practice. Adjust it if you spent more or less time.';
+      input.value = orig; doneBtn.disabled = false; doneBtn.textContent = 'Done';
+      back.classList.add('show');
+      setTimeout(() => { try { input.focus(); input.select(); } catch(_){} }, 40);
+    };
+    function close(){ back.classList.remove('show'); sid = null; }
+    async function save(){
+      const mins = clamp(input.value); input.value = mins;
+      if (!sid || mins === orig) { close(); return; }
+      doneBtn.disabled = true; doneBtn.textContent = 'Saving…';
+      try {
+        await db.from('practice_sessions').update({ duration_minutes: mins }).eq('id', sid);
+        await db.from('practice_items').update({ duration_minutes: mins }).eq('session_id', sid);
+      } catch(_){}
+      close();
+    }
+    back.querySelector('#atm-minus').onclick = () => { input.value = clamp(input.value) - 1; };
+    back.querySelector('#atm-plus').onclick  = () => { input.value = clamp(input.value) + 1; };
+    input.onchange = () => { input.value = clamp(input.value); };
+    doneBtn.onclick = save;
+    back.addEventListener('click', e => { if (e.target === back) save(); });
+  })();
 
   /* ============================================================
      Notes

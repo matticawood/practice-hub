@@ -170,6 +170,28 @@
   #app-main .btn-gold:hover { transform:translateY(-1px); box-shadow:0 10px 20px -8px rgba(245,197,24,.75); }
   #app-main .btn:disabled { opacity:.6; cursor:default; transform:none; box-shadow:none; }
 
+  /* Logged-time editor shown when a lesson is marked complete */
+  .tc-tm-back { position:fixed; inset:0; z-index:200; background:rgba(30,22,10,.42); display:none; align-items:center; justify-content:center; padding:20px; }
+  .tc-tm-back.show { display:flex; }
+  .tc-tm { width:100%; max-width:340px; background:var(--surface); border:1px solid var(--border); border-radius:18px; box-shadow:0 24px 60px -20px rgba(40,26,6,.5); padding:22px; text-align:center; }
+  .tc-tm .tm-tick { width:44px; height:44px; border-radius:50%; background:color-mix(in srgb,var(--accent) 16%,transparent); color:var(--accent-dark); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; }
+  .tc-tm .tm-tick svg { width:24px; height:24px; }
+  .tc-tm h3 { margin:0 0 4px; font-size:1.05rem; }
+  .tc-tm p { margin:0 0 16px; color:var(--text-muted); font-size:.86rem; line-height:1.45; }
+  .tc-tm-step { display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:18px; }
+  .tc-tm-step button { width:40px; height:40px; border-radius:12px; border:1.5px solid var(--border); background:var(--surface); color:var(--text); font-size:1.3rem; font-weight:700; cursor:pointer; line-height:1; }
+  .tc-tm-step button:hover { border-color:#d6c5a8; }
+  .tc-tm-step .val { min-width:88px; }
+  .tc-tm-step .val input { width:64px; text-align:center; font-size:1.5rem; font-weight:800; color:var(--text); border:none; background:none; font-family:inherit; -moz-appearance:textfield; }
+  .tc-tm-step .val input::-webkit-outer-spin-button, .tc-tm-step .val input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+  .tc-tm-step .val .u { display:block; font-size:.7rem; color:var(--text-muted); font-weight:700; letter-spacing:.04em; text-transform:uppercase; margin-top:-2px; }
+  .tc-tm-acts { display:flex; gap:10px; }
+  .tc-tm-acts .btn { flex:1; border:1.5px solid var(--border); background:var(--surface); color:var(--text); border-radius:12px; padding:11px 14px; font-size:.88rem; font-weight:700; cursor:pointer; font-family:inherit; transition:border-color .15s,transform .12s,box-shadow .15s; }
+  .tc-tm-acts .btn:hover { border-color:#d6c5a8; }
+  .tc-tm-acts .btn-gold { background:linear-gradient(180deg,#f7d24a,#f5c518); color:#3a2c00; border:none; box-shadow:0 7px 16px -7px rgba(245,197,24,.7); }
+  .tc-tm-acts .btn-gold:hover { transform:translateY(-1px); box-shadow:0 10px 20px -8px rgba(245,197,24,.75); }
+  .tc-tm-acts .btn:disabled { opacity:.6; cursor:default; transform:none; box-shadow:none; }
+
   .complete-bar { position:sticky; bottom:0; z-index:10; background:linear-gradient(180deg,rgba(250,247,243,0),var(--bg) 45%); padding:20px 0 8px; margin-top:26px; display:flex; align-items:center; gap:12px; }
   .complete-bar .done-note { color:var(--accent-dark); font-weight:700; font-size:.86rem; display:inline-flex; align-items:center; gap:6px; }
   .complete-bar .done-note svg { width:17px; height:17px; }
@@ -180,8 +202,24 @@
 
 <div id="loading-screen"><div class="spinner"></div></div>
 <div id="toast"></div>
+<div class="tc-tm-back" id="tc-time-modal">
+  <div class="tc-tm" role="dialog" aria-modal="true" aria-labelledby="tc-tm-title">
+    <div class="tm-tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+    <h3 id="tc-tm-title">Lesson complete</h3>
+    <p id="tc-tm-sub">Added to your practice. Adjust the time if you spent more or less.</p>
+    <div class="tc-tm-step">
+      <button type="button" id="tc-tm-minus" aria-label="Less time">&minus;</button>
+      <span class="val"><input type="number" id="tc-tm-input" min="1" max="600" inputmode="numeric"><span class="u">minutes</span></span>
+      <button type="button" id="tc-tm-plus" aria-label="More time">+</button>
+    </div>
+    <div class="tc-tm-acts">
+      <button type="button" class="btn btn-gold" id="tc-tm-save">Done</button>
+    </div>
+  </div>
+</div>
 
 <header id="app-header" style="display:none"></header>
+<script src="/shared-practice-autolog.js?v=3"></script>
 <script src="/shared-achievements.js?v=6"></script>
 <script src="/shared-header.js?v=2026070101"></script>
 
@@ -246,6 +284,61 @@ function showToast(msg, ms) {
   const el = document.getElementById("toast"); el.textContent = msg; el.classList.add("visible");
   setTimeout(() => el.classList.remove("visible"), ms || 2600);
 }
+
+// ── Logged-time editor ────────────────────────────────────────
+// Opens after a lesson is marked complete so the auto-logged minutes can be
+// adjusted immediately. Writes straight to the session + its practice item.
+let _tmSessionId = null, _tmOrig = 0;
+function _tmClamp(n) { n = Math.round(Number(n) || 0); return Math.max(1, Math.min(600, n)); }
+function openLoggedTimeEditor(sessionId, minutes) {
+  _tmSessionId = sessionId;
+  _tmOrig = _tmClamp(minutes);
+  const back = document.getElementById("tc-time-modal");
+  const input = document.getElementById("tc-tm-input");
+  document.getElementById("tc-tm-sub").textContent =
+    "Added " + _tmOrig + " min to your practice. Adjust it if you spent more or less time.";
+  input.value = _tmOrig;
+  document.getElementById("tc-tm-save").disabled = false;
+  document.getElementById("tc-tm-save").textContent = "Done";
+  back.classList.add("show");
+}
+function closeLoggedTimeEditor() {
+  document.getElementById("tc-time-modal").classList.remove("show");
+  _tmSessionId = null;
+}
+// Apply whatever time is shown and close. A no-op write is skipped when the
+// default is untouched, so "Done" always just means "that's right".
+async function _tmSave() {
+  const input = document.getElementById("tc-tm-input");
+  const saveBtn = document.getElementById("tc-tm-save");
+  const mins = _tmClamp(input.value);
+  input.value = mins;
+  if (!_tmSessionId || mins === _tmOrig) { closeLoggedTimeEditor(); return; }
+  saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+  try {
+    await db.from("practice_sessions").update({ duration_minutes: mins }).eq("id", _tmSessionId);
+    await db.from("practice_items").update({ duration_minutes: mins }).eq("session_id", _tmSessionId);
+  } catch (_) {}
+  closeLoggedTimeEditor();
+  showToast("Practice time updated to " + mins + " min");
+}
+(function () {
+  const wire = () => {
+    const back = document.getElementById("tc-time-modal");
+    if (!back || back._wired) return;
+    back._wired = true;
+    const input = document.getElementById("tc-tm-input");
+    document.getElementById("tc-tm-minus").onclick = () => { input.value = _tmClamp(input.value) - 1; };
+    document.getElementById("tc-tm-plus").onclick = () => { input.value = _tmClamp(input.value) + 1; };
+    input.onchange = () => { input.value = _tmClamp(input.value); };
+    document.getElementById("tc-tm-save").onclick = _tmSave;
+    // Clicking outside applies the shown value too, so dismissing never silently
+    // drops an adjustment the member just made.
+    back.addEventListener("click", (e) => { if (e.target === back) _tmSave(); });
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
+  else wire();
+})();
 
 // ── Views ─────────────────────────────────────────────────────
 // Push/replace a history entry for in-page view changes so swipe-back / browser-back
@@ -440,7 +533,37 @@ async function openLesson(id, courseKey, push) {
     if (e) { paintBar(); showToast("Could not save. Try again."); return; }
     PROGRESS[id] = { completed: done, score: row.score };
     paintBar();
-    showToast(done ? "Lesson complete" : "Marked as not complete");
+
+    // Auto-log the lesson's time toward practice — once, deduped by origin_ref.
+    // Completing moves BOTH goals: the day (a practice day) and the hours (toward
+    // the next roadmap level). Un-marking removes the entry. The toast makes it
+    // visible so it's never re-logged manually.
+    let loggedMins = 0, loggedSessionId = null;
+    try {
+      if (done && window.PracticeAutolog) {
+        const r = await window.PracticeAutolog.logAppActivity(db, {
+          email: myEmail, source: "app-lesson", originRef: "lesson:" + id,
+          minutes: lesson.est_minutes, itemType: "theory",
+          label: lesson.title, notes: "Course lesson: " + lesson.title,
+        });
+        loggedMins = r.logged ? r.minutes : 0;
+        loggedSessionId = r.logged ? r.sessionId : null;
+        if (r.logged) { try { await db.rpc("recompute_streak_tokens", { p_email: myEmail }); } catch (_) {} }
+      } else if (!done && window.PracticeAutolog) {
+        await window.PracticeAutolog.removeAppActivity(db, {
+          email: myEmail, source: "app-lesson", originRef: "lesson:" + id });
+        try { await db.rpc("recompute_streak_tokens", { p_email: myEmail }); } catch (_) {}
+      }
+    } catch (_) {}
+
+    // On completion, open the time editor so the logged minutes are adjustable
+    // right here (not only later in the practice log). Fall back to a toast if
+    // nothing was logged (e.g. re-completing an already-logged lesson).
+    if (done && loggedSessionId) {
+      openLoggedTimeEditor(loggedSessionId, loggedMins);
+    } else {
+      showToast(done ? "Lesson complete" : "Marked as not complete");
+    }
     // Re-check achievements (First Lesson, Theory: Level 1) after a completion.
     if (done && window.tcCheckAchievements) window.tcCheckAchievements({ force: true });
   }
