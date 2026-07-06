@@ -3417,7 +3417,25 @@ window.ppdCycleStatus = async function(sheetId, btn) {
     dbError = error; if (!error) _ppdReadingMap.set(sheetId, next);
   } else {
     const { error } = await db.from('reading_list').update({ status: next }).eq('email', myEmail).eq('sheet_id', sheetId);
-    dbError = error; if (!error) _ppdReadingMap.set(sheetId, next);
+    dbError = error;
+    if (!error) {
+      _ppdReadingMap.set(sheetId, next);
+      // Marking read from the list logs the reading time too (mirrors the reader's
+      // Finish + the un-read removal above). Deduped by origin_ref so it's once only.
+      if (next === 'read' && window.PracticeAutolog) {
+        const sheet = (_ppdAllSheets || []).find(function (s) { return String(s.id) === String(sheetId); });
+        if (sheet) {
+          try {
+            const r = await PracticeAutolog.logAppActivity(db, {
+              email: myEmail, source: 'app-article', originRef: 'article:' + sheetId,
+              minutes: _ppdReadMins(sheet), itemType: 'theory',
+              label: sheet.title || 'Article', notes: 'Piano Practice Daily: ' + (sheet.title || ''),
+            });
+            if (r.logged) await db.rpc('recompute_streak_tokens', { p_email: myEmail });
+          } catch (_) {}
+        }
+      }
+    }
   }
   if (dbError) {
     console.error('Reading list update failed:', dbError);
