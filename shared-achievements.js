@@ -1110,3 +1110,39 @@ async function tcCheckAchievements(opts) {
   } catch (e) { console.warn("tcCheckAchievements failed:", e); }
 }
 window.tcCheckAchievements = tcCheckAchievements;
+
+// Reconcile: remove any RECORDED badge the member no longer qualifies for.
+// Called after an action that can UNDO an achievement's basis (e.g. un-marking a
+// course lesson, which also removes the practice it auto-logged). It reloads the
+// member's real data, re-runs the same check() rules with NO db stickiness, and
+// revokes only the recorded badges whose check now fails — so a still-valid badge
+// (e.g. "First Read" when a saved sheet remains) is kept. Achievements granted
+// silently or from a prior-hours baseline are never recorded, so they're never
+// touched here. Never revokes on a failed data load (guards against wiping a
+// member's badges if a query fails).
+async function tcReconcileAchievements() {
+  try {
+    if (typeof db === "undefined" || !db) return;
+    if (typeof myEmail === "undefined" || !myEmail) return;
+    const s = await db.rpc("get_my_sessions", { p_email: myEmail });
+    if (s.error) return;                 // do not revoke on a failed load
+    allSessions = s.data || [];
+    const st = await db.from("streak_tokens").select("*").eq("email", myEmail).maybeSingle();
+    if (!st.error) streakData = st.data;
+    await loadAchievementExtras();
+
+    const earnedByCheck = new Set(
+      computeAchievements(allSessions, new Set()).filter(a => a.earned).map(a => a.id)
+    );
+    const { data: dbRows, error: dbErr } = await db.from("achievement_events")
+      .select("achievement_id").eq("email", myEmail);
+    if (dbErr || !dbRows) return;
+    const toRevoke = [...new Set(dbRows.map(r => r.achievement_id))]
+      .filter(id => !earnedByCheck.has(id));
+    if (!toRevoke.length) return;
+
+    await db.rpc("revoke_achievements", { p_ids: toRevoke });
+    try { localStorage.setItem("ach_earned_" + myEmail, JSON.stringify([...earnedByCheck])); } catch (_) {}
+  } catch (e) { console.warn("tcReconcileAchievements failed:", e); }
+}
+window.tcReconcileAchievements = tcReconcileAchievements;

@@ -220,7 +220,7 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-practice-autolog.js?v=3"></script>
-<script src="/shared-achievements.js?v=6"></script>
+<script src="/shared-achievements.js?v=7"></script>
 <script src="/shared-header.js?v=2026070101"></script>
 
 <main id="app-main">
@@ -520,7 +520,12 @@ async function openLesson(id, courseKey, push) {
     bar.innerHTML = done
       ? `<span class="done-note">${CHECK_BIG} Completed</span><button class="btn" id="toggle-complete">Mark as not complete</button>`
       : `<button class="btn btn-gold" id="toggle-complete">Mark complete</button>`;
-    bar.querySelector("#toggle-complete").onclick = () => setDone(!done);
+    bar.querySelector("#toggle-complete").onclick = () => {
+      // Un-marking removes the practice this lesson logged and recomputes the
+      // streak, so confirm it — stops an accidental tap wiping a real completion.
+      if (done && !confirm("Mark this lesson as not complete? This removes the practice time it logged and may affect your streak.")) return;
+      setDone(!done);
+    };
   }
   async function setDone(done) {
     const btn = bar.querySelector("#toggle-complete"); btn.disabled = true; btn.textContent = "Saving…";
@@ -553,6 +558,10 @@ async function openLesson(id, courseKey, push) {
         await window.PracticeAutolog.removeAppActivity(db, {
           email: myEmail, source: "app-lesson", originRef: "lesson:" + id });
         try { await db.rpc("recompute_streak_tokens", { p_email: myEmail }); } catch (_) {}
+        // Un-marking removed the lesson + its auto-logged practice. Revoke any
+        // badge that no longer holds (e.g. First Lesson, First Note), keeping ones
+        // still earned by other data.
+        try { if (window.tcReconcileAchievements) await window.tcReconcileAchievements(); } catch (_) {}
       }
     } catch (_) {}
 
