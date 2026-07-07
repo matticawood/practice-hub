@@ -285,10 +285,22 @@
 
   const _BADGE_SHAPE={circle:`<circle cx="27" cy="27" r="24.5"`,hex:`<polygon points="27,3 48,15.5 48,38.5 27,51 6,38.5 6,15.5"`,shield:`<path d="M27 3L49 13v21q0 14-22 17Q5 48 5 34V13z"`,star:`<polygon points="27,2 33.2,18.5 50.8,19.3 37,30.3 41.7,47.2 27,37.5 12.3,47.2 17,30.3 3.2,19.3 20.8,18.5"`,diamond:`<polygon points="27,3 51,27 27,51 3,27"`,};
   const _BADGE_SHINE={circle:`<path d="M10 14Q27 3 44 14Q27 23 10 14Z" fill="rgba(255,255,255,.14)"/>`,hex:`<path d="M14 16L27 6 40 16Q27 24 14 16Z" fill="rgba(255,255,255,.14)"/>`,shield:`<path d="M11 14L27 6 43 14Q27 22 11 14Z" fill="rgba(255,255,255,.14)"/>`,star:`<path d="M18 18L27 5 36 18Q27 25 18 18Z" fill="rgba(255,255,255,.14)"/>`,diamond:`<path d="M16 18L27 4 38 18Q27 26 16 18Z" fill="rgba(255,255,255,.14)"/>`,};
-  const _BADGE_CAT_SHAPE={sessions:'circle',time:'hex',streak:'shield',pieces:'diamond',scales:'hex',sightread:'circle',improv:'star',theorycat:'circle',eartraining:'hex',depth:'star',books:'circle',variety:'star',saves:'shield',reading:'shield',community:'circle',game:'hex',library:'diamond',noterec:'star',chordrec:'diamond',live:'star',courses:'shield',};
-  const _BADGE_PALETTE={sessions:['#93c5fd','#2563eb','#1d4ed8'],time:['#fde68a','#f59e0b','#b45309'],streak:['#fca5a5','#ef4444','#b91c1c'],pieces:['#c4b5fd','#7c3aed','#5b21b6'],scales:['#6ee7b7','#059669','#047857'],sightread:['#67e8f9','#0891b2','#0e7490'],improv:['#fdba74','#ea580c','#c2410c'],theorycat:['#86efac','#16a34a','#15803d'],eartraining:['#d8b4fe','#9333ea','#7e22ce'],depth:['#fca5a5','#dc2626','#991b1b'],books:['#a5b4fc','#4338ca','#3730a3'],variety:['#f9a8d4','#db2777','#be185d'],saves:['#fde68a','#ca8a04','#a16207'],reading:['#5eead4','#0d9488','#0f766e'],community:['#7dd3fc','#0284c7','#0369a1'],game:['#fdba74','#c2410c','#9a3412'],library:['#f9a8d4','#be185d','#9d174d'],noterec:['#d9f99d','#65a30d','#3f6212'],chordrec:['#f0abfc','#c026d3','#86198f'],live:['#fda4af','#e11d48','#9f1239'],roadmap:['#fde68a','#f0a500','#9a6a00'],courses:['#6ee7b7','#10b981','#047857'],};
+  const _BADGE_CAT_SHAPE={sessions:'circle',time:'hex',streak:'shield',pieces:'diamond',scales:'hex',sightread:'circle',improv:'star',theorycat:'circle',eartraining:'hex',depth:'star',books:'circle',variety:'star',saves:'shield',reading:'shield',community:'circle',game:'hex',library:'diamond',noterec:'star',chordrec:'diamond',earrec:'hex',live:'star',courses:'shield',};
+  const _BADGE_PALETTE={sessions:['#93c5fd','#2563eb','#1d4ed8'],time:['#fde68a','#f59e0b','#b45309'],streak:['#fca5a5','#ef4444','#b91c1c'],pieces:['#c4b5fd','#7c3aed','#5b21b6'],scales:['#6ee7b7','#059669','#047857'],sightread:['#67e8f9','#0891b2','#0e7490'],improv:['#fdba74','#ea580c','#c2410c'],theorycat:['#86efac','#16a34a','#15803d'],eartraining:['#d8b4fe','#9333ea','#7e22ce'],depth:['#fca5a5','#dc2626','#991b1b'],books:['#a5b4fc','#4338ca','#3730a3'],variety:['#f9a8d4','#db2777','#be185d'],saves:['#fde68a','#ca8a04','#a16207'],reading:['#5eead4','#0d9488','#0f766e'],community:['#7dd3fc','#0284c7','#0369a1'],game:['#fdba74','#c2410c','#9a3412'],library:['#f9a8d4','#be185d','#9d174d'],noterec:['#d9f99d','#65a30d','#3f6212'],chordrec:['#f0abfc','#c026d3','#86198f'],earrec:['#a5f3fc','#06b6d4','#0e7490'],live:['#fda4af','#e11d48','#9f1239'],roadmap:['#fde68a','#f0a500','#9a6a00'],courses:['#6ee7b7','#10b981','#047857'],};
 
   function _lerpHex(h1,h2,t){const p=s=>parseInt(s,16);const r=Math.round(p(h1.slice(1,3))+(p(h2.slice(1,3))-p(h1.slice(1,3)))*t);const g=Math.round(p(h1.slice(3,5))+(p(h2.slice(3,5))-p(h1.slice(3,5)))*t);const b=Math.round(p(h1.slice(5,7))+(p(h2.slice(5,7))-p(h1.slice(5,7)))*t);return`#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;}
+
+  // Single source of truth: overlay the per-achievement catalogue (name / desc /
+  // icon + category) from the shared engine (shared-achievements.js ACHIEVEMENTS)
+  // so this module can never drift out of sync again. The hardcoded ACH / ACH_CAT
+  // above are only a fallback for the (unlikely) case the engine isn't loaded.
+  if (typeof ACHIEVEMENTS !== "undefined" && Array.isArray(ACHIEVEMENTS)) {
+    ACHIEVEMENTS.forEach(function (a) {
+      if (!a || !a.id) return;
+      ACH[a.id] = { icon: a.icon, name: a.name, desc: a.desc };
+      if (a.cat) ACH_CAT[a.id] = a.cat;
+    });
+  }
   let _bdgUID=0;
   // NB: gradient ids are namespaced ("smmg…") so they never collide with the
   // host page's own achBadgeSVG ids ("g…"). A duplicate SVG gradient id makes
@@ -644,7 +656,13 @@
     const { data, error } = await _db.from("achievement_events")
       .select("achievement_id, earned_at").eq("email", _mmEmail)
       .order("earned_at", { ascending: false }).limit(200);
-    const achievements = data || [];
+    // Dedup by achievement_id so the count matches the badge leaderboard (which
+    // counts DISTINCT) and no badge card ever appears twice.
+    const _seenAch = new Set();
+    const achievements = (data || []).filter(r => {
+      if (_seenAch.has(r.achievement_id)) return false;
+      _seenAch.add(r.achievement_id); return true;
+    });
     if (error || !achievements.length) {
       panel.innerHTML = `<div class="mm-tab-empty">No achievements unlocked yet.</div>`;
       return;

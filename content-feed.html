@@ -1205,7 +1205,7 @@ function _ytBody(p) {
     return `<div class="cf-yt-embed"><iframe src="https://www.youtube.com/embed/${ytId}?autoplay=1" allowfullscreen loading="lazy"></iframe></div><div class="cf-card-title">${title}</div>`;
   }
   return `
-    <div class="cf-yt-thumb" onclick="embedYt('${p.id}')">
+    <div class="cf-yt-thumb" onclick="event.stopPropagation();embedYt('${p.id}', this)">
       <img src="https://img.youtube.com/vi/${ytId}/hqdefault.jpg" alt="${title}" loading="lazy" />
       <div class="cf-yt-play"><div class="cf-yt-play-btn"><div class="cf-yt-play-icon"></div></div></div>
     </div>
@@ -1248,10 +1248,39 @@ function _typeBadge(type) {
 /* ── Post detail view ────────────────────────────────────────────────────── */
 let _openedInPage = false; // true when a post was opened by tapping a card on the list
 
+// Pause any playing videos (mux-player + native <video>) inside a container, so a
+// feed video doesn't keep running behind the detail view, and the detail video
+// stops on the way out. Mirrors community.html's _pauseVideosIn.
+let _cfFeedScrollY = 0;
+let _cfDetailPid = null;   // post currently shown in the detail view
+function _cfPauseVideosIn(sel) {
+  document.querySelectorAll(`${sel} mux-player, ${sel} video`).forEach(v => { try { v.pause(); } catch (e) {} });
+  // YouTube iframes have no .pause() and keep playing (even hidden). Stop them:
+  // a feed card reverts to its thumbnail (clean + no re-autoplay); anywhere else
+  // (the detail view) the iframe is simply removed.
+  document.querySelectorAll(`${sel} iframe`).forEach(f => {
+    try {
+      const body = f.closest('[id^="cf-body-"]');
+      if (body) {
+        const pid = body.id.slice("cf-body-".length);
+        _embeddedYt.delete(pid);
+        const p = _posts.find(x => x.id === pid);
+        body.innerHTML = p ? _cardBody(p) : "";
+      } else {
+        f.remove();                       // detail iframe: just remove it
+        if (_cfDetailPid) _embeddedYt.delete(_cfDetailPid);  // keep embed state honest
+      }
+    } catch (e) {}
+  });
+}
+
 function showCfDetail(postId, push = true) {
   const p = _posts.find(x => x.id === postId);
   if (!p) return;
 
+  _cfDetailPid = postId;             // track which post the detail view is showing
+  _cfFeedScrollY = window.scrollY;   // remember feed position to restore on Back
+  _cfPauseVideosIn("#cf-main");      // stop the feed video before hiding it
   document.getElementById("cf-main").style.display = "none";
   document.getElementById("cf-detail").style.display = "";
   window.scrollTo(0, 0);
@@ -1319,9 +1348,10 @@ function closeCfDetail() {
     sameOriginRef = !!u && u.origin === location.origin && u.pathname !== location.pathname;
   } catch {}
   if (_openedInPage || sameOriginRef) { history.back(); return; }
+  _cfPauseVideosIn("#cf-detail");     // stop the detail video on the way out
   document.getElementById("cf-detail").style.display = "none";
   document.getElementById("cf-main").style.display = "";
-  window.scrollTo(0, 0);
+  window.scrollTo(0, 0);   // deep-link fallback: no saved feed position
   history.replaceState({}, "", "/content-feed.html");
 }
 
@@ -1329,17 +1359,22 @@ window.addEventListener("popstate", (e) => {
   if (e.state?.post) {
     showCfDetail(e.state.post, false);
   } else {
+    _cfPauseVideosIn("#cf-detail");   // stop the detail video before hiding it
     document.getElementById("cf-detail").style.display = "none";
     document.getElementById("cf-main").style.display = "";
-    window.scrollTo(0, 0);
+    window.scrollTo(0, _cfFeedScrollY);  // restore the feed position (no jump to top)
   }
 });
 
-function embedYt(postId) {
+function embedYt(postId, thumbEl) {
   _embeddedYt.add(postId);
-  const p    = _posts.find(x => x.id === postId);
-  const body = document.getElementById(`cf-body-${postId}`);
-  if (p && body) body.innerHTML = _ytBody(p);
+  const p = _posts.find(x => x.id === postId);
+  if (!p) return;
+  // Embed where the thumbnail was actually tapped — works in both the feed card
+  // and the detail view (whose body has no cf-body-<id> element). Fall back to the
+  // feed card body when no element is passed (e.g. programmatic calls).
+  const body = (thumbEl && thumbEl.parentElement) || document.getElementById(`cf-body-${postId}`);
+  if (body) body.innerHTML = _ytBody(p);
 }
 
 /* ── Comments toggle ─────────────────────────────────────────────────────── */
@@ -1454,6 +1489,7 @@ function openEditCfForm(postId) {
   // the post detail page, swap back to the feed view so the form is visible.
   // (Don't call closeCfDetail() — it may fire history.back() and navigate away.)
   if (document.getElementById("cf-detail").style.display !== "none") {
+    _cfPauseVideosIn("#cf-detail");
     document.getElementById("cf-detail").style.display = "none";
     document.getElementById("cf-main").style.display = "";
     if (location.search) history.replaceState({}, "", "/content-feed.html");
