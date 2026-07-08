@@ -10159,11 +10159,16 @@ function switchMainLbTab(main, fromHistory) {
   const achPanel        = document.getElementById("lb-panel-achievements");
   const communityPanel  = document.getElementById("lb-panel-community");
   const roadmapPanel    = document.getElementById("lb-panel-roadmap");
-  document.body.classList.toggle("rm-immersive", main === "roadmap");
+  // Only the scenic map (?map=scene) is the fixed, immersive, non-scrolling view.
+  // The trail roadmap is a normal scrolling page, so it must NOT get the lock.
+  const _rmScene = new URLSearchParams(location.search).get("map") === "scene";
+  document.body.classList.toggle("rm-immersive", main === "roadmap" && _rmScene);
   // Lock document scroll while the immersive roadmap is open (mobile): the map
   // has its own internal scroll, so the page must not scroll — otherwise you can
   // drag the whole page (header included) up and reveal white behind the nav.
-  document.documentElement.classList.toggle("rm-page-lock", main === "roadmap");
+  document.documentElement.classList.toggle("rm-page-lock", main === "roadmap" && _rmScene);
+  // The trail roadmap is a dark, distinct destination: darken the whole content area.
+  document.body.classList.toggle("rt-trail-mode", main === "roadmap" && !_rmScene);
   if (roadmapPanel)   roadmapPanel.style.display   = main === "roadmap"      ? "" : "none";
   if (dashPanel)      dashPanel.style.display      = main === "dashboard"    ? "" : "none";
   if (statsPanel)     statsPanel.style.display     = main === "stats"        ? "" : "none";
@@ -11816,28 +11821,29 @@ const _RG_ICON = {
 function _rgIcon(k) {
   return '<svg class="rg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (_RG_ICON[k] || _RG_ICON.piece) + '</svg>';
 }
-function _renderJourneyCard() {
+function _renderJourneyCard(returnParts) {
   const el = document.getElementById("journey-card");
-  if (!el) return;
+  if (!el && !returnParts) return;
   // Shows on your own dashboard AND for the owner's "view as" (viewingEmail is set
   // only by the owner-only Viewing-as bar), so the owner can see a member's journey.
   // Read-only either way — editing prior hours stays on the roadmap page (self only).
-  if (!window.ROADMAP || typeof _rmTrackMinutes !== "function") { el.innerHTML = ""; return; }
+  if (!window.ROADMAP || typeof _rmTrackMinutes !== "function") { if (returnParts) return null; el.innerHTML = ""; return; }
   // Ensure the prior-hours baseline is loaded so the level matches the roadmap.
   if (typeof _practiceBaseline !== "undefined" && _practiceBaseline === null && typeof _rmLoadBaseline === "function") {
     _practiceBaseline = false;
-    _rmLoadBaseline().then(_renderJourneyCard);
+    _rmLoadBaseline().then(_rmAfterLoad);
+    if (returnParts) return null;
     return;
   }
   // Pull the DB-backed self-checks (non-blocking: render now off the localStorage
   // mirror, then repaint once the authoritative row arrives).
   if (typeof _selfChecks !== "undefined" && _selfChecks === null && typeof _rmLoadSelfChecks === "function") {
     _selfChecks = false;
-    _rmLoadSelfChecks().then(() => { try { _renderJourneyCard(); } catch (_) {} });
+    _rmLoadSelfChecks().then(() => { try { _rmAfterLoad(); } catch (_) {} });
   }
   const mins = _rmTrackMinutes();
   const T = _rmLevelFor("total", mins.total / 60);
-  if (!T || !T.cur) { el.innerHTML = ""; return; }
+  if (!T || !T.cur) { if (returnParts) return null; el.innerHTML = ""; return; }
 
   const stage = T.cur;
   const goals = stage.goals || [];
@@ -12180,6 +12186,11 @@ function _renderJourneyCard() {
   let goalsExpanded = false;
   try { goalsExpanded = localStorage.getItem("rm_goals_expanded") === "1"; } catch (_) {}
   const goalsCollapsed = manyGoals && !goalsExpanded;
+  // The trail roadmap reuses this same computed level data (objectives, jars, picks)
+  // for its current-stage card, so nothing drifts between the dashboard and the trail.
+  if (returnParts) return { T, stage, goals, goalRows, rolledRows, rolled, jars, recsHtml,
+    doneCount, totalGoals, manyGoals, goalsCollapsed, pct, nextLine, trophy, isNew, baselineBtn, mins };
+  if (!el) return;
   // Two cards: a compact "where you are" status card (stage, progress, the per-track
   // skill jars) and a separate "what to work on" card (objectives + Matt's picks), so
   // the status reads at a glance and the task list has its own, less busy space.
@@ -12218,6 +12229,12 @@ function _renderJourneyCard() {
       window._rgFadeBound = true;
     }
   }
+}
+// Repaint whichever "Your Path" surface is showing after an async load (baseline /
+// self-checks): the dashboard journey card and, if the roadmap tab is open, the trail.
+function _rmAfterLoad() {
+  try { if (typeof _renderJourneyCard === "function") _renderJourneyCard(); } catch (_) {}
+  try { if (typeof renderRoadmap === "function" && document.getElementById("roadmap-content")) renderRoadmap(); } catch (_) {}
 }
 function renderStatsHero() {
   const el = document.getElementById('stats-hero');
@@ -12419,7 +12436,7 @@ function _toggleGoalSelf(key, e) {
     try { if (next) localStorage.setItem("rm_goal_" + key, "1"); else localStorage.removeItem("rm_goal_" + key); } catch (_) {}
     _rmSaveSelfChecks().catch(() => {});
   }
-  try { _renderJourneyCard(); } catch (_) {}
+  try { _rmAfterLoad(); } catch (_) {}
 }
 // Show all / show fewer objectives (remembers the choice), then re-render.
 function _rgToggleGoals() {
@@ -23989,6 +24006,163 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     return `<span class="${cls}" style="--si:url('${src}')"><img src="${src}"${err} alt="" draggable="false"><span class="rm-statue-shimmer"></span></span>`;
   }
 
+  // ── The trail roadmap (new default view). Reuses the live objectives/jars/picks
+  // from _renderJourneyCard(true) and per-skill levels from _rmAreas, so nothing
+  // drifts from the dashboard. The old scenic map stays available at ?map=scene. ──
+  const RT_ICON = {
+    days:"<rect x='3' y='4' width='18' height='17' rx='2'/><path d='M3 9h18M8 2.5v3M16 2.5v3'/><path d='m9 15 2 2 4-4'/>",
+    scales:"<rect x='3' y='4' width='18' height='16' rx='1.5'/><path d='M8 4v9M12 4v9M16 4v9'/>",
+    piece:"<circle cx='6' cy='18' r='2.5'/><circle cx='17' cy='16' r='2.5'/><path d='M8.5 18V6l11-2v12'/>",
+    sightread:"<path d='M12 7a4 4 0 0 0-4-4H3v15h5a3 3 0 0 1 4 1 3 3 0 0 1 4-1h5V3h-5a4 4 0 0 0-4 4Z'/><path d='M12 7v13'/>",
+    ear:"<path d='M4 15v-2a8 8 0 0 1 16 0v2'/><rect x='3' y='14' width='4' height='6' rx='1.5'/><rect x='17' y='14' width='4' height='6' rx='1.5'/>"
+  };
+  function _rtSvg(k,cls){ return "<svg class='"+(cls||"rt-ico")+"' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"+(RT_ICON[k]||RT_ICON.piece)+"</svg>"; }
+  function _rtDetail(lv,future){
+    return "<div class='rt-detail-grid'>"+
+      "<div class='rt-detail'><div class='rt-detail-lbl'>"+(future?"What you will be able to do":"What you can do at this level")+"</div><div class='rt-detail-txt'>"+escHtml(lv.canDo)+"</div></div>"+
+      "<div class='rt-detail'><div class='rt-detail-lbl'>"+(future?"What to work on here":"What to work on at this level")+"</div><div class='rt-detail-txt'>"+escHtml(lv.focus)+"</div></div>"+
+    "</div>";
+  }
+  window.rtTogg = function(i){ var s=document.querySelector(".rt-stop[data-i='"+i+"']"); if(s) s.classList.toggle("open"); };
+  function renderRoadmapTrail(el){
+    const R = window.ROADMAP, total = R.levels.total;
+    const parts = _renderJourneyCard(true);
+    if (!parts) { el.innerHTML = "<div class='rt-loading'>Loading your path…</div>"; return; }
+    const CURRENT = parts.stage.level;
+    const TOTAL_HOURS = Math.round(parts.mins.total / 60);
+    const areas = window._rmAreas || {};
+    const SK_ICON = { repertoire:"piece", technique:"scales", sight_reading:"sightread", musicianship:"ear" };
+    const SKILLS = ["repertoire","technique","sight_reading","musicianship"].filter(k=>areas[k]).map(k=>({ key:k, lbl:areas[k].label, cvar:areas[k].color, level:areas[k].level, fill:Math.round((areas[k].progress||0)*100), icon:SK_ICON[k] }));
+    const bandLo = total.map(l=>l.hours);
+    const lv0 = total[CURRENT-1];
+    // Trail jars: same _rmAreas data as the dashboard, but richer — each shows the
+    // skill's current level name and a "behind" badge when that skill lags the
+    // overall stage. (The plain dashboard jars only carry label + percentage.)
+    const rtJars = SKILLS.map(function(s){
+      const a = areas[s.key], gap = CURRENT - s.level, behind = gap > 0, lvName = total[s.level-1].name, showPct = a && a.next;
+      return "<div class='jc-jar' role='button' tabindex='0' onclick=\"_rmOpenArea('"+s.key+"')\">"+
+        "<div class='rm-jar3d' style='--rmc:"+s.cvar+"'>"+
+          "<div class='rm-jar3d-body'><div class='rm-jar3d-liquid' style='height:"+s.fill+"%'></div></div>"+
+          "<div class='rm-jar3d-shine'></div><div class='rm-jar3d-rim'></div>"+
+          "<div class='rm-jar3d-pct'>"+(showPct?s.fill+"%":"&#9733;")+"</div>"+
+        "</div>"+
+        "<div class='jc-jar-lbl'>"+escHtml(s.lbl)+"</div>"+
+        "<div class='rt-jar-lvl"+(behind?" behind":"")+"'>"+escHtml(lvName)+"</div>"+
+        (behind?"<span class='rt-jar-lag'>"+gap+" stage"+(gap>1?"s":"")+" behind</span>":"")+
+      "</div>";
+    }).join("");
+
+    const RT_CSS = "<style>"+
+      "body.rt-trail-mode,body.rt-trail-mode #app-main{background:#0f0f0f}"+
+      "body.rt-trail-mode #lb-panel-roadmap{margin-top:0}"+
+      "#lb-panel-roadmap{background:#0f0f0f;min-height:100vh;background-image:radial-gradient(1100px 500px at 50% -80px,rgba(245,197,24,.05),transparent 70%)}"+
+      ".rt-loading{padding:40px;text-align:center;color:#8a8a8a;font-weight:600}"+
+      ".rt-hero{max-width:1400px;margin:0 auto 22px;background:#1a1a1a;border:1px solid #2e2e2e;border-radius:16px;padding:17px 20px}"+
+      ".rt-hero-row{display:flex;align-items:center;gap:15px}.rt-hero-statue{flex-shrink:0}"+
+      ".rt-statue{position:relative;display:inline-block;width:56px;height:56px;vertical-align:middle}"+
+      ".rt-statue img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 4px 6px rgba(0,0,0,.55))}"+
+      ".rt-statue::after{content:'';position:absolute;inset:0;-webkit-mask-image:var(--si);mask-image:var(--si);-webkit-mask-size:100% 100%;mask-size:100% 100%;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;background:linear-gradient(108deg,transparent 42%,rgba(255,255,255,.6) 50%,transparent 58%);background-size:250% 100%;background-repeat:no-repeat;background-position:220% 0;animation:rtShimmer 7s linear infinite;pointer-events:none}"+
+      ".rt-statue-shimmer{display:none}@keyframes rtShimmer{0%{background-position:220% 0}100%{background-position:-220% 0}}"+
+      ".rt-hero-info{flex:1;min-width:0}.rt-hero-eye{font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#d3a11e}"+
+      ".rt-hero-title{font-size:1.4rem;font-weight:800;letter-spacing:-.02em;margin:1px 0;color:#f0f0f0}"+
+      ".rt-hero-sub{font-size:.78rem;color:#8a8a8a}.rt-hero-sub b{color:#f0f0f0}"+
+      ".rt-hero-side{margin-left:auto;flex-shrink:0;display:flex;flex-direction:column;align-items:stretch;gap:8px}"+
+      ".rt-hero-pill{text-align:center;font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:5px 11px;border-radius:99px;color:#1a1204;background:#F5C518}"+
+      ".rt-hero-blurb{font-size:.78rem;color:#8a8a8a;line-height:1.5;margin:14px 0 0;padding-top:13px;border-top:1px solid #2e2e2e}"+
+      ".rt-trail{position:relative;max-width:1400px;margin:0 auto;padding-left:78px}"+
+      ".rt-trail::before{content:'';position:absolute;left:30px;top:8px;bottom:30px;width:3px;transform:translateX(-50%);background:linear-gradient(180deg,rgba(245,197,24,.55),rgba(245,197,24,.14));border-radius:2px}"+
+      ".rt-stop{position:relative;margin-bottom:26px}"+
+      ".rt-node{position:absolute;left:-48px;top:0;width:56px;height:56px;transform:translateX(-50%);display:grid;place-items:center;z-index:3;cursor:pointer;background:none;border:0;padding:0}"+
+      ".rt-node::before{content:'';position:absolute;inset:-5px 13px;border-radius:50%;background:#0f0f0f;z-index:0}.rt-node .rt-statue{position:relative;z-index:1}"+
+      ".rt-stop.future .rt-statue img{filter:grayscale(1) brightness(.62);opacity:.75}.rt-stop.future .rt-statue::after{display:none}"+
+      ".rt-pins{position:absolute;left:-48px;top:62px;transform:translateX(-50%);display:flex;flex-wrap:wrap;justify-content:center;gap:3px;width:37px;z-index:4}"+
+      ".rt-pin{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;color:#fff;cursor:pointer;padding:0;box-shadow:0 2px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.35);border:1.5px solid rgba(255,255,255,.3);transition:transform .15s}"+
+      ".rt-pin:hover{transform:scale(1.15)}.rt-pin.lag{outline:2px solid #f87171;outline-offset:1px}.rt-pin svg{width:10px;height:10px}"+
+      ".rt-card{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:15px}"+
+      ".rt-stop.current .rt-card{border-color:rgba(245,197,24,.45);box-shadow:0 12px 40px -16px rgba(245,197,24,.2)}.rt-stop.future .rt-card{opacity:.66}"+
+      ".rt-head{display:flex;align-items:center;gap:12px;width:100%;text-align:left;cursor:pointer;background:none;border:0;font:inherit;color:inherit;padding:13px 15px;border-radius:15px}"+
+      ".rt-head:hover{background:rgba(245,197,24,.05)}.rt-head-info{flex:1;min-width:0}"+
+      ".rt-eye{font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#d3a11e}.rt-stop.future .rt-eye{color:#8a8a8a}"+
+      ".rt-name{font-size:1.1rem;font-weight:800;line-height:1.1;margin:2px 0;color:#f0f0f0}.rt-band{font-size:.67rem;color:#8a8a8a}"+
+      ".rt-status{flex-shrink:0;font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:4px 9px;border-radius:99px}"+
+      ".rt-status.done{color:#10b981;background:color-mix(in srgb,#10b981 15%,transparent)}.rt-status.locked{color:#8a8a8a;background:color-mix(in srgb,#8a8a8a 15%,transparent)}"+
+      ".rt-chev{flex-shrink:0;width:16px;height:16px;color:#8a8a8a;transition:transform .2s}.rt-stop.open .rt-chev{transform:rotate(180deg)}"+
+      ".rt-body{display:none;padding:0 15px 15px}.rt-stop.open .rt-body{display:block}"+
+      ".rt-bar{height:8px;border-radius:99px;background:#2a2a2a;overflow:hidden;margin:4px 0 6px}.rt-bar>i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#f0a500,#f5c518)}"+
+      ".rt-next{font-size:.72rem;color:#8a8a8a;font-weight:600;margin-bottom:15px}.rt-next b{color:#d3a11e}"+
+      ".rt-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 30px}"+
+      ".rt-detail-lbl{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;color:#d3a11e}"+
+      ".rt-detail-txt{font-size:.84rem;color:#cdcdcd;line-height:1.6}"+
+      ".rt-sub{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.7rem;font-weight:800;color:#8a8a8a;text-transform:uppercase;letter-spacing:.05em;margin:16px 2px 9px}.rt-sub strong{color:#d3a11e}"+
+      ".rt-body .rg-baseline,.rt-hero-baseline .rg-baseline{flex-shrink:0;text-transform:none;color:#d3a11e;background:rgba(245,197,24,.1);border-color:rgba(245,197,24,.32)}"+
+      ".rt-hero-baseline .rg-baseline{display:flex;width:100%;justify-content:center}"+
+      ".rt-jars{margin-top:16px;padding-top:13px;border-top:1px solid #2e2e2e}"+
+      ".rt-jars .rm-jar3d-pct{color:#f5f5f5;text-shadow:0 1px 2px rgba(0,0,0,.7)}"+
+      ".rt-jar-lvl{font-size:.56rem;font-weight:700;color:#8a8a8a;text-align:center;line-height:1.1;margin-top:1px}.rt-jar-lvl.behind{color:#f0a0a0}"+
+      ".rt-jar-lag{font-size:.47rem;font-weight:800;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap;color:#fca5a5;background:rgba(239,68,68,.14);padding:1px 5px;border-radius:99px;margin-top:2px;display:inline-block}"+
+      ".rt-note{font-size:.75rem;color:#8a8a8a;margin-top:12px}.rt-note--done{color:#10b981;font-weight:700}"+
+      /* dark overrides for the reused dashboard components inside the trail */
+      ".rt-body .rg-goal{background:rgba(255,255,255,.03);border-color:#2e2e2e}"+
+      ".rt-body .rg-goal .rg-label{color:#e8e8e8}.rt-body .rg-goal.done .rg-label{color:#8a8a8a}"+
+      ".rt-body .rg-tick{border-color:rgba(255,255,255,.25);color:#8a8a8a}"+
+      ".rt-body .rg-roll-head{color:#8a8a8a}.rt-body .jc-jar-lbl{color:#8a8a8a}"+
+      ".rt-body .rg-recs{border-top-color:#2e2e2e}.rt-body .rg-recs-title{color:#f0f0f0}.rt-body .rg-recs-sub{color:#8a8a8a}"+
+      ".rt-body .rg-rec{background:rgba(255,255,255,.04)}.rt-body .rg-rec-t{color:#e8e8e8}.rt-body .rg-rec-c{color:#8a8a8a}"+
+      "@media(max-width:760px){.rt-detail-grid{grid-template-columns:1fr;gap:0}.rt-detail{margin-bottom:13px}}"+
+      /* Match the dashboard's 16px side inset on mobile (cards sit off the edge, dark bg stays full-bleed) */
+      "@media(max-width:768px){body.rt-trail-mode #lb-panel-roadmap{padding-left:16px;padding-right:16px;box-sizing:border-box}}"+
+      "@media(max-width:560px){.rt-trail{padding-left:66px}.rt-trail::before{left:24px}.rt-node{left:-42px;width:48px;height:48px}.rt-statue{width:48px;height:48px}.rt-pins{left:-42px;top:54px}.rt-hero,.rt-trail{max-width:none}}"+
+    "</style>";
+
+    let html = RT_CSS + "<div class='rt-hero'><div class='rt-hero-row'>"+
+      "<span class='rt-hero-statue'>"+rmStatueImg(CURRENT, total.length, "current", "rt-statue")+"</span>"+
+      "<div class='rt-hero-info'><div class='rt-hero-eye'>You are here</div><h2 class='rt-hero-title'>"+escHtml(lv0.name)+"</h2>"+
+      "<div class='rt-hero-sub'><b>Level "+CURRENT+"</b> &middot; "+TOTAL_HOURS+" hours logged</div></div>"+
+      "<div class='rt-hero-side'><span class='rt-hero-pill'>Current stage</span>"+(parts.baselineBtn?("<div class='rt-hero-baseline'>"+parts.baselineBtn+"</div>"):"")+"</div></div>"+
+      "<p class='rt-hero-blurb'>You move up the levels by logging practice hours: reach the hours a level needs and your statue advances to the next one. Separately, the four coloured pins beneath the statues are your individual skills, each climbing the levels on its own as you fill that skill's container. A pin higher than your statue means that skill is a stage behind. Your current level also gives you a set of objectives to work through and tick off. Tap any stage or any skill to see what you can do there.</p></div>";
+
+    html += "<div class='rt-trail'>";
+    total.forEach(function(lv,i){
+      const num=lv.level, done=num<CURRENT, current=num===CURRENT, locked=num>CURRENT;
+      const state = done?"done":current?"current":"future";
+      const hi=bandLo[i+1];
+      const band=bandLo[i].toLocaleString()+(hi?"–"+hi.toLocaleString():"+")+"h"+(lv.grade?" · "+lv.grade:"");
+      const pins = SKILLS.filter(function(s){return s.level===num;}).map(function(s){
+        return "<button class='rt-pin"+(s.level<CURRENT?" lag":"")+"' onclick=\"_rmOpenArea('"+s.key+"')\" style='background:"+s.cvar+"' title='"+escHtml(s.lbl)+"'>"+_rtSvg(s.icon,"")+"</button>";
+      }).join("");
+      let body="";
+      if(current){
+        const pct = parts.T.next ? Math.round(parts.T.progress*100) : 100;
+        const nextTxt = parts.T.next ? (TOTAL_HOURS+" / "+parts.T.next.hours.toLocaleString()+" h &middot; <b>"+_rmFmtHrs((parts.T.next.hours*60)-parts.mins.total)+" to "+escHtml(parts.T.next.name)+"</b>") : "Top stage, self-directed";
+        body = "<div class='rt-bar'><i style='width:"+pct+"%'></i></div><div class='rt-next'>"+nextTxt+"</div>"+
+          _rtDetail(lv,false)+
+          "<div class='jc-jars rt-jars'>"+rtJars+"</div>"+
+          "<div class='rt-sub'><span>Your objectives at the "+escHtml(lv.name)+" level &middot; <strong>"+parts.doneCount+"/"+parts.goals.length+"</strong></span></div>"+
+          "<div class='rg-goals'>"+parts.goalRows+(parts.rolled&&parts.rolled.length?("<div class='rg-roll-head'>Still to catch up from earlier</div>"+parts.rolledRows):"")+"</div>"+
+          (parts.recsHtml||"");
+      } else if(done){
+        body = _rtDetail(lv,false)+"<div class='rt-note rt-note--done'>You cleared this stage</div>";
+      } else {
+        body = _rtDetail(lv,true)+"<div class='rt-note'>Objectives unlock when you reach this stage.</div>";
+      }
+      const status = done?"<span class='rt-status done'>Complete</span>":locked?"<span class='rt-status locked'>Locked</span>":"";
+      html += "<div class='rt-stop "+state+(current?" open":"")+"' data-i='"+i+"'>"+
+        "<button class='rt-node' onclick='rtTogg("+i+")'>"+rmStatueImg(num, total.length, state, "rt-statue")+"</button>"+
+        (pins?"<div class='rt-pins'>"+pins+"</div>":"")+
+        "<div class='rt-card'>"+
+          "<button class='rt-head' onclick='rtTogg("+i+")'><div class='rt-head-info'><div class='rt-eye'>Level "+num+"</div><div class='rt-name'>"+escHtml(lv.name)+"</div><div class='rt-band'>"+escHtml(band)+"</div></div>"+status+"<svg class='rt-chev' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg></button>"+
+          "<div class='rt-body'>"+body+"</div>"+
+        "</div></div>";
+    });
+    html += "</div>";
+    el.innerHTML = html;
+    // Fade the picks shelf's right edge only when it overflows (matches the dashboard),
+    // so a single remaining pick isn't clipped. The current stage's card is open, so
+    // its recs row is measurable.
+    const _rtRecs = el.querySelector(".rt-stop.open .rg-recs-row");
+    if (_rtRecs) requestAnimationFrame(function(){ if (_rtRecs.clientWidth) _rtRecs.classList.toggle("is-scroll", _rtRecs.scrollWidth - _rtRecs.clientWidth > 4); });
+  }
+
   function renderRoadmap() {
     const el = document.getElementById("roadmap-content");
     if (!el || !window.ROADMAP) return;
@@ -23998,6 +24172,11 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       return;
     }
     if (_practiceBaseline === false) return; // still loading
+    // New trail view by default; ?map=scene keeps the old scenic roadmap for comparison.
+    if (new URLSearchParams(location.search).get("map") !== "scene") {
+      try { renderRoadmapTrail(el); } catch (e) { console.error("trail render failed", e); }
+      return;
+    }
 
     const mins = _rmTrackMinutes();
     const isSelf = ((typeof viewingEmail === "string" ? viewingEmail : myEmail) === myEmail);
@@ -25121,7 +25300,10 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     const b = (_practiceBaseline && typeof _practiceBaseline === "object") ? _practiceBaseline : {};
     const split = b.split || {};
     const totalH = b.total_minutes ? Math.round((Number(b.total_minutes) || 0) / 60) : "";
-    const pct = k => (split[k] != null ? split[k] : "");
+    // Pre-fill the typical split as real values (not just placeholders) so the fields
+    // read as filled from the start, matching the hint below — the total-hours autofill
+    // only fires on input, which left them visibly blank on first open (esp. on mobile).
+    const pct = k => (split[k] != null ? split[k] : _RM_BL_DEFAULT[k]);
     _rmShowModal(
       `<button class="rm-modal-close" onclick="_rmCloseStone()" aria-label="Close">&times;</button>
        <div class="rm-modal-eyebrow">Prior experience</div>
