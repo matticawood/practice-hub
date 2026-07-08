@@ -1119,6 +1119,11 @@ function _shBuildChrome() {
       </div>
       </div>
     `;
+    // Reveal the top bar as soon as its markup is built — same moment the sidebar
+    // appears. Previously it stayed display:none until initSharedHeader ran after
+    // auth, so on desktop the sidebar was instant but the top bar flashed in a
+    // beat later. The avatar fills in from cache / the background profile fetch.
+    header.style.display = "";
   }
 
   // Secondary nav: desktop = light underlined page tabs (themed via page CSS vars),

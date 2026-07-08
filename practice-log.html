@@ -8173,7 +8173,7 @@
           <div id="wiz-structures-list"></div>
         </div>
         <button id="wiz-add-first-btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Practice Item</button>
-        <div id="wiz-add-first-hint">Log a piece, scale, technique, or anything you practised.</div>
+        <div id="wiz-add-first-hint">Log a piece, scale, technique, or anything you practiced.</div>
         <button id="wiz-quick-btn" type="button" onclick="wizStartQuick()">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Add quick practice
         </button>
@@ -8289,7 +8289,7 @@
             </div>
           </div>
           <button type="button" id="wiz-ql-btn" class="btn btn-primary wiz-quick-log-btn" onclick="quickLogSubmit()">Log practice</button>
-          <div class="wiz-quick-note">For fuller stats and deeper insights, log your practice the other way.</div>
+          <div class="wiz-quick-note">For fuller stats and deeper insights, head back and log a full practice session by selecting "+ Add Practice Item".</div>
         </div>
       </div>
 
@@ -20730,47 +20730,20 @@ async function bootApp() {
   const session = getSession();
   if (!session) { redirectToRoot(); return; }
 
-  // Ensure the Supabase auth session is alive — refresh if missing
-  const { data: { session: supaSession } } = await db.auth.getSession();
-  if (!supaSession) {
-    // Try refreshing from stored tokens — silently ignore if it fails
-    await db.auth.refreshSession().catch(() => {});
-  }
-
   myEmail = session.email;
   viewingEmail = myEmail;
 
-  // Fetch display name + avatar for shared header, AND gate on membership.
-  // A cancelled subscription deletes the row from allowed_emails (Stripe
-  // webhook). If the row is gone, this account no longer has access even if
-  // the auth session is still technically valid — sign them out and show the
-  // "subscription ended" screen so they can't keep using the app.
-  let _avatarUrl = null;
-  {
-    const { data: _nr, error: _gateErr } = await db.from("allowed_emails")
-      .select("name, avatar_url").eq("email", myEmail).maybeSingle();
-    // Only lock out on a definitive "no row" result — never on a transient
-    // network error (which would return _gateErr) so we don't kick out
-    // legitimate members during a blip.
-    if (!_gateErr && !_nr) {
-      await db.auth.signOut().catch(() => {});
-      clearSession();
-      document.getElementById("loading-screen").style.display = "none";
-      document.getElementById("app-main").style.display = "none";
-      const ls = document.getElementById("login-screen");
-      if (ls) {
-        ls.style.display = "block";
-        const errEl = document.getElementById("login-error");
-        if (errEl) {
-          errEl.style.display = "block";
-          errEl.textContent = "Your membership has ended. Resubscribe to regain access.";
-        }
-      }
-      return;
-    }
-    myName = _nr?.name || null;
-    _avatarUrl = _nr?.avatar_url || null;
-  }
+  // Reveal the app chrome IMMEDIATELY from the cached session — do NOT wait on any
+  // network call. Previously the header + log button were gated behind the auth
+  // check AND the membership query (which the caller already ran just before us),
+  // so a slow connection left a half-loaded page: button present but dead, sidebar
+  // highlighting on click but not moving. Name + avatar come from the cached header
+  // profile now; the background check below refreshes them and, if the session has
+  // genuinely gone bad, ends it as a clean logout instead of a frozen page.
+  let _cachedProfile = null;
+  try { _cachedProfile = JSON.parse(sessionStorage.getItem("sh_avatar_" + myEmail) || "null"); } catch(_) {}
+  myName = _cachedProfile?.myName || null;
+  let _avatarUrl = _cachedProfile?.avatarUrl || null;
 
   document.getElementById("loading-screen").style.display = "none";
   document.getElementById("login-screen").style.display = "none";
@@ -20786,9 +20759,57 @@ async function bootApp() {
     console.error("initSharedHeader error:", headerErr);
   }
 
-  // Show the FAB immediately — it must never depend on later async operations
-  // (loadTheorySheets, populateViewingDropdown, loadData) which can fail or be slow.
+  // Show the FAB immediately — it must never depend on later async operations.
   document.getElementById("log-fab").style.display = "flex";
+
+  // Clean teardown for a bad/ended session: sign out and show the login screen
+  // with a message, rather than leaving the member on a frozen page that does
+  // nothing until they navigate away (the "logged in but stuck" case).
+  const _endBootSession = async (msg) => {
+    await db.auth.signOut().catch(() => {});
+    clearSession();
+    document.getElementById("app-main").style.display = "none";
+    document.getElementById("loading-screen").style.display = "none";
+    const ls = document.getElementById("login-screen");
+    if (ls) {
+      ls.style.display = "block";
+      const errEl = document.getElementById("login-error");
+      if (errEl) { errEl.style.display = "block"; errEl.textContent = msg; }
+    }
+  };
+
+  // Background: make sure the Supabase auth session is still alive; refresh if
+  // missing. If it truly can't be revived, the account is desynced — end cleanly.
+  // (getSession reads local storage, so an offline member with a stored session
+  // still passes; only a genuinely absent session triggers the logout.)
+  let { data: { session: supaSession } } = await db.auth.getSession();
+  if (!supaSession) {
+    await db.auth.refreshSession().catch(() => {});
+    ({ data: { session: supaSession } } = await db.auth.getSession());
+    if (!supaSession) { await _endBootSession("Your session has expired. Please sign in again."); return; }
+  }
+
+  // Background: fetch the real display name + avatar and re-check membership as a
+  // safety net (the caller already gated on it before calling bootApp). Only a
+  // definitive "no row" locks out — never a transient network error, so a blip
+  // can't kick out a legitimate member.
+  {
+    const { data: _nr, error: _gateErr } = await db.from("allowed_emails")
+      .select("name, avatar_url").eq("email", myEmail).maybeSingle();
+    if (!_gateErr && !_nr) { await _endBootSession("Your membership has ended. Resubscribe to regain access."); return; }
+    if (_nr) {
+      // Update name + avatar in place (no re-init — that would double-bind the
+      // header's click handlers) and refresh the cache for the next early paint.
+      if (_nr.name) { myName = _nr.name; const _em = document.getElementById("header-email"); if (_em) _em.textContent = _nr.name; }
+      const _av = document.getElementById("sh-avatar-el");
+      if (_av && _nr.avatar_url && _nr.avatar_url !== _avatarUrl) {
+        _avatarUrl = _nr.avatar_url;
+        _av.innerHTML = '<img src="' + _nr.avatar_url + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+        _av.style.background = "none"; _av.style.color = "inherit";
+      }
+      try { sessionStorage.setItem("sh_avatar_" + myEmail, JSON.stringify({ avatarUrl: _avatarUrl, myName: myName || null })); } catch(_) {}
+    }
+  }
 
   // Deep-link: open the log wizard straight away when arrived via ?log=1
   // (e.g. the community "log a session" link). Strip the param so a refresh doesn't re-open.
