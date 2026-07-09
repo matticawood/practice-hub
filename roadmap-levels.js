@@ -186,8 +186,10 @@
     ],
     [ // 5 Confident
       { icon: "piece",  group: "piece",  label: "Learn 6 Upper Intermediate pieces", type: "piece", tier: 3, count: 6 },
-      { icon: "scales", group: "scales", label: "All major and minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales", all: true },
-      { icon: "scales", group: "arps",   label: "All major and minor arpeggios, in every key", type: "self", key: "s5-arps", all: true },
+      { icon: "scales", group: "scales", label: "All major scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales", all: true },
+      { icon: "scales", group: "minors", label: "All minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-minors", all: true },
+      { icon: "scales", group: "arps",    label: "All major arpeggios, in every key", type: "self", key: "s5-arps", all: true },
+      { icon: "scales", group: "arpsmin", label: "All minor arpeggios, in every key", type: "self", key: "s5-arpsmin", all: true },
       { icon: "note",   group: "note",   label: "Score 40 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
       { icon: "chord",  group: "chord",  label: "Score 7 in Chord Recognition (sevenths, any key)", type: "chord", target: 7, match: { tier: 3, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 14 in the Ear Training tool (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
@@ -197,8 +199,10 @@
       { icon: "piece",  group: "piece",  label: "Learn 6 Advanced pieces", type: "piece", tier: 4, count: 6 },
       { icon: "musicianship", group: "musicianship", label: "Analyse a piece you're learning (sketch its harmonic outline)", type: "self", key: "s6-analyse" },
       { icon: "perform", group: "perform", label: "Record yourself and share it with someone (or in the community)", type: "self", key: "s6-perform" },
-      { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales", all: true },
-      { icon: "scales", group: "arps",   label: "All arpeggios fluent in every key", type: "self", key: "s6-arps", all: true },
+      { icon: "scales", group: "scales", label: "All major scales, in every key, in sixteenth notes at 120 bpm, even and controlled", type: "self", key: "s6-scales", all: true },
+      { icon: "scales", group: "minors", label: "All minor scales, in every key, in sixteenth notes at 120 bpm, even and controlled", type: "self", key: "s6-minors", all: true },
+      { icon: "scales", group: "arps",    label: "All major arpeggios, in every key, in sixteenth notes at 120 bpm, even and controlled", type: "self", key: "s6-arps", all: true },
+      { icon: "scales", group: "arpsmin", label: "All minor arpeggios, in every key, in sixteenth notes at 120 bpm, even and controlled", type: "self", key: "s6-arpsmin", all: true },
       { icon: "sightread", group: "sightread", label: "Sight-read Upper Intermediate pieces, read once: 8,000 minutes (10 minutes a day for 800 days)", type: "hours", category: "sightreading", targetMin: 8000 }
     ],
     [ // 7 Performer

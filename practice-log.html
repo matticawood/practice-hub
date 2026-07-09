@@ -233,6 +233,27 @@
     .rg-why { display: flex; gap: 5px; align-items: flex-start;
       font-size: .74rem; font-weight: 400; line-height: 1.35; color: var(--text-muted); }
     .rg-why-i { flex-shrink: 0; width: 13px; height: 13px; margin-top: 1.5px; opacity: .75; }
+    /* Scale-family drop-down: header row (tap to open) + a wrapping grid of key chips. */
+    .rg-goal--scales { display: block; padding: 0; }
+    .rg-scale-head { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 11px; cursor: pointer; }
+    .rg-scale-head:hover { background: color-mix(in srgb, #f5c518 7%, transparent); }
+    .rg-caret { flex-shrink: 0; width: 15px; height: 15px; margin-left: 2px;
+      color: color-mix(in srgb, var(--text-muted) 75%, transparent); transition: transform .18s ease; }
+    .rg-caret.open { transform: rotate(180deg); }
+    .rg-skeys { display: flex; flex-direction: column; padding: 2px 12px 9px 45px; }
+    .rg-skey { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; font: inherit;
+      font-size: .8rem; font-weight: 600; color: var(--text); background: none; border: none; cursor: pointer;
+      padding: 7px 4px; transition: background .12s ease; }
+    .rg-skey + .rg-skey { border-top: 1px solid color-mix(in srgb, var(--border) 35%, transparent); }
+    .rg-skey:hover { background: color-mix(in srgb, #f5c518 8%, transparent); }
+    .rg-skey-tick { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: #fff;
+      border: 1.5px dashed color-mix(in srgb, var(--text-muted) 55%, transparent); }
+    .rg-skey-tick svg { width: 11px; height: 11px; }
+    .rg-skey-lbl { flex: 1; min-width: 0; }
+    .rg-skey-hint { flex-shrink: 0; font-size: .62rem; font-weight: 600; color: var(--text-muted); opacity: .5; }
+    .rg-skey.on .rg-skey-hint { display: none; }
+    .rg-skey.on .rg-skey-lbl { color: var(--text-muted); }
+    .rg-skey.on .rg-skey-tick { border-style: solid; border-color: transparent; background: linear-gradient(135deg, #10b981, #0d9c6e); }
     .rg-self-hint { flex-shrink: 0; font-size: .6rem; font-weight: 600; color: var(--text-muted); opacity: .55; }
     .rg-keys { flex-shrink: 0; font-size: .62rem; font-weight: 800; padding: 2px 7px; border-radius: 99px;
       color: #b07c08; background: color-mix(in srgb, #f5c518 18%, transparent); }
@@ -12040,6 +12061,44 @@ function _renderJourneyCard(returnParts) {
     try { return localStorage.getItem("rm_goal_" + key) === "1"; } catch (e) { return false; }
   };
   const grpOf = g => g.group || g.icon;
+  // Scale-family self-checks (scales / arps / minors) with two or more keys are ticked
+  // per key via a drop-down: the ring fills as each key is marked off. Sub-ticks are
+  // stored as composite self-check keys "<objKey>:<rawKey>" (no schema change), and a
+  // legacy whole-objective tick still counts as every key done (backward compatible).
+  const RM_CIRCLE = ["C", "G", "D", "A", "E", "B", "F#", "Db", "Ab", "Eb", "Bb", "F"];
+  const RM_MINOR_FORMS = ["natural", "harmonic", "melodic"];
+  const rmScaleKeys = g => {
+    if (g.type !== "self") return null;
+    const grp = grpOf(g);
+    if (grp !== "scales" && grp !== "arps" && grp !== "minors" && grp !== "arpsmin") return null;
+    const keys = (g.keys && g.keys.length) ? g.keys : (g.all ? RM_CIRCLE : null);
+    if (!keys || keys.length < 2) return null;
+    // Minor objectives cover three forms per key — make each form its own tick
+    // ("A|natural", "A|harmonic", "A|melodic") so the list shows all three.
+    if (grp === "minors") {
+      // Keyed minors (stages 3-4) list each of the three forms separately; the "all
+      // keys" minors (stages 5-6) roll the three forms into one tick per key.
+      if (g.all) return keys;
+      const units = [];
+      keys.forEach(k => RM_MINOR_FORMS.forEach(f => units.push(k + "|" + f)));
+      return units;
+    }
+    return keys;
+  };
+  const rmSubKey = (objKey, k) => objKey + ":" + k;
+  const rmKeyLabel = k => k.replace("b", "♭").replace("#", "♯");
+  // Keys with a commonly-used enharmonic spelling get both names. The pair differs by
+  // context: F♯/G♭, B/C♭, D♭/C♯ for majors; C♯/D♭, G♯/A♭, E♭/D♯ for minors (a bare
+  // "Db"/"Ab" minor would be mis-spelled — they're really C♯ and G♯ minor).
+  const RM_ENH_MAJ = { "F#": "F♯/G♭", "B": "B/C♭", "Db": "D♭/C♯" };
+  // Minor pairs where BOTH spellings are within 7 accidentals: G♯(5♯)/A♭(7♭),
+  // D♯(6♯)/E♭(6♭), A♯(7♯)/B♭(5♭). "Db" is corrected to C♯ minor (4♯) because D♭ minor
+  // would be 8 flats — invalid — so it is single, not a pair.
+  const RM_ENH_MIN = { "Db": "C♯", "Ab": "G♯/A♭", "Eb": "E♭/D♯", "Bb": "B♭/A♯" };
+  const rmKeyDisplay = (k, minor) => (minor ? RM_ENH_MIN : RM_ENH_MAJ)[k] || rmKeyLabel(k);
+  const rmScaleTicked = (g, keys) => selfDone(g.key)
+    ? keys.length
+    : keys.filter(k => selfDone(rmSubKey(g.key, k))).length;
   // Accumulating goals (days, sight-reading & improv minutes) store their OWN per-level
   // target; the tick threshold is the sum of that group's targets across all levels up
   // to the goal's level, so the displayed number stays small/per-level while the tick
@@ -12102,7 +12161,7 @@ function _renderJourneyCard(returnParts) {
         ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length
         : pieces(g.tier)) >= g.count;
       case "theory": return g.mode === "complete" ? thDone(g.level) : thBegin(g.level);
-      case "self":  return selfDone(g.key);
+      case "self": { const mk = rmScaleKeys(g); return mk ? rmScaleTicked(g, mk) >= mk.length : selfDone(g.key); }
       default: return false;
     }
   };
@@ -12153,6 +12212,8 @@ function _renderJourneyCard(returnParts) {
   // Live progress for an in-progress objective: a text readout AND a 0–1 fraction
   // used to fill a ring around the tick, so members SEE it creep up as they practise.
   const goalStat = (g, lvl) => {
+    { const mk = (g.type === "self") ? rmScaleKeys(g) : null;
+      if (mk) { const t = rmScaleTicked(g, mk); return { txt: `${t}/${mk.length}`, frac: mk.length ? t / mk.length : 0 }; } }
     if (g.match && g.match.keys) { const h = keysHit(g).length, n = g.match.keys.length; return { txt: `${h}/${n} keys`, frac: n ? h / n : 0 }; }
     // Days: no "X/N" chip — the countdown lives in the label ("Practice another N
     // days at this level"). The ring fills toward the cumulative target so it, and
@@ -12225,6 +12286,52 @@ function _renderJourneyCard(returnParts) {
     const why = (RM_SHOW_WHY && lvl === 1 && !done && ({ theory: 1, note: 1, scales: 1 })[g.group])
       ? (RM_WHY["0|" + g.group] || "") : "";
     const goChev = href ? '<span class="rg-go" aria-hidden="true">&#8250;</span>' : "";
+
+    // ── Scale-family multi-key drop-down (tier-0 baselines only) ──
+    // Tapping the row opens a panel of per-key toggles; the ring + "n/N" fill as each
+    // key is ticked. Keeps any rationale line above the panel.
+    const mkeys = rmScaleKeys(g);
+    if (mkeys) {
+      const open = !!(window._rmOpenScales && window._rmOpenScales.has(g.key));
+      const legacy = selfDone(g.key);
+      const keyList = mkeys.join(",");
+      const caret = `<svg class="rg-caret${open ? " open" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+      const whyLine = why
+        ? `<span class="rg-why"><svg class="rg-why-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span>${escHtml(why)}</span></span>`
+        : "";
+      const head = `<div class="rg-scale-head" role="button" tabindex="0" onclick="_rmToggleScaleOpen('${g.key}',event)">`
+                 + `<span class="${tickCls}">${done ? CHECK : ring}</span>`
+                 + `<span class="rg-why-body"><span class="rg-why-head"><span class="rg-label">${escHtml(labelText)}</span>${chip}${caret}</span>${whyLine}</span>`
+                 + `</div>`;
+      let panel = "";
+      if (open) {
+        const grp = grpOf(g);
+        const isArp = grp === "arps" || grp === "arpsmin";
+        const typeWord = isArp ? "arpeggio" : "scale";
+        const minorArp = grp === "arpsmin";               // minor arpeggios (own group)
+        const rows = mkeys.map(k => {
+          const on = legacy || selfDone(rmSubKey(g.key, k));
+          let lbl;
+          if (grp === "minors") {
+            if (k.indexOf("|") >= 0) {                    // per-form (stages 3-4)
+              const p = k.split("|");
+              lbl = `${rmKeyDisplay(p[0], true)} ${p[1]} minor scale`;
+            } else {                                        // all keys: forms rolled up
+              lbl = `${rmKeyDisplay(k, true)} minor scales (natural, harmonic and melodic)`;
+            }
+          } else {
+            lbl = `${rmKeyDisplay(k, minorArp)} ${minorArp ? "minor" : "major"} ${typeWord}`;
+          }
+          return `<button type="button" class="rg-skey${on ? " on" : ""}" onclick="_rmToggleScaleKey('${g.key}','${k}','${keyList}',event)">`
+               + `<span class="rg-skey-tick">${on ? CHECK : ""}</span>`
+               + `<span class="rg-skey-lbl">${escHtml(lbl)}</span>`
+               + `<span class="rg-skey-hint">mark done</span></button>`;
+        }).join("");
+        panel = `<div class="rg-skeys">${rows}</div>`;
+      }
+      return `<div class="rg-goal rg-goal--scales self${done ? " done" : ""}">${head}${panel}</div>`;
+    }
+
     let inner;
     if (why) {
       // Rationale variant: the ring sits in its own column, centred against the whole
@@ -12624,6 +12731,36 @@ function _toggleGoalSelf(key, e) {
     _rmSaveSelfChecks().catch(() => {});
   }
   try { _rmAfterLoad(); } catch (_) {}
+}
+// Scale-family drop-downs: expansion is transient UI state (not persisted).
+window._rmOpenScales = window._rmOpenScales || new Set();
+function _rmToggleScaleOpen(key, e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  const s = window._rmOpenScales;
+  if (s.has(key)) s.delete(key); else s.add(key);
+  try { _renderJourneyCard(); } catch (_) {}
+}
+// Tick / untick one key of a multi-key scale self-check. Stored as "<objKey>:<rawKey>".
+function _rmToggleScaleKey(objKey, rawKey, keyList, e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  if (!_selfChecks || typeof _selfChecks !== "object") _selfChecks = {};
+  const own = !viewingEmail || viewingEmail === myEmail;
+  const keys = (keyList || "").split(",").filter(Boolean);
+  const setKey = (k, on) => {
+    const ck = objKey + ":" + k;
+    if (on) _selfChecks[ck] = true; else delete _selfChecks[ck];
+    if (own) { try { on ? localStorage.setItem("rm_goal_" + ck, "1") : localStorage.removeItem("rm_goal_" + ck); } catch (_) {} }
+  };
+  // Expand a legacy whole-objective tick into explicit per-key ticks before toggling,
+  // so un-ticking one key doesn't silently clear the rest.
+  if (_selfChecks[objKey]) {
+    keys.forEach(k => setKey(k, true));
+    delete _selfChecks[objKey];
+    if (own) { try { localStorage.removeItem("rm_goal_" + objKey); } catch (_) {} }
+  }
+  setKey(rawKey, !_selfChecks[objKey + ":" + rawKey]);
+  if (own) _rmSaveSelfChecks().catch(() => {});
+  try { _rmAfterLoad(); } catch (_) { try { _renderJourneyCard(); } catch (__) {} }
 }
 // Show all / show fewer objectives (remembers the choice), then re-render.
 function _rgToggleGoals() {
