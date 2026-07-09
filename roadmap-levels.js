@@ -142,27 +142,27 @@
   //  type 'self'  → member self-checks it (persisted; placeholder localStorage for now)
   const GOALS = [
     [ // 1 First Steps
-      { icon: "days",   group: "days",   label: "Reach your first 50 days of practice", type: "days", target: 50 },
-      { icon: "scales", group: "scales", label: "C and G major scales, hands together, two octaves", type: "self", key: "s1-scales", keys: ["C", "G"] },
-      { icon: "note",   group: "note",   label: "Score 10 in Note Recognition in both C and G major", type: "note", target: 10, match: { keys: ["C", "G"] } },
       { icon: "theory", group: "theory", label: "Begin Theory Level 1", type: "theory", level: 1, mode: "begin" },
+      { icon: "piece",  group: "piece",  label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 },
+      { icon: "note",   group: "note",   label: "Score 10 in Note Recognition in both C and G major", type: "note", target: 10, match: { keys: ["C", "G"] } },
+      { icon: "scales", group: "scales", label: "C and G major scales, hands together, two octaves", type: "self", key: "s1-scales", keys: ["C", "G"] },
       { icon: "sightread", group: "sightread", label: "Sight-read very simple single lines, read once: 500 minutes (10 minutes a day for 50 days)", type: "hours", category: "sightreading", targetMin: 500 },
-      { icon: "piece",  group: "piece",  label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 }
+      { icon: "days",   group: "days",   label: "Reach your first 50 days of practice", type: "days", target: 50 }
     ],
     [ // 2 Beginner
-      { icon: "days",   group: "days",   label: "Practice another 100 days at this level", type: "days", target: 100 },
+      { icon: "piece",  group: "piece",  label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 },
       { icon: "scales", group: "scales", label: "C, G, D and F major scales, hands together, two octaves", type: "self", key: "s2-scales", keys: ["C", "G", "D", "F"] },
       { icon: "scales", group: "arps",   label: "C, G, D and F major arpeggios", type: "self", key: "s2-arps", keys: ["C", "G", "D", "F"] },
       { icon: "note",   group: "note",   label: "Score 18 in Note Recognition in each of C, G, D and F major", type: "note", target: 18, match: { keys: ["C", "G", "D", "F"] } },
       { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition in each of C, G, D and F (triads in the key)", type: "chord", target: 10, match: { keys: ["C", "G", "D", "F"], tier: 1 } },
       { icon: "ear",    group: "ear",    label: "Score 12 in the Ear Training tool in each of C, G, D and F (major versus minor)", type: "ear", target: 12, match: { keys: ["C", "G", "D", "F"], set: "major_minor" } },
-      { icon: "improv", group: "improv", label: "Spend 3 hours improvising, starting with simple triads and a melody", type: "hours", category: "improvisation", target: 3 },
       { icon: "theory", group: "theory", label: "Complete Theory Level 1", type: "theory", level: 1, mode: "complete" },
+      { icon: "improv", group: "improv", label: "Spend 3 hours improvising, starting with simple triads and a melody", type: "hours", category: "improvisation", target: 3 },
       { icon: "sightread", group: "sightread", label: "Sight-read easy hands-together pieces, read once: 1,000 minutes (10 minutes a day for 100 days)", type: "hours", category: "sightreading", targetMin: 1000 },
-      { icon: "piece",  group: "piece",  label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 }
+      { icon: "days",   group: "days",   label: "Practice another 100 days at this level", type: "days", target: 100 }
     ],
     [ // 3 Foundations
-      { icon: "days",   group: "days",   label: "Practice another 200 days at this level", type: "days", target: 200 },
+      { icon: "piece",  group: "piece",  label: "Learn 1 to 2 Lower Intermediate pieces", type: "piece", tier: 2, count: 2 },
       { icon: "scales", group: "scales", label: "A, B♭ and E♭ major scales", type: "self", key: "s3-scales", keys: ["A", "Bb", "Eb"] },
       { icon: "scales", group: "arps",   label: "A, B♭ and E♭ major arpeggios", type: "self", key: "s3-arps", keys: ["A", "Bb", "Eb"] },
       { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in A, E and D", type: "self", key: "s3-minors", keys: ["A", "E", "D"] },
@@ -170,10 +170,11 @@
       { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition (triads in any key, with no key to lean on)", type: "chord", target: 10, match: { tier: 1, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 16 in the Ear Training tool (triads: major, minor, diminished, augmented)", type: "ear", target: 16, match: { set: "triads" } },
       { icon: "theory", group: "theory", label: "Complete Theory Level 2", type: "theory", level: 2, mode: "complete" },
-      { icon: "piece",  group: "piece",  label: "Learn 1 to 2 Lower Intermediate pieces", type: "piece", tier: 2, count: 2 },
-      { icon: "sightread", group: "sightread", label: "Sight-read Beginner-level pieces, read once: 2,000 minutes (10 minutes a day for 200 days)", type: "hours", category: "sightreading", targetMin: 2000 }
+      { icon: "sightread", group: "sightread", label: "Sight-read Beginner-level pieces, read once: 2,000 minutes (10 minutes a day for 200 days)", type: "hours", category: "sightreading", targetMin: 2000 },
+      { icon: "days",   group: "days",   label: "Practice another 200 days at this level", type: "days", target: 200 }
     ],
     [ // 4 Intermediate
+      { icon: "piece",  group: "piece",  label: "Learn 5 intermediate pieces (Lower to Upper Intermediate)", type: "piece", tier: 2, count: 5 },
       { icon: "scales", group: "scales", label: "All major scales secure, hands together, two octaves", type: "self", key: "s4-scales", all: true },
       { icon: "scales", group: "arps",   label: "All major arpeggios secure", type: "self", key: "s4-arps", all: true },
       { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in B, G and C", type: "self", key: "s4-minors", keys: ["B", "G", "C"] },
@@ -181,37 +182,36 @@
       { icon: "chord",  group: "chord",  label: "Score 9 in Chord Recognition (triads and inversions, any key)", type: "chord", target: 9, match: { tier: 2, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 12 in the Ear Training tool (sevenths)", type: "ear", target: 12, match: { set: "sevenths" } },
       { icon: "improv", group: "improv", label: "Spend another 5 hours improvising over simple chord progressions", type: "hours", category: "improvisation", target: 5 },
-      { icon: "sightread", group: "sightread", label: "Sight-read Beginner to Lower Intermediate pieces, read once: 3,500 minutes (10 minutes a day for 350 days)", type: "hours", category: "sightreading", targetMin: 3500 },
-      { icon: "piece",  group: "piece",  label: "Learn 5 intermediate pieces (Lower to Upper Intermediate)", type: "piece", tier: 2, count: 5 }
+      { icon: "sightread", group: "sightread", label: "Sight-read Beginner to Lower Intermediate pieces, read once: 3,500 minutes (10 minutes a day for 350 days)", type: "hours", category: "sightreading", targetMin: 3500 }
     ],
     [ // 5 Confident
+      { icon: "piece",  group: "piece",  label: "Learn 6 Upper Intermediate pieces", type: "piece", tier: 3, count: 6 },
       { icon: "scales", group: "scales", label: "All major and minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales", all: true },
       { icon: "scales", group: "arps",   label: "All major and minor arpeggios, in every key", type: "self", key: "s5-arps", all: true },
       { icon: "note",   group: "note",   label: "Score 40 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
-      { icon: "ear",    group: "ear",    label: "Score 14 in the Ear Training tool (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
       { icon: "chord",  group: "chord",  label: "Score 7 in Chord Recognition (sevenths, any key)", type: "chord", target: 7, match: { tier: 3, mode: "free" } },
-      { icon: "sightread", group: "sightread", label: "Sight-read Lower Intermediate pieces, read once: 5,000 minutes (10 minutes a day for 500 days)", type: "hours", category: "sightreading", targetMin: 5000 },
-      { icon: "piece",  group: "piece",  label: "Learn 6 Upper Intermediate pieces", type: "piece", tier: 3, count: 6 }
+      { icon: "ear",    group: "ear",    label: "Score 14 in the Ear Training tool (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
+      { icon: "sightread", group: "sightread", label: "Sight-read Lower Intermediate pieces, read once: 5,000 minutes (10 minutes a day for 500 days)", type: "hours", category: "sightreading", targetMin: 5000 }
     ],
     [ // 6 Advanced
-      { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales", all: true },
-      { icon: "scales", group: "arps",   label: "All arpeggios fluent in every key", type: "self", key: "s6-arps", all: true },
-      { icon: "sightread", group: "sightread", label: "Sight-read Upper Intermediate pieces, read once: 8,000 minutes (10 minutes a day for 800 days)", type: "hours", category: "sightreading", targetMin: 8000 },
       { icon: "piece",  group: "piece",  label: "Learn 6 Advanced pieces", type: "piece", tier: 4, count: 6 },
       { icon: "musicianship", group: "musicianship", label: "Analyse a piece you're learning (sketch its harmonic outline)", type: "self", key: "s6-analyse" },
-      { icon: "perform", group: "perform", label: "Record yourself and share it with someone (or in the community)", type: "self", key: "s6-perform" }
+      { icon: "perform", group: "perform", label: "Record yourself and share it with someone (or in the community)", type: "self", key: "s6-perform" },
+      { icon: "scales", group: "scales", label: "All scales fluent in every key", type: "self", key: "s6-scales", all: true },
+      { icon: "scales", group: "arps",   label: "All arpeggios fluent in every key", type: "self", key: "s6-arps", all: true },
+      { icon: "sightread", group: "sightread", label: "Sight-read Upper Intermediate pieces, read once: 8,000 minutes (10 minutes a day for 800 days)", type: "hours", category: "sightreading", targetMin: 8000 }
     ],
     [ // 7 Performer
-      { icon: "sightread", group: "sightread", label: "Sight-read Advanced pieces across styles, read once: 15,000 minutes (10 minutes a day for 1,500 days)", type: "hours", category: "sightreading", targetMin: 15000 },
       { icon: "perform", group: "perform", label: "Prepare and perform a balanced Advanced programme", type: "self", key: "s7-prog" },
       { icon: "piece",   group: "piece",   label: "Learn another 5 advanced-to-expert pieces", type: "piece", tier: 4, count: 11 },
-      { icon: "musicianship", group: "musicianship", label: "Transpose a piece at sight", type: "self", key: "s7-transpose" }
+      { icon: "musicianship", group: "musicianship", label: "Transpose a piece at sight", type: "self", key: "s7-transpose" },
+      { icon: "sightread", group: "sightread", label: "Sight-read Advanced pieces across styles, read once: 15,000 minutes (10 minutes a day for 1,500 days)", type: "hours", category: "sightreading", targetMin: 15000 }
     ],
     [ // 8 Artist
       { icon: "perform", group: "perform", label: "Prepare and perform a full programme of expert pieces", type: "self", key: "s8-programme" },
       { icon: "expert", group: "piece", label: "Learn an Expert work and make it your own", type: "self", key: "s8-expert" },
-      { icon: "sightread", group: "sightread", label: "Keep sight-reading any style, 10 minutes a day, including accompaniments", type: "self", key: "s8-sr" },
-      { icon: "musicianship", group: "musicianship", label: "Improvise a complete piece", type: "self", key: "s8-improvise" }
+      { icon: "musicianship", group: "musicianship", label: "Improvise a complete piece", type: "self", key: "s8-improvise" },
+      { icon: "sightread", group: "sightread", label: "Keep sight-reading any style, 10 minutes a day, including accompaniments", type: "self", key: "s8-sr" }
     ]
   ];
 
