@@ -9261,21 +9261,23 @@ async function loadData() {
 
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
-      const [nr, cr, pg, er, uc, thL, thP] = await Promise.all([
+      const [nr, cr, pg, er, uc, thL, thP, it] = await Promise.all([
         db.from("note_game_scores").select("score, created_at, clef, accidentals, key_signature, range").eq("email", viewingEmail),
         db.from("chord_game_scores").select("score, created_at, tier, mode, key_signature").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
         db.from("ear_game_scores").select("score, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
         db.from("user_collections").select("status, created_at, piece_id, pieces(difficulty)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, status").eq("course", "theory"),
-        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true)
+        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true),
+        db.from("interval_game_scores").select("score, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase())
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
         note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at, clef: r.clef, accidentals: r.accidentals, key_signature: r.key_signature, range: r.range })),
         chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at, tier: r.tier, mode: r.mode, key_signature: r.key_signature })),
         passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at })),
-        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type, key_signature: r.key_signature }))
+        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type, key_signature: r.key_signature })),
+        interval: byTime(it.data).map(r => ({ v: r.score, t: r.created_at, side: r.side, tier: r.tier, key_mode: r.key_mode, playback: r.playback, key_signature: r.key_signature }))
       };
       _insightCollections = uc.data || [];
       // Completed-piece tiers (for "learn N pieces"), all-collection tiers (for "add a
@@ -12041,6 +12043,12 @@ function _renderJourneyCard(returnParts) {
                       else if (r.range !== mt.range && r.range !== "full") return false; } }
     if (k === "chord") { if (mt.tier && !(Number(r.tier) >= mt.tier)) return false; if (mt.mode === "free" && r.mode !== "free") return false; }
     if (k === "ear")   { if (mt.set && !((EAR_SET[r.chord_set] || 0) >= (EAR_SET[mt.set] || 0))) return false; }
+    if (k === "interval") {
+      const RANK = { number: 1, pm: 2, full: 3 };
+      if (mt.side && r.side !== mt.side) return false;                       // reading vs listening are distinct skills
+      if (mt.tier && (RANK[r.tier] || 0) < (RANK[mt.tier] || 0)) return false; // a harder tier satisfies an easier goal
+      if (mt.key_mode === "free" && r.key_mode !== "free") return false;     // a "no key" goal needs a free score
+    }
     return true;
   };
   const bestMatch = (k, mt) => ((_insightTrainers && _insightTrainers[k]) || []).reduce((m, r) => scoreQualifies(k, r, mt) ? Math.max(m, r.v || 0) : m, 0);
@@ -12153,7 +12161,7 @@ function _renderJourneyCard(returnParts) {
     switch (g.type) {
       case "days":  return days >= cumThresh(g, lvl, "days");
       case "hours": return catMins(g.category) >= cumThresh(g, lvl, "min");
-      case "note": case "chord": case "ear":
+      case "note": case "chord": case "ear": case "interval":
         return (g.match && g.match.keys)
           ? keysHit(g).length >= g.match.keys.length      // a score at target in EVERY prescribed key
           : bestMatch(g.type, g.match) >= g.target;
@@ -12221,7 +12229,14 @@ function _renderJourneyCard(returnParts) {
     if (g.type === "days")  { const thr = cumThresh(g, lvl, "days"); return { txt: "", frac: thr ? Math.min(1, days / thr) : 0 }; }
     if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const have = Math.max(0, Math.min(need, catMins(g.category) - (cumThresh(g, lvl, "min") - need))); return { txt: `${Math.round(have / 60)}/${Math.round(need / 60)} h`, frac: need ? have / need : 0 }; }
     if (g.type === "piece") { const have = Math.min(g.count, (g.mode === "added" ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length : pieces(g.tier))); return { txt: `${have}/${g.count}`, frac: g.count ? have / g.count : 0 }; }
-    if (g.type === "note" || g.type === "chord" || g.type === "ear") { const b = bestMatch(g.type, g.match); return { txt: `best ${b}/${g.target}`, frac: g.target ? Math.min(1, b / g.target) : 0 }; }
+    if (g.type === "note" || g.type === "chord" || g.type === "ear" || g.type === "interval") { const b = bestMatch(g.type, g.match); return { txt: `best ${b}/${g.target}`, frac: g.target ? Math.min(1, b / g.target) : 0 }; }
+    // Theory "complete" goals fill lesson-by-lesson (e.g. 3/13 lessons); the ring
+    // and count creep up as the member finishes each lesson in that level.
+    if (g.type === "theory" && g.mode === "complete") {
+      const T = (typeof _goalTheory !== "undefined" && _goalTheory) ? _goalTheory : { totals: {}, done: {} };
+      const tot = (T.totals && T.totals[g.level]) || 0, dn = Math.min(tot, (T.done && T.done[g.level]) || 0);
+      if (tot > 0) return { txt: `${dn}/${tot} lessons`, frac: dn / tot };
+    }
     return { txt: "", frac: 0 };
   };
   const RING_C = 56.5;  // 2·π·9, the ring circumference
@@ -12260,6 +12275,7 @@ function _renderJourneyCard(returnParts) {
       note:  "/tools.html?section=note",
       chord: "/tools.html?section=chord",
       ear:   "/tools.html?section=ear",
+      interval: "/tools.html?section=interval",
       theory:"/courses.html",
       piece: "/resources.html",
     };
@@ -14813,7 +14829,7 @@ async function renderAchievements() {
     { key: "courses",  label: "Courses",            colour: ACH_COLOURS.courses, cats: ["courses"] },
     { key: "reading",  label: "Piano Practice Daily",colour: ACH_COLOURS.reading, cats: ["reading"] },
     { key: "library",  label: "Pieces Library",      colour: ACH_COLOURS.library, cats: ["library"] },
-    { key: "game",     label: "Practice Tools",      colour: ACH_COLOURS.game,    cats: ["game", "noterec", "chordrec", "earrec"] },
+    { key: "game",     label: "Practice Tools",      colour: ACH_COLOURS.game,    cats: ["game", "noterec", "chordrec", "earrec", "intervalrec"] },
     { key: "community",label: "Community",           colour: ACH_COLOURS.community,cats: ["community", "live"] },
   ];
 

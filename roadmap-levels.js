@@ -151,25 +151,27 @@
     ],
     [ // 2 Beginner
       { icon: "piece",  group: "piece",  label: "Learn 4 Beginner pieces", type: "piece", tier: 1, count: 4 },
+      { icon: "theory", group: "theory", label: "Complete Theory Level 1", type: "theory", level: 1, mode: "complete" },
       { icon: "scales", group: "scales", label: "C, G, D and F major scales, hands together, two octaves", type: "self", key: "s2-scales", keys: ["C", "G", "D", "F"] },
       { icon: "scales", group: "arps",   label: "C, G, D and F major arpeggios", type: "self", key: "s2-arps", keys: ["C", "G", "D", "F"] },
       { icon: "note",   group: "note",   label: "Score 18 in Note Recognition in each of C, G, D and F major", type: "note", target: 18, match: { keys: ["C", "G", "D", "F"] } },
       { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition in each of C, G, D and F (triads in the key)", type: "chord", target: 10, match: { keys: ["C", "G", "D", "F"], tier: 1 } },
       { icon: "ear",    group: "ear",    label: "Score 12 in the Ear Training tool in each of C, G, D and F (major versus minor)", type: "ear", target: 12, match: { keys: ["C", "G", "D", "F"], set: "major_minor" } },
-      { icon: "theory", group: "theory", label: "Complete Theory Level 1", type: "theory", level: 1, mode: "complete" },
+      { icon: "note",   group: "interval", label: "Score 12 in Interval Training, reading intervals by number, in each of C, G, D and F", type: "interval", target: 12, match: { side: "reading", tier: "number", keys: ["C", "G", "D", "F"] } },
       { icon: "improv", group: "improv", label: "Spend 3 hours improvising, starting with simple triads and a melody", type: "hours", category: "improvisation", target: 3 },
       { icon: "sightread", group: "sightread", label: "Sight-read easy hands-together pieces, read once: 1,000 minutes (10 minutes a day for 100 days)", type: "hours", category: "sightreading", targetMin: 1000 },
       { icon: "days",   group: "days",   label: "Practice another 100 days at this level", type: "days", target: 100 }
     ],
     [ // 3 Foundations
       { icon: "piece",  group: "piece",  label: "Learn 1 to 2 Lower Intermediate pieces", type: "piece", tier: 2, count: 2 },
+      { icon: "theory", group: "theory", label: "Complete Theory Level 2", type: "theory", level: 2, mode: "complete" },
       { icon: "scales", group: "scales", label: "A, B♭ and E♭ major scales", type: "self", key: "s3-scales", keys: ["A", "Bb", "Eb"] },
       { icon: "scales", group: "arps",   label: "A, B♭ and E♭ major arpeggios", type: "self", key: "s3-arps", keys: ["A", "Bb", "Eb"] },
       { icon: "scales", group: "minors", label: "Natural, harmonic and melodic minor scales in A, E and D", type: "self", key: "s3-minors", keys: ["A", "E", "D"] },
       { icon: "note",   group: "note",   label: "Score 18 in Note Recognition in each of A, B♭ and E♭ major", type: "note", target: 18, match: { keys: ["A", "Bb", "Eb"] } },
       { icon: "chord",  group: "chord",  label: "Score 10 in Chord Recognition (triads in any key, with no key to lean on)", type: "chord", target: 10, match: { tier: 1, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 16 in the Ear Training tool (triads: major, minor, diminished, augmented)", type: "ear", target: 16, match: { set: "triads" } },
-      { icon: "theory", group: "theory", label: "Complete Theory Level 2", type: "theory", level: 2, mode: "complete" },
+      { icon: "note",   group: "interval", label: "Score 12 in Interval Training, reading perfect and major intervals, in each of A, B♭ and E♭", type: "interval", target: 12, match: { side: "reading", tier: "pm", keys: ["A", "Bb", "Eb"] } },
       { icon: "sightread", group: "sightread", label: "Sight-read Beginner-level pieces, read once: 2,000 minutes (10 minutes a day for 200 days)", type: "hours", category: "sightreading", targetMin: 2000 },
       { icon: "days",   group: "days",   label: "Practice another 200 days at this level", type: "days", target: 200 }
     ],
@@ -181,6 +183,7 @@
       { icon: "note",   group: "note",   label: "Score 34 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 34, match: { clef: "mixed", acc: true } },
       { icon: "chord",  group: "chord",  label: "Score 9 in Chord Recognition (triads and inversions, any key)", type: "chord", target: 9, match: { tier: 2, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 12 in the Ear Training tool (sevenths)", type: "ear", target: 12, match: { set: "sevenths" } },
+      { icon: "note",   group: "interval", label: "Score 15 in Interval Training, reading full-quality intervals (diminished to augmented), between any two notes", type: "interval", target: 15, match: { side: "reading", tier: "full", key_mode: "free" } },
       { icon: "improv", group: "improv", label: "Spend another 5 hours improvising over simple chord progressions", type: "hours", category: "improvisation", target: 5 },
       { icon: "sightread", group: "sightread", label: "Sight-read Beginner to Lower Intermediate pieces, read once: 3,500 minutes (10 minutes a day for 350 days)", type: "hours", category: "sightreading", targetMin: 3500 }
     ],
@@ -193,11 +196,13 @@
       { icon: "note",   group: "note",   label: "Score 40 in Note Recognition (mixed clef, sharps and flats)", type: "note", target: 40, match: { clef: "mixed", acc: true } },
       { icon: "chord",  group: "chord",  label: "Score 7 in Chord Recognition (sevenths, any key)", type: "chord", target: 7, match: { tier: 3, mode: "free" } },
       { icon: "ear",    group: "ear",    label: "Score 14 in the Ear Training tool (sevenths)", type: "ear", target: 14, match: { set: "sevenths" } },
+      { icon: "ear",    group: "interval", label: "Score 20 in Interval Training, hearing perfect and major intervals, between any two notes", type: "interval", target: 20, match: { side: "listening", tier: "pm", key_mode: "free" } },
       { icon: "sightread", group: "sightread", label: "Sight-read Lower Intermediate pieces, read once: 5,000 minutes (10 minutes a day for 500 days)", type: "hours", category: "sightreading", targetMin: 5000 }
     ],
     [ // 6 Advanced
       { icon: "piece",  group: "piece",  label: "Learn 6 Advanced pieces", type: "piece", tier: 4, count: 6 },
       { icon: "musicianship", group: "musicianship", label: "Analyse a piece you're learning (sketch its harmonic outline)", type: "self", key: "s6-analyse" },
+      { icon: "ear",    group: "interval", label: "Score 24 in Interval Training, hearing full-quality intervals, between any two notes", type: "interval", target: 24, match: { side: "listening", tier: "full", key_mode: "free" } },
       { icon: "perform", group: "perform", label: "Record yourself and share it with someone (or in the community)", type: "self", key: "s6-perform" },
       { icon: "scales", group: "scales", label: "All major scales, in every key, in sixteenth notes at 120 bpm, even and controlled", type: "self", key: "s6-scales", all: true },
       { icon: "scales", group: "minors", label: "All minor scales, in every key, in sixteenth notes at 120 bpm, even and controlled", type: "self", key: "s6-minors", all: true },
@@ -261,6 +266,8 @@
                 { group: "piece", type: "piece", tier: 1, count: 1, label: "Try a first Beginner-level piece" } ]
     },
     { // 2 Beginner
+      interval: [ { group: "interval", type: "interval", target: 22, match: { side: "reading", tier: "number" }, label: "Score 22 in Interval Training, reading intervals by number, in a key" },
+                  { group: "interval", type: "interval", target: 10, match: { side: "listening", tier: "number" }, label: "Score 10 in Interval Training, hearing intervals by number, in a key" } ],
       scales: [ { group: "scales", type: "self", key: "x2-scales-1", keys: ["A"], label: "A major scale, hands together, two octaves" },
                 { group: "scales", type: "self", key: "x2-scales-2", keys: ["Bb"], label: "B♭ major scale, hands together, two octaves" },
                 { group: "scales", type: "self", key: "x2-scales-3", keys: ["Eb"], label: "E♭ major scale, hands together, two octaves" },
@@ -288,6 +295,8 @@
                 { group: "piece", type: "piece", tier: 2, count: 1, label: "Try a Lower Intermediate piece" } ]
     },
     { // 3 Foundations
+      interval: [ { group: "interval", type: "interval", target: 30, match: { side: "reading", tier: "number" }, label: "Score 30 in Interval Training, reading intervals by number, in a key" },
+                  { group: "interval", type: "interval", target: 12, match: { side: "listening", tier: "pm" }, label: "Score 12 in Interval Training, hearing perfect and major intervals, in a key" } ],
       scales: [ { group: "scales", type: "self", key: "x3-scales-1", keys: ["E"], label: "E major scale, hands together, two octaves" },
                 { group: "scales", type: "self", key: "x3-scales-2", keys: ["Ab"], label: "A♭ major scale, hands together, two octaves" },
                 { group: "scales", type: "self", key: "x3-scales-3", keys: ["B"], label: "B major scale, hands together, two octaves" },
@@ -318,6 +327,8 @@
                 { group: "piece", type: "piece", tier: 3, count: 1, label: "Try an Upper Intermediate piece" } ]
     },
     { // 4 Intermediate
+      interval: [ { group: "interval", type: "interval", target: 28, match: { side: "reading", tier: "pm", key_mode: "free" }, label: "Score 28 in Interval Training, reading perfect and major intervals, between any two notes" },
+                  { group: "interval", type: "interval", target: 15, match: { side: "listening", tier: "pm", key_mode: "free" }, label: "Score 15 in Interval Training, hearing perfect and major intervals, between any two notes" } ],
       scales: [ { group: "scales", type: "self", key: "x4-scales-1", label: "All 12 major scales in sixteenth notes (semiquavers) at ♩=88, hands together" },
                 { group: "scales", type: "self", key: "x4-scales-2", label: "All major scales in contrary motion, two octaves" } ],
       arps:   [ { group: "arps", type: "self", key: "x4-arps-1", label: "All minor arpeggios (same key order as the majors)" },
@@ -347,6 +358,8 @@
                 { group: "piece", type: "piece", tier: 4, count: 1, label: "Try an Advanced piece" } ]
     },
     { // 5 Confident
+      interval: [ { group: "interval", type: "interval", target: 30, match: { side: "reading", tier: "full", key_mode: "free" }, label: "Score 30 in Interval Training, reading full-quality intervals, between any two notes" },
+                  { group: "interval", type: "interval", target: 16, match: { side: "listening", tier: "full", key_mode: "free" }, label: "Score 16 in Interval Training, hearing full-quality intervals, between any two notes" } ],
       scales: [ { group: "scales", type: "self", key: "x5-scales-1", label: "All scales in sixteenth notes at ♩=100, hands together" },
                 { group: "scales", type: "self", key: "x5-scales-2", label: "Scales a third apart" },
                 { group: "scales", type: "self", key: "x5-scales-3", label: "Scales a sixth apart" },
@@ -371,6 +384,8 @@
                 { group: "piece", type: "piece", tier: 4, count: 2, label: "Learn a second Advanced piece" } ]
     },
     { // 6 Advanced
+      interval: [ { group: "interval", type: "interval", target: 38, match: { side: "reading", tier: "number", key_mode: "free" }, label: "Score 38 in Interval Training, reading intervals by number, between any two notes" },
+                  { group: "interval", type: "interval", target: 28, match: { side: "listening", tier: "pm", key_mode: "free" }, label: "Score 28 in Interval Training, hearing perfect and major intervals, between any two notes" } ],
       scales: [ { group: "scales", type: "self", key: "x6-scales-1", label: "Chromatic scales, hands together" },
                 { group: "scales", type: "self", key: "x6-scales-2", label: "Whole-tone scales" },
                 { group: "scales", type: "self", key: "x6-scales-3", label: "Scales in contrary motion in all keys" },

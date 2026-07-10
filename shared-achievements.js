@@ -211,6 +211,7 @@ const ACH_COLOURS = {
   saves:       ["rgba(168,85,247,.13)",  "rgba(168,85,247,.35)",  "#a855f7"],
   chordrec:    ["rgba(217,70,239,.13)",  "rgba(217,70,239,.35)",  "#d946ef"],
   earrec:      ["rgba(6,182,212,.13)",   "rgba(6,182,212,.35)",   "#06b6d4"],
+  intervalrec: ["rgba(245,158,11,.13)",  "rgba(245,158,11,.35)",  "#f59e0b"],
   community:   ["rgba(2,132,199,.13)",   "rgba(2,132,199,.35)",   "#0284c7"],
   live:        ["rgba(225,29,72,.13)",   "rgba(225,29,72,.35)",   "#e11d48"],
   roadmap:     ["rgba(240,165,0,.15)",   "rgba(240,165,0,.40)",   "#f0a500"],
@@ -337,6 +338,10 @@ const ACH_ICON_MAP = {
   earg1:_AI.HEADPH, earg10:_AI.WAVE, earg50:_AI.STAGE,
   ears10:_AI.TARGET, ears20:_AI.BINOS, ears30:_AI.STARF,
   earex:_AI.PIANO, earkey:_AI.STEPS, earext:_AI.LAYERS,
+  // Interval Training Game
+  itg1:_AI.TARGET, itg10:_AI.REPEAT, itg50:_AI.MEDAL,
+  its15:_AI.EYE, its25:_AI.BINOS, its35:_AI.TROPHY,
+  itread:_AI.NOTES2, itear:_AI.HEADPH, itfull:_AI.WAVEFRM, itfree:_AI.INFINITY,
   // Community — posts
   cmp1:_AI.SPARKLE, cmp10:_AI.NOTES2, cmp25:_AI.AWARD, cmp50:_AI.CROWN,
   // Community — comments
@@ -380,7 +385,7 @@ const _BADGE_CAT_SHAPE = {
   scales:'hex', sightread:'circle', improv:'star', theorycat:'circle',
   eartraining:'hex', depth:'star', books:'circle', variety:'star',
   saves:'shield', reading:'shield', community:'circle', game:'hex',
-  library:'diamond', noterec:'star', chordrec:'diamond', earrec:'hex', live:'star',
+  library:'diamond', noterec:'star', chordrec:'diamond', earrec:'hex', intervalrec:'diamond', live:'star',
   roadmap:'circle', courses:'shield',
 };
 // Colour palette per category [light, mid, dark] — interpolated by tier
@@ -406,6 +411,7 @@ const _BADGE_PALETTE = {
   noterec:     ['#d9f99d','#65a30d','#3f6212'],  // light lime → vivid → deep green
   chordrec:    ['#f0abfc','#c026d3','#86198f'],  // light fuchsia → vivid → deep magenta
   earrec:      ['#a5f3fc','#06b6d4','#0e7490'],  // light cyan → vivid → deep cyan
+  intervalrec: ['#fcd34d','#f59e0b','#b45309'],  // light amber → vivid → deep amber
   live:        ['#fda4af','#e11d48','#9f1239'],  // soft rose → vivid → deep crimson
   roadmap:     ['#fde68a','#f0a500','#9a6a00'],  // pale gold → trophy gold → deep bronze
 };
@@ -696,6 +702,19 @@ const ACHIEVEMENTS = [
   { id:"earex",  cat:"earrec", icon:"👂", name:"Name That Chord", desc:"Score 10 identifying the exact chord by ear",      check:(s,x)=>(x.earBestExact||0)>=10,   prog:(s,x)=>[(x.earBestExact||0),10]   },
   { id:"earkey", cat:"earrec", icon:"👂", name:"Diatonic Ear",    desc:"Score 10 in a key by ear",                         check:(s,x)=>(x.earBestKey||0)>=10,     prog:(s,x)=>[(x.earBestKey||0),10]     },
   { id:"earext", cat:"earrec", icon:"👂", name:"Extended Ear",    desc:"Score 10 on the extensions set by ear",            check:(s,x)=>(x.earBestExt||0)>=10,     prog:(s,x)=>[(x.earBestExt||0),10]     },
+
+  // Interval Training Game — engagement, a fluency score ladder (any config, chasing
+  // the ~40 ceiling), and breadth badges pegged to the harder configs.
+  { id:"itg1",   cat:"intervalrec", icon:"🎯", name:"First Interval",   desc:"Play your first interval training game",          check:(s,x)=>(x.itGamesPlayed||0)>=1,        prog:(s,x)=>[(x.itGamesPlayed||0),1]         },
+  { id:"itg10",  cat:"intervalrec", icon:"🎯", name:"Interval Regular", desc:"Play 10 interval training games",                check:(s,x)=>(x.itGamesPlayed||0)>=10,       prog:(s,x)=>[(x.itGamesPlayed||0),10]        },
+  { id:"itg50",  cat:"intervalrec", icon:"🎯", name:"Interval Devotee", desc:"Play 50 interval training games",                check:(s,x)=>(x.itGamesPlayed||0)>=50,       prog:(s,x)=>[(x.itGamesPlayed||0),50]        },
+  { id:"its15",  cat:"intervalrec", icon:"🎯", name:"Interval Spotter", desc:"Score 15 correct in a single game",              check:(s,x)=>(x.itBestScore||0)>=15,         prog:(s,x)=>[(x.itBestScore||0),15]          },
+  { id:"its25",  cat:"intervalrec", icon:"🎯", name:"Interval Sharp",   desc:"Score 25 correct in a single game",              check:(s,x)=>(x.itBestScore||0)>=25,         prog:(s,x)=>[(x.itBestScore||0),25]          },
+  { id:"its35",  cat:"intervalrec", icon:"🎯", name:"Interval Ace",     desc:"Score 35 correct in a single game",              check:(s,x)=>(x.itBestScore||0)>=35,         prog:(s,x)=>[(x.itBestScore||0),35]          },
+  { id:"itread", cat:"intervalrec", icon:"🎯", name:"Quality Reader",   desc:"Score 15 reading full-quality intervals",        check:(s,x)=>(x.itBestReadFull||0)>=15,      prog:(s,x)=>[(x.itBestReadFull||0),15]       },
+  { id:"itear",  cat:"intervalrec", icon:"🎯", name:"Interval Ear",     desc:"Score 12 by ear (perfect & major)",              check:(s,x)=>(x.itBestListenPM||0)>=12,      prog:(s,x)=>[(x.itBestListenPM||0),12]       },
+  { id:"itfull", cat:"intervalrec", icon:"🎯", name:"Keen Ear",         desc:"Score 12 by ear on full-quality intervals",      check:(s,x)=>(x.itBestListenFull||0)>=12,    prog:(s,x)=>[(x.itBestListenFull||0),12]     },
+  { id:"itfree", cat:"intervalrec", icon:"🎯", name:"Free Ear",         desc:"Score 12 by ear, full quality, in no key",       check:(s,x)=>(x.itBestListenFullFree||0)>=12, prog:(s,x)=>[(x.itBestListenFullFree||0),12] },
   // Community — posts
   { id:"cmp1",  cat:"community", icon:"📣", name:"First Post",       desc:"Share your first post with the community",             check:(s,x)=>(x.postCount||0)>=1,       prog:(s,x)=>[(x.postCount||0),1]       },
   { id:"cmp10", cat:"community", icon:"📣", name:"Contributor",      desc:"Share 10 posts with the community",                    check:(s,x)=>(x.postCount||0)>=10,      prog:(s,x)=>[(x.postCount||0),10]      },
@@ -738,6 +757,7 @@ let _achExtras = {
   nrGamesPlayed:0, nrBestScore:0, nrBestTreble:0, nrBestBass:0, nrBestMixed:0, nrBestAcc:0, nrBestKey:0, nrKeysPlayed:0,
   crGamesPlayed:0, crBestScore:0, crBestTreble:0, crBestBass:0, crBestKey:0,
   earGamesPlayed:0, earBestScore:0, earBestExact:0, earBestKey:0, earBestExt:0,
+  itGamesPlayed:0, itBestScore:0, itBestReadFull:0, itBestListenPM:0, itBestListenFull:0, itBestListenFullFree:0,
   postCount:0, commentCount:0, reactionCount:0, liveAttended:0,
   maxPostComments:0, hasAvatar:false, baselineMins:0,
 };
@@ -746,7 +766,7 @@ async function loadAchievementExtras() {
   const email = (typeof viewingEmail !== "undefined" && viewingEmail) || myEmail;
   const isOwn = email === myEmail;
 
-  const [readResult, gamesResult, colResult, nrResult, crResult, earResult] = await Promise.all([
+  const [readResult, gamesResult, colResult, nrResult, crResult, earResult, itResult] = await Promise.all([
     isOwn
       ? db.from("reading_list").select("status").eq("email", email)
       : db.rpc("get_user_reading_list", { p_email: email }),
@@ -759,7 +779,8 @@ async function loadAchievementExtras() {
     db.from("note_game_scores").select("score,clef,accidentals,key_signature").eq("email", email),
     // Chord game scores are stored with a lowercased email and are world-readable.
     db.from("chord_game_scores").select("score,clef,mode").eq("email", (email || "").toLowerCase()),
-    db.from("ear_game_scores").select("score,answer_type,chord_set,key_signature").eq("email", (email || "").toLowerCase())
+    db.from("ear_game_scores").select("score,answer_type,chord_set,key_signature").eq("email", (email || "").toLowerCase()),
+    db.from("interval_game_scores").select("score,side,tier,key_mode").eq("email", (email || "").toLowerCase())
   ]);
 
   const readRows  = readResult.data  || [];
@@ -806,6 +827,17 @@ async function loadAchievementExtras() {
   _achExtras.earBestExact   = earRows.filter(r => r.answer_type === "exact").reduce((m, r) => Math.max(m, r.score || 0), 0);
   _achExtras.earBestKey     = earRows.filter(r => r.key_signature).reduce((m, r) => Math.max(m, r.score || 0), 0);
   _achExtras.earBestExt     = earRows.filter(r => r.chord_set === "extensions").reduce((m, r) => Math.max(m, r.score || 0), 0);
+
+  // Interval training game — best score globally + in the specific hard configs
+  // (achievements peg to the config, not just any-config, so they can't be farmed easy).
+  const itRows = itResult.data || [];
+  const _itMax = f => itRows.filter(f).reduce((m, r) => Math.max(m, r.score || 0), 0);
+  _achExtras.itGamesPlayed        = itRows.length;
+  _achExtras.itBestScore          = _itMax(() => true);
+  _achExtras.itBestReadFull       = _itMax(r => r.side === "reading"  && r.tier === "full");
+  _achExtras.itBestListenPM       = _itMax(r => r.side === "listening" && r.tier === "pm");
+  _achExtras.itBestListenFull     = _itMax(r => r.side === "listening" && r.tier === "full");
+  _achExtras.itBestListenFullFree = _itMax(r => r.side === "listening" && r.tier === "full" && r.key_mode === "free");
 
   // Community engagement + live attendance. These span several tables, so we
   // sum cheap head-only count queries. Each is wrapped so a missing table or a
@@ -1146,3 +1178,15 @@ async function tcReconcileAchievements() {
   } catch (e) { console.warn("tcReconcileAchievements failed:", e); }
 }
 window.tcReconcileAchievements = tcReconcileAchievements;
+
+// ── Single source of truth for badge visuals ─────────────────────────────────
+// Other surfaces that draw badges but keep their own local maps (the community
+// feed, the member modal) overlay these at load time, so adding a new game /
+// category / icon HERE propagates everywhere with nothing else to hand-sync.
+// Category order for the colour tier is derived from ACHIEVEMENTS' own order.
+window.ACH_ENGINE = {
+  ICON:    ACH_ICON_MAP,
+  PALETTE: _BADGE_PALETTE,
+  SHAPE:   _BADGE_CAT_SHAPE,
+  ORDER:   function (cat) { return ACHIEVEMENTS.filter(function (a) { return a.cat === cat; }).map(function (a) { return a.id; }); },
+};
