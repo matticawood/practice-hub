@@ -89,14 +89,30 @@ const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 const DIFF_LABELS = ["Absolute Beginner","Beginner","Lower Intermediate","Upper Intermediate","Advanced","Expert"];
 
-// Grade equivalence rubric for the 0-5 scale (anchored on the existing data:
-// Für Elise = 2 / ABRSM ~5; Gymnopédie should sit well below its current 3).
-const SCALE_RUBRIC = `0 = Absolute Beginner (pre-grade / ABRSM Initial; Henle 1 easy end)
-1 = Beginner (ABRSM 1-3; RCM 1-4; Henle 1)
-2 = Lower Intermediate (ABRSM 4-5; RCM 5-6; Henle 2-3)
-3 = Upper Intermediate (ABRSM 6-7; RCM 7-8; Henle 3-4)
-4 = Advanced (ABRSM 8 / early diploma; RCM 9-10; Henle 5-6)
-5 = Expert (advanced diploma, concert/virtuoso; Henle 7-9)`;
+// The model returns an ABRSM-EQUIVALENT grade (0-10); the CODE maps it to the band
+// so the grade->band step is deterministic (the model was mis-mapping, e.g. calling a
+// Grade-4 piece "Upper Intermediate").
+const BOARD_GUIDANCE = `Work out the piece's ABRSM-EQUIVALENT grade, converting other boards first:
+- London College of Music (LCM) grades run about 1-2 grades EASIER than ABRSM (an LCM Grade 6 is roughly ABRSM Grade 4-5). Do NOT take an LCM number at face value.
+- RCM / Trinity numbering differs from ABRSM; convert to the ABRSM equivalent.
+- Henle 1-9 is a rough cross-check only (Henle 1-2 ~ ABRSM 1-4, 3-4 ~ ABRSM 5-6, 5-6 ~ ABRSM 7-8, 7-9 ~ diploma+).
+Rules:
+- When sources disagree, use the reputable pedagogical CONSENSUS and lean to how the piece is COMMONLY TAUGHT. Do NOT pick the hardest outlier.
+- Many famous pieces are graded LOWER than their fame suggests. Do not inflate.
+- Grade the FULL piece as titled (or just the named movement/section).
+Report the ABRSM-equivalent as a number: 0 = pre-Grade-1 / Initial, 1-8 = ABRSM grades, 9 = performance diploma (DipABRSM/ARSM), 10 = advanced diploma / concert-virtuoso (LRSM/FRSM).`;
+
+// Deterministic ABRSM-equivalent grade (0-10) -> our 0-5 band.
+function gradeToLevel(g){
+  g = Number(g);
+  if (!isFinite(g)) return null;
+  if (g < 1)  return 0;   // pre-grade         -> Absolute Beginner
+  if (g <= 3) return 1;   // ABRSM 1-3         -> Beginner
+  if (g <= 5) return 2;   // ABRSM 4-5         -> Lower Intermediate
+  if (g <= 7) return 3;   // ABRSM 6-7         -> Upper Intermediate
+  if (g <= 9) return 4;   // ABRSM 8 / diploma -> Advanced
+  return 5;               // advanced diploma / virtuoso -> Expert
+}
 
 let shouldStop = false;
 let pieces = [];
@@ -135,25 +151,22 @@ async function callClaude(apiKey, body){
 
 async function assessPiece(piece, apiKey){
   const cur = piece.difficulty != null ? `${piece.difficulty} (${DIFF_LABELS[piece.difficulty]})` : "unknown";
-  const prompt = `You are a piano pedagogy expert auditing the difficulty levels in a repertoire database. Assess the CORRECT level for this piece INDEPENDENTLY - do not simply agree with the current rating, which may be wrong.
+  const prompt = `You are a piano pedagogy expert auditing difficulty levels in a repertoire database. Assess this piece INDEPENDENTLY and rigorously - do not just agree with the current rating (which may be wrong), but do NOT over-grade.
 
 Piece: ${piece.title}
 Composer/Artist: ${piece.composer || "unknown"}${piece.year ? `\nYear: ${piece.year}` : ""}
-Current rating in the database: ${cur}
+Current rating: ${cur}
 
-Search the web for this SPECIFIC piece's difficulty from reputable sources - prefer, in order: Henle Verlag difficulty level (their 1-9 scale), ABRSM / RCM / Trinity exam grade, or clear pedagogical consensus. Grade the FULL piece as titled (if the title names a single movement/section, grade just that; otherwise the whole work). Beware works that are famous but far easier or harder than their reputation.
+Search the web for this SPECIFIC piece's difficulty from reputable sources (Henle level, ABRSM / RCM / Trinity / LCM exam grade, established teaching consensus).
 
-Map your finding to this 0-5 scale:
-${SCALE_RUBRIC}
+${BOARD_GUIDANCE}
 
 Return ONLY JSON (no markdown):
 {
-  "suggested_level": <integer 0-5>,
-  "band": "<matching band name>",
-  "henle": "<Henle level or range if found, else null>",
-  "grade": "<ABRSM/RCM/Trinity grade if found, else null>",
+  "abrsm_grade": <number 0-10 as defined above: your single best ABRSM-EQUIVALENT after converting boards>,
+  "grades_found": "<short, raw: what each board/source actually said, e.g. 'LCM G6; consensus ABRSM ~G4; Henle 2'>",
   "confidence": "high" | "medium" | "low",
-  "reasoning": "<one or two sentences: what the sources say and why this level>",
+  "reasoning": "<one or two sentences justifying the ABRSM-equivalent, including any board conversion you applied>",
   "source": "<the main source you relied on>"
 }`;
   const data = await callClaude(apiKey, {
@@ -162,7 +175,9 @@ Return ONLY JSON (no markdown):
     tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
     messages: [{ role: "user", content: prompt }]
   });
-  return parseAssessment(data);
+  const a = parseAssessment(data);
+  a.suggested_level = gradeToLevel(a.abrsm_grade);   // deterministic grade -> band
+  return a;
 }
 
 async function startAudit(){
@@ -225,7 +240,7 @@ function renderResults(){
     const {p, a} = x;
     const cur = p.difficulty, sug = a.suggested_level;
     const delta = sug - cur;
-    const refs = [a.henle ? `Henle ${esc(a.henle)}` : null, a.grade ? esc(a.grade) : null].filter(Boolean).join(" · ");
+    const refs = [a.abrsm_grade!=null ? `ABRSM-equiv ${esc(a.abrsm_grade)}` : null, a.grades_found ? esc(a.grades_found) : null].filter(Boolean).join(" · ");
     return `<tr id="pa-row-${p.id}">
       <td>${changedRow ? `<input type="checkbox" class="apply-check" data-id="${p.id}" checked>` : ""}</td>
       <td class="piece"><div>${esc(p.title)}</div><div class="composer">${esc(p.composer||"")}</div></td>
