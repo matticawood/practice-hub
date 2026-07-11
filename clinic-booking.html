@@ -509,16 +509,18 @@ async function buyPackage(){
 
 // ── redeem ──
 async function checkCredits(){
-  const email=document.getElementById("rd-email").value.trim().toLowerCase();
   const err=document.getElementById("rd-err"); err.style.display="none";
-  if(!/.+@.+\..+/.test(email)){ err.textContent="Please enter a valid email."; err.style.display="block"; return; }
-  const btn=document.getElementById("rd-btn"); btn.disabled=true; btn.innerHTML='<span class="spin dk"></span> Checking…';
+  const btn=document.getElementById("rd-btn");
+  // In-app page: the member is signed in, so read credits from their session
+  // (not a typed email). No session -> ask them to sign in.
+  if(!myToken){ err.textContent="Please sign in to the Practice Room to use your lesson package."; err.style.display="block"; return; }
+  btn.disabled=true; btn.innerHTML='<span class="spin dk"></span> Checking…';
   try{
-    const res=await fetch(`${FN}/lesson-credits?email=${encodeURIComponent(email)}`,{headers:AUTH});
+    const res=await fetch(`${FN}/lesson-credits`,{headers:{apikey:SUPABASE_ANON,"Authorization":`Bearer ${myToken}`}});
     const data=await res.json();
-    if((data.remaining||0)<=0){ err.textContent="No lessons found for that email. If you've just bought a package, give it a minute and try again."; err.style.display="block"; return; }
+    if((data.remaining||0)<=0){ err.textContent="No lessons found on your account. If you've just bought a package, give it a minute and try again."; err.style.display="block"; return; }
     if(!EVENT_1HR){ err.textContent="Lesson booking isn't quite set up yet, please contact Matthew to schedule."; err.style.display="block"; return; }
-    redeemEmail=email; redeemRemaining=data.remaining||0; basket=[]; mode="redeem"; clinic=PRODUCTS.l60; startBooking();
+    redeemEmail=myEmailAddr; redeemRemaining=data.remaining||0; basket=[]; mode="redeem"; clinic=PRODUCTS.l60; startBooking();
   }catch(e){ err.textContent="Something went wrong, please try again."; err.style.display="block"; }
   finally{ btn.disabled=false; btn.innerHTML="Check my lessons →"; }
 }
@@ -671,7 +673,8 @@ async function confirmBooking(){
     if(selFiles.length){ try{ fileUrl=(await Promise.all(selFiles.map(uploadAttachment))).join(", "); }catch(_){} }
     if(mode==="redeem"){
       const slots = (basket.length ? basket : [selSlot]).map(t=>new Date(t).toISOString());
-      const res=await fetch(`${FN}/lesson-redeem`,{method:"POST",headers:AUTH,body:JSON.stringify({ email, eventTypeId:clinic.id, slots, name:fname, timeZone:userTZ, notes:notes||undefined, fileUrl:fileUrl||undefined })});
+      const redeemHeaders = myToken ? { apikey:SUPABASE_ANON, "Authorization":`Bearer ${myToken}`, "Content-Type":"application/json" } : AUTH;
+      const res=await fetch(`${FN}/lesson-redeem`,{method:"POST",headers:redeemHeaders,body:JSON.stringify({ email, eventTypeId:clinic.id, slots, name:fname, timeZone:userTZ, notes:notes||undefined, fileUrl:fileUrl||undefined })});
       const data=await res.json();
       if(!res.ok || data.error) throw new Error(data.error||"Booking failed");
       const n=data.booked||slots.length;
@@ -707,7 +710,7 @@ function result(icon,title,msg){ document.getElementById("res-emoji").innerHTML=
 
 // ── Your booked lessons (signed-in member; reads bookings via self-read RLS) ──
 const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let myDb=null, myEmailAddr="";
+let myDb=null, myEmailAddr="", myToken="";
 function openMyLessons(){ if(myDb&&myEmailAddr) showMyLessons(myDb,myEmailAddr); }
 // Friendly lesson-type names. bookings.kind is stored as "20min"/"30min"/"60min"
 // (a redeemed package lesson is also "60min"); event_type_id is the fallback.
@@ -758,7 +761,8 @@ function showMineSignedOut(){
     const isAdmin = myEmail.toLowerCase() === "matthew@matthewcawood.com";
     initSharedHeader({ db: _db, myEmail, myName, isAdmin, activePage: "studio", avatarUrl: ae?.avatar_url || null });
     // Signed-in member: expose the "Your booked lessons" button next to the currency toggle.
-    myDb = _db; myEmailAddr = myEmail;
+    myDb = _db; myEmailAddr = myEmail; myToken = session.access_token;
+    const rde = document.getElementById("rd-email"); if (rde) { rde.value = myEmail; rde.readOnly = true; }
     const mb = document.getElementById("mylessons-btn"); if (mb) mb.style.display = "inline-flex";
     if (wantMine) showMyLessons(_db, myEmail);
   } catch(e) { if (wantMine) showMineSignedOut(); }
