@@ -2124,10 +2124,32 @@ function _ensureIOSAudio() {
   _iosSilentAudio.play().catch(function() {});
 }
 
+// ── OS media controls (notification shade / lock screen) ──────────────────────
+// The looping silent <audio> above claims a media session, so we can surface
+// play/pause for the metronome the way a music app does. Works on Android/Chrome;
+// iOS support is partial. Handlers toggle the metronome; playbackState mirrors it.
+var _metroMediaInit = false;
+function _metroMedia(state) {
+  if (!("mediaSession" in navigator)) return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: "Metronome", artist: Math.round(metroBPM) + " BPM", album: "The Practice Room"
+    });
+    if (!_metroMediaInit) {
+      navigator.mediaSession.setActionHandler("play",  function () { if (!metroRunning) startMetro(); });
+      navigator.mediaSession.setActionHandler("pause", function () { if (metroRunning) stopMetro(); });
+      navigator.mediaSession.setActionHandler("stop",  function () { if (metroRunning) stopMetro(); });
+      _metroMediaInit = true;
+    }
+    navigator.mediaSession.playbackState = state;
+  } catch (e) {}
+}
+
 function startMetro() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === "suspended") audioCtx.resume();
   _ensureIOSAudio(); // bypass iOS ringer/silent switch
+  _metroMedia("playing");
   metroRunning = true; currentBeat = 0;
   nextNoteTime = audioCtx.currentTime + 0.05;
   schedulerLoop();
@@ -2137,6 +2159,7 @@ function startMetro() {
 
 function stopMetro() {
   metroRunning = false; clearTimeout(metroTimer);
+  _metroMedia("paused");
   const disc = document.getElementById("metro-disc");
   if (disc) disc.className = "metro-disc";
   document.querySelectorAll(".metro-disc-pip").forEach(function(p) { p.className = "metro-disc-pip"; });
