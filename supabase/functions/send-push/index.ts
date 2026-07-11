@@ -26,6 +26,8 @@ const FB_CLIENT_EMAIL = Deno.env.get("FIREBASE_CLIENT_EMAIL")!;
 const FB_PRIVATE_KEY  = (Deno.env.get("FIREBASE_PRIVATE_KEY") || "").replace(/\\n/g, "\n");
 const SUPA_URL        = Deno.env.get("SUPABASE_URL")!;
 const SUPA_SERVICE    = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY        = Deno.env.get("SUPABASE_ANON_KEY")!;
+const OWNER_EMAIL     = "matthew@matthewcawood.com";
 
 const cors = {
   "Access-Control-Allow-Origin":  "*",
@@ -183,6 +185,26 @@ async function supaDeleteTokens(tokens: string[]) {
   });
 }
 
+// ── Caller identity ──────────────────────────────────────────────────────────
+// The anon key is a valid project JWT, so verify_jwt cannot tell a logged-out
+// visitor from a member. Resolve the real user behind the bearer token; returns
+// null for the anon key or any non-user token. Used to stop a logged-out (or
+// impersonating) caller forging pushes to other members.
+async function callerEmail(req: Request): Promise<string | null> {
+  const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token || token === ANON_KEY) return null;
+  try {
+    const r = await fetch(`${SUPA_URL}/auth/v1/user`, {
+      headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return null;
+    const u = await r.json();
+    return String(u?.email || "").toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -203,6 +225,11 @@ Deno.serve(async (req) => {
   // (so the app-icon badge — which tracks bell notifications — is left
   // untouched; chat unread is handled by the in-app chat badge).
   if (body.chat_push && body.email) {
+    // Only a participant of this conversation may fire its "new message" push.
+    const _caller = await callerEmail(req);
+    if (!_caller) return json({ error: "unauthorized" }, 401);
+    const _parts = String(body.chat_id || "").toLowerCase().split("|");
+    if (_parts.length === 2 && !_parts.includes(_caller)) return json({ error: "forbidden" }, 403);
     const devices = await supaSelect(
       `device_tokens?email=eq.${encodeURIComponent(String(body.email).toLowerCase())}&select=token`,
     );
@@ -244,6 +271,9 @@ Deno.serve(async (req) => {
   // (clear_badge is accepted as an alias for backwards compatibility.)
   if ((body.sync_badge || body.clear_badge) && body.email) {
     const emailLc = String(body.email).toLowerCase();
+    // You can only sync your OWN app-icon badge.
+    const _caller = await callerEmail(req);
+    if (!_caller || _caller !== emailLc) return json({ error: "forbidden" }, 403);
     const devices = await supaSelect(
       `device_tokens?email=eq.${encodeURIComponent(emailLc)}&select=token`,
     );
@@ -309,6 +339,10 @@ Deno.serve(async (req) => {
     metadata = rows[0].metadata || {};
     ntype    = rows[0].type || "";
   } else if (body.email && body.title) {
+    // Arbitrary push to an arbitrary address with arbitrary content = owner-only
+    // (broadcasts to members go through the notifications table, not this path).
+    const _caller = await callerEmail(req);
+    if (_caller !== OWNER_EMAIL) return json({ error: "forbidden" }, 403);
     email    = body.email;
     title    = body.title;
     content  = body.body || "";
