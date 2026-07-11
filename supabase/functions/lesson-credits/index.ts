@@ -52,13 +52,12 @@ Deno.serve(async (req) => {
       if (!trows.length) return json({ remaining: 0 });
       email = String(trows[0].email || "").toLowerCase();
     } else {
-      // Prefer a logged-in session (proves ownership). Fall back to the ?email=
-      // lookup transitionally (still used by the app's clinic-booking.html); this
-      // is removed once that page is on sessions, to close the enumeration oracle.
-      const authed = await sessionEmail(req);
-      if (authed) email = authed;
-      else if (emailParam && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailParam)) email = emailParam;
-      else return json({ remaining: 0 });
+      // No token -> require a signed-in session (proves ownership). The open
+      // ?email= lookup is gone: it let anyone enumerate which addresses held
+      // credits.
+      email = await sessionEmail(req);
+      void emailParam;
+      if (!email) return json({ remaining: 0 });
     }
 
     // Credits are valid for 12 months from purchase — exclude anything older.

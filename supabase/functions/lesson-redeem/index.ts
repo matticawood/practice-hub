@@ -121,11 +121,10 @@ Deno.serve(async (req) => {
       if (!trows.length) return json({ error: "That booking link is not valid." }, 403);
       email = String(trows[0].email || "").trim().toLowerCase();
     } else {
-      // Prefer a logged-in session; fall back to the typed email transitionally
-      // (still used by the app's clinic-booking.html) until that page moves to
-      // session-based redeem, then this fallback is removed to close the IDOR.
-      const authed = await sessionEmail(req);
-      email = authed || String(reqBody.email || "").trim().toLowerCase();
+      // No token -> require an OTP-verified / signed-in session. A bare typed
+      // email is no longer trusted (that was the credit-burn IDOR).
+      email = await sessionEmail(req);
+      if (!email) return json({ error: "Please book from the link in your package email, or sign in to continue." }, 403);
     }
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Invalid email" }, 400);
     // Accept a list of slots (book several at once) or a single startTime (legacy).
