@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Piece Difficulty Audit</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 24px; max-width: 1000px; }
+    h1 { font-size: 1.2rem; margin-bottom: 4px; }
+    p.sub { font-size: 0.85rem; color: #888; margin-bottom: 20px; line-height: 1.6; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 9px 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.9rem; font-family: monospace; outline: none; margin-bottom: 12px; }
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+    .btn-primary { background: #2d6a2d; color: #9de89d; }
+    .btn-stop    { background: #6a2d2d; color: #e89d9d; }
+    .btn-apply   { background: #1a3a6a; color: #7ab4ff; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .progress-wrap { margin-top: 14px; display: none; }
+    .progress-bar-bg { background: #222; border-radius: 4px; height: 8px; overflow: hidden; }
+    .progress-bar-fill { background: #4ade80; height: 100%; transition: width 0.3s; width: 0%; }
+    .progress-label { font-size: 0.8rem; color: #888; margin-top: 6px; }
+    .summary { font-size: 0.9rem; color: #ccc; margin: 6px 0 16px; }
+    .summary b { color: #facc15; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #262626; vertical-align: top; }
+    th { color: #777; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; background: #0f0f0f; }
+    td.piece { min-width: 210px; }
+    .composer { color: #888; font-size: 0.78rem; }
+    .lvl { font-weight: 700; }
+    .from { color: #f87171; }
+    .to   { color: #4ade80; }
+    .arrow { color: #666; margin: 0 6px; }
+    .reason { color: #bbb; line-height: 1.55; max-width: 380px; }
+    .src { color: #6b8cff; font-size: 0.76rem; }
+    .conf { font-size: 0.7rem; padding: 1px 7px; border-radius: 9px; }
+    .conf.high { background:#12331c; color:#4ade80; } .conf.medium { background:#33300f; color:#facc15; } .conf.low { background:#331414; color:#f87171; }
+    .delta { font-size: 0.72rem; color:#888; }
+    .apply-check { width: 16px; height: 16px; accent-color: #4ade80; cursor: pointer; }
+    .row-done { opacity: .45; }
+    .row-err td { color: #f87171; }
+    details { margin-top: 18px; } summary { cursor: pointer; color: #888; font-size: 0.85rem; }
+    .ok { color:#4ade80; } .err { color:#f87171; } .warn { color:#facc15; }
+    a { color: #6b8cff; }
+  </style>
+</head>
+<body>
+
+<h1>🎚️ Piece Difficulty Audit</h1>
+<p class="sub">
+  Independently re-assesses every library piece's level (0–5) against reputable sources (Henle level, ABRSM / RCM grade) using Claude + web search, and flags mismatches with the current rating.<br>
+  Nothing changes until you tick corrections and Apply. Applying updates the level <b>and</b> regenerates that piece's "challenges" text so the prose matches the new level.<br>
+  Scale: <b>0</b> Absolute Beginner · <b>1</b> Beginner · <b>2</b> Lower Intermediate · <b>3</b> Upper Intermediate · <b>4</b> Advanced · <b>5</b> Expert.
+</p>
+
+<div class="card">
+  <label for="api-key">Anthropic API Key</label>
+  <input type="password" id="api-key" placeholder="sk-ant-…" />
+  <div class="controls">
+    <button class="btn-primary" id="run-btn" onclick="startAudit()">⚡ Assess all pieces</button>
+    <button class="btn-stop" id="stop-btn" onclick="stopAudit()" style="display:none">⏹ Stop</button>
+    <span id="status" style="font-size:0.85rem;color:#888"></span>
+  </div>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    <div class="progress-label" id="progress-label"></div>
+  </div>
+</div>
+
+<div id="summary" class="summary" style="display:none"></div>
+<div id="apply-bar" class="card" style="display:none">
+  <div class="controls">
+    <button class="btn-apply" id="apply-btn" onclick="applySelected()">✓ Apply selected corrections</button>
+    <button style="background:#222;color:#aaa;border:1px solid #333" onclick="selectAll(true)">Select all</button>
+    <button style="background:#222;color:#aaa;border:1px solid #333" onclick="selectAll(false)">Deselect all</button>
+    <span id="apply-status" style="font-size:0.85rem;color:#888"></span>
+  </div>
+</div>
+
+<div id="results"></div>
+
+<script>
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const DIFF_LABELS = ["Absolute Beginner","Beginner","Lower Intermediate","Upper Intermediate","Advanced","Expert"];
+
+// Grade equivalence rubric for the 0-5 scale (anchored on the existing data:
+// Für Elise = 2 / ABRSM ~5; Gymnopédie should sit well below its current 3).
+const SCALE_RUBRIC = `0 = Absolute Beginner (pre-grade / ABRSM Initial; Henle 1 easy end)
+1 = Beginner (ABRSM 1-3; RCM 1-4; Henle 1)
+2 = Lower Intermediate (ABRSM 4-5; RCM 5-6; Henle 2-3)
+3 = Upper Intermediate (ABRSM 6-7; RCM 7-8; Henle 3-4)
+4 = Advanced (ABRSM 8 / early diploma; RCM 9-10; Henle 5-6)
+5 = Expert (advanced diploma, concert/virtuoso; Henle 7-9)`;
+
+let shouldStop = false;
+let pieces = [];
+let assess = {};   // id -> {suggested_level, band, henle, grade, confidence, reasoning, source, error}
+
+const savedKey = localStorage.getItem("anthropic_key");
+if (savedKey) document.getElementById("api-key").value = savedKey;
+
+function setStatus(m){ document.getElementById("status").textContent = m; }
+function stopAudit(){ shouldStop = true; setStatus("Stopping after in-flight pieces…"); }
+function selectAll(v){ document.querySelectorAll(".apply-check").forEach(c=>c.checked=v); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// Extract the model's text (ignoring web_search tool blocks) and pull the JSON out.
+function parseAssessment(data){
+  const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("no JSON in reply");
+  return JSON.parse(m[0]);
+}
+
+async function callClaude(apiKey, body){
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error?.message || `API ${res.status}`); }
+  return res.json();
+}
+
+async function assessPiece(piece, apiKey){
+  const cur = piece.difficulty != null ? `${piece.difficulty} (${DIFF_LABELS[piece.difficulty]})` : "unknown";
+  const prompt = `You are a piano pedagogy expert auditing the difficulty levels in a repertoire database. Assess the CORRECT level for this piece INDEPENDENTLY - do not simply agree with the current rating, which may be wrong.
+
+Piece: ${piece.title}
+Composer/Artist: ${piece.composer || "unknown"}${piece.year ? `\nYear: ${piece.year}` : ""}
+Current rating in the database: ${cur}
+
+Search the web for this SPECIFIC piece's difficulty from reputable sources - prefer, in order: Henle Verlag difficulty level (their 1-9 scale), ABRSM / RCM / Trinity exam grade, or clear pedagogical consensus. Grade the FULL piece as titled (if the title names a single movement/section, grade just that; otherwise the whole work). Beware works that are famous but far easier or harder than their reputation.
+
+Map your finding to this 0-5 scale:
+${SCALE_RUBRIC}
+
+Return ONLY JSON (no markdown):
+{
+  "suggested_level": <integer 0-5>,
+  "band": "<matching band name>",
+  "henle": "<Henle level or range if found, else null>",
+  "grade": "<ABRSM/RCM/Trinity grade if found, else null>",
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "<one or two sentences: what the sources say and why this level>",
+  "source": "<the main source you relied on>"
+}`;
+  const data = await callClaude(apiKey, {
+    model: "claude-opus-4-8",
+    max_tokens: 1500,
+    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
+    messages: [{ role: "user", content: prompt }]
+  });
+  return parseAssessment(data);
+}
+
+async function startAudit(){
+  const apiKey = document.getElementById("api-key").value.trim();
+  if (!apiKey){ setStatus("Enter your Anthropic API key first."); return; }
+  localStorage.setItem("anthropic_key", apiKey);
+  shouldStop = false;
+  document.getElementById("run-btn").disabled = true;
+  document.getElementById("stop-btn").style.display = "inline-block";
+  document.getElementById("progress-wrap").style.display = "block";
+  document.getElementById("results").innerHTML = "";
+  document.getElementById("summary").style.display = "none";
+  document.getElementById("apply-bar").style.display = "none";
+  assess = {};
+
+  setStatus("Loading pieces…");
+  const { data, error } = await db.from("pieces").select("id,title,composer,year,difficulty,challenges").eq("kind","piece").order("difficulty",{ascending:true});
+  if (error){ setStatus("Load failed: " + error.message); return; }
+  pieces = data || [];
+
+  const POOL = 4;               // modest concurrency to stay well under rate limits
+  let done = 0, idx = 0;
+  async function worker(){
+    while (idx < pieces.length && !shouldStop){
+      const p = pieces[idx++];
+      try { assess[p.id] = await assessPiece(p, apiKey); }
+      catch(e){ assess[p.id] = { error: e.message }; }
+      done++;
+      const pct = Math.round(done / pieces.length * 100);
+      document.getElementById("progress-fill").style.width = pct + "%";
+      document.getElementById("progress-label").textContent = `${done} / ${pieces.length} assessed`;
+      setStatus(`Assessing… ${p.title.slice(0,40)}`);
+    }
+  }
+  await Promise.all(Array.from({length: POOL}, worker));
+
+  document.getElementById("run-btn").disabled = false;
+  document.getElementById("stop-btn").style.display = "none";
+  setStatus(shouldStop ? "Stopped." : "Done.");
+  renderResults();
+}
+
+function renderResults(){
+  const rows = pieces
+    .map(p => ({ p, a: assess[p.id] }))
+    .filter(x => x.a);
+  const errs = rows.filter(x => x.a.error);
+  const graded = rows.filter(x => !x.a.error && typeof x.a.suggested_level === "number");
+  const changed = graded.filter(x => x.a.suggested_level !== x.p.difficulty)
+    .sort((a,b) => Math.abs(b.a.suggested_level - b.p.difficulty) - Math.abs(a.a.suggested_level - a.p.difficulty));
+  const same = graded.filter(x => x.a.suggested_level === x.p.difficulty);
+
+  document.getElementById("summary").style.display = "block";
+  document.getElementById("summary").innerHTML =
+    `Assessed <b>${graded.length}</b> pieces · <b>${changed.length}</b> corrections suggested · ${same.length} already correct` +
+    (errs.length ? ` · <span class="err">${errs.length} errors</span>` : "");
+  document.getElementById("apply-bar").style.display = changed.length ? "flex" : "none";
+
+  const row = (x, changedRow) => {
+    const {p, a} = x;
+    const cur = p.difficulty, sug = a.suggested_level;
+    const delta = sug - cur;
+    const refs = [a.henle ? `Henle ${esc(a.henle)}` : null, a.grade ? esc(a.grade) : null].filter(Boolean).join(" · ");
+    return `<tr id="pa-row-${p.id}">
+      <td>${changedRow ? `<input type="checkbox" class="apply-check" data-id="${p.id}" checked>` : ""}</td>
+      <td class="piece"><div>${esc(p.title)}</div><div class="composer">${esc(p.composer||"")}</div></td>
+      <td class="lvl"><span class="from">${cur} ${esc(DIFF_LABELS[cur]||"?")}</span>${changedRow ? `<span class="arrow">→</span><span class="to">${sug} ${esc(DIFF_LABELS[sug]||"?")}</span>` : ""}${changedRow ? `<div class="delta">${delta>0?"+":""}${delta} level${Math.abs(delta)===1?"":"s"}</div>` : ""}</td>
+      <td><span class="conf ${esc(a.confidence||"low")}">${esc(a.confidence||"?")}</span></td>
+      <td class="reason">${esc(a.reasoning||"")}${refs?`<div class="src">${refs}</div>`:""}${a.source?`<div class="src">${esc(a.source)}</div>`:""}</td>
+    </tr>`;
+  };
+
+  let html = "";
+  if (changed.length){
+    html += `<h3 style="font-size:.95rem;color:#facc15">Suggested corrections (${changed.length})</h3>
+      <table><thead><tr><th></th><th>Piece</th><th>Level</th><th>Conf.</th><th>Reasoning &amp; source</th></tr></thead><tbody>`;
+    html += changed.map(x=>row(x,true)).join("");
+    html += `</tbody></table>`;
+  }
+  if (errs.length){
+    html += `<details open><summary>${errs.length} errors</summary><table><tbody>` +
+      errs.map(x=>`<tr class="row-err"><td></td><td class="piece">${esc(x.p.title)}</td><td colspan="3">${esc(x.a.error)}</td></tr>`).join("") +
+      `</tbody></table></details>`;
+  }
+  if (same.length){
+    html += `<details><summary>${same.length} already at the right level</summary><table><tbody>` +
+      same.map(x=>row(x,false)).join("") + `</tbody></table></details>`;
+  }
+  document.getElementById("results").innerHTML = html;
+}
+
+async function regenChallenges(piece, newDiff, apiKey){
+  const label = DIFF_LABELS[newDiff];
+  const prompt = `You are writing a database entry for "The Practice Room", a piano repertoire reference for adult learners. British English spelling.
+
+Piece: ${piece.title}${piece.composer?`\nComposer/Artist: ${piece.composer}`:""}${piece.year?`\nYear: ${piece.year}`:""}
+Difficulty level: ${label}
+
+Write the "challenges" entry as TWO paragraphs (plain text, no markdown, no JSON):
+1. The key technical and musical challenges, and why the piece sits at ${label} level. Refer to the level by name (${label}), never by a number, and do not mention any other/previous level.
+2. Headed "Before You Begin:" - the technical skills and musical understanding a pianist should have mastered before attempting this piece.
+
+Write with authority and warmth, specific to this piece. Return ONLY the two paragraphs of challenges text.`;
+  const data = await callClaude(apiKey, { model: "claude-sonnet-4-6", max_tokens: 1200, messages: [{ role:"user", content: prompt }] });
+  return (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
+}
+
+async function applySelected(){
+  const apiKey = document.getElementById("api-key").value.trim();
+  const checks = [...document.querySelectorAll(".apply-check:checked")];
+  if (!checks.length){ document.getElementById("apply-status").textContent = "Nothing selected."; return; }
+  document.getElementById("apply-btn").disabled = true;
+  let ok=0, fail=0;
+  for (const cb of checks){
+    const id = Number(cb.dataset.id);
+    const p = pieces.find(x=>x.id===id); const a = assess[id];
+    if (!p || !a) continue;
+    const newDiff = a.suggested_level;
+    document.getElementById("apply-status").textContent = `Updating ${p.title.slice(0,36)}…`;
+    try {
+      const challenges = await regenChallenges(p, newDiff, apiKey);
+      const { error } = await db.from("pieces").update({ difficulty: newDiff, challenges }).eq("id", id);
+      if (error) throw new Error(error.message);
+      p.difficulty = newDiff; p.challenges = challenges;
+      document.getElementById(`pa-row-${id}`)?.classList.add("row-done");
+      cb.checked = false; cb.disabled = true; ok++;
+    } catch(e){ fail++; document.getElementById("apply-status").textContent = `Error on ${p.title}: ${e.message}`; }
+  }
+  document.getElementById("apply-btn").disabled = false;
+  document.getElementById("apply-status").innerHTML = `<span class="ok">Applied ${ok}</span>${fail?` · <span class="err">${fail} failed</span>`:""}. Level + challenges text updated.`;
+}
+</script>
+</body>
+</html>
