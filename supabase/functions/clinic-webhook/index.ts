@@ -145,10 +145,29 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
   // Idempotent on stripe_session_id (unique index); retries are ignored.
   const ins = await fetch(`${SUPABASE_URL}/rest/v1/lesson_credits`, {
     method: "POST",
-    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=representation" },
     body: JSON.stringify({ email, package: String(qty), total: qty, remaining: qty, stripe_session_id: session.id }),
   });
   if (!ins.ok && ins.status !== 409) console.error("credit insert failed:", ins.status, await ins.text());
+
+  // The per-purchase redeem token proves ownership of the email, so the buyer can
+  // book via /book-a-lesson/?redeem=<token> with nothing to type and no login.
+  let redeemToken = "";
+  try {
+    const insRows = ins.ok ? await ins.json().catch(() => []) : [];
+    if (Array.isArray(insRows) && insRows[0]?.redeem_token) redeemToken = String(insRows[0].redeem_token);
+  } catch (_) { /* fall through to lookup */ }
+  if (!redeemToken) {
+    // idempotent retry (row already existed, none returned) — look up its token
+    const look = await fetch(`${SUPABASE_URL}/rest/v1/lesson_credits?select=redeem_token&stripe_session_id=eq.${encodeURIComponent(session.id)}&limit=1`, {
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+    });
+    const lrows = look.ok ? await look.json().catch(() => []) : [];
+    if (Array.isArray(lrows) && lrows[0]?.redeem_token) redeemToken = String(lrows[0].redeem_token);
+  }
+  const bookingUrl = redeemToken
+    ? `https://matthewcawood.com/book-a-lesson/?redeem=${redeemToken}`
+    : "https://matthewcawood.com/book-a-lesson/";
 
   await recordBooking({ vid: session.client_reference_id ?? null, email, kind: "package", amount_minor: session.amount_total ?? null, currency: session.currency ?? null, sessionId: session.id });
 
@@ -166,11 +185,11 @@ async function grantPackageCredits(meta: Record<string, string>, session: any) {
           heading: `You've got ${qty} lessons`,
           paragraphs: [
             `Thank you for booking a package of <strong>${qty} one-hour lessons</strong> with Matthew. Schedule each one whenever suits you.`,
-            `When you're ready, head to the booking page, choose <strong>&ldquo;Use my lesson package&rdquo;</strong>, and enter the email on this order: <strong>${email}</strong>.`,
+            `When you're ready, just tap the button below. It opens your personal booking page, already set up for your lessons, so there's nothing to type. <strong>Keep this email</strong> and use the same button to book your remaining lessons anytime.`,
           ],
           detail: `${ic("ticket")}<strong>${qty} lesson${qty === 1 ? "" : "s"} remaining</strong> &nbsp;·&nbsp; Valid until ${new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`,
-          ctaText: "Book your first lesson →",
-          ctaHref: "https://matthewcawood.com/book-a-lesson/",
+          ctaText: "Book your lessons →",
+          ctaHref: bookingUrl,
           footerNote: "Matthew Cawood · Online Piano Lessons",
         }),
       }),
