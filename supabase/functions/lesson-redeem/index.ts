@@ -4,6 +4,8 @@
 // decrements the oldest credit row. Emails Matt + the student.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const ANON_KEY     = Deno.env.get("SUPABASE_ANON_KEY") || "";
+const UUID_RE      = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CAL_API_KEY  = Deno.env.get("CAL_API_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const NOTIFY_TO   = "matthew@matthewcawood.com";
@@ -85,14 +87,43 @@ async function sb(path: string, init: RequestInit = {}) {
   });
 }
 
+// A logged-in member's session proves ownership of their email. Returns "" for the
+// anon key or any non-user token.
+async function sessionEmail(req: Request): Promise<string> {
+  const t = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!t || t === ANON_KEY) return "";
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${t}` } });
+    if (!r.ok) return "";
+    const u = await r.json();
+    return String(u?.email || "").trim().toLowerCase();
+  } catch { return ""; }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
     const reqBody = await req.json();
-    const { email: rawEmail, eventTypeId, name, timeZone, notes, fileUrl } = reqBody;
-    const email = String(rawEmail || "").trim().toLowerCase();
+    const { eventTypeId, name, timeZone, notes, fileUrl } = reqBody;
+
+    // Prove ownership of the email before spending its paid credits. A redeem
+    // token (from the "package is ready" email) or a logged-in session are both
+    // proof; a bare typed email is only honoured transitionally until the token
+    // rollout is complete (booking page + buyer emails), then removed.
+    let email = "";
+    const token = String(reqBody.redeem_token || "").trim();
+    if (token) {
+      if (!UUID_RE.test(token)) return json({ error: "That booking link is not valid." }, 403);
+      const tr = await sb(`lesson_credits?select=email&redeem_token=eq.${encodeURIComponent(token)}&limit=1`);
+      const trows = tr.ok ? await tr.json() : [];
+      if (!trows.length) return json({ error: "That booking link is not valid." }, 403);
+      email = String(trows[0].email || "").trim().toLowerCase();
+    } else {
+      const authed = await sessionEmail(req);
+      email = authed || String(reqBody.email || "").trim().toLowerCase(); // authed, else transitional typed email
+    }
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Invalid email" }, 400);
     // Accept a list of slots (book several at once) or a single startTime (legacy).
     const rawSlots: string[] = Array.isArray(reqBody.slots) && reqBody.slots.length
