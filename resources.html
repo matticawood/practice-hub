@@ -2442,14 +2442,71 @@ window.colChipClick = async function(colKey, status) {
   await colSetStatus(colKey, status);
 };
 
+// Ask how hard a custom piece was for the member (relative to them). Resolves to
+// 'below' | 'at' | 'above', or null if cancelled. The server RPC maps this to an
+// absolute tier using their practice hours — no roadmap needed on this page.
+function askCustomDifficultyRes(colKey) {
+  if (!document.getElementById("ptidy-modal-css")) {
+    const st = document.createElement("style"); st.id = "ptidy-modal-css";
+    st.textContent =
+      ".ptidy-ov{position:fixed;inset:0;background:rgba(20,16,10,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;animation:ptidyFade .15s ease}" +
+      "@keyframes ptidyFade{from{opacity:0}}" +
+      ".ptidy-ov-card{background:#fffdf9;border-radius:18px;padding:24px 22px 16px;max-width:400px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.30);animation:ptidyPop .2s cubic-bezier(.2,.9,.3,1.15)}" +
+      "@keyframes ptidyPop{from{opacity:0;transform:translateY(10px) scale(.96)}}" +
+      ".ptidy-ov-card h3{margin:0 0 5px;font-size:1.06rem;font-weight:800;line-height:1.3;color:#1a1410}" +
+      ".ptidy-ov-card h3 b{color:#9a6f12}" +
+      ".ptidy-ov-card p{margin:0 0 16px;font-size:.8rem;line-height:1.4;color:#8a8175}" +
+      ".ptidy-opt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border:1.5px solid #ece5d9;background:#faf7f3;border-radius:13px;padding:12px 14px;margin-bottom:9px;cursor:pointer;transition:border-color .12s,background .12s,transform .05s}" +
+      ".ptidy-opt:hover{border-color:#f5c518;background:#fff}.ptidy-opt:active{transform:scale(.99)}" +
+      ".ptidy-opt-txt{flex:1;min-width:0}.ptidy-opt-txt b{display:block;font-size:.9rem;font-weight:800;color:#1a1410}" +
+      ".ptidy-opt-txt small{display:block;font-weight:500;color:#8a8175;margin-top:1px;font-size:.76rem}" +
+      ".ptidy-meter{display:flex;gap:3px;flex-shrink:0}.ptidy-meter i{width:6px;height:20px;border-radius:3px;background:#e8ddc6}.ptidy-meter i.on{background:#f5c518}" +
+      ".ptidy-cancel{display:block;margin:6px auto 0;background:none;border:none;color:#8a8175;font-size:.8rem;cursor:pointer;padding:6px}.ptidy-cancel:hover{color:#1a1410}";
+    document.head.appendChild(st);
+  }
+  return new Promise(resolve => {
+    const title = (myCollection[colKey] && myCollection[colKey].title) || "this piece";
+    const opt = (r, on, label, sub) =>
+      '<button class="ptidy-opt" data-r="' + r + '"><span class="ptidy-opt-txt"><b>' + label + '</b><small>' + sub + '</small></span>' +
+      '<span class="ptidy-meter">' + [0,1,2].map(i => '<i class="' + (i < on ? "on" : "") + '"></i>').join("") + '</span></button>';
+    const ov = document.createElement("div");
+    ov.className = "ptidy-ov";
+    ov.innerHTML =
+      '<div class="ptidy-ov-card">' +
+      '<h3>How did <b>' + escHtml(title) + '</b> feel to learn?</h3>' +
+      '<p>Your honest answer sets its level on your roadmap.</p>' +
+      opt("below", 1, "Comfortable", "I picked it up fairly quickly") +
+      opt("at", 2, "Challenging but achievable", "It took real work") +
+      opt("above", 3, "A real stretch", "Near the top of what I can do") +
+      '<button class="ptidy-cancel" data-cancel>Cancel</button>' +
+      '</div>';
+    document.body.appendChild(ov);
+    const done = v => { ov.remove(); resolve(v); };
+    ov.addEventListener("click", e => { if (e.target === ov) done(null); });
+    ov.querySelector("[data-cancel]").addEventListener("click", () => done(null));
+    ov.querySelectorAll("[data-r]").forEach(b => b.addEventListener("click", () => done(b.dataset.r)));
+  });
+}
+
 async function colSetStatus(colKey, status) {
   if (!await requireAuth()) return;
   if (isCustomKey(colKey)) {
     // Custom piece — update via user_piece_id
     const upId = userPieceIdFromKey(colKey);
-    const { error } = await db.from("user_collections")
-      .update({ status: status }).eq("email", myEmail).eq("user_piece_id", upId);
-    if (error) { showToast("Error updating collection — please try again."); return; }
+    if (status === "completed") {
+      // Finishing a custom piece asks how hard it was FOR YOU; the RPC turns that
+      // into an absolute level (from your practice hours) so it counts toward the
+      // roadmap piece objectives. Cancel = leave the status unchanged.
+      const rating = await askCustomDifficultyRes(colKey);
+      if (!rating) return;
+      const { data: diff, error } = await db.rpc("complete_custom_piece", { p_email: myEmail, p_user_piece_id: upId, p_rating: rating });
+      if (error) { showToast("Error updating collection — please try again."); return; }
+      if (myCollection[colKey] && diff != null) myCollection[colKey].difficulty = diff;
+    } else {
+      const { error } = await db.from("user_collections")
+        .update({ status: status }).eq("email", myEmail).eq("user_piece_id", upId);
+      if (error) { showToast("Error updating collection — please try again."); return; }
+    }
   } else {
     const { error } = await db.rpc("set_collection_status", {
       p_email: myEmail, p_piece_id: Number(colKey), p_status: status

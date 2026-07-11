@@ -6287,10 +6287,13 @@ async function loadPosts() {
     };
   });
 
-  // Hydrate session_data for structured practice log posts
+  // Hydrate session_data for structured practice log posts. A post may bundle
+  // extra_session_ids (the member's other activity that day) — those sessions'
+  // items are merged into the card and their minutes added to the total.
   const logPostsWithSession = _posts.filter(p => p.type === "practice_log" && p.session_id);
   if (logPostsWithSession.length) {
-    const sessionIds = [...new Set(logPostsWithSession.map(p => p.session_id))];
+    const sessionIds = [...new Set(logPostsWithSession.flatMap(p =>
+      [p.session_id, ...(Array.isArray(p.extra_session_ids) ? p.extra_session_ids : [])]).filter(Boolean))];
     const [{ data: sessionRows }, { data: itemRows }] = await Promise.all([
       db.from("practice_sessions").select("id,session_date,duration_minutes,notes,focus_rating").in("id", sessionIds),
       db.from("practice_items").select("id,session_id,item_type,piece_label,label,duration_minutes,notes,sort_order,piece_request,theory_slug").in("session_id", sessionIds).order("sort_order"),
@@ -6298,11 +6301,16 @@ async function loadPosts() {
     const sessionMap = {};
     (sessionRows || []).forEach(s => { sessionMap[s.id] = { ...s, items: [] }; });
     (itemRows    || []).forEach(i => { if (sessionMap[i.session_id]) sessionMap[i.session_id].items.push(i); });
-    _posts = _posts.map(p =>
-      p.session_id && sessionMap[p.session_id]
-        ? { ...p, session_data: sessionMap[p.session_id] }
-        : p
-    );
+    const sumDur = s => s ? (s.duration_minutes || (s.items || []).reduce((a, i) => a + (i.duration_minutes || 0), 0)) : 0;
+    _posts = _posts.map(p => {
+      if (!p.session_id || !sessionMap[p.session_id]) return p;
+      const base = sessionMap[p.session_id];
+      const extras = (Array.isArray(p.extra_session_ids) ? p.extra_session_ids : []).map(id => sessionMap[id]).filter(Boolean);
+      if (!extras.length) return { ...p, session_data: base };
+      const mergedItems = [...base.items, ...extras.flatMap(s => s.items)];
+      const mergedDur = sumDur(base) + extras.reduce((a, s) => a + sumDur(s), 0);
+      return { ...p, session_data: { ...base, items: mergedItems, duration_minutes: mergedDur } };
+    });
   }
 
   // Fetch like/comment counts for content feed posts
