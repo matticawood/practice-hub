@@ -18,10 +18,23 @@ const cors = {
 };
 const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const sb = (path: string) =>
   fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// A logged-in customer's session (OTP-verified) proves ownership of their email.
+async function sessionEmail(req: Request): Promise<string> {
+  const t = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!t || t === ANON_KEY) return "";
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${t}` } });
+    if (!r.ok) return "";
+    const u = await r.json();
+    return String(u?.email || "").trim().toLowerCase();
+  } catch { return ""; }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -38,12 +51,14 @@ Deno.serve(async (req) => {
       const trows = tr.ok ? await tr.json() : [];
       if (!trows.length) return json({ remaining: 0 });
       email = String(trows[0].email || "").toLowerCase();
-    } else if (emailParam && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailParam)) {
-      // Legacy path — kept working until the booking page + emails are fully on
-      // tokens, then removed to close the enumeration oracle.
-      email = emailParam;
     } else {
-      return json({ remaining: 0 });
+      // Prefer a logged-in session (proves ownership). Fall back to the ?email=
+      // lookup transitionally (still used by the app's clinic-booking.html); this
+      // is removed once that page is on sessions, to close the enumeration oracle.
+      const authed = await sessionEmail(req);
+      if (authed) email = authed;
+      else if (emailParam && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailParam)) email = emailParam;
+      else return json({ remaining: 0 });
     }
 
     // Credits are valid for 12 months from purchase — exclude anything older.
