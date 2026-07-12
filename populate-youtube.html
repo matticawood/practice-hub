@@ -252,16 +252,25 @@ function logMsg(msg, cls = "") {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// We only want PERFORMANCE videos, never tutorials / Synthesia falling-notes /
+// lesson / cover uploads. Push the search away from them with negative query
+// terms, then hard-filter the results by title and channel before choosing one.
+const YT_TUTORIAL_RX = /\b(tutorial|synthesia|how to play|lesson|learn (to play|piano)|play[- ]?along|easy piano|slowed|midi|note[- ]?names|falling notes)\b/i;
 async function searchYouTube(query) {
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=1&key=${getYtKey()}`;
+  const q = query + ' -tutorial -synthesia -"how to play" -lesson';
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&videoEmbeddable=true&maxResults=10&key=${getYtKey()}`;
   const res = await fetch(url);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error?.message || `HTTP ${res.status}`);
   }
   const data = await res.json();
-  if (!data.items || data.items.length === 0) return null;
-  return `https://www.youtube.com/watch?v=${data.items[0].id.videoId}`;
+  const items = (data.items || []).filter(it => {
+    const t = it.snippet?.title || "", c = it.snippet?.channelTitle || "";
+    return !YT_TUTORIAL_RX.test(t) && !YT_TUTORIAL_RX.test(c);
+  });
+  if (!items.length) return null;   // no clean performance found -> leave blank (flagged) rather than link a tutorial
+  return `https://www.youtube.com/watch?v=${items[0].id.videoId}`;
 }
 
 async function saveYoutubeUrl(pieceId, url) {
