@@ -504,6 +504,16 @@
     if(v&&typeof v==='object'){const o={};for(const k in v)o[k]=sanitizeDashes(v[k]);return o;}
     return v;
   }
+  // Deterministic house-style fixes the model sometimes misses: British -ise
+  // practise spellings, and "staff" for the notation lines (house rule: stave).
+  function sanitizeHouseStyle(v){
+    if(typeof v==='string') return v
+      .replace(/([Pp])ractis(e|es|ed|ing)/g,'$1ractic$2')
+      .replace(/\bstaff\b/g,'stave').replace(/\bStaff\b/g,'Stave').replace(/\bstaffs\b/g,'staves');
+    if(Array.isArray(v)) return v.map(sanitizeHouseStyle);
+    if(v&&typeof v==='object'){const o={};for(const k in v)o[k]=sanitizeHouseStyle(v[k]);return o;}
+    return v;
+  }
   function genPrompt(topic, category){
     return `You are writing a "Piano Practice Daily" piano-theory article for piano students of all levels. Produce a polished, genuinely interesting multi-page article.
 
@@ -514,6 +524,13 @@ ACCURACY (most important) — you have a web_search tool, use it
 - For anything about a real person, group, place, event, piece or dated fact (especially a composer or pianist), USE web search to verify the specifics before writing them: dates, birthplaces, teachers, competition results and placings, prizes, premieres, recordings, biographical claims. Do not rely on memory.
 - Be especially careful with competition results and awards. Do NOT say someone won a competition, prize or title unless web search confirms it. Reaching a final or placing is NOT winning. If unsure, generalise or leave it out.
 - If web search cannot confirm a detail, do not state it. Never guess a date, result or fact to fill space. Do not invent quotations, anecdotes, opus numbers or statistics.
+
+MUSIC THEORY ACCURACY (check every claim from first principles by spelling it out)
+- Spell out every chord, interval and scale degree before writing it. State intervals and directions precisely (the correct interval name, and up vs down).
+- A perfect fifth is SEVEN semitones (not five). A 4-3 suspension suspends the fourth above the bass resolving down to the third: over a G bass that is C resolving to B, not F to E (F over G is a 7-6). Over Dm7-G7-Cmaj7 the two guide-tone voices are C to B and F to E.
+- "Fully diminished" means the diminished SEVENTH chord; a triad on the leading note is a diminished TRIAD. An Alberti bass is single notes in sequence (low, high, middle, high), never two notes struck together.
+- A pivot (common) chord in a modulation must be diatonic to BOTH keys. Check each Roman numeral and figured-bass figure (6/4, 6/3) against the actual notes.
+- Register numbers: middle C is C4, so two octaves below it is C2. Double-check any pitch label.
 
 AUDIENCE AND CLARITY
 - Write so a complete beginner can follow, while still giving real depth for intermediate and advanced players.
@@ -532,6 +549,15 @@ STRUCTURE
 - takeaways: 3 to 5 short closing points, AND a "takeawaysKind":
   * "practice" for a technique, theory concept or skill the reader can work on (titled "Practice This", concrete things to practise).
   * "takeaways" for a biographical, historical or appreciation topic such as a composer or pianist, where there is nothing to literally practise (titled "Key Takeaways", the key things worth remembering). For a composer or pianist article, use "takeaways".
+
+HOUSE STYLE AND TEACHING APPROACH (strict)
+- Spelling: always "practice", "practicing", "practiced" (with a c), never the -ise/-ising/-ised forms.
+- Always "stave" (the five lines of notation), never "staff".
+- Do not write that the reader will "meet" a concept, term or passage; use "see", "find" or "encounter".
+- Count rhythm and subdivisions numerically, e.g. "1-2-3" across a beat, never "1-and-a" or "1-la-li".
+- This teacher does NOT teach through "five-finger patterns" or a "five-finger position". Never frame technique or beginner pieces that way; instead use slow, deliberate, isolated single-finger and short-passage work, or describe a melody as staying within a small hand span.
+- Do NOT frame anything around exams, examiners, grades, exam syllabuses, competition judges or "assessment". Teach reading, listening and musicianship for their own sake. (Referring to a piece's general difficulty is fine.)
+- Avoid forced or cheesy analogies (no beach towels, ocean waves and the like). Explain plainly.
 
 HARD RULES
 - NEVER use an em dash or en dash. Use commas, periods, parentheses, or "to" for ranges.
@@ -599,6 +625,31 @@ Return JSON only, no markdown fences:
     const c2=raw.slice(s,e+1);
     try{return JSON.parse(c2);}catch(_){return JSON.parse(repairJson(c2));}
   }
+  // Second pass: re-read the finished draft and fix music-theory errors,
+  // house-style breaks and exam/five-finger framing before it reaches the editor.
+  function auditPrompt(art){
+    return `You are the accuracy and house-style editor for "Piano Practice Daily" articles. Below is a drafted article as JSON. Review EVERY block and correct any problem, leaving everything already correct untouched.
+
+1. MUSIC THEORY / FACTUAL: spell out every chord, interval and scale degree and fix anything wrong. Watch for: a 4-3 suspension mislabelled (a 4-3 suspends the fourth above the bass resolving to the third; over a G bass that is C to B, not F to E); wrong guide-tone lines (over Dm7-G7-Cmaj7 the voices are C to B and F to E); a perfect fifth called "five semitones" (it is seven); "fully diminished" used for a diminished triad; an Alberti bass described as two notes struck together (it is single notes); a modulation pivot chord that is not diatonic to BOTH keys; wrong inversion figures (6/4, 6/3), Roman numerals, register numbers (middle C is C4, so two octaves below is C2), dates, names, opus numbers or quotations. If a real-person or dated fact looks doubtful, use web search to check it.
+2. HOUSE STYLE: "practice"/"practicing"/"practiced" with a c (never -ise); "stave" not "staff"; never "meet" a concept (use see/find/encounter); count rhythm numerically ("1-2-3"), never "1-and-a"; no em or en dashes.
+3. TEACHING APPROACH: remove any "five-finger pattern" or "five-finger position" framing, and any exam / examiner / grade / syllabus / assessment / competition-judge framing, while keeping the musical substance. Remove forced analogies (beach towels, ocean waves and the like).
+
+Return the FULL corrected article as the SAME JSON shape, no markdown fences and no commentary. Keep it JSON-safe: no double quote inside any string value (use single quotes for names and nicknames).
+
+ARTICLE:
+${JSON.stringify(art)}`;
+  }
+  async function auditArticle(apiKey, art){
+    let raw;
+    try{
+      raw=await anthropicMessage(apiKey,{model:'claude-sonnet-4-6',max_tokens:8000,tools:[{type:'web_search_20250305',name:'web_search',max_uses:4}],messages:[{role:'user',content:auditPrompt(art)}]});
+    }catch(_){ return art; } // if the audit call fails, keep the original draft
+    const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
+    if(s===-1) return art;
+    let fixed;
+    try{ fixed=await parseLoose(apiKey, raw.slice(s,e+1)); }catch(_){ return art; }
+    return (fixed&&Array.isArray(fixed.pages)&&fixed.pages.length) ? fixed : art;
+  }
   async function generateArticle(){
     const apiKey=document.getElementById('api-key').value.trim();
     const topic=document.getElementById('gen-topic').value.trim();
@@ -606,15 +657,19 @@ Return JSON only, no markdown fences:
     if(!topic){ genErr('Please describe the topic.'); return; }
     document.getElementById('gen-error').classList.remove('visible');
     document.getElementById('gen-spinner').classList.add('visible');
+    const spinMsg=document.getElementById('gen-spinner-msg'); spinMsg.textContent='Writing your article…';
     document.getElementById('gen-btn').disabled=true;
     try{
       const category=document.getElementById('f-category').value.trim();
-      let art=sanitizeDashes(await callClaude(apiKey,genPrompt(topic,category)));
+      let art=await callClaude(apiKey,genPrompt(topic,category));
       if(!art||!Array.isArray(art.pages)||!art.pages.length) throw new Error('Bad shape returned, try again.');
+      spinMsg.textContent='Checking accuracy and house style…';
+      art=await auditArticle(apiKey, art);
+      art=sanitizeHouseStyle(sanitizeDashes(art));
       loadContent(art);
       closeGenerate();
     }catch(err){ genErr(err.message||'Something went wrong.'); }
-    finally{ document.getElementById('gen-spinner').classList.remove('visible'); document.getElementById('gen-btn').disabled=false; }
+    finally{ document.getElementById('gen-spinner').classList.remove('visible'); document.getElementById('gen-btn').disabled=false; spinMsg.textContent='Writing your article…'; }
   }
   function genErr(m){ const el=document.getElementById('gen-error'); el.textContent=m; el.classList.add('visible'); }
 
