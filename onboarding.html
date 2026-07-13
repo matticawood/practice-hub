@@ -81,13 +81,13 @@
     .field label {
       font-size: 0.82rem; font-weight: 600; color: var(--text);
     }
-    .field input, .field textarea {
+    .field input, .field textarea, .field select {
       width: 100%; background: #1a1a1a;
       border: 1.5px solid var(--border); border-radius: 10px;
       color: var(--text); font-size: 0.95rem; padding: 11px 13px;
       font-family: inherit; transition: border-color .15s; outline: none;
     }
-    .field input:focus, .field textarea:focus { border-color: var(--accent); }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
     .field textarea { resize: none; height: 90px; }
     .field-hint { font-size: 0.75rem; color: var(--muted); }
 
@@ -189,6 +189,8 @@
     <div class="step-dot" id="dot-3"></div>
     <div class="step-line"></div>
     <div class="step-dot" id="dot-4"></div>
+    <div class="step-line"></div>
+    <div class="step-dot" id="dot-5"></div>
   </div>
 
   <!-- ── Step 0: Name ── -->
@@ -306,9 +308,44 @@
         <input id="twitter-input" type="text" placeholder="username" />
       </div>
     </div>
+    <button class="btn-primary" onclick="go(5)">Continue →</button>
+    <button class="btn-skip" onclick="go(5)">Skip for now</button>
+  </div>
+
+  <!-- ── Step 5: Prior experience ── -->
+  <div class="step" id="step-5">
+    <div class="step-header">
+      <h1>Have you played before?</h1>
+      <p>Tell us roughly how much you've practised, so we start you at the right level rather than from scratch. Brand new? Just tap "I'm just starting".</p>
+    </div>
+    <div class="field">
+      <label for="exp-years">How long have you been playing? <span style="font-weight:400;color:var(--muted)">(years)</span></label>
+      <input id="exp-years" type="number" min="0" step="0.5" placeholder="e.g. 2" inputmode="decimal" oninput="updateExpEstimate()" />
+      <span class="field-hint">Under a year? Use a decimal — e.g. 0.5 for about six months.</span>
+    </div>
+    <div class="field">
+      <label for="exp-days">On average, how many days a week?</label>
+      <input id="exp-days" type="number" min="0" max="7" step="1" placeholder="e.g. 4" inputmode="numeric" oninput="updateExpEstimate()" />
+    </div>
+    <div class="field">
+      <label for="exp-mins">Roughly how long per session?</label>
+      <select id="exp-mins" onchange="updateExpEstimate()">
+        <option value="">Select…</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="45">45 minutes</option>
+        <option value="60">1 hour</option>
+        <option value="75">1 hr 15 min</option>
+        <option value="90">1 hr 30 min</option>
+        <option value="120">2 hours</option>
+        <option value="180">3 hours or more</option>
+      </select>
+      <span class="field-hint">Give a realistic average — across your good and quiet weeks.</span>
+    </div>
+    <div class="field-hint" id="exp-estimate" style="min-height:1.3em;color:var(--accent);font-weight:600"></div>
     <div class="error-msg" id="finish-error"></div>
     <button class="btn-primary" id="finish-btn" onclick="finish()">Let's go →</button>
-    <button class="btn-skip" onclick="finish()">Skip for now</button>
+    <button class="btn-skip" onclick="finish()">I'm just starting →</button>
   </div>
 
 </div>
@@ -343,7 +380,7 @@ const SUPA_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
 const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
 const db = supabase.createClient(SUPA_URL, SUPA_ANON);
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 let myEmail      = null;
 let _currentStep = 0;
 let _croppedBlob = null;
@@ -357,16 +394,29 @@ let _croppedBlob = null;
   }
   myEmail = session.user.email;
 
-  // If already onboarded, skip straight to dashboard
+  // If already onboarded, skip straight to dashboard — unless ?preview is set,
+  // which lets the owner walk the flow to review it without resetting any flag.
+  const _preview = new URLSearchParams(location.search).has("preview");
   const { data: ae } = await db.from("allowed_emails")
-    .select("onboarded,name").eq("email", myEmail).maybeSingle();
-  if (ae?.onboarded) {
+    .select("onboarded,name,headline,instrument,bio,location,website,instagram,youtube,twitter,avatar_url")
+    .eq("email", myEmail).maybeSingle();
+  if (ae?.onboarded && !_preview) {
     window.location.replace("/practice-log.html");
     return;
   }
 
-  // Pre-fill name if already set
-  if (ae?.name) document.getElementById("name-input").value = ae.name;
+  // Pre-fill any existing profile data so re-running onboarding never blanks it.
+  const _setv = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+  _setv("name-input", ae?.name);       _setv("headline-input", ae?.headline);
+  _setv("instrument-input", ae?.instrument); _setv("bio-input", ae?.bio);
+  _setv("location-input", ae?.location); _setv("website-input", ae?.website);
+  _setv("instagram-input", ae?.instagram); _setv("youtube-input", ae?.youtube);
+  _setv("twitter-input", ae?.twitter);
+  if (ae?.avatar_url) {
+    const p = document.getElementById("avatar-preview");
+    // Keep the #avatar-initials span in the DOM (go() references it); just add the photo alongside.
+    if (p && !p.querySelector("img")) p.insertAdjacentHTML("afterbegin", `<img src="${ae.avatar_url}" alt="" />`);
+  }
   document.getElementById("name-input").focus();
 })();
 
@@ -381,9 +431,10 @@ function go(n) {
       return;
     }
     document.getElementById("name-error").textContent = "";
-    // Update initials preview for photo step
+    // Update initials preview for photo step (may be absent if a photo is already shown)
     const ini = name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
-    document.getElementById("avatar-initials").textContent = ini;
+    const _initEl = document.getElementById("avatar-initials");
+    if (_initEl) _initEl.textContent = ini;
   }
 
   document.getElementById(`step-${_currentStep}`).classList.remove("active");
@@ -410,6 +461,23 @@ async function finish() {
   const instagram = document.getElementById("instagram-input").value.trim() || null;
   const youtube   = document.getElementById("youtube-input").value.trim()   || null;
   const twitter   = document.getElementById("twitter-input").value.trim()   || null;
+
+  // Prior experience → practice_baseline (seeds roadmap LEVEL only; never counts
+  // toward streaks/achievements/leaderboards — those read logged practice). We just
+  // do the maths and write the same row a manual "prior hours" entry would.
+  const expYears = parseFloat(document.getElementById("exp-years").value) || 0;
+  const expDays  = parseFloat(document.getElementById("exp-days").value)  || 0;
+  const expMins  = parseInt(document.getElementById("exp-mins").value, 10) || 0;
+  const priorMinutes = Math.round(expYears * 52 * expDays * expMins);   // weeks × days/wk × min/session
+  if (priorMinutes > 0) {
+    try {
+      await db.from("practice_baseline").upsert(
+        { email: myEmail, total_minutes: priorMinutes,
+          split: { repertoire: 45, technique: 25, sight_reading: 10, musicianship: 20 },
+          updated_at: new Date().toISOString() },
+        { onConflict: "email" });
+    } catch (e) { console.warn("baseline save failed:", e?.message || e); }  // don't block onboarding
+  }
 
   // Upload photo if cropped
   let avatarUrl = null;
@@ -439,6 +507,18 @@ async function finish() {
   }
 
   window.location.replace("/practice-log.html");
+}
+
+// ── Prior-experience live estimate ────────────────────────────────────
+function updateExpEstimate() {
+  const y = parseFloat(document.getElementById("exp-years").value) || 0;
+  const d = parseFloat(document.getElementById("exp-days").value)  || 0;
+  const m = parseInt(document.getElementById("exp-mins").value, 10) || 0;
+  const hrs = Math.round(y * 52 * d * m / 60);
+  const el = document.getElementById("exp-estimate");
+  el.textContent = hrs > 0
+    ? `≈ ${hrs.toLocaleString()} hours of prior practice — we'll start you at the right level.`
+    : "";
 }
 
 // ── Photo handling ────────────────────────────────────────────────────
