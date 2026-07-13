@@ -158,11 +158,14 @@
     let hiEnd = opts.to != null ? noteToMidi(opts.to) : null;
     if (lo == null) lo = (hi.length ? Math.min.apply(null, hi) : 60) - 2;
     if (hiEnd == null) hiEnd = (hi.length ? Math.max.apply(null, hi) : 71) + 2;
-    while (_BLACK[pcMod(lo)]) lo--;
-    while (pcMod(lo) !== 0) lo--;               // start the keyboard on a C
+    while (_BLACK[pcMod(lo)]) lo--;              // never start on a black key
+    if (!opts.full) while (pcMod(lo) !== 0) lo--; // start on a C (skipped for a full-piano diagram)
     while (_BLACK[pcMod(hiEnd)]) hiEnd++;        // end on a white key
     if (hiEnd - lo < 12) hiEnd = lo + 12;
-    if (hiEnd - lo > 48) hiEnd = lo + 24;        // clamp to 2 octaves so keys never get too thin
+    // Normally clamp to 2 octaves so interactive keys never get too thin. A "full"
+    // keyboard (opts.full) is a non-interactive orientation diagram of the whole
+    // piano (e.g. show where middle C sits), so it keeps its full range.
+    if (!opts.full && hiEnd - lo > 48) hiEnd = lo + 24;
     const hiSet = {}; hi.forEach(m => { hiSet[m] = 1; });
     const whites = [];
     for (let m = lo; m <= hiEnd; m++) if (!_BLACK[pcMod(m)]) whites.push(m);
@@ -291,7 +294,8 @@
           <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
       }
       case "keyboard": {
-        const live = b.playable === false ? "" : " lr-kbd-live";
+        // A full-piano orientation diagram is not clickable (keys are too thin to play).
+        const live = (b.playable === false || b.full) ? "" : " lr-kbd-live";
         const notesJson = esc(JSON.stringify(b.highlight || []));
         const head = (b.label || (b.highlight && b.highlight.length))
           ? `<div class="lr-kbd-head">${b.label ? `<span class="lr-kbd-label">${esc(b.label)}</span>` : ""}${(b.highlight && b.highlight.length) ? `<button type="button" class="lr-kbd-play" data-notes="${notesJson}"><span class="lr-play-ico">&#9654;</span> Play</button>` : ""}</div>`
