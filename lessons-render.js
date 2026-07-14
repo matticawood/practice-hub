@@ -223,8 +223,8 @@
   function buildHandHTML() {
     // [leftPct, topPct, number] per fingertip, left hand then right hand
     const fn = [
-      [12.0, 19.0, 5], [18.0, 7.0, 4], [25.0, 1.5, 3], [32.5, 4.5, 2], [40.0, 29.0, 1],
-      [60.0, 29.0, 1], [67.5, 4.5, 2], [72.5, 1.5, 3], [80.0, 7.0, 4], [87.0, 19.0, 5]
+      [12.5, 19.0, 5], [18.0, 7.0, 4], [25.5, 1.5, 3], [33.5, 4.5, 2], [42.0, 31.0, 1],
+      [58.0, 31.0, 1], [66.5, 4.5, 2], [71.0, 1.5, 3], [79.5, 7.0, 4], [86.5, 19.0, 5]
     ];
     const dots = fn.map(([x, y, n]) => `<span class="lr-fn" style="left:${x}%;top:${y}%">${n}</span>`).join("");
     return `<div class="lr-hand-wrap"><img src="/assets/hands-fingers.png" alt="Two hands, backs up, with finger numbers 1 to 5 on each fingertip" loading="lazy">${dots}</div>`;
@@ -655,7 +655,7 @@
     .lr-hand{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
     .lr-hand-wrap{position:relative;max-width:460px;margin:0 auto;container-type:inline-size;aspect-ratio:3/2}
     .lr-hand-wrap img{display:block;width:100%;height:auto}
-    .lr-fn{position:absolute;transform:translate(-50%,-50%);width:clamp(24px,7.4cqw,34px);height:clamp(24px,7.4cqw,34px);border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font-weight:800;font-size:clamp(13px,4cqw,17px);line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(60,40,20,.35)}
+    .lr-fn{position:absolute;transform:translate(-50%,-50%);width:clamp(21px,6.2cqw,29px);height:clamp(21px,6.2cqw,29px);border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font-weight:800;font-size:clamp(12px,3.4cqw,15px);line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(60,40,20,.35)}
     .lr-hand .lr-cap{margin-top:8px}
     /* Circled finger number on a keyboard key. */
     .lr-key-w .lr-key-fg{position:absolute;bottom:8%;left:50%;transform:translateX(-50%);width:20px;height:20px;border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font:700 12px/20px system-ui;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.25)}
