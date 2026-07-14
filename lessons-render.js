@@ -216,31 +216,18 @@
     return s + `</svg>`;
   }
 
-  // Right-hand diagram with circled finger numbers 1-5 on the fingertips (thumb = 1).
-  // Built from capsule fingers + palm + thumb, drawn twice — an edge-coloured layer at
-  // full size behind a fill-coloured layer inset by 3px — so the overlapping parts union
-  // into one clean hand silhouette with a single outline and no internal seams. Teaches
-  // finger numbers before any notes. Returns an SVG string.
-  function buildHandSVG() {
-    const FILL = "#f6e7c0", EDGE = "#d9b874";
-    const fingers = [
-      { x: 112, y: 66, w: 30, h: 128 }, // index (2)
-      { x: 148, y: 44, w: 30, h: 150 }, // middle (3)
-      { x: 184, y: 60, w: 30, h: 134 }, // ring (4)
-      { x: 218, y: 92, w: 26, h: 102 }  // pinky (5)
+  // Finger-number diagram: a real line-drawing of both hands (backs up, as they sit on
+  // the keys) with gold circled numbers 1-5 laid over each fingertip. Both thumbs are 1,
+  // meeting in the middle, counting out to 5 on each side. Badge positions are percentages
+  // of the image (1536x1024), calibrated to the fingertips. Returns the wrap HTML.
+  function buildHandHTML() {
+    // [leftPct, topPct, number] per fingertip, left hand then right hand
+    const fn = [
+      [12.0, 27.5, 5], [18.5, 15.0, 4], [26.0, 9.5, 3], [32.5, 13.0, 2], [42.5, 37.5, 1],
+      [57.0, 37.5, 1], [66.5, 13.0, 2], [73.5, 10.0, 3], [80.5, 15.0, 4], [87.5, 27.5, 5]
     ];
-    const palm = { x: 100, y: 150, w: 152, h: 130, rx: 42 };
-    const thumb = { x: 86, y: 150, w: 32, h: 118, rot: 42, cx: 104, cy: 178 };
-    const cap = (r, ins) => { const w = r.w - 2 * ins; return `<rect x="${r.x + ins}" y="${r.y + ins}" width="${w}" height="${r.h - 2 * ins}" rx="${w / 2}"/>`; };
-    const palmR = ins => `<rect x="${palm.x + ins}" y="${palm.y + ins}" width="${palm.w - 2 * ins}" height="${palm.h - 2 * ins}" rx="${palm.rx - ins}"/>`;
-    const thumbR = ins => { const w = thumb.w - 2 * ins; return `<g transform="rotate(${thumb.rot} ${thumb.cx} ${thumb.cy})"><rect x="${thumb.x + ins}" y="${thumb.y + ins}" width="${w}" height="${thumb.h - 2 * ins}" rx="${w / 2}"/></g>`; };
-    const shapes = ins => thumbR(ins) + fingers.map(f => cap(f, ins)).join("") + palmR(ins);
-    const badge = (cx, cy, n) => `<circle cx="${cx}" cy="${cy}" r="16" fill="#f5c518"/><text x="${cx}" y="${cy + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#3a2c00">${n}</text>`;
-    return `<svg viewBox="0 0 320 300" xmlns="http://www.w3.org/2000/svg" class="lr-hand-svg" font-family="system-ui">`
-      + `<g fill="${EDGE}">${shapes(0)}</g>`
-      + `<g fill="${FILL}">${shapes(3)}</g>`
-      + badge(54, 238, 1) + badge(127, 66, 2) + badge(163, 44, 3) + badge(199, 60, 4) + badge(231, 92, 5)
-      + `</svg>`;
+    const dots = fn.map(([x, y, n]) => `<span class="lr-fn" style="left:${x}%;top:${y}%">${n}</span>`).join("");
+    return `<div class="lr-hand-wrap"><img src="/assets/hands-fingers.png" alt="Two hands, backs up, with finger numbers 1 to 5 on each fingertip" loading="lazy">${dots}</div>`;
   }
 
   // ── Minimal, safe markdown → HTML (bold, italic, code, links, lists) ──
@@ -382,8 +369,8 @@
         return `<figure class="lr-prestaff"><div class="lr-ps-out" data-spec="${spec}"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>${playBtn}`;
       }
       case "hand": {
-        // Right-hand diagram with circled finger numbers 1-5 (teaches finger numbers).
-        return `<figure class="lr-hand">${buildHandSVG()}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
+        // Both-hands diagram with circled finger numbers 1-5 (teaches finger numbers).
+        return `<figure class="lr-hand">${buildHandHTML()}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
       case "task":
         return `<div class="lr-task"><div class="lr-task-label">Your task</div>
@@ -664,9 +651,11 @@
     .lr-prestaff{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
     .lr-ps-svg{display:block;width:100%;max-width:100%;height:auto}
     .lr-prestaff .lr-cap{margin-top:8px}
-    /* Right-hand finger-number diagram: framed card, responsive SVG (capped width). */
+    /* Finger-number diagram: framed card, real hand image with number badges overlaid. */
     .lr-hand{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
-    .lr-hand-svg{display:block;width:100%;max-width:300px;height:auto;margin:0 auto}
+    .lr-hand-wrap{position:relative;max-width:460px;margin:0 auto;container-type:inline-size;aspect-ratio:3/2}
+    .lr-hand-wrap img{display:block;width:100%;height:auto}
+    .lr-fn{position:absolute;transform:translate(-50%,-50%);width:clamp(24px,7.4cqw,34px);height:clamp(24px,7.4cqw,34px);border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font-weight:800;font-size:clamp(13px,4cqw,17px);line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(60,40,20,.35)}
     .lr-hand .lr-cap{margin-top:8px}
     /* Circled finger number on a keyboard key. */
     .lr-key-w .lr-key-fg{position:absolute;bottom:8%;left:50%;transform:translateX(-50%);width:20px;height:20px;border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font:700 12px/20px system-ui;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.25)}
