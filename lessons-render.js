@@ -226,8 +226,8 @@
     // the fingertip midpoint and sits just above its tip; the thumb badge caps the
     // detected thumb-tip extremity. x = % of image width, y = % of image height.
     const fn = [
-      [11.8, 18.1, 5], [19.0, 6.1, 4], [26.1, 0.5, 3], [33.5, 4.5, 2], [43.3, 30.5, 1],
-      [55.3, 30.3, 1], [65.1, 4.6, 2], [72.4, 0.5, 3], [79.6, 6.1, 4], [86.7, 18.1, 5]
+      [11.8, 18.1, 5], [19.0, 6.1, 4], [26.1, 0.5, 3], [33.5, 4.5, 2], [43.3, 28.0, 1],
+      [55.3, 27.8, 1], [65.1, 4.6, 2], [72.4, 0.5, 3], [79.6, 6.1, 4], [86.7, 18.1, 5]
     ];
     const dots = fn.map(([x, y, n]) => `<span class="lr-fn" style="left:${x}%;top:${y}%">${n}</span>`).join("");
     return `<div class="lr-hand-wrap"><img src="/assets/hands-fingers.png" alt="Two hands, backs up, with finger numbers 1 to 5 on each fingertip" loading="lazy">${dots}</div>`;
