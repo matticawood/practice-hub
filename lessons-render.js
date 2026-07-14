@@ -496,31 +496,25 @@
           // distributed and normal note size, whether the line is open-ended or closed
           // with a final bar line. staffwidth tracks the container so it stays responsive.
           const full = Math.max(260, (out.clientWidth || 660) - 4);
-          // A viewBox (added below) scales the drawing to the container width, so the
-          // apparent note size is container/staffwidth. To make a "hero" stave read
-          // bigger, pack the music into a narrower staffwidth so it magnifies on display.
-          // abcjs `scale` makes the notes bigger while staffwidth caps the total width,
-          // so a "hero" stave reads large and still fits the column (like a method book).
-          const heroScale = parseFloat(fig.dataset.scale) || 1;
-          const isHero = heroScale > 1;
-          // A hero stave renders at natural (scaled) size like a method book: no
-          // %%stretchlast and no viewBox rewrite (both of which distort at scale).
-          window.ABCJS.renderAbc(out, (isHero ? "" : "%%stretchlast 1\n") + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full, scale: heroScale });
-          // abcjs gives the SVG fixed width/height attributes but NO viewBox, so CSS
-          // "max-width:100%" shrinks the SVG's box without scaling its content — on any
-          // width narrower than the drawing (mobile, the studio preview) the right side
-          // overflows and the final bar line is clipped off. Adding a viewBox makes the
-          // content scale with the box, so the whole stave (final bar line included)
-          // stays visible at every width.
-          const s = out.querySelector("svg");
-          if (s && !isHero && !s.getAttribute("viewBox")) {
-            // Base the viewBox on the actual drawn content (getBBox), not abcjs's
-            // width/height attrs: slurs/ties arc above or below the staff (into
-            // negative y or past the height), and a "0 0 w h" viewBox clips them.
-            let vb = null;
-            try { const bb = s.getBBox(); const p = 3; if (bb.width && bb.height) vb = (bb.x - p) + " " + (bb.y - p) + " " + (bb.width + p * 2) + " " + (bb.height + p * 2); } catch (e) {}
-            if (!vb) { const w = parseFloat(s.getAttribute("width")), h = parseFloat(s.getAttribute("height")); if (w && h) vb = "0 0 " + w + " " + h; }
-            if (vb) { s.setAttribute("viewBox", vb); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); }
+          const isHero = (parseFloat(fig.dataset.scale) || 1) > 1;
+          if (isHero) {
+            // Hero stave: lay the music out in a narrow staffwidth so the notes read
+            // large, then let abcjs's responsive:"resize" scale the whole SVG (viewBox +
+            // width:100%) to the column at ANY width. This keeps it big on desktop, scales
+            // it down to fit on mobile (no clipping), and keeps the final bar line in view.
+            window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 5, paddingbottom: 5, staffwidth: 380, responsive: "resize" });
+          } else {
+            window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full });
+            // abcjs gives the SVG fixed width/height attributes but NO viewBox, so CSS
+            // "max-width:100%" shrinks the box without scaling content and clips the right
+            // edge on narrow widths. A getBBox-based viewBox makes the whole stave scale.
+            const s = out.querySelector("svg");
+            if (s && !s.getAttribute("viewBox")) {
+              let vb = null;
+              try { const bb = s.getBBox(); const p = 3; if (bb.width && bb.height) vb = (bb.x - p) + " " + (bb.y - p) + " " + (bb.width + p * 2) + " " + (bb.height + p * 2); } catch (e) {}
+              if (!vb) { const w = parseFloat(s.getAttribute("width")), h = parseFloat(s.getAttribute("height")); if (w && h) vb = "0 0 " + w + " " + h; }
+              if (vb) { s.setAttribute("viewBox", vb); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); }
+            }
           }
           out.dataset.done = "1";
         } catch (e) { out.innerHTML = '<div class="lr-abc-err">This notation could not be rendered.</div>'; }
