@@ -223,8 +223,8 @@
   function buildHandHTML() {
     // [leftPct, topPct, number] per fingertip, left hand then right hand
     const fn = [
-      [12.0, 27.5, 5], [18.5, 15.0, 4], [26.0, 9.5, 3], [32.5, 13.0, 2], [42.5, 37.5, 1],
-      [57.0, 37.5, 1], [66.5, 13.0, 2], [73.5, 10.0, 3], [80.5, 15.0, 4], [87.5, 27.5, 5]
+      [12.0, 20.0, 5], [18.5, 9.0, 4], [26.0, 4.0, 3], [31.5, 7.0, 2], [41.0, 29.5, 1],
+      [58.0, 29.5, 1], [67.8, 7.0, 2], [74.0, 4.0, 3], [81.0, 9.0, 4], [88.0, 20.0, 5]
     ];
     const dots = fn.map(([x, y, n]) => `<span class="lr-fn" style="left:${x}%;top:${y}%">${n}</span>`).join("");
     return `<div class="lr-hand-wrap"><img src="/assets/hands-fingers.png" alt="Two hands, backs up, with finger numbers 1 to 5 on each fingertip" loading="lazy">${dots}</div>`;
