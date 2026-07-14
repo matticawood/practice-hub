@@ -217,22 +217,30 @@
   }
 
   // Right-hand diagram with circled finger numbers 1-5 on the fingertips (thumb = 1).
-  // Used to teach finger numbers before any notes. Returns an SVG string.
+  // Built from capsule fingers + palm + thumb, drawn twice — an edge-coloured layer at
+  // full size behind a fill-coloured layer inset by 3px — so the overlapping parts union
+  // into one clean hand silhouette with a single outline and no internal seams. Teaches
+  // finger numbers before any notes. Returns an SVG string.
   function buildHandSVG() {
-    return `<svg viewBox="0 0 300 240" xmlns="http://www.w3.org/2000/svg" class="lr-hand-svg" font-family="system-ui">`
-      + `<path d="M70 235 Q60 150 78 130 L110 118 Q150 112 195 122 L222 140 Q238 165 232 210 Q228 238 200 238 Z" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
-      + `<rect x="86" y="70" width="24" height="70" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
-      + `<rect x="118" y="46" width="24" height="94" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
-      + `<rect x="150" y="58" width="24" height="82" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
-      + `<rect x="182" y="80" width="22" height="62" rx="11" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
-      + `<g transform="rotate(38 70 175)"><rect x="34" y="150" width="24" height="66" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/></g>`
-      + `<g font-weight="800" font-size="17" text-anchor="middle">`
-      + `<circle cx="40" cy="150" r="15" fill="#f5c518"/><text x="40" y="156" fill="#3a2c00">1</text>`
-      + `<circle cx="98" cy="66" r="15" fill="#f5c518"/><text x="98" y="72" fill="#3a2c00">2</text>`
-      + `<circle cx="130" cy="42" r="15" fill="#f5c518"/><text x="130" y="48" fill="#3a2c00">3</text>`
-      + `<circle cx="162" cy="54" r="15" fill="#f5c518"/><text x="162" y="60" fill="#3a2c00">4</text>`
-      + `<circle cx="193" cy="76" r="15" fill="#f5c518"/><text x="193" y="82" fill="#3a2c00">5</text>`
-      + `</g></svg>`;
+    const FILL = "#f6e7c0", EDGE = "#d9b874";
+    const fingers = [
+      { x: 112, y: 66, w: 30, h: 128 }, // index (2)
+      { x: 148, y: 44, w: 30, h: 150 }, // middle (3)
+      { x: 184, y: 60, w: 30, h: 134 }, // ring (4)
+      { x: 218, y: 92, w: 26, h: 102 }  // pinky (5)
+    ];
+    const palm = { x: 100, y: 150, w: 152, h: 130, rx: 42 };
+    const thumb = { x: 86, y: 150, w: 32, h: 118, rot: 42, cx: 104, cy: 178 };
+    const cap = (r, ins) => { const w = r.w - 2 * ins; return `<rect x="${r.x + ins}" y="${r.y + ins}" width="${w}" height="${r.h - 2 * ins}" rx="${w / 2}"/>`; };
+    const palmR = ins => `<rect x="${palm.x + ins}" y="${palm.y + ins}" width="${palm.w - 2 * ins}" height="${palm.h - 2 * ins}" rx="${palm.rx - ins}"/>`;
+    const thumbR = ins => { const w = thumb.w - 2 * ins; return `<g transform="rotate(${thumb.rot} ${thumb.cx} ${thumb.cy})"><rect x="${thumb.x + ins}" y="${thumb.y + ins}" width="${w}" height="${thumb.h - 2 * ins}" rx="${w / 2}"/></g>`; };
+    const shapes = ins => thumbR(ins) + fingers.map(f => cap(f, ins)).join("") + palmR(ins);
+    const badge = (cx, cy, n) => `<circle cx="${cx}" cy="${cy}" r="16" fill="#f5c518"/><text x="${cx}" y="${cy + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#3a2c00">${n}</text>`;
+    return `<svg viewBox="0 0 320 300" xmlns="http://www.w3.org/2000/svg" class="lr-hand-svg" font-family="system-ui">`
+      + `<g fill="${EDGE}">${shapes(0)}</g>`
+      + `<g fill="${FILL}">${shapes(3)}</g>`
+      + badge(54, 238, 1) + badge(127, 66, 2) + badge(163, 44, 3) + badge(199, 60, 4) + badge(231, 92, 5)
+      + `</svg>`;
   }
 
   // ── Minimal, safe markdown → HTML (bold, italic, code, links, lists) ──
