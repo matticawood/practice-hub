@@ -302,8 +302,13 @@
           : "";
         return `<figure class="lr-kbd${live}">${head}${buildKeyboard(b)}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
-      case "notation":
-        return `<figure class="lr-notation"><div class="lr-abc-src" style="display:none">${esc(b.abc || "")}</div><div class="lr-abc-out"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
+      case "notation": {
+        // hero: a large, framed "method-book" stave where the music is the focal
+        // point (bigger notes, finger numbers via !1! decorations in the abc).
+        const heroCls = (b.hero || b.scale) ? " lr-notation-hero" : "";
+        const scaleAttr = ` data-scale="${b.scale ? +b.scale : (b.hero ? 1.6 : 1)}"`;
+        return `<figure class="lr-notation${heroCls}"${scaleAttr}><div class="lr-abc-src" style="display:none">${esc(b.abc || "")}</div><div class="lr-abc-out"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
+      }
       case "task":
         return `<div class="lr-task"><div class="lr-task-label">Your task</div>
           <div class="lr-text">${mdToHtml(b.md)}</div>
@@ -491,7 +496,16 @@
           // distributed and normal note size, whether the line is open-ended or closed
           // with a final bar line. staffwidth tracks the container so it stays responsive.
           const full = Math.max(260, (out.clientWidth || 660) - 4);
-          window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full });
+          // A viewBox (added below) scales the drawing to the container width, so the
+          // apparent note size is container/staffwidth. To make a "hero" stave read
+          // bigger, pack the music into a narrower staffwidth so it magnifies on display.
+          // abcjs `scale` makes the notes bigger while staffwidth caps the total width,
+          // so a "hero" stave reads large and still fits the column (like a method book).
+          const heroScale = parseFloat(fig.dataset.scale) || 1;
+          const isHero = heroScale > 1;
+          // A hero stave renders at natural (scaled) size like a method book: no
+          // %%stretchlast and no viewBox rewrite (both of which distort at scale).
+          window.ABCJS.renderAbc(out, (isHero ? "" : "%%stretchlast 1\n") + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full, scale: heroScale });
           // abcjs gives the SVG fixed width/height attributes but NO viewBox, so CSS
           // "max-width:100%" shrinks the SVG's box without scaling its content — on any
           // width narrower than the drawing (mobile, the studio preview) the right side
@@ -499,7 +513,7 @@
           // content scale with the box, so the whole stave (final bar line included)
           // stays visible at every width.
           const s = out.querySelector("svg");
-          if (s && !s.getAttribute("viewBox")) {
+          if (s && !isHero && !s.getAttribute("viewBox")) {
             // Base the viewBox on the actual drawn content (getBBox), not abcjs's
             // width/height attrs: slurs/ties arc above or below the staff (into
             // negative y or past the height), and a "0 0 w h" viewBox clips them.
@@ -561,6 +575,8 @@
     .lr-kbd-live .lr-key{cursor:pointer}
     .lr-key-press{filter:brightness(1.22)}
     .lr-notation{margin:18px 0;overflow-x:auto}
+    .lr-notation-hero{margin:14px 0;padding:20px 18px 12px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
+    .lr-notation-hero .lr-cap{margin-top:8px}
     /* Centre via text-align (block), NOT flexbox: a flex child's min-width:auto
        stops max-width:100% from shrinking a wide SVG, so on narrow widths (the
        studio preview panel, phones) the stave overflows and the right edge —
