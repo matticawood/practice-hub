@@ -188,28 +188,51 @@
     return `<div class="lr-kbd-keys" style="--kw:${whites.length}">${html}</div>`;
   }
 
-  // Pre-staff notation: a row of big circled finger numbers, note letters, and open/
-  // filled noteheads whose height traces the melody up and down. No stave. Returns an
-  // SVG string (responsive via viewBox + width:100%).
+  // Pre-staff notation: circled finger numbers on top, open/filled noteheads whose
+  // height traces the melody up and down, a soft contour line running THROUGH the note
+  // centres so rising = higher, and the note letters underneath. No stave, no baseline.
+  // Returns an SVG string (responsive via viewBox + width:100%).
   function buildPrestaffSVG(spec) {
     const F = spec.fingers || [], NM = spec.names || [], LV = spec.levels || [], BT = spec.beats || [];
     const n = Math.max(F.length, NM.length, LV.length);
     if (!n) return "";
-    const gap = 110, margin = 46, W = margin * 2 + (n - 1) * gap, H = 162;
-    const base = 116, step = 16, fingerY = 38;
+    const gap = 130, margin = 60, W = margin * 2 + (n - 1) * gap, H = 150;
+    const base = 96, step = 16, fingerY = 34, letterY = 140;
+    // Note-centre points for the contour line and the noteheads.
+    const pts = [];
+    for (let i = 0; i < n; i++) pts.push([margin + i * gap, base - (LV[i] || 0) * step]);
     let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="system-ui" class="lr-ps-svg">`;
-    s += `<line x1="${margin - 12}" y1="${base + 3}" x2="${W - margin + 12}" y2="${base + 3}" stroke="#e5ddd0" stroke-width="2"/>`;
+    // contour line through the note centres (drawn first, so noteheads sit on top)
+    if (n > 1) s += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#d9cbb4" stroke-width="2.5" stroke-linejoin="round"/>`;
     for (let i = 0; i < n; i++) {
-      const cx = margin + i * gap;
-      const cy = base - (LV[i] || 0) * step;
+      const [cx, cy] = pts[i];
       const long = (BT[i] || 1) >= 2;
       s += long
         ? `<ellipse cx="${cx}" cy="${cy}" rx="15" ry="11" fill="none" stroke="#1a1410" stroke-width="3"/>`
         : `<ellipse cx="${cx}" cy="${cy}" rx="14" ry="10.5" fill="#1a1410"/>`;
       if (F[i] != null) s += `<circle cx="${cx}" cy="${fingerY}" r="15" fill="#f5c518"/><text x="${cx}" y="${fingerY + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#3a2c00">${esc(String(F[i]))}</text>`;
-      if (NM[i] != null) s += `<text x="${cx}" y="150" text-anchor="middle" font-size="15" fill="#8a7868">${esc(String(NM[i]))}</text>`;
+      if (NM[i] != null) s += `<text x="${cx}" y="${letterY}" text-anchor="middle" font-size="15" fill="#8a7868">${esc(String(NM[i]))}</text>`;
     }
     return s + `</svg>`;
+  }
+
+  // Right-hand diagram with circled finger numbers 1-5 on the fingertips (thumb = 1).
+  // Used to teach finger numbers before any notes. Returns an SVG string.
+  function buildHandSVG() {
+    return `<svg viewBox="0 0 300 240" xmlns="http://www.w3.org/2000/svg" class="lr-hand-svg" font-family="system-ui">`
+      + `<path d="M70 235 Q60 150 78 130 L110 118 Q150 112 195 122 L222 140 Q238 165 232 210 Q228 238 200 238 Z" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
+      + `<rect x="86" y="70" width="24" height="70" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
+      + `<rect x="118" y="46" width="24" height="94" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
+      + `<rect x="150" y="58" width="24" height="82" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
+      + `<rect x="182" y="80" width="22" height="62" rx="11" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/>`
+      + `<g transform="rotate(38 70 175)"><rect x="34" y="150" width="24" height="66" rx="12" fill="#f6e7c0" stroke="#d9b874" stroke-width="2"/></g>`
+      + `<g font-weight="800" font-size="17" text-anchor="middle">`
+      + `<circle cx="40" cy="150" r="15" fill="#f5c518"/><text x="40" y="156" fill="#3a2c00">1</text>`
+      + `<circle cx="98" cy="66" r="15" fill="#f5c518"/><text x="98" y="72" fill="#3a2c00">2</text>`
+      + `<circle cx="130" cy="42" r="15" fill="#f5c518"/><text x="130" y="48" fill="#3a2c00">3</text>`
+      + `<circle cx="162" cy="54" r="15" fill="#f5c518"/><text x="162" y="60" fill="#3a2c00">4</text>`
+      + `<circle cx="193" cy="76" r="15" fill="#f5c518"/><text x="193" y="82" fill="#3a2c00">5</text>`
+      + `</g></svg>`;
   }
 
   // ── Minimal, safe markdown → HTML (bold, italic, code, links, lists) ──
@@ -349,6 +372,10 @@
           ? `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="1" data-beats="${esc(JSON.stringify(b.beats || []))}" data-bpm="${b.bpm || 72}"><span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Hear it")}</span></button></div>`
           : "";
         return `<figure class="lr-prestaff"><div class="lr-ps-out" data-spec="${spec}"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>${playBtn}`;
+      }
+      case "hand": {
+        // Right-hand diagram with circled finger numbers 1-5 (teaches finger numbers).
+        return `<figure class="lr-hand">${buildHandSVG()}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
       case "task":
         return `<div class="lr-task"><div class="lr-task-label">Your task</div>
@@ -629,6 +656,10 @@
     .lr-prestaff{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
     .lr-ps-svg{display:block;width:100%;max-width:100%;height:auto}
     .lr-prestaff .lr-cap{margin-top:8px}
+    /* Right-hand finger-number diagram: framed card, responsive SVG (capped width). */
+    .lr-hand{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
+    .lr-hand-svg{display:block;width:100%;max-width:300px;height:auto;margin:0 auto}
+    .lr-hand .lr-cap{margin-top:8px}
     /* Circled finger number on a keyboard key. */
     .lr-key-w .lr-key-fg{position:absolute;bottom:8%;left:50%;transform:translateX(-50%);width:20px;height:20px;border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font:700 12px/20px system-ui;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.25)}
     /* Centre via text-align (block), NOT flexbox: a flex child's min-width:auto
