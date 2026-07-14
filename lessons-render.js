@@ -305,8 +305,10 @@
       case "notation": {
         // hero: a large, framed "method-book" stave where the music is the focal
         // point (bigger notes, finger numbers via !1! decorations in the abc).
-        const heroCls = (b.hero || b.scale) ? " lr-notation-hero" : "";
-        const scaleAttr = ` data-scale="${b.scale ? +b.scale : (b.hero ? 1.6 : 1)}"`;
+        // compact: a tiny fixed-size stave (e.g. to show a single note's length) that
+        // does NOT stretch full-width, so it stays a readable size on mobile too.
+        const heroCls = (b.hero || b.scale) ? " lr-notation-hero" : (b.compact ? " lr-notation-mini" : "");
+        const scaleAttr = ` data-scale="${b.scale ? +b.scale : (b.hero ? 1.6 : 1)}"${b.compact ? ' data-compact="1"' : ""}`;
         return `<figure class="lr-notation${heroCls}"${scaleAttr}><div class="lr-abc-src" style="display:none">${esc(b.abc || "")}</div><div class="lr-abc-out"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
       case "task":
@@ -497,7 +499,11 @@
           // with a final bar line. staffwidth tracks the container so it stays responsive.
           const full = Math.max(260, (out.clientWidth || 660) - 4);
           const isHero = (parseFloat(fig.dataset.scale) || 1) > 1;
-          if (isHero) {
+          if (fig.dataset.compact === "1") {
+            // A tiny fixed-size figure (single note / note-value demo): fixed staffwidth,
+            // no stretch/responsive, so it stays the same readable size on every screen.
+            window.ABCJS.renderAbc(out, abc, { paddingtop: 3, paddingbottom: 3, staffwidth: 130, scale: 1.4 });
+          } else if (isHero) {
             // Hero stave: lay the music out in a narrow staffwidth so the notes read
             // large, then let abcjs's responsive:"resize" scale the whole SVG (viewBox +
             // width:100%) to the column at ANY width. This keeps it big on desktop, scales
@@ -571,6 +577,8 @@
     .lr-notation{margin:18px 0;overflow-x:auto}
     .lr-notation-hero{margin:14px 0;padding:20px 18px 12px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
     .lr-notation-hero .lr-cap{margin-top:8px}
+    .lr-notation-mini{margin:10px 0}
+    .lr-notation-mini .lr-abc-out{text-align:center}
     /* Centre via text-align (block), NOT flexbox: a flex child's min-width:auto
        stops max-width:100% from shrinking a wide SVG, so on narrow widths (the
        studio preview panel, phones) the stave overflows and the right edge —
