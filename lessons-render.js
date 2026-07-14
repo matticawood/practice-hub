@@ -167,12 +167,16 @@
     // piano (e.g. show where middle C sits), so it keeps its full range.
     if (!opts.full && hiEnd - lo > 48) hiEnd = lo + 24;
     const hiSet = {}; hi.forEach(m => { hiSet[m] = 1; });
+    // Optional circled finger numbers on keys, e.g. { "C4": 1, "D4": 2 }.
+    const fg = {};
+    if (opts.fingers) for (const k in opts.fingers) { const mm = noteToMidi(k); if (mm != null) fg[mm] = opts.fingers[k]; }
     const whites = [];
     for (let m = lo; m <= hiEnd; m++) if (!_BLACK[pcMod(m)]) whites.push(m);
     const ww = 100 / whites.length;
     let html = "";
     whites.forEach((m, i) => {
-      html += `<div class="lr-key lr-key-w${hiSet[m] ? " lr-key-hi" : ""}" data-midi="${m}" style="left:${(i * ww).toFixed(4)}%;width:${ww.toFixed(4)}%"></div>`;
+      const badge = fg[m] != null ? `<span class="lr-key-fg">${fg[m]}</span>` : "";
+      html += `<div class="lr-key lr-key-w${hiSet[m] ? " lr-key-hi" : ""}" data-midi="${m}" style="left:${(i * ww).toFixed(4)}%;width:${ww.toFixed(4)}%">${badge}</div>`;
     });
     for (let m = lo; m <= hiEnd; m++) {
       if (!_BLACK[pcMod(m)]) continue;
@@ -182,6 +186,30 @@
       html += `<div class="lr-key lr-key-b${hiSet[m] ? " lr-key-hi" : ""}" data-midi="${m}" style="left:calc(${left.toFixed(4)}% - ${(ww * 0.32).toFixed(4)}%);width:${(ww * 0.64).toFixed(4)}%"></div>`;
     }
     return `<div class="lr-kbd-keys" style="--kw:${whites.length}">${html}</div>`;
+  }
+
+  // Pre-staff notation: a row of big circled finger numbers, note letters, and open/
+  // filled noteheads whose height traces the melody up and down. No stave. Returns an
+  // SVG string (responsive via viewBox + width:100%).
+  function buildPrestaffSVG(spec) {
+    const F = spec.fingers || [], NM = spec.names || [], LV = spec.levels || [], BT = spec.beats || [];
+    const n = Math.max(F.length, NM.length, LV.length);
+    if (!n) return "";
+    const gap = 110, margin = 46, W = margin * 2 + (n - 1) * gap, H = 162;
+    const base = 116, step = 16, fingerY = 38;
+    let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="system-ui" class="lr-ps-svg">`;
+    s += `<line x1="${margin - 12}" y1="${base + 3}" x2="${W - margin + 12}" y2="${base + 3}" stroke="#e5ddd0" stroke-width="2"/>`;
+    for (let i = 0; i < n; i++) {
+      const cx = margin + i * gap;
+      const cy = base - (LV[i] || 0) * step;
+      const long = (BT[i] || 1) >= 2;
+      s += long
+        ? `<ellipse cx="${cx}" cy="${cy}" rx="15" ry="11" fill="none" stroke="#1a1410" stroke-width="3"/>`
+        : `<ellipse cx="${cx}" cy="${cy}" rx="14" ry="10.5" fill="#1a1410"/>`;
+      if (F[i] != null) s += `<circle cx="${cx}" cy="${fingerY}" r="15" fill="#f5c518"/><text x="${cx}" y="${fingerY + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#3a2c00">${esc(String(F[i]))}</text>`;
+      if (NM[i] != null) s += `<text x="${cx}" y="150" text-anchor="middle" font-size="15" fill="#8a7868">${esc(String(NM[i]))}</text>`;
+    }
+    return s + `</svg>`;
   }
 
   // ── Minimal, safe markdown → HTML (bold, italic, code, links, lists) ──
@@ -310,6 +338,17 @@
         const heroCls = (b.hero || b.scale) ? " lr-notation-hero" : (b.compact ? " lr-notation-mini" : "");
         const scaleAttr = ` data-scale="${b.scale ? +b.scale : (b.hero ? 1.6 : 1)}"${b.compact ? ' data-compact="1"' : ""}`;
         return `<figure class="lr-notation${heroCls}"${scaleAttr}><div class="lr-abc-src" style="display:none">${esc(b.abc || "")}</div><div class="lr-abc-out"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
+      }
+      case "prestaff": {
+        // Pre-staff notation (First Steps day-one pieces): big circled finger numbers
+        // with an up/down contour and note letters, NO stave. Drawn as SVG in init();
+        // audio via the shared play button.
+        const spec = esc(JSON.stringify({ fingers: b.fingers || [], names: b.names || [], levels: b.levels || [], beats: b.beats || [] }));
+        const notes = b.notes || [];
+        const playBtn = notes.length
+          ? `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="1" data-beats="${esc(JSON.stringify(b.beats || []))}" data-bpm="${b.bpm || 72}"><span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Hear it")}</span></button></div>`
+          : "";
+        return `<figure class="lr-prestaff"><div class="lr-ps-out" data-spec="${spec}"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>${playBtn}`;
       }
       case "task":
         return `<div class="lr-task"><div class="lr-task-label">Your task</div>
@@ -472,6 +511,13 @@
         key.classList.add("lr-key-press");
         setTimeout(() => key.classList.remove("lr-key-press"), 160);
       }));
+    // Pre-staff notation blocks: draw the finger-number/contour SVG.
+    root.querySelectorAll(".lr-ps-out").forEach(out => {
+      if (out.dataset.done) return;
+      let spec; try { spec = JSON.parse(out.dataset.spec || "{}"); } catch (e) { spec = {}; }
+      out.innerHTML = buildPrestaffSVG(spec);
+      out.dataset.done = "1";
+    });
     // Warm up the soundfont if this lesson has any audio so the first note is instant.
     if (root.querySelector(".lr-play-btn, .lr-kbd-play, .lr-kbd-live")) loadPiano();
 
@@ -579,6 +625,12 @@
     .lr-notation-hero .lr-cap{margin-top:8px}
     .lr-notation-mini{margin:10px 0}
     .lr-notation-mini .lr-abc-out{text-align:center}
+    /* Pre-staff notation (First Steps): framed card, responsive SVG. */
+    .lr-prestaff{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
+    .lr-ps-svg{display:block;width:100%;max-width:100%;height:auto}
+    .lr-prestaff .lr-cap{margin-top:8px}
+    /* Circled finger number on a keyboard key. */
+    .lr-key-w .lr-key-fg{position:absolute;bottom:8%;left:50%;transform:translateX(-50%);width:20px;height:20px;border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font:700 12px/20px system-ui;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.25)}
     /* Centre via text-align (block), NOT flexbox: a flex child's min-width:auto
        stops max-width:100% from shrinking a wide SVG, so on narrow widths (the
        studio preview panel, phones) the stave overflows and the right edge —
