@@ -369,7 +369,9 @@
         const playBtn = notes.length
           ? `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="1" data-beats="${esc(JSON.stringify(b.beats || []))}" data-bpm="${b.bpm || 72}"><span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Hear it")}</span></button></div>`
           : "";
-        return `<figure class="lr-prestaff"><div class="lr-ps-out" data-spec="${spec}"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>${playBtn}`;
+        // Keep the play button INSIDE the figure so a prestaff block is a single
+        // top-level element (the lesson-studio inline editor maps one element per block).
+        return `<figure class="lr-prestaff"><div class="lr-ps-out" data-spec="${spec}"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}${playBtn}</figure>`;
       }
       case "hand": {
         // Both-hands diagram with circled finger numbers 1-5 (teaches finger numbers).
