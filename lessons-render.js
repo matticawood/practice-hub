@@ -115,10 +115,10 @@
           t.setAttribute("x", (Lx + w * (k + 0.5) / perBar).toFixed(1));
           t.setAttribute("y", y.toFixed(1));
           t.setAttribute("text-anchor", "middle");
-          // Match the counting in the other lessons exactly: black Times italic
-          // (this is what abcjs's %%annotationfont Times 11 italic used to draw).
-          t.setAttribute("font-size", "11");
-          t.setAttribute("font-style", "italic");
+          // Match the counting the earlier lessons drew EXACTLY (measured from the
+          // old %%annotationfont Times 11 annotation output, which abcjs rendered as
+          // Times New Roman 15px upright black - it ignores the "italic" keyword).
+          t.setAttribute("font-size", "15");
           t.setAttribute("font-family", "Times New Roman, Times, serif");
           t.setAttribute("fill", "#000000");
           t.textContent = String(k + 1);
