@@ -100,34 +100,43 @@
       const els = [...svg.querySelectorAll(".abcjs-note, .abcjs-rest")].filter(e => /\babcjs-v0\b/.test(e.getAttribute("class") || ""));
       if (!els.length) return;
       const byBar = {};
+      let hasHalfBeat = false;
       els.forEach(e => {
         const cls = e.getAttribute("class") || "";
         const mM = cls.match(/abcjs-m(\d+)/);
         const dM = cls.match(/abcjs-d([\d-]+)/);
         const bb = e.getBBox();
+        // Duration in beats as a FLOAT (an eighth is 0.5), so we can count "and"s.
         let beats = 1;
-        if (dM) beats = Math.max(1, Math.round(parseFloat(dM[1].replace("-", ".")) * denom));
+        if (dM) beats = Math.max(0.5, parseFloat(dM[1].replace("-", ".")) * denom);
         const mi = mM ? +mM[1] : 0;
-        (byBar[mi] = byBar[mi] || []).push({ x: bb.x + bb.width / 2, beats: beats, rest: /\babcjs-rest\b/.test(cls) });
+        const arr = (byBar[mi] = byBar[mi] || []);
+        const start = arr.length ? arr[arr.length - 1].start + arr[arr.length - 1].beats : 0;
+        if (beats % 1 !== 0 || start % 1 !== 0) hasHalfBeat = true;
+        arr.push({ x: bb.x + bb.width / 2, beats: beats, start: start, rest: /\babcjs-rest\b/.test(cls) });
       });
+      // When eighth notes are present, count in half-beat steps and label the
+      // off-beats "&" (spoken "and"), e.g. 1 & 2 & 3 & 4 &. Otherwise whole beats.
+      const sub = hasHalfBeat ? 2 : 1;
       // Sit the counts below the LOWEST drawn thing (a stem-down note, a low ledger
       // note or a rest can hang below the staff line), so they never touch the music.
       let low = staffBottom;
       svg.querySelectorAll(".abcjs-note, .abcjs-rest").forEach(e => { const b = e.getBBox(); low = Math.max(low, b.y + b.height); });
       const y = low + 13;
       const NS = "http://www.w3.org/2000/svg";
-      const place = (x, num) => {
+      // "&" is a touch narrower/lighter than the numbers so an off-beat between two
+      // close eighths does not crowd them; the numbers match the earlier lessons
+      // EXACTLY (measured from the old %%annotationfont Times 11 output, which abcjs
+      // renders as Times New Roman 15px upright black - it ignores "italic").
+      const place = (x, label, amp) => {
         const t = document.createElementNS(NS, "text");
         t.setAttribute("x", x.toFixed(1));
         t.setAttribute("y", y.toFixed(1));
         t.setAttribute("text-anchor", "middle");
-        // Match the counting the earlier lessons drew EXACTLY (measured from the old
-        // %%annotationfont Times 11 output, which abcjs rendered as Times New Roman
-        // 15px upright black - it silently ignores the "italic" keyword).
-        t.setAttribute("font-size", "15");
+        t.setAttribute("font-size", amp ? "12" : "15");
         t.setAttribute("font-family", "Times New Roman, Times, serif");
-        t.setAttribute("fill", "#000000");
-        t.textContent = String(num);
+        t.setAttribute("fill", amp ? "#555555" : "#000000");
+        t.textContent = label;
         svg.appendChild(t);
       };
       const mkeys = Object.keys(byBar).map(Number).sort((a, b) => a - b);
@@ -135,22 +144,28 @@
         const items = byBar[mi].sort((a, b) => a.x - b.x);
         const rightEdge = bars[idx] != null ? bars[idx] : items[items.length - 1].x;
         const leftEdge = idx === 0 ? items[0].x - (rightEdge - items[0].x) / (2 * perBar - 1) : bars[idx - 1];
-        // A rest that fills the whole bar has no notes to sit under, so spread its
-        // counts evenly across the bar (a whole-bar rest reads 1 2 3 4 across it).
-        if (items.length === 1 && items[0].rest && items[0].beats >= perBar) {
-          for (let k = 0; k < perBar; k++) place(leftEdge + (rightEdge - leftEdge) * (k + 0.5) / perBar, k + 1);
+        // A single note or rest that fills the whole bar (a whole note, a whole rest,
+        // a dotted half in 3/4) is held/waited through the bar, so spread its counts
+        // evenly across the bar instead of cramming them against the note head.
+        if (items.length === 1 && items[0].beats >= perBar) {
+          for (let k = 0; k < perBar; k++) place(leftEdge + (rightEdge - leftEdge) * (k + 0.5) / perBar, String(k + 1));
           return;
         }
-        // Otherwise: count 1 sits under each note/rest; its held beats fan out toward
-        // the next note (or the bar line for the last element in the bar).
-        let beat = 0;
-        items.forEach((it, j) => {
-          const nextX = j < items.length - 1 ? items[j + 1].x : rightEdge;
-          for (let h = 0; h < it.beats && beat < perBar; h++) {
-            place(it.x + (nextX - it.x) * (h / it.beats), beat + 1);
-            beat++;
+        // On-beat NUMBERS: every whole beat gets its number, sitting under the note
+        // sounding on that beat (interpolated across a held note, exactly like the
+        // quarter-note lessons).
+        for (let beat = 0; beat < perBar; beat++) {
+          let it = null, ni = -1;
+          for (let j = 0; j < items.length; j++) {
+            if (items[j].start <= beat + 1e-6 && beat < items[j].start + items[j].beats - 1e-6) { it = items[j]; ni = j; break; }
           }
-        });
+          if (!it) continue;
+          const nextX = ni < items.length - 1 ? items[ni + 1].x : rightEdge;
+          place(it.x + (nextX - it.x) * ((beat - it.start) / it.beats), String(beat + 1));
+        }
+        // Off-beat "&": shown ONLY where a note actually starts on the off-beat (a
+        // struck eighth), never crammed into a held note. Sits right under that note.
+        items.forEach(it => { if (Math.abs(it.start % 1 - 0.5) < 1e-6) place(it.x, "&", true); });
       });
       // Grow the SVG box so the counts are not clipped.
       const need = y + 6;
