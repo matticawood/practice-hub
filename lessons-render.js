@@ -121,7 +121,20 @@
       // Grow the SVG box so the counts are not clipped.
       const need = y + 6;
       const vb = svg.getAttribute("viewBox");
-      if (vb) { const p = vb.split(/\s+/).map(Number); if (need > p[1] + p[3]) { p[3] = need - p[1]; svg.setAttribute("viewBox", p.join(" ")); } }
+      if (vb) {
+        const p = vb.split(/\s+/).map(Number);
+        if (need > p[1] + p[3]) {
+          p[3] = need - p[1];
+          svg.setAttribute("viewBox", p.join(" "));
+          // Hero (responsive:"resize") wraps the SVG in a div whose height is a
+          // stale padding-bottom % (of the original aspect ratio) with overflow
+          // hidden. Recompute it from the grown viewBox or the counts get clipped.
+          const wrap = svg.parentElement;
+          if (wrap && /abcjs-container/.test(wrap.className || "") && p[2]) {
+            wrap.style.paddingBottom = (p[3] / p[2] * 100).toFixed(4) + "%";
+          }
+        }
+      }
       const h = parseFloat(svg.getAttribute("height"));
       if (h && need > h) svg.setAttribute("height", need);
     } catch (e) { /* counts are decorative; never break the stave */ }
