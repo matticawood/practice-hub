@@ -203,7 +203,7 @@
     for (let i = 0; i < n; i++) pts.push([margin + i * gap, base - (LV[i] || 0) * step]);
     let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="system-ui" class="lr-ps-svg">`;
     // contour line through the note centres (drawn first, so noteheads sit on top)
-    if (n > 1) s += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#d9cbb4" stroke-width="2.5" stroke-linejoin="round"/>`;
+    if (n > 1 && spec.line !== false) s += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#d9cbb4" stroke-width="2.5" stroke-linejoin="round"/>`;
     for (let i = 0; i < n; i++) {
       const [cx, cy] = pts[i];
       const long = (BT[i] || 1) >= 2;
@@ -364,10 +364,13 @@
         // Pre-staff notation (First Steps day-one pieces): big circled finger numbers
         // with an up/down contour and note letters, NO stave. Drawn as SVG in init();
         // audio via the shared play button.
-        const spec = esc(JSON.stringify({ fingers: b.fingers || [], names: b.names || [], levels: b.levels || [], beats: b.beats || [] }));
+        // line !== false draws the up/down contour; set line:false for a flat demo
+        // (e.g. the same note short vs long) where a connecting line would be meaningless.
+        const spec = esc(JSON.stringify({ fingers: b.fingers || [], names: b.names || [], levels: b.levels || [], beats: b.beats || [], line: b.line }));
         const notes = b.notes || [];
+        const clickAttr = b.click ? ` data-click="1"` : "";
         const playBtn = notes.length
-          ? `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="1" data-beats="${esc(JSON.stringify(b.beats || []))}" data-bpm="${b.bpm || 72}"><span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Hear it")}</span></button></div>`
+          ? `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="1" data-beats="${esc(JSON.stringify(b.beats || []))}" data-bpm="${b.bpm || 72}"${clickAttr}><span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Hear it")}</span></button></div>`
           : "";
         // Keep the play button INSIDE the figure so a prestaff block is a single
         // top-level element (the lesson-studio inline editor maps one element per block).
