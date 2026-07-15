@@ -80,51 +80,78 @@
     try {
       const svg = out.querySelector("svg");
       if (!svg) return;
-      const mm = abc.match(/M:\s*(\d+)\s*\/\s*\d+/);
+      const mm = abc.match(/M:\s*(\d+)\s*\/\s*(\d+)/);
       const perBar = mm ? parseInt(mm[1], 10) : 4;
+      const denom = mm ? parseInt(mm[2], 10) : 4;
       if (!perBar || perBar > 12) return;
       const staves = [...svg.querySelectorAll(".abcjs-staff")];
       if (!staves.length) return;
       let staffBottom = 0;
       staves.forEach(s => { const b = s.getBBox(); staffBottom = Math.max(staffBottom, b.y + b.height); });
-      // Barlines, sorted left→right, de-duped (a braced grand stave draws one bar
-      // element per staff at nearly the same x).
+      // Barlines = the right edge of each bar, sorted left→right, de-duped (a braced
+      // grand stave draws one bar element per staff at nearly the same x).
       let bars = [...svg.querySelectorAll(".abcjs-bar")].map(e => { const b = e.getBBox(); return b.x + b.width / 2; }).sort((a, b) => a - b);
       bars = bars.filter((x, i) => i === 0 || x - bars[i - 1] > 4);
       if (!bars.length) return;
-      const firstEl = svg.querySelector(".abcjs-note, .abcjs-rest");
-      if (!firstEl) return;
-      const fb = firstEl.getBBox();
-      const firstX = fb.x + fb.width / 2;
-      // Left edge of bar 0: extrapolated back from the first note so beat 1 sits
-      // under it (abcjs pads the clef/key, so the staff's left edge is too far left).
-      const lx0 = firstX - (bars[0] - firstX) / (2 * perBar - 1);
-      const bounds = [lx0, ...bars];
-      // Sit the counts below the LOWEST drawn thing (a stem-down note, a low
-      // ledger note or a rest can hang below the staff line), not just the staff
-      // bottom, so the numbers never collide with the music above them.
+      // Parse each note/rest of the TOP voice into { measure, x-centre, beats, rest }.
+      // The count for a note sits UNDER that note; a held note's / rest's extra beats
+      // are interpolated toward the next note (or the bar line) so the numbers track
+      // the music instead of being spaced blindly across the bar.
+      const els = [...svg.querySelectorAll(".abcjs-note, .abcjs-rest")].filter(e => /\babcjs-v0\b/.test(e.getAttribute("class") || ""));
+      if (!els.length) return;
+      const byBar = {};
+      els.forEach(e => {
+        const cls = e.getAttribute("class") || "";
+        const mM = cls.match(/abcjs-m(\d+)/);
+        const dM = cls.match(/abcjs-d([\d-]+)/);
+        const bb = e.getBBox();
+        let beats = 1;
+        if (dM) beats = Math.max(1, Math.round(parseFloat(dM[1].replace("-", ".")) * denom));
+        const mi = mM ? +mM[1] : 0;
+        (byBar[mi] = byBar[mi] || []).push({ x: bb.x + bb.width / 2, beats: beats, rest: /\babcjs-rest\b/.test(cls) });
+      });
+      // Sit the counts below the LOWEST drawn thing (a stem-down note, a low ledger
+      // note or a rest can hang below the staff line), so they never touch the music.
       let low = staffBottom;
       svg.querySelectorAll(".abcjs-note, .abcjs-rest").forEach(e => { const b = e.getBBox(); low = Math.max(low, b.y + b.height); });
       const y = low + 13;
       const NS = "http://www.w3.org/2000/svg";
-      for (let m = 0; m < bounds.length - 1; m++) {
-        const Lx = bounds[m], w = bounds[m + 1] - Lx;
-        if (w <= 0) continue;
-        for (let k = 0; k < perBar; k++) {
-          const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", (Lx + w * (k + 0.5) / perBar).toFixed(1));
-          t.setAttribute("y", y.toFixed(1));
-          t.setAttribute("text-anchor", "middle");
-          // Match the counting the earlier lessons drew EXACTLY (measured from the
-          // old %%annotationfont Times 11 annotation output, which abcjs rendered as
-          // Times New Roman 15px upright black - it ignores the "italic" keyword).
-          t.setAttribute("font-size", "15");
-          t.setAttribute("font-family", "Times New Roman, Times, serif");
-          t.setAttribute("fill", "#000000");
-          t.textContent = String(k + 1);
-          svg.appendChild(t);
+      const place = (x, num) => {
+        const t = document.createElementNS(NS, "text");
+        t.setAttribute("x", x.toFixed(1));
+        t.setAttribute("y", y.toFixed(1));
+        t.setAttribute("text-anchor", "middle");
+        // Match the counting the earlier lessons drew EXACTLY (measured from the old
+        // %%annotationfont Times 11 output, which abcjs rendered as Times New Roman
+        // 15px upright black - it silently ignores the "italic" keyword).
+        t.setAttribute("font-size", "15");
+        t.setAttribute("font-family", "Times New Roman, Times, serif");
+        t.setAttribute("fill", "#000000");
+        t.textContent = String(num);
+        svg.appendChild(t);
+      };
+      const mkeys = Object.keys(byBar).map(Number).sort((a, b) => a - b);
+      mkeys.forEach((mi, idx) => {
+        const items = byBar[mi].sort((a, b) => a.x - b.x);
+        const rightEdge = bars[idx] != null ? bars[idx] : items[items.length - 1].x;
+        const leftEdge = idx === 0 ? items[0].x - (rightEdge - items[0].x) / (2 * perBar - 1) : bars[idx - 1];
+        // A rest that fills the whole bar has no notes to sit under, so spread its
+        // counts evenly across the bar (a whole-bar rest reads 1 2 3 4 across it).
+        if (items.length === 1 && items[0].rest && items[0].beats >= perBar) {
+          for (let k = 0; k < perBar; k++) place(leftEdge + (rightEdge - leftEdge) * (k + 0.5) / perBar, k + 1);
+          return;
         }
-      }
+        // Otherwise: count 1 sits under each note/rest; its held beats fan out toward
+        // the next note (or the bar line for the last element in the bar).
+        let beat = 0;
+        items.forEach((it, j) => {
+          const nextX = j < items.length - 1 ? items[j + 1].x : rightEdge;
+          for (let h = 0; h < it.beats && beat < perBar; h++) {
+            place(it.x + (nextX - it.x) * (h / it.beats), beat + 1);
+            beat++;
+          }
+        });
+      });
       // Grow the SVG box so the counts are not clipped.
       const need = y + 6;
       const vb = svg.getAttribute("viewBox");
