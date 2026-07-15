@@ -241,16 +241,20 @@
     const gate = opts.staccato ? 0.3 : (opts.legato ? 1.1 : 0.96);   // staccato = short/detached, legato = notes overlap smoothly
     const beats = Array.isArray(opts.beats) ? opts.beats : null;
     const gains = Array.isArray(opts.gains) ? opts.gains : null;   // per-note loudness (accents)
+    const staccatos = Array.isArray(opts.staccatos) ? opts.staccatos : null;   // per-note short/detached (overrides clip gate)
     const spb = 60 / (opts.bpm || 80);   // seconds per beat
     let cum = 0;
     notes.forEach((nv, i) => {
       const m = (nv == null) ? null : noteToMidi(nv);
       const mul = (gains && gains[i] != null) ? gains[i] : 1;
+      // A note flagged staccato plays short (0.3) whatever the clip gate is, so a
+      // piece can mix a smooth bar and a staccato bar in one clip.
+      const g = (staccatos && staccatos[i]) ? 0.3 : gate;
       let when, dur;
       if (beats) {
         const bl = (beats[i] != null ? beats[i] : 1);
         when = ctx.currentTime + 0.03 + (seq ? cum * spb : 0);
-        dur = Math.max(0.08, bl * spb * gate);
+        dur = Math.max(0.08, bl * spb * g);
         if (seq) cum += bl;
       } else {
         const gap = opts.gap || 0.55;
@@ -481,11 +485,12 @@
         const clickAttr = b.click ? ` data-click="1"` : "";
         const gainsAttr = Array.isArray(b.gains) ? ` data-gains="${esc(JSON.stringify(b.gains))}"` : "";
         const stacAttr = b.staccato ? ` data-staccato="1"` : "";
+        const stacsAttr = Array.isArray(b.staccatos) ? ` data-staccatos="${esc(JSON.stringify(b.staccatos))}"` : "";
         const legAttr = b.legato ? ` data-legato="1"` : "";
         // voices: independent simultaneous lines (e.g. a held left-hand note under a
         // moving right-hand melody). Each voice is { notes, beats, bpm?, staccato? }.
         const voicesAttr = Array.isArray(b.voices) ? ` data-voices="${esc(JSON.stringify(b.voices))}"` : "";
-        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}${stacAttr}${legAttr}${voicesAttr}>
+        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}${stacAttr}${stacsAttr}${legAttr}${voicesAttr}>
           <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
       }
       case "keyboard": {
@@ -684,6 +689,7 @@
           click: btn.dataset.click === "1",
           gains: parseJson(btn.dataset.gains, null),
           staccato: btn.dataset.staccato === "1",
+          staccatos: parseJson(btn.dataset.staccatos, null),
           legato: btn.dataset.legato === "1"
         });
       }));
