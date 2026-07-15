@@ -115,10 +115,12 @@
           t.setAttribute("x", (Lx + w * (k + 0.5) / perBar).toFixed(1));
           t.setAttribute("y", y.toFixed(1));
           t.setAttribute("text-anchor", "middle");
-          t.setAttribute("font-size", "10");
+          // Match the counting in the other lessons exactly: black Times italic
+          // (this is what abcjs's %%annotationfont Times 11 italic used to draw).
+          t.setAttribute("font-size", "11");
           t.setAttribute("font-style", "italic");
           t.setAttribute("font-family", "Times New Roman, Times, serif");
-          t.setAttribute("fill", "#9a7b52");
+          t.setAttribute("fill", "#000000");
           t.textContent = String(k + 1);
           svg.appendChild(t);
         }
