@@ -346,8 +346,11 @@
         // A full-piano orientation diagram is not clickable (keys are too thin to play).
         const live = (b.playable === false || b.full) ? "" : " lr-kbd-live";
         const notesJson = esc(JSON.stringify(b.highlight || []));
-        const head = (b.label || (b.highlight && b.highlight.length))
-          ? `<div class="lr-kbd-head">${b.label ? `<span class="lr-kbd-label">${esc(b.label)}</span>` : ""}${(b.highlight && b.highlight.length) ? `<button type="button" class="lr-kbd-play" data-notes="${notesJson}"><span class="lr-play-ico">&#9654;</span> Play</button>` : ""}</div>`
+        // The head Play button sounds the highlighted keys together. Hide it with
+        // noplay:true where that would be a meaningless cluster (e.g. C-D-E position).
+        const wantPlay = !!(b.highlight && b.highlight.length) && !b.noplay;
+        const head = (b.label || wantPlay)
+          ? `<div class="lr-kbd-head">${b.label ? `<span class="lr-kbd-label">${esc(b.label)}</span>` : ""}${wantPlay ? `<button type="button" class="lr-kbd-play" data-notes="${notesJson}"><span class="lr-play-ico">&#9654;</span> Play</button>` : ""}</div>`
           : "";
         return `<figure class="lr-kbd${live}">${head}${buildKeyboard(b)}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
