@@ -69,6 +69,63 @@
     _abcjsLoading = loadScriptOnce("https://cdn.jsdelivr.net/npm/abcjs@6.4.4/dist/abcjs-basic-min.js");
     return _abcjsLoading;
   }
+  // Post-render "counting row": abcjs cannot spread a held note's / rest's beat
+  // numbers evenly across its span, so instead of annotating the ABC we overlay
+  // the counts as SVG <text> after rendering. Each bar is divided into `perBar`
+  // equal slots and the numbers 1..perBar are centred in those slots below the
+  // staff, so a whole-rest bar reads "1 2 3 4" evenly across the whole bar and a
+  // held half note gets two numbers spread across it. add_classes must be on so
+  // barlines (.abcjs-bar) and notes/rests are queryable.
+  function addCountRow(out, abc) {
+    try {
+      const svg = out.querySelector("svg");
+      if (!svg) return;
+      const mm = abc.match(/M:\s*(\d+)\s*\/\s*\d+/);
+      const perBar = mm ? parseInt(mm[1], 10) : 4;
+      if (!perBar || perBar > 12) return;
+      const staves = [...svg.querySelectorAll(".abcjs-staff")];
+      if (!staves.length) return;
+      let staffBottom = 0;
+      staves.forEach(s => { const b = s.getBBox(); staffBottom = Math.max(staffBottom, b.y + b.height); });
+      // Barlines, sorted left→right, de-duped (a braced grand stave draws one bar
+      // element per staff at nearly the same x).
+      let bars = [...svg.querySelectorAll(".abcjs-bar")].map(e => { const b = e.getBBox(); return b.x + b.width / 2; }).sort((a, b) => a - b);
+      bars = bars.filter((x, i) => i === 0 || x - bars[i - 1] > 4);
+      if (!bars.length) return;
+      const firstEl = svg.querySelector(".abcjs-note, .abcjs-rest");
+      if (!firstEl) return;
+      const fb = firstEl.getBBox();
+      const firstX = fb.x + fb.width / 2;
+      // Left edge of bar 0: extrapolated back from the first note so beat 1 sits
+      // under it (abcjs pads the clef/key, so the staff's left edge is too far left).
+      const lx0 = firstX - (bars[0] - firstX) / (2 * perBar - 1);
+      const bounds = [lx0, ...bars];
+      const y = staffBottom + 15;
+      const NS = "http://www.w3.org/2000/svg";
+      for (let m = 0; m < bounds.length - 1; m++) {
+        const Lx = bounds[m], w = bounds[m + 1] - Lx;
+        if (w <= 0) continue;
+        for (let k = 0; k < perBar; k++) {
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", (Lx + w * (k + 0.5) / perBar).toFixed(1));
+          t.setAttribute("y", y.toFixed(1));
+          t.setAttribute("text-anchor", "middle");
+          t.setAttribute("font-size", "12");
+          t.setAttribute("font-style", "italic");
+          t.setAttribute("font-family", "Georgia, Times, serif");
+          t.setAttribute("fill", "#9a7b52");
+          t.textContent = String(k + 1);
+          svg.appendChild(t);
+        }
+      }
+      // Grow the SVG box so the counts are not clipped.
+      const need = y + 6;
+      const vb = svg.getAttribute("viewBox");
+      if (vb) { const p = vb.split(/\s+/).map(Number); if (need > p[1] + p[3]) { p[3] = need - p[1]; svg.setAttribute("viewBox", p.join(" ")); } }
+      const h = parseFloat(svg.getAttribute("height"));
+      if (h && need > h) svg.setAttribute("height", need);
+    } catch (e) { /* counts are decorative; never break the stave */ }
+  }
   const _PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
   const _BLACK = { 1: 1, 3: 1, 6: 1, 8: 1, 10: 1 };
   function noteToMidi(n) {
@@ -387,7 +444,7 @@
         // compact: a tiny fixed-size stave (e.g. to show a single note's length) that
         // does NOT stretch full-width, so it stays a readable size on mobile too.
         const heroCls = (b.hero || b.scale) ? " lr-notation-hero" : (b.compact ? " lr-notation-mini" : "");
-        const scaleAttr = ` data-scale="${b.scale ? +b.scale : (b.hero ? 1.6 : 1)}"${b.compact ? ' data-compact="1"' : ""}`;
+        const scaleAttr = ` data-scale="${b.scale ? +b.scale : (b.hero ? 1.6 : 1)}"${b.compact ? ' data-compact="1"' : ""}${b.count ? ' data-count="1"' : ""}`;
         return `<figure class="lr-notation${heroCls}"${scaleAttr}><div class="lr-abc-src" style="display:none">${esc(b.abc || "")}</div><div class="lr-abc-out"></div>${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
       case "prestaff": {
@@ -612,6 +669,7 @@
           // with a final bar line. staffwidth tracks the container so it stays responsive.
           const full = Math.max(260, (out.clientWidth || 660) - 4);
           const isHero = (parseFloat(fig.dataset.scale) || 1) > 1;
+          const wantCount = fig.dataset.count === "1";
           if (fig.dataset.compact === "1") {
             // A tiny fixed-size figure (single note / note-value demo): fixed staffwidth,
             // no stretch/responsive, so it stays the same readable size on every screen.
@@ -621,9 +679,10 @@
             // large, then let abcjs's responsive:"resize" scale the whole SVG (viewBox +
             // width:100%) to the column at ANY width. This keeps it big on desktop, scales
             // it down to fit on mobile (no clipping), and keeps the final bar line in view.
-            window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 5, paddingbottom: 5, staffwidth: 380, responsive: "resize" });
+            window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 5, paddingbottom: 5, staffwidth: 380, responsive: "resize", add_classes: wantCount });
+            if (wantCount) addCountRow(out, abc);
           } else {
-            window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full });
+            window.ABCJS.renderAbc(out, "%%stretchlast 1\n" + abc, { paddingtop: 4, paddingbottom: 4, staffwidth: full, add_classes: wantCount });
             // abcjs gives the SVG fixed width/height attributes but NO viewBox, so CSS
             // "max-width:100%" shrinks the box without scaling content and clips the right
             // edge on narrow widths. A getBBox-based viewBox makes the whole stave scale.
@@ -634,6 +693,7 @@
               if (!vb) { const w = parseFloat(s.getAttribute("width")), h = parseFloat(s.getAttribute("height")); if (w && h) vb = "0 0 " + w + " " + h; }
               if (vb) { s.setAttribute("viewBox", vb); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); }
             }
+            if (wantCount) addCountRow(out, abc);
           }
           out.dataset.done = "1";
         } catch (e) { out.innerHTML = '<div class="lr-abc-err">This notation could not be rendered.</div>'; }
