@@ -193,26 +193,36 @@
   // centres so rising = higher, and the note letters underneath. No stave, no baseline.
   // Returns an SVG string (responsive via viewBox + width:100%).
   function buildPrestaffSVG(spec) {
-    const F = spec.fingers || [], NM = spec.names || [], LV = spec.levels || [], BT = spec.beats || [];
-    const n = Math.max(F.length, NM.length, LV.length);
+    // One or two hands. spec.lh (when present) is a second hand drawn as a stacked
+    // strip below the first, so hands-together pieces show both parts at once.
+    const hands = spec.lh ? [spec, spec.lh] : [spec];
+    const two = hands.length > 1;
+    const n = Math.max(0, ...hands.map(h => Math.max((h.fingers || []).length, (h.names || []).length, (h.levels || []).length)));
     if (!n) return "";
-    const gap = 130, margin = 60, W = margin * 2 + (n - 1) * gap, H = 150;
-    const base = 96, step = 16, fingerY = 34, letterY = 140;
-    // Note-centre points for the contour line and the noteheads.
-    const pts = [];
-    for (let i = 0; i < n; i++) pts.push([margin + i * gap, base - (LV[i] || 0) * step]);
+    const gap = 130, margin = 60, stripH = 150, W = margin * 2 + (n - 1) * gap, H = stripH * hands.length;
+    const step = 16;
+    // Draw one hand's strip (finger badges, contour, noteheads, letters) at a y offset.
+    const strip = (h, yOff, label) => {
+      const F = h.fingers || [], NM = h.names || [], LV = h.levels || [], BT = h.beats || [];
+      const base = yOff + 96, fingerY = yOff + 34, letterY = yOff + 140;
+      const pts = [];
+      for (let i = 0; i < n; i++) pts.push([margin + i * gap, base - (LV[i] || 0) * step]);
+      let s = "";
+      if (label) s += `<text x="8" y="${yOff + 15}" font-size="13" fill="#8a7868">${esc(label)}</text>`;
+      if (n > 1 && spec.line !== false) s += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#d9cbb4" stroke-width="2.5" stroke-linejoin="round"/>`;
+      for (let i = 0; i < n; i++) {
+        const [cx, cy] = pts[i];
+        const long = (BT[i] || 1) >= 2;
+        s += long
+          ? `<ellipse cx="${cx}" cy="${cy}" rx="15" ry="11" fill="none" stroke="#1a1410" stroke-width="3"/>`
+          : `<ellipse cx="${cx}" cy="${cy}" rx="14" ry="10.5" fill="#1a1410"/>`;
+        if (F[i] != null) s += `<circle cx="${cx}" cy="${fingerY}" r="15" fill="#f5c518"/><text x="${cx}" y="${fingerY + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#3a2c00">${esc(String(F[i]))}</text>`;
+        if (NM[i] != null) s += `<text x="${cx}" y="${letterY}" text-anchor="middle" font-size="15" fill="#8a7868">${esc(String(NM[i]))}</text>`;
+      }
+      return s;
+    };
     let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="system-ui" class="lr-ps-svg">`;
-    // contour line through the note centres (drawn first, so noteheads sit on top)
-    if (n > 1 && spec.line !== false) s += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#d9cbb4" stroke-width="2.5" stroke-linejoin="round"/>`;
-    for (let i = 0; i < n; i++) {
-      const [cx, cy] = pts[i];
-      const long = (BT[i] || 1) >= 2;
-      s += long
-        ? `<ellipse cx="${cx}" cy="${cy}" rx="15" ry="11" fill="none" stroke="#1a1410" stroke-width="3"/>`
-        : `<ellipse cx="${cx}" cy="${cy}" rx="14" ry="10.5" fill="#1a1410"/>`;
-      if (F[i] != null) s += `<circle cx="${cx}" cy="${fingerY}" r="15" fill="#f5c518"/><text x="${cx}" y="${fingerY + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#3a2c00">${esc(String(F[i]))}</text>`;
-      if (NM[i] != null) s += `<text x="${cx}" y="${letterY}" text-anchor="middle" font-size="15" fill="#8a7868">${esc(String(NM[i]))}</text>`;
-    }
+    hands.forEach((h, hi) => { s += strip(h, hi * stripH, two ? (hi === 0 ? "Right hand" : "Left hand") : null); });
     return s + `</svg>`;
   }
 
@@ -369,11 +379,18 @@
         // audio via the shared play button.
         // line !== false draws the up/down contour; set line:false for a flat demo
         // (e.g. the same note short vs long) where a connecting line would be meaningless.
-        const spec = esc(JSON.stringify({ fingers: b.fingers || [], names: b.names || [], levels: b.levels || [], beats: b.beats || [], line: b.line }));
+        const lh = b.lh && (b.lh.notes || b.lh.names || b.lh.levels) ? b.lh : null;
+        const specObj = { fingers: b.fingers || [], names: b.names || [], levels: b.levels || [], beats: b.beats || [], line: b.line };
+        if (lh) specObj.lh = { fingers: lh.fingers || [], names: lh.names || [], levels: lh.levels || [], beats: lh.beats || [] };
+        const spec = esc(JSON.stringify(specObj));
         const notes = b.notes || [];
         const clickAttr = b.click ? ` data-click="1"` : "";
-        const playBtn = notes.length
-          ? `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="1" data-beats="${esc(JSON.stringify(b.beats || []))}" data-bpm="${b.bpm || 72}"${clickAttr}><span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Hear it")}</span></button></div>`
+        // Two hands: play both parts together as two voices. One hand: a single sequence.
+        const playData = lh
+          ? ` data-voices="${esc(JSON.stringify([{ notes, beats: b.beats || [] }, { notes: lh.notes || [], beats: lh.beats || [] }]))}" data-bpm="${b.bpm || 72}"${clickAttr}`
+          : ` data-notes="${esc(JSON.stringify(notes))}" data-seq="1" data-beats="${esc(JSON.stringify(b.beats || []))}" data-bpm="${b.bpm || 72}"${clickAttr}`;
+        const playBtn = (notes.length || (lh && (lh.notes || []).length))
+          ? `<div class="lr-play"><button type="button" class="lr-play-btn"${playData}><span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Hear it")}</span></button></div>`
           : "";
         // Keep the play button INSIDE the figure so a prestaff block is a single
         // top-level element (the lesson-studio inline editor maps one element per block).
