@@ -2632,16 +2632,27 @@ async function colAddCustom(title, composer, status) {
     .insert({ email: myEmail, title: title.trim(), composer: (composer || "").trim() })
     .select().single();
   if (upErr || !upData) { showToast("Error saving custom piece"); return; }
-  // Add to user_collections
-  const { error: ucErr } = await db.from("user_collections")
-    .insert({ email: myEmail, user_piece_id: upData.id, status: status });
-  if (ucErr) { showToast("Error adding to collection"); return; }
   const key = customKey(upData.id);
-  myCollection[key] = Object.assign({}, upData, { status: status, _custom: true });
+  // Adding straight to "Completed" must go through the difficulty rating (so the piece
+  // earns a level and counts toward roadmap objectives), exactly like completing it from
+  // its card. So we add it as Learning first, then hand off to colSetStatus, which shows
+  // the "how did it feel?" prompt and calls the RPC. Aspire/Learning add directly.
+  const initial = (status === "completed") ? "learning" : status;
+  const { error: ucErr } = await db.from("user_collections")
+    .insert({ email: myEmail, user_piece_id: upData.id, status: initial });
+  if (ucErr) { showToast("Error adding to collection"); return; }
+  myCollection[key] = Object.assign({}, upData, { status: initial, _custom: true });
   renderCollection();
   document.getElementById("col-search-dropdown").style.display = "none";
   document.getElementById("col-search-input").value = "";
-  showToast("✓ Custom piece added to " + COL_STATUS_LABELS[status]);
+  if (status === "completed") {
+    await colSetStatus(key, "completed");   // shows the rating prompt + rates + counts it
+    // If they cancelled the rating, the piece stays in Learning — say so, don't leave it silent.
+    if (myCollection[key] && myCollection[key].status !== "completed")
+      showToast("✓ Added to Learning — mark it Completed anytime to rate it.");
+  } else {
+    showToast("✓ Custom piece added to " + COL_STATUS_LABELS[status]);
+  }
 }
 window.colAddCustom = colAddCustom;
 
