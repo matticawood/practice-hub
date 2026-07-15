@@ -100,7 +100,12 @@
       // under it (abcjs pads the clef/key, so the staff's left edge is too far left).
       const lx0 = firstX - (bars[0] - firstX) / (2 * perBar - 1);
       const bounds = [lx0, ...bars];
-      const y = staffBottom + 15;
+      // Sit the counts below the LOWEST drawn thing (a stem-down note, a low
+      // ledger note or a rest can hang below the staff line), not just the staff
+      // bottom, so the numbers never collide with the music above them.
+      let low = staffBottom;
+      svg.querySelectorAll(".abcjs-note, .abcjs-rest").forEach(e => { const b = e.getBBox(); low = Math.max(low, b.y + b.height); });
+      const y = low + 13;
       const NS = "http://www.w3.org/2000/svg";
       for (let m = 0; m < bounds.length - 1; m++) {
         const Lx = bounds[m], w = bounds[m + 1] - Lx;
@@ -110,9 +115,9 @@
           t.setAttribute("x", (Lx + w * (k + 0.5) / perBar).toFixed(1));
           t.setAttribute("y", y.toFixed(1));
           t.setAttribute("text-anchor", "middle");
-          t.setAttribute("font-size", "12");
+          t.setAttribute("font-size", "10");
           t.setAttribute("font-style", "italic");
-          t.setAttribute("font-family", "Georgia, Times, serif");
+          t.setAttribute("font-family", "Times New Roman, Times, serif");
           t.setAttribute("fill", "#9a7b52");
           t.textContent = String(k + 1);
           svg.appendChild(t);
