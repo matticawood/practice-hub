@@ -199,14 +199,28 @@
     const two = hands.length > 1;
     const n = Math.max(0, ...hands.map(h => Math.max((h.fingers || []).length, (h.names || []).length, (h.levels || []).length)));
     if (!n) return "";
-    const gap = 130, margin = 60, stripH = 150, W = margin * 2 + (n - 1) * gap, H = stripH * hands.length;
-    const step = 16;
-    // Draw one hand's strip (finger badges, contour, noteheads, letters) at a y offset.
-    const strip = (h, yOff, label) => {
+    const gap = 130, margin = 60, W = margin * 2 + (n - 1) * gap, step = 16;
+    // Each hand's strip height ADAPTS to its pitch range: the top note always sits 30px
+    // below the finger badges, and lower notes step DOWN by a constant `step` per level.
+    // So a skip (2 levels) looks twice as tall as a step (1 level), and a wide range never
+    // collides with the badges. Range 2 reproduces the original single-step geometry.
+    const geom = h => {
+      const LV = (h.levels || []).slice(0, n);
+      const vals = LV.filter(v => v != null);
+      const lo = vals.length ? Math.min(...vals) : 0, hi = vals.length ? Math.max(...vals) : 0;
+      const range = hi - lo;
+      const contourTop = 64;                 // highest note (level hi)
+      const bottom = range === 0 ? 96 : contourTop + range * step;  // lowest note (level lo)
+      const cy = lv => range === 0 ? 96 : bottom - ((lv || 0) - lo) * step;
+      const letterY = bottom + 44;
+      return { cy, letterY, stripH: letterY + 10 };
+    };
+    // Draw one hand's strip at a y offset, using its own adaptive geometry g.
+    const strip = (h, yOff, g, label) => {
       const F = h.fingers || [], NM = h.names || [], LV = h.levels || [], BT = h.beats || [];
-      const base = yOff + 96, fingerY = yOff + 34, letterY = yOff + 140;
+      const fingerY = yOff + 34;
       const pts = [];
-      for (let i = 0; i < n; i++) pts.push([margin + i * gap, base - (LV[i] || 0) * step]);
+      for (let i = 0; i < n; i++) pts.push([margin + i * gap, yOff + g.cy(LV[i])]);
       let s = "";
       if (label) s += `<text x="8" y="${yOff + 15}" font-size="13" fill="#8a7868">${esc(label)}</text>`;
       if (n > 1 && spec.line !== false) s += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#d9cbb4" stroke-width="2.5" stroke-linejoin="round"/>`;
@@ -217,12 +231,15 @@
           ? `<ellipse cx="${cx}" cy="${cy}" rx="15" ry="11" fill="none" stroke="#1a1410" stroke-width="3"/>`
           : `<ellipse cx="${cx}" cy="${cy}" rx="14" ry="10.5" fill="#1a1410"/>`;
         if (F[i] != null) s += `<circle cx="${cx}" cy="${fingerY}" r="15" fill="#f5c518"/><text x="${cx}" y="${fingerY + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#3a2c00">${esc(String(F[i]))}</text>`;
-        if (NM[i] != null) s += `<text x="${cx}" y="${letterY}" text-anchor="middle" font-size="15" fill="#8a7868">${esc(String(NM[i]))}</text>`;
+        if (NM[i] != null) s += `<text x="${cx}" y="${yOff + g.letterY}" text-anchor="middle" font-size="15" fill="#8a7868">${esc(String(NM[i]))}</text>`;
       }
       return s;
     };
+    const geoms = hands.map(geom);
+    const H = geoms.reduce((a, g) => a + g.stripH, 0);
     let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="system-ui" class="lr-ps-svg">`;
-    hands.forEach((h, hi) => { s += strip(h, hi * stripH, two ? (hi === 0 ? "Right hand" : "Left hand") : null); });
+    let yOff = 0;
+    hands.forEach((h, hi) => { s += strip(h, yOff, geoms[hi], two ? (hi === 0 ? "Right hand" : "Left hand") : null); yOff += geoms[hi].stripH; });
     return s + `</svg>`;
   }
 
