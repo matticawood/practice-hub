@@ -12607,15 +12607,27 @@ function _renderJourneyCard(returnParts) {
   // hours), still in the First Steps stage, no real game score yet, course
   // unfinished, and not dismissed. A strong game score only surfaces the escape
   // hatch — it never force-ejects. Dev preview: ?abc=1 forces it on (host dev--).
-  const _abcDev = /(^|\.)dev--/.test(location.hostname) && /[?&]abc=1/.test(location.search);
-  // Dismiss and finishing the course always hide it (even under the dev preview),
-  // so dismissing hands the section back to the normal level picks.
+  // Dev preview: ?abc=<n> forces the card on (host dev--). n=1 previews the
+  // not-started state; n>1 previews the started state as if n lessons are done.
+  const _devHost = /(^|\.)dev--/.test(location.hostname);
+  const _abcN = _devHost ? parseInt((location.search.match(/[?&]abc=(\d+)/) || [])[1], 10) : NaN;
+  const _abcDev = _abcN >= 1;
+  // Started -> sticky: once a lesson is done, keep offering "Continue" until the
+  // course is finished or dismissed, regardless of the fresh-beginner signals
+  // (their practice may cross 5h, or a game score arrive, before they finish).
+  const _fsStarted = !!_fsCourse && _fsCourse.live && _fsCourse.done > 0;
+  // Fresh-beginner signals decide whether to surface the course to someone who
+  // hasn't started it yet.
+  const _fsFresh = !!_fsCourse && (_abcDev || (
+    _fsCourse.live && T.idx === 0 && mins.total < 300 &&
+    bestMatch("note", null) < 8 && bestMatch("chord", null) < 4 &&
+    bestMatch("ear", null) < 4 && bestMatch("interval", null) < 4
+  ));
+  // Dismiss and finishing always hide it (even under the dev preview), so
+  // dismissing hands the section back to the normal level picks.
   const _fsBeginner = !!_fsCourse && _fsCourse.total > 0 &&
-    _fsCourse.done < _fsCourse.total && !selfDone("abc_dismissed") && (_abcDev || (
-      _fsCourse.live && T.idx === 0 && mins.total < 300 &&
-      bestMatch("note", null) < 8 && bestMatch("chord", null) < 4 &&
-      bestMatch("ear", null) < 4 && bestMatch("interval", null) < 4
-    ));
+    _fsCourse.done < _fsCourse.total && !selfDone("abc_dismissed") &&
+    (_fsStarted || _fsFresh);
 
   // ── Matt's piece picks for this level — a few library pieces at the stage's
   // difficulty the member doesn't already have, linking straight into the library.
@@ -12662,14 +12674,18 @@ function _renderJourneyCard(returnParts) {
   // here"; in progress -> "Lesson N of total" (sticky). A Dismiss control and an
   // "already play?" escape hatch sit beneath it.
   if (_fsBeginner) {
-    const _done = _fsCourse.done, _total = _fsCourse.total, _started = _done > 0;
+    const _total = _fsCourse.total;
+    // Dev preview: ?abc=n (n>1) fakes n done lessons so the started state can be
+    // reviewed with a full account; otherwise use real progress.
+    const _done = (_abcDev && _abcN > 1) ? Math.min(_abcN, _total - 1) : _fsCourse.done;
+    const _started = _done > 0;
     const _pct = _total ? Math.round(_done / _total * 100) : 0;
     const _cap = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1 2.5 2.5 6 2.5s6-1.5 6-2.5v-5"/></svg>`;
     const _arrow = `<svg class="abc-pick-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`;
     recsHtml = `<div class="rg-recs">
       <div class="rg-recs-head">
         <img class="rg-recs-av" src="${MATT_AVATAR}" alt="Matt" draggable="false" onerror="this.style.display='none'">
-        <div class="rg-recs-htext"><div class="rg-recs-title">Matt's picks</div><div class="rg-recs-sub">New here? Choose where to start</div></div>
+        <div class="rg-recs-htext"><div class="rg-recs-title">Matt's picks</div><div class="rg-recs-sub">${_started ? "Pick up where you left off" : "New here? Choose where to start"}</div></div>
       </div>
       <a class="abc-pick" href="/courses.html?course=first-steps">
         <span class="abc-pick-ic">${_cap}</span>
