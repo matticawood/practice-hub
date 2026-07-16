@@ -111,7 +111,11 @@
       var s = STEPS[i], last = i === STEPS.length - 1;
       pop.style.opacity = "0"; spot.style.opacity = "0";
       var nextLabel = last ? (s.primary || "Done") : "Next";
-      pop.innerHTML = "<h4>" + esc(s.title) + "</h4><p>" + esc(s.text) + "</p>" +
+      // title/text may be functions, resolved here at display time so a step can
+      // adapt to what is actually on screen when it shows.
+      var sTitle = (typeof s.title === "function") ? s.title() : s.title;
+      var sText  = (typeof s.text  === "function") ? s.text()  : s.text;
+      pop.innerHTML = "<h4>" + esc(sTitle) + "</h4><p>" + esc(sText) + "</p>" +
         '<div class="sp-tour-foot"><span class="sp-tour-dots">' + (i + 1) + " / " + STEPS.length + "</span>" +
         '<div class="sp-tour-btns"><button type="button" class="sp-tour-skip">Skip</button>' +
         '<button type="button" class="sp-tour-next">' + esc(nextLabel) + "</button></div></div>";
