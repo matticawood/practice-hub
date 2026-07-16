@@ -10926,8 +10926,11 @@ async function renderDashboard() {
     .slice(0, 3);
   const recentHTML = recent.length ? recent.map(s => {
     const items  = (s.practice_items || []);
-    const labels = items.map(i => i.piece_label || i.label || '').filter(Boolean).slice(0, 2);
-    const more   = items.length > 2 ? ` +${items.length - 2}` : '';
+    // Dedupe labels: a holistic course lesson repeats its title across the four
+    // track-items, so unique-ify before previewing to avoid "Title · Title +2".
+    const uniqLabels = [...new Set(items.map(i => i.piece_label || i.label || '').filter(Boolean))];
+    const labels = uniqLabels.slice(0, 2);
+    const more   = uniqLabels.length > 2 ? ` +${uniqLabels.length - 2}` : '';
     const [y, mo, d] = s.session_date.split('-').map(Number);
     const dateObj    = new Date(y, mo-1, d);
     const shortDate  = `${dateObj.toLocaleString('default',{weekday:'short'})} ${d} ${MONTHS_SHORT[mo-1]}`;
@@ -17938,7 +17941,16 @@ function _focusDots(r) {
 
 function renderSessionCard(sess, canEdit, expand) {
   const items = sess.practice_items || [];
-  const itemsHTML = items.map(item => renderHistoryItem(item, sess.timing_mode)).join("");
+  // A course lesson (theory or the holistic beginner course) is one lesson to the
+  // member, even though the beginner course splits it across four track-items to
+  // credit all four roadmap buckets. Show it as a single "Course lesson" entry.
+  const isCourseLesson = sess.source === "app-lesson";
+  const lessonLabel = isCourseLesson
+    ? ((items[0] && items[0].label) || (sess.notes || "").replace(/^Course lesson:\s*/, "") || "Course lesson")
+    : "";
+  const itemsHTML = (isCourseLesson && items.length > 1)
+    ? renderLessonSummaryRow(lessonLabel, sess.duration_minutes, _histSessionType(items))
+    : items.map(item => renderHistoryItem(item, sess.timing_mode)).join("");
   // Game entries are a fixed per-play tally, so their time isn't editable — hide
   // the Edit button (they can still be deleted).
   const canEditTime = canEdit && sess.source !== "app-game";
@@ -17971,9 +17983,9 @@ function renderSessionCard(sess, canEdit, expand) {
     ? `<div class="session-focus">Focus ${_focusDots(sess.focus_rating)} <span style="opacity:.6;margin-left:2px">${sess.focus_rating}/5</span></div>`
     : "";
 
-  const preview = _histSessionPreview(items);
+  const preview = isCourseLesson ? lessonLabel : _histSessionPreview(items);
   const title = preview || "Practice session";
-  const itemCount = `${items.length} item${items.length !== 1 ? "s" : ""}`;
+  const itemCount = isCourseLesson ? "Course lesson" : `${items.length} item${items.length !== 1 ? "s" : ""}`;
   const domType = _histSessionType(items);
   const tc = TYPE_COLOR[domType] || TYPE_COLOR.other;
 
@@ -17996,6 +18008,23 @@ function renderSessionCard(sess, canEdit, expand) {
           ${actionsHTML}
         </div>
       </div>
+    </div>`;
+}
+
+// A course lesson is one session. The holistic beginner course stores it as
+// several practice_items (one per roadmap track) so it credits Repertoire,
+// Technique, Sight-reading and Musicianship at once, but the member should just
+// see the single lesson it was. Collapse those items into one summary row.
+function renderLessonSummaryRow(label, mins, domType) {
+  const tc = TYPE_COLOR[domType] || TYPE_COLOR.other;
+  const dur = mins ? `<div class="item-duration">${formatMinutes(mins)}</div>` : "";
+  return `
+    <div class="practice-item-row" style="background:${tc.bg};border-left:3px solid ${tc.border}">
+      <div class="item-icon" style="color:${tc.border}">${typeIconSVG(domType)}</div>
+      <div class="item-content">
+        <div class="item-label">${escHtml(label)}</div>
+      </div>
+      ${dur}
     </div>`;
 }
 
@@ -20756,7 +20785,12 @@ function buildShareText(dateStr, durationMins, items, notes) {
   lines.push("");
 
   if (items.length > 0) {
-    for (const item of items) {
+    // A holistic course lesson is stored as several track-items that share one
+    // label (so it credits all four roadmap buckets); show it as a single line
+    // rather than repeating the lesson four times.
+    const uniqLabels = new Set(items.map(it => (it.label || "").trim()).filter(Boolean));
+    const rows = (items.length > 1 && uniqLabels.size === 1) ? items.slice(0, 1) : items;
+    for (const item of rows) {
       const typeInfo = TYPE_MAP[item.item_type] || { icon: "📝", label: "Other" };
       let label = `${typeInfo.icon} ${item.label || typeInfo.label}`;
 
