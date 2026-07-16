@@ -669,12 +669,20 @@ function scrollTop() { window.scrollTo({ top: 0, behavior: "smooth" }); }
     initSharedHeader({ db, myEmail, myName, isAdmin: myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase(), activePage: "resources", avatarUrl: (ae && ae.avatar_url) || null });
   } catch (e) { console.error("initSharedHeader error:", e); }
 
+  // Owner-only preview: ?preview=1 includes DRAFT lessons so an unpublished course
+  // can be walked end-to-end on the courses page before going live. Members always
+  // see published lessons only.
+  const _isOwner = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  const _preview = _isOwner && new URLSearchParams(location.search).get("preview") === "1";
+  let _lessonsQ = db.from("lessons").select("id,course,level,sort_order,title,summary,est_minutes")
+    .in("course", COURSES.map(c => c.key));
+  if (!_preview) _lessonsQ = _lessonsQ.eq("status", "published");
+  _lessonsQ = _lessonsQ.order("course").order("level").order("sort_order");
   const [{ data: lessons }, { data: prog }] = await Promise.all([
-    db.from("lessons").select("id,course,level,sort_order,title,summary,est_minutes")
-      .eq("status", "published").in("course", COURSES.map(c => c.key))
-      .order("course").order("level").order("sort_order"),
+    _lessonsQ,
     db.from("lesson_progress").select("lesson_id,completed,score").eq("email", myEmail),
   ]);
+  if (_preview) { try { showToast("Preview mode: showing draft lessons too"); } catch (_) {} }
   LESSONS = lessons || [];
   PROGRESS = {};
   (prog || []).forEach(p => { PROGRESS[p.lesson_id] = { completed: p.completed, score: p.score }; });
