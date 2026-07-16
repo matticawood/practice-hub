@@ -678,14 +678,44 @@ function scrollTop() { window.scrollTo({ top: 0, behavior: "smooth" }); }
     .in("course", COURSES.map(c => c.key));
   if (!_preview) _lessonsQ = _lessonsQ.eq("status", "published");
   _lessonsQ = _lessonsQ.order("course").order("level").order("sort_order");
-  const [{ data: lessons }, { data: prog }] = await Promise.all([
+  const _emailLc = (myEmail || "").toLowerCase();
+  const [{ data: lessons }, { data: prog }, { data: _sess }, { data: _base },
+         { data: _fsIds }, { data: _ns }, { data: _cs }, { data: _es }, { data: _is }, { data: _msc }] = await Promise.all([
     _lessonsQ,
     db.from("lesson_progress").select("lesson_id,completed,score").eq("email", myEmail),
+    db.from("practice_sessions").select("duration_minutes").eq("email", myEmail),
+    db.from("practice_baseline").select("total_minutes").eq("email", myEmail).maybeSingle(),
+    db.from("lessons").select("id").eq("course", "first-steps"),
+    db.from("note_game_scores").select("score").eq("email", myEmail),
+    db.from("chord_game_scores").select("score").eq("email", myEmail),
+    db.from("ear_game_scores").select("score").eq("email", myEmail),
+    db.from("interval_game_scores").select("score").eq("email", _emailLc),
+    db.from("member_self_checks").select("checks").eq("email", myEmail).maybeSingle(),
   ]);
   if (_preview) { try { showToast("Preview mode: showing draft lessons too"); } catch (_) {} }
   LESSONS = lessons || [];
   PROGRESS = {};
   (prog || []).forEach(p => { PROGRESS[p.lesson_id] = { completed: p.completed, score: p.score }; });
+
+  // Course order: The Absolute Beginner Course sits UNDER Music Theory by default,
+  // and lifts ABOVE it for a flagged absolute beginner — the same signal as the
+  // dashboard "Start here" pick: they've started it (sticky), OR they look fresh
+  // (under 5h total incl. prior hours, no real game score) and haven't dismissed
+  // it. Owner preview: ?bf=1 forces the beginner-first order.
+  const _maxScore = a => (a || []).reduce((m, r) => Math.max(m, r.score || 0), 0);
+  const _totMin = (_sess || []).reduce((a, r) => a + (r.duration_minutes || 0), 0) + ((_base && _base.total_minutes) || 0);
+  const _fsIdSet = new Set((_fsIds || []).map(r => r.id));
+  const _fsStarted = (prog || []).some(p => p.completed && _fsIdSet.has(p.lesson_id));
+  const _dismissed = !!(_msc && _msc.checks && _msc.checks.abc_dismissed);
+  const _noStrongScore = _maxScore(_ns) < 8 && _maxScore(_cs) < 4 && _maxScore(_es) < 4 && _maxScore(_is) < 4;
+  let _beginnerFirst = _fsStarted || (!_dismissed && _totMin < 300 && _noStrongScore);
+  if (_isOwner && new URLSearchParams(location.search).get("bf") === "1") _beginnerFirst = true;
+  const _fsi = COURSES.findIndex(c => c.key === "first-steps");
+  if (_fsi > -1) {
+    const [_fsc] = COURSES.splice(_fsi, 1);
+    const _thi = COURSES.findIndex(c => c.key === "theory");
+    COURSES.splice(_thi < 0 ? 0 : (_beginnerFirst ? _thi : _thi + 1), 0, _fsc);
+  }
 
   document.getElementById("loading-screen").style.display = "none";
   document.getElementById("app-main").style.display = "block";
