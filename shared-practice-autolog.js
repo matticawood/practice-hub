@@ -50,13 +50,29 @@
     // successful dedup, not a real error.
     if (error) return { logged: false, minutes, error };
 
-    await db.from("practice_items").insert({
-      session_id: sess.id,
-      item_type: o.itemType,
-      duration_minutes: minutes,
-      label: o.label || null,
-      sort_order: 0,
-    });
+    // A caller can spread one session across several tracks by passing
+    // `items: [{ itemType, minutes }]` (a holistic course lesson that credits
+    // repertoire/technique/sight-reading/musicianship at once). The split should
+    // sum to `minutes`; we insert one practice_item per entry. Otherwise a single
+    // item on `o.itemType` (the default for the theory course, games, etc.).
+    const rows = (Array.isArray(o.items) && o.items.length)
+      ? o.items
+          .filter(it => it && (Number(it.minutes) || 0) > 0)
+          .map((it, i) => ({
+            session_id: sess.id,
+            item_type: it.itemType,
+            duration_minutes: Math.round(Number(it.minutes) || 0),
+            label: o.label || null,
+            sort_order: i,
+          }))
+      : [{
+          session_id: sess.id,
+          item_type: o.itemType,
+          duration_minutes: minutes,
+          label: o.label || null,
+          sort_order: 0,
+        }];
+    await db.from("practice_items").insert(rows);
     return { logged: true, minutes, sessionId: sess.id };
   }
 

@@ -219,7 +219,7 @@
 </div>
 
 <header id="app-header" style="display:none"></header>
-<script src="/shared-practice-autolog.js?v=3"></script>
+<script src="/shared-practice-autolog.js?v=4"></script>
 <script src="/shared-achievements.js?v=7"></script>
 <script src="/shared-header.js?v=2026070101"></script>
 
@@ -308,6 +308,48 @@ function closeLoggedTimeEditor() {
   document.getElementById("tc-time-modal").classList.remove("show");
   _tmSessionId = null;
 }
+// The Absolute Beginner Course (first-steps) is holistic: every lesson is
+// playing a piece, working on technique, reading, and understanding at once. So
+// its practice time is spread across all four roadmap tracks with a fixed
+// weighting that leans to repertoire, rather than counted as pure musicianship
+// like the Theory course. item_type strings map to tracks in practice-log
+// (_RM_TYPE_TO_TRACK): piece->Repertoire, technique->Technique,
+// sightreading->Sight-reading, theory->Musicianship.
+const FS_TRACK_WEIGHTS = [
+  { itemType: "piece",        w: 0.40 }, // Repertoire
+  { itemType: "technique",    w: 0.25 }, // Technique
+  { itemType: "sightreading", w: 0.15 }, // Sight reading
+  { itemType: "theory",       w: 0.20 }, // Musicianship
+];
+// Largest-remainder allocation of `total` whole minutes across weights so the
+// parts always sum exactly to the session total (no drift, no lost minute).
+function _allocate(exacts, total) {
+  const out = exacts.map(v => Math.floor(v));
+  let left = total - out.reduce((a, b) => a + b, 0);
+  const order = exacts.map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (let k = 0; k < left; k++) out[order[k % order.length].i] += 1;
+  return out;
+}
+function _fsSplit(total) {
+  total = Math.round(Number(total) || 0);
+  if (total <= 0) return [];
+  const mins = _allocate(FS_TRACK_WEIGHTS.map(t => total * t.w), total);
+  return FS_TRACK_WEIGHTS
+    .map((t, i) => ({ itemType: t.itemType, minutes: mins[i] }))
+    .filter(r => r.minutes > 0);
+}
+// Re-spread a new total across a session's existing items in their current
+// proportions (used when the member adjusts the logged time). A single-item
+// session just takes the whole value; a split session stays balanced.
+function _reallocate(cur, total) {
+  total = Math.round(Number(total) || 0);
+  const sum = cur.reduce((a, b) => a + b, 0);
+  if (total <= 0) return cur.map(() => 0);
+  if (sum <= 0) return cur.map((_, i) => (i === 0 ? total : 0));
+  return _allocate(cur.map(v => (v / sum) * total), total);
+}
+
 // Apply whatever time is shown and close. A no-op write is skipped when the
 // default is untouched, so "Done" always just means "that's right".
 async function _tmSave() {
@@ -319,7 +361,17 @@ async function _tmSave() {
   saveBtn.disabled = true; saveBtn.textContent = "Saving…";
   try {
     await db.from("practice_sessions").update({ duration_minutes: mins }).eq("id", _tmSessionId);
-    await db.from("practice_items").update({ duration_minutes: mins }).eq("session_id", _tmSessionId);
+    // Re-spread the new total across the session's items in their current
+    // proportions, so a multi-track split (this course) stays balanced and a
+    // single-item session (theory) just takes the whole value.
+    const { data: its } = await db.from("practice_items")
+      .select("id,duration_minutes").eq("session_id", _tmSessionId).order("sort_order");
+    if (its && its.length) {
+      const shares = _reallocate(its.map(x => x.duration_minutes || 0), mins);
+      for (let i = 0; i < its.length; i++) {
+        await db.from("practice_items").update({ duration_minutes: shares[i] }).eq("id", its[i].id);
+      }
+    }
   } catch (_) {}
   closeLoggedTimeEditor();
   showToast("Practice time updated to " + mins + " min");
@@ -551,6 +603,7 @@ async function openLesson(id, courseKey, push) {
         const r = await window.PracticeAutolog.logAppActivity(db, {
           email: myEmail, source: "app-lesson", originRef: "lesson:" + id,
           minutes: lesson.est_minutes, itemType: "theory",
+          items: lesson.course === "first-steps" ? _fsSplit(lesson.est_minutes) : null,
           label: lesson.title, notes: "Course lesson: " + lesson.title,
         });
         loggedMins = r.logged ? r.minutes : 0;
