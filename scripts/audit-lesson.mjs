@@ -55,7 +55,10 @@ console.log(`\n=== AUDIT: ${target.title}  (${target.course} L${target.level} #$
 console.log(`blocks: ${B.length} | est_minutes: ${target.est_minutes} | status: ${target.status}\n`);
 
 // ── 1. STRUCTURAL ────────────────────────────────────────────────────────────
-const KNOWN = new Set(["heading","text","callout","example","task","divider","notation","play","keyboard","questions"]);
+// Keep in step with the renderer's block types (lessons-render.js) and
+// lesson-studio's BLOCK_TYPES, or valid blocks get flagged as unknown.
+const KNOWN = new Set(["heading","text","callout","example","task","divider","notation","play","keyboard","questions",
+                       "image","audio","video","download","hand","prestaff"]);
 const noteRe = /^([A-G][#b]?\d|r)$/;
 B.forEach((b, i) => {
   if (!b.type || !KNOWN.has(b.type)) flag("STRUCT", `[${i}] unknown/missing type: ${b.type}`);
