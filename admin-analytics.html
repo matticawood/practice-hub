@@ -914,8 +914,15 @@ async function renderAcquisition() {
         const linkTot = {}; for (const e of ytViews) if (inWin(e.ts)) (linkTot["Signup"] = linkTot["Signup"] || new Set()).add(e.vid);
         for (const e of siteYT) if (inWin(e.ts)) { const d = destOf(e.path); (linkTot[d] = linkTot[d] || new Set()).add(e.vid); }
         const allTotal = new Set(); for (const o of Object.values(vidYT)) for (const v of o.tot) allTotal.add(v);
-        const perDest = {}; for (const d of DESTS) perDest[d] = Object.entries(vidYT).map(([c, o]) => [c, o.dest[d] ? o.dest[d].size : 0]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 15);
-        const allList = Object.entries(vidYT).map(([c, o]) => [c, o.tot.size]).sort((a, b) => b[1] - a[1]).slice(0, 15);
+        // Order the tables by the selected metric: click count (default) or the
+        // conversions traced to each video. Conversions win, then clicks as tiebreak.
+        const sortKey = window._ytSort || 'clicks';
+        const sortList = arr => arr.sort((a, b) => {
+          if (sortKey === 'conv') { const cd = (convPerVideo[b[0]] || 0) - (convPerVideo[a[0]] || 0); if (cd) return cd; }
+          return b[1] - a[1];
+        });
+        const perDest = {}; for (const d of DESTS) perDest[d] = sortList(Object.entries(vidYT).map(([c, o]) => [c, o.dest[d] ? o.dest[d].size : 0]).filter(x => x[1] > 0)).slice(0, 15);
+        const allList = sortList(Object.entries(vidYT).map(([c, o]) => [c, o.tot.size])).slice(0, 15);
         const ytTable = (list, showConv) => {
           if (!list.length) return `<div style="color:#64748b;font-size:.82rem;padding:12px 0">No clicks to this link in this window.</div>`;
           const mx = list[0][1] || 1;
@@ -949,10 +956,17 @@ async function renderAcquisition() {
       window._ytSetWin = function (days, btn) {
         document.querySelectorAll(".ytv-win").forEach(b => b.classList.remove("active"));
         if (btn) btn.classList.add("active");
+        window._ytWinDays = days;
         if (typeof window.__ytRenderFn === "function") window.__ytRenderFn(days);
       };
+      window._ytSetSort = function (key, btn) {
+        window._ytSort = key;
+        document.querySelectorAll(".ytv-sort").forEach(b => b.classList.remove("active"));
+        if (btn) btn.classList.add("active");
+        if (typeof window.__ytRenderFn === "function") window.__ytRenderFn(window._ytWinDays || 0);
+      };
 
-      h += `<style>.ytv-tab,.ytv-win{background:#0d1525;border:1px solid #1e2d4a;border-radius:8px;padding:8px 14px;font-size:.82rem;color:#94a3b8;cursor:pointer;font-family:inherit}.ytv-tab:hover,.ytv-win:hover{border-color:#3b4d6e}.ytv-tab.active,.ytv-win.active{background:rgba(245,197,24,.14);border-color:#f5c518;color:#f5c518}.ytv-tab b{color:#f5c518}.ytv-win{font-weight:600}</style>`;
+      h += `<style>.ytv-tab,.ytv-win,.ytv-sort{background:#0d1525;border:1px solid #1e2d4a;border-radius:8px;padding:8px 14px;font-size:.82rem;color:#94a3b8;cursor:pointer;font-family:inherit}.ytv-tab:hover,.ytv-win:hover,.ytv-sort:hover{border-color:#3b4d6e}.ytv-tab.active,.ytv-win.active,.ytv-sort.active{background:rgba(245,197,24,.14);border-color:#f5c518;color:#f5c518}.ytv-tab b{color:#f5c518}.ytv-win,.ytv-sort{font-weight:600}</style>`;
       h += `<h2 class="section-header" style="border-bottom-color:#1e2d4a">${ico('share','#f5c518')}YouTube videos &amp; links <span class="section-meta">which videos drive each description link</span></h2>`;
       h += `<div style="font-size:.74rem;color:#64748b;margin:8px 0 10px">Pick a time window, then a link, to see which videos are driving clicks. Click a video to open it.</div>`;
       h += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px">
@@ -960,6 +974,11 @@ async function renderAcquisition() {
         <button class="ytv-win" onclick="_ytSetWin(30,this)">30 days</button>
         <button class="ytv-win" onclick="_ytSetWin(7,this)">7 days</button>
         <button class="ytv-win" onclick="_ytSetWin(2,this)">48 hours</button>
+      </div>`;
+      h += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px">
+        <span style="font-size:.74rem;color:#64748b">Order by</span>
+        <button class="ytv-sort active" onclick="_ytSetSort('clicks',this)">Clicks</button>
+        <button class="ytv-sort" onclick="_ytSetSort('conv',this)">Conversions</button>
       </div>`;
       h += `<div id="ytv-container"></div><div style="margin-bottom:28px"></div>`;
     }
