@@ -1401,7 +1401,10 @@ window._shToggleNotif = () => {
   }
   panel?.classList.add("open");
   document.getElementById("sh-notif-overlay")?.classList.add("visible");
-  window._shLoadNotifs?.().then(() => window._shRenderNotifs?.());
+  // Load + render (with the "new" highlights), THEN mark everything seen so the
+  // app-icon badge clears. Opening the bell is the member saying "I've looked",
+  // which is what stops the badge sticking at a mystery number.
+  window._shLoadNotifs?.().then(() => { window._shRenderNotifs?.(); window._shMarkSeen?.(); });
   if (window._shIsAdmin) document.getElementById("notif-admin-wrap").style.display = "block";
 };
 // Alias used by practice-log.html
@@ -2710,6 +2713,26 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     await _shSyncAppBadge(true);
   };
   window.markAllNotifsRead = window._shMarkAllRead;
+
+  // Opening the bell counts as SEEING the notifications, so clear the app-icon
+  // badge and mark every unread row read (case-insensitive, ALL rows not just the
+  // 60 loaded). This is the real fix for the "mystery" badge: informational
+  // notifications (achievements, app updates, feed) piled up as unread and the
+  // badge never came down because nobody taps "mark all read". We do NOT flip the
+  // in-memory _notifs here, so the panel keeps its "new" highlights for this one
+  // viewing; the next load reads them as read. Self-heals stuck badges on next open.
+  window._shMarkSeen = async function() {
+    if (!myEmail || !db) return;
+    try { navigator.clearAppBadge?.(); } catch {}
+    const el = document.getElementById("notif-badge"); if (el) el.style.display = "none";
+    const hadUnread = _notifs.some(n => !n.read);
+    if (hadUnread) {
+      try { await db.from("notifications").update({ read: true }).ilike("email", myEmail).eq("read", false); } catch {}
+    }
+    // Force the native iOS icon badge to 0 (APNs-driven) whether or not the loaded
+    // page saw the unread rows, so a badge left stuck by older/out-of-window rows clears too.
+    await _shSyncAppBadge(true);
+  };
 
   // Sync the native iOS app-icon badge. By default it asks send-push to fire a
   // silent push with the user's *current* unread count (so reading one drops the
