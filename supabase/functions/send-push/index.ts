@@ -185,6 +185,46 @@ async function supaDeleteTokens(tokens: string[]) {
   });
 }
 
+// ── Unseen-notification count ────────────────────────────────────────────────
+// The app-icon badge counts notifications the member has not yet LOOKED AT —
+// i.e. created after their `notif_seen_at` watermark (set when they open the
+// bell). This is deliberately separate from per-notification `read` state: a
+// member can open the bell (badge clears) yet still have unread items sitting
+// bold in the list to tap through one by one. A member with no watermark (never
+// opened the bell) counts every notification as unseen.
+async function unseenCount(emailLc: string): Promise<number> {
+  let seenAt = "";
+  try {
+    const rows = await supaSelect(
+      `allowed_emails?email=eq.${encodeURIComponent(emailLc)}&select=notif_seen_at`,
+    );
+    seenAt = rows?.[0]?.notif_seen_at || "";
+  } catch { /* treat as never-seen */ }
+  let q = `notifications?email=eq.${encodeURIComponent(emailLc)}&select=id`;
+  if (seenAt) q += `&created_at=gt.${encodeURIComponent(seenAt)}`;
+  try {
+    const cnt = await fetch(`${SUPA_URL}/rest/v1/${q}`, {
+      headers: { "apikey": SUPA_SERVICE, "Authorization": `Bearer ${SUPA_SERVICE}`, "Prefer": "count=exact", "Range": "0-0" },
+    });
+    const cr = cnt.headers.get("content-range");
+    const total = cr && cr.includes("/") ? parseInt(cr.split("/")[1], 10) : NaN;
+    return isNaN(total) ? 0 : total;
+  } catch { return 0; }
+}
+
+// Stamp the member's seen-watermark to now, so every current notification
+// counts as looked-at and the icon badge drops to 0.
+async function markSeen(emailLc: string) {
+  await fetch(`${SUPA_URL}/rest/v1/allowed_emails?email=eq.${encodeURIComponent(emailLc)}`, {
+    method: "PATCH",
+    headers: {
+      "apikey": SUPA_SERVICE, "Authorization": `Bearer ${SUPA_SERVICE}`,
+      "Content-Type": "application/json", "Prefer": "return=minimal",
+    },
+    body: JSON.stringify({ notif_seen_at: new Date().toISOString() }),
+  });
+}
+
 // ── Caller identity ──────────────────────────────────────────────────────────
 // The anon key is a valid project JWT, so verify_jwt cannot tell a logged-out
 // visitor from a member. Resolve the real user behind the bearer token; returns
@@ -264,34 +304,32 @@ Deno.serve(async (req) => {
   }
 
   // ── Badge sync path ─────────────────────────────────────────────────────────
-  // Called from the web app whenever the user reads notification(s). Sends a
-  // silent (content-available, no alert) push to every device for that email
-  // with badge = the user's *current* unread count. So marking one read drops
-  // the icon badge by one; marking all read clears it to 0.
-  // (clear_badge is accepted as an alias for backwards compatibility.)
-  if ((body.sync_badge || body.clear_badge) && body.email) {
+  // Called from the web app to update the OS app-icon badge via a silent
+  // (content-available, no alert) push. The badge reflects the member's UNSEEN
+  // count — notifications created since they last opened the bell — NOT the
+  // unread count. Three intents:
+  //   mark_seen  → stamp the seen-watermark to now (badge → 0). Fired when the
+  //                bell is opened: the badge clears but items stay unread in the
+  //                list to tap through.
+  //   clear_badge→ force badge to 0 without moving the watermark (legacy alias).
+  //   sync_badge → recompute badge = current unseen count.
+  if ((body.sync_badge || body.clear_badge || body.mark_seen) && body.email) {
     const emailLc = String(body.email).toLowerCase();
     // You can only sync your OWN app-icon badge.
     const _caller = await callerEmail(req);
     if (!_caller || _caller !== emailLc) return json({ error: "forbidden" }, 403);
+
+    // Opening the bell = seeing everything current: advance the watermark first,
+    // so the unseen count below resolves to 0.
+    if (body.mark_seen) await markSeen(emailLc);
+
     const devices = await supaSelect(
       `device_tokens?email=eq.${encodeURIComponent(emailLc)}&select=token`,
     );
     if (!devices.length) return json({ synced: 0, reason: "no devices" });
 
-    // Count current unread (0 when clear_badge was the explicit intent).
-    let unread = 0;
-    if (!body.clear_badge) {
-      try {
-        const cnt = await fetch(
-          `${SUPA_URL}/rest/v1/notifications?email=eq.${encodeURIComponent(emailLc)}&read=eq.false&select=id`,
-          { headers: { "apikey": SUPA_SERVICE, "Authorization": `Bearer ${SUPA_SERVICE}`, "Prefer": "count=exact", "Range": "0-0" } },
-        );
-        const cr = cnt.headers.get("content-range");
-        const total = cr && cr.includes("/") ? parseInt(cr.split("/")[1], 10) : NaN;
-        if (!isNaN(total)) unread = total;
-      } catch { /* default 0 */ }
-    }
+    // mark_seen / clear_badge both mean 0; sync recomputes unseen.
+    const unread = (body.clear_badge || body.mark_seen) ? 0 : await unseenCount(emailLc);
 
     const accessToken = await getFirebaseAccessToken();
     let synced = 0;
@@ -389,17 +427,13 @@ Deno.serve(async (req) => {
 
   const accessToken = await getFirebaseAccessToken();
 
-  // Badge = the recipient's current unread notification count so the iOS app
-  // icon badge is accurate rather than always "1".
+  // Badge = the recipient's UNSEEN count (notifications since they last opened
+  // the bell) so the icon badge reflects "new to look at", not a pile of old
+  // unread informational notifications. The row we're pushing for is itself
+  // unseen, so this is always >= 1.
   let badge = 1;
   try {
-    const cnt = await fetch(
-      `${SUPA_URL}/rest/v1/notifications?email=eq.${encodeURIComponent(email.toLowerCase())}&read=eq.false&select=id`,
-      { headers: { "apikey": SUPA_SERVICE, "Authorization": `Bearer ${SUPA_SERVICE}`, "Prefer": "count=exact", "Range": "0-0" } },
-    );
-    const cr = cnt.headers.get("content-range"); // e.g. "0-0/5"
-    const total = cr && cr.includes("/") ? parseInt(cr.split("/")[1], 10) : NaN;
-    if (!isNaN(total)) badge = Math.max(1, total);
+    badge = Math.max(1, await unseenCount(email.toLowerCase()));
   } catch { /* fall back to 1 */ }
 
   // Coerce all metadata values to strings — FCM data payloads are string-only.

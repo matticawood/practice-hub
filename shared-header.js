@@ -2547,6 +2547,22 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
 
   // ── Notifications ──────────────────────────────────────────────────────────
   let _notifs = [];
+  // Bell list pagination — load newest first, grow the window on "Load older".
+  let _notifLimit = 30;
+  let _notifHasMore = false;
+  // "Seen" watermark (per member). The OS app-icon badge counts notifications
+  // NEWER than this — i.e. arrived since the bell was last opened — which is
+  // separate from per-notification `read` state (the in-app bold highlight).
+  // Mirrored in localStorage for an instant web-PWA badge; the authoritative
+  // copy lives in allowed_emails.notif_seen_at (read on load, used by send-push
+  // for the iOS badge).
+  const _SEEN_KEY = "sh_notif_seen_at:" + (myEmail || "");
+  let _seenAt = (() => { try { return localStorage.getItem(_SEEN_KEY) || ""; } catch { return ""; } })();
+  function _unseen() {
+    if (!_seenAt) return _notifs.length; // never opened the bell → all are new
+    const t = new Date(_seenAt).getTime();
+    return _notifs.filter(n => new Date(n.created_at).getTime() > t).length;
+  }
 
   // Gold trophy icon for Monthly Champions notifications (matches the feed card badge).
   const _NOTIF_CHAMP_ICON = `<div class="notif-item-badge"><span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#ffe27a,#f0a500);color:#fff;box-shadow:0 2px 6px rgba(240,165,0,.35)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></span></div>`;
@@ -2562,14 +2578,18 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   }
 
   function _badge() {
+    // In-app bell dot = UNREAD count (bold items still to tap through).
     const u = _notifs.filter(n => !n.read).length;
-    // OS app-icon badge for installed PWA / Android TWA. iOS sets this
-    // server-side via APNs; web/Android must set it client-side from the same
-    // unread count. (Android launchers may render it as a dot rather than the
-    // exact number — an OS limitation, not something we control.)
+    // OS app-icon badge = UNSEEN count (arrived since the bell was last opened).
+    // These are deliberately different: opening the bell clears the app-icon
+    // badge while leaving unread items bold in the list. iOS sets the app-icon
+    // badge server-side via APNs (send-push, from allowed_emails.notif_seen_at);
+    // web/Android PWA set it here from the local watermark for instant feedback.
+    // (Android launchers may render it as a dot rather than the exact number.)
+    const seen = _unseen();
     try {
       if ("setAppBadge" in navigator) {
-        if (u > 0) navigator.setAppBadge(u); else navigator.clearAppBadge();
+        if (seen > 0) navigator.setAppBadge(seen); else navigator.clearAppBadge();
       }
     } catch (e) {}
     const el = document.getElementById("notif-badge");
@@ -2633,30 +2653,52 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
           <div class="notif-item-time">${_ago(n.created_at)}</div>
         </div>
       </div>`;
-    }).join("");
+    }).join("") + (_notifHasMore
+      ? `<button class="notif-load-more" onclick="window._shLoadMoreNotifs()" style="display:block;width:100%;padding:11px;border:none;border-top:1px solid rgba(0,0,0,.06);background:none;font-family:inherit;font-size:.82rem;font-weight:600;color:var(--accent,#7c3aed);cursor:pointer">Load older</button>`
+      : "");
   };
 
   window._shLoadNotifs = async function() {
     if (!myEmail || !db) return;
+    // Sync the seen-watermark from the server (authoritative) the first time, so
+    // the OS badge on a fresh device reflects the real "unseen" count rather than
+    // treating every notification as new. Best-effort — falls back to localStorage.
+    if (!_seenAt) {
+      try {
+        const { data: me } = await db.from("allowed_emails")
+          .select("notif_seen_at").ilike("email", myEmail).maybeSingle();
+        if (me?.notif_seen_at) {
+          _seenAt = me.notif_seen_at;
+          try { localStorage.setItem(_SEEN_KEY, _seenAt); } catch {}
+        }
+      } catch {}
+    }
+    // Fetch one page past the current window to detect whether "Load older" is needed.
     const { data } = await db.from("notifications").select("*")
-      .eq("email", myEmail).order("created_at", { ascending: false }).limit(60);
-    _notifs = data || [];
+      .eq("email", myEmail).order("created_at", { ascending: false })
+      .limit(_notifLimit + 1);
+    const rows = data || [];
+    _notifHasMore = rows.length > _notifLimit;
+    _notifs = _notifHasMore ? rows.slice(0, _notifLimit) : rows;
     _badge();
+  };
+
+  // "Load older" — grow the window and re-render.
+  window._shLoadMoreNotifs = async function() {
+    _notifLimit += 30;
+    await window._shLoadNotifs();
+    window._shRenderNotifs();
   };
 
   window._shNotifClick = async function(el) {
     const id = el.dataset.id;
     const n = _notifs.find(n => n.id === id);
     if (n && !n.read) {
+      // Tapping an item clears its bold/unread highlight in the list. The OS
+      // app-icon badge is "seen"-based (already cleared when the bell opened), so
+      // we don't touch it here — only the in-app list state.
       n.read = true; _badge(); window._shRenderNotifs();
-      // Update the app-icon badge immediately via the Badging API (installed PWA)
-      // so it doesn't wait on the silent-push round-trip.
-      try {
-        const unread = _notifs.filter(x => !x.read).length;
-        if (unread > 0) navigator.setAppBadge?.(unread); else navigator.clearAppBadge?.();
-      } catch {}
       await db.from("notifications").update({ read: true }).eq("id", id).eq("email", myEmail);
-      _shSyncAppBadge(); // keepalive fetch — survives the navigation below
     }
     // Navigate to the linked content
     // Derive a destination: prefer stored link_url, fall back to community page for comment notifications
@@ -2692,54 +2734,49 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     }
   };
 
-  window._shMarkAllRead = async function() {
-    // Optimistically clear the in-app bell immediately.
-    _notifs.forEach(n => n.read = true);
-    _badge(); window._shRenderNotifs();
-    // Clear the app-icon badge instantly via the web Badging API (works for an
-    // installed PWA; no-op/harmless in the native shell). The silent push below
-    // is the path that actually clears the native-wrapper badge.
+  // Advance the local seen-watermark to now and drop the OS app-icon badge to 0
+  // immediately (web Badging API). Shared by "open bell" and "mark all read".
+  function _stampSeenLocal() {
+    _seenAt = new Date().toISOString();
+    try { localStorage.setItem(_SEEN_KEY, _seenAt); } catch {}
     try { navigator.clearAppBadge?.(); } catch {}
-    // Mark ALL unread rows read for this user — not just the 60 loaded in the
-    // bell, and case-insensitively so it matches the badge count query in
-    // send-push (which lowercases the email). Otherwise older/other-cased
-    // unread rows survive and the app-icon badge stays stuck > 0.
+  }
+
+  window._shMarkAllRead = async function() {
+    // Clear both signals: mark every item read (in-app bold) AND seen (icon badge).
+    _notifs.forEach(n => n.read = true);
+    _stampSeenLocal();
+    _badge(); window._shRenderNotifs();
+    // Mark ALL unread rows read for this user — not just the loaded window, and
+    // case-insensitively so it matches send-push (which lowercases the email).
     await db.from("notifications").update({ read: true })
       .ilike("email", myEmail).eq("read", false);
-    // "Mark all read" means unread is now 0 by definition, so force the app-icon
-    // badge straight to 0 (clear_badge) rather than re-counting. Re-counting is
-    // race-prone — the UPDATE above may not yet be visible to the send-push
-    // query — which left the badge stuck at 1. Await it so failures surface.
-    await _shSyncAppBadge(true);
+    // Advance the server watermark + push the iOS badge to 0.
+    await _shSyncAppBadge("seen");
   };
   window.markAllNotifsRead = window._shMarkAllRead;
 
-  // Opening the bell counts as SEEING the notifications, so clear the app-icon
-  // badge and mark every unread row read (case-insensitive, ALL rows not just the
-  // 60 loaded). This is the real fix for the "mystery" badge: informational
-  // notifications (achievements, app updates, feed) piled up as unread and the
-  // badge never came down because nobody taps "mark all read". We do NOT flip the
-  // in-memory _notifs here, so the panel keeps its "new" highlights for this one
-  // viewing; the next load reads them as read. Self-heals stuck badges on next open.
+  // Opening the bell counts as SEEING everything currently there: it clears the
+  // OS app-icon badge but leaves unread items bold in the list to tap through.
+  // This is the real fix for the "mystery" badge — informational notifications
+  // (achievements, app updates, feed) no longer pile the icon badge up, because
+  // the badge tracks "unseen since last open", not "unread forever". We do NOT
+  // mark anything read here, so the unread highlights survive.
   window._shMarkSeen = async function() {
     if (!myEmail || !db) return;
-    try { navigator.clearAppBadge?.(); } catch {}
-    const el = document.getElementById("notif-badge"); if (el) el.style.display = "none";
-    const hadUnread = _notifs.some(n => !n.read);
-    if (hadUnread) {
-      try { await db.from("notifications").update({ read: true }).ilike("email", myEmail).eq("read", false); } catch {}
-    }
-    // Force the native iOS icon badge to 0 (APNs-driven) whether or not the loaded
-    // page saw the unread rows, so a badge left stuck by older/out-of-window rows clears too.
-    await _shSyncAppBadge(true);
+    _stampSeenLocal();
+    const el = document.getElementById("notif-badge");
+    if (el && !_notifs.some(n => !n.read)) el.style.display = "none"; // no unread → hide dot too
+    // Advance the server watermark + push the native iOS badge to 0.
+    await _shSyncAppBadge("seen");
   };
 
-  // Sync the native iOS app-icon badge. By default it asks send-push to fire a
-  // silent push with the user's *current* unread count (so reading one drops the
-  // badge by one). Pass forceClear=true to force the badge to 0 regardless — used
-  // by "mark all read", where the count is 0 by definition and re-counting races
-  // with the DB write. No-op outside the app shell / for users with no devices.
-  async function _shSyncAppBadge(forceClear = false) {
+  // Update the native iOS app-icon badge via a silent push from send-push.
+  //   action "seen"  → advance the server seen-watermark, badge → 0 (bell opened).
+  //   action true    → force badge to 0 without moving the watermark (legacy clear).
+  //   action omitted → recompute badge = current unseen count.
+  // No-op outside the app shell / for users with no devices.
+  async function _shSyncAppBadge(action) {
     if (!myEmail || !db) return;
     try {
       const { data: { session } } = await db.auth.getSession();
@@ -2748,9 +2785,11 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       const SUPA_URL = db?.supabaseUrl
         || (db?.rest?.url ? db.rest.url.replace(/\/rest\/v1$/, "") : null)
         || "https://gyskfutmncprqxazgatv.supabase.co";
-      const payload = forceClear
-        ? { clear_badge: true, email: myEmail }
-        : { sync_badge: true, email: myEmail };
+      const payload = action === "seen"
+        ? { mark_seen: true, email: myEmail }
+        : action
+          ? { clear_badge: true, email: myEmail }
+          : { sync_badge: true, email: myEmail };
       await fetch(`${SUPA_URL}/functions/v1/send-push`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
