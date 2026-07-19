@@ -8416,7 +8416,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <span id="wiz-overview-date-text">Today</span>
         </div>
-        <div id="wiz-dup-nudge" style="display:none"></div>
         <div id="wiz-overview-items"></div>
         <button id="wiz-overview-add-btn" type="button" class="wiz-overview-add-btn">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -18780,7 +18779,8 @@ async function _wizRenderTodaySoFar() {
 
 function openWizard(startOverview = false) {
   _wizSlotId  = null;
-  _wizDupNudgeDismissed = false;
+  _wizTheoryDupAck = false;
+  _wizAutoTheoryCache = {};
   // Presence: show that they're logging a session; restored on close.
   window._shPrevDetail = window._shPageDetail;
   window._shPageDetail = "Hub · Logging a session";
@@ -18978,6 +18978,26 @@ function _wizRenderTypePicker() {
 function _wizChangeType(type) {
   const fi = formItems[_wizItemIdx];
   if (!fi) return;
+  // Interrupt when they pick Theory on a day that already has auto-logged theory,
+  // so they don't hand-log time the course already logged. Only theory, only a
+  // real overlap, and only until they've said "add anyway" once this session.
+  if (type === "theory" && fi.type !== "theory" && !_wizTheoryDupAck && myEmail && db) {
+    const date = document.getElementById("session-date")?.value;
+    if (date) {
+      _wizAutoTheoryFor(date).then(matches => {
+        if (matches.length) {
+          _wizShowTheoryDupConfirm(matches, date, () => { _wizTheoryDupAck = true; _wizApplyType(fi, type); });
+        } else {
+          _wizApplyType(fi, type);
+        }
+      });
+      return;
+    }
+  }
+  _wizApplyType(fi, type);
+}
+
+function _wizApplyType(fi, type) {
   _haptic(10);
   changeItemType(fi.id, type);
   _wizRenderTypePicker();
@@ -19122,60 +19142,62 @@ function _wizRenderOverview() {
   const ovEl = document.getElementById("wiz-screen-overview");
   if (ovEl) { ovEl.onscroll = _wizUpdateOverviewFade; }
   requestAnimationFrame(_wizUpdateOverviewFade);
-  _wizCheckDupNudge();
 }
 
-// "Already logged" nudge — the theory course auto-logs each lesson as its own
-// session, so a member who ALSO hand-types a "Theory" item ends up logging the
-// same time twice. When their review contains a manual theory item AND that same
-// day already has auto-logged THEORY-course lessons, surface a gentle heads-up so
-// they don't double-count. Fires only on a genuine overlap (manual theory + auto
-// theory the same day), so it can honestly say "looks like you're adding it again".
-let _wizDupNudgeDismissed = false;
-async function _wizCheckDupNudge() {
-  const box = document.getElementById("wiz-dup-nudge");
-  if (!box) return;
-  const hide = () => { box.style.display = "none"; box.innerHTML = ""; };
-  if (_wizDupNudgeDismissed) return hide();
-  // Only relevant if they've manually added a theory item.
-  if (!formItems.some(fi => fi.type === "theory")) return hide();
-  const date = document.getElementById("session-date")?.value;
-  if (!date || !myEmail || !db) return hide();
+// "Already logged" theory guard. The theory course auto-logs each lesson as its
+// own session, so a member who ALSO hand-types a "Theory" item logs the same time
+// twice. When they choose the Theory type on a day that already has auto-logged
+// THEORY-course lessons, interrupt with a confirm BEFORE the item is added so they
+// can decide rather than double-count. Fires only on a genuine overlap; the
+// "add anyway" choice is remembered for the rest of the wizard session.
+let _wizTheoryDupAck = false;   // acknowledged "add anyway" this wizard session
+let _wizAutoTheoryCache = {};   // date -> [{title, mins}] of auto-logged theory that day
+
+async function _wizAutoTheoryFor(date) {
+  if (_wizAutoTheoryCache[date]) return _wizAutoTheoryCache[date];
+  let out = [];
   try {
-    // Auto-logged lessons that day (the course logs each as its own app-lesson session).
     const { data: sess } = await db.from("practice_sessions")
-      .select("id,duration_minutes,origin_ref")
+      .select("duration_minutes,origin_ref")
       .eq("email", myEmail).eq("session_date", date).eq("source", "app-lesson");
-    if (!sess || !sess.length) return hide();
-    const refIds = sess.map(s => (s.origin_ref || "").replace("lesson:", "")).filter(Boolean);
-    if (!refIds.length) return hide();
-    // Keep only the THEORY-course lessons (beginner-course lessons aren't a theory dup).
-    const { data: lessons } = await db.from("lessons").select("id,title,course").in("id", refIds);
-    const theory = {};
-    (lessons || []).forEach(l => { if (l.course === "theory") theory[l.id] = l.title; });
-    const matches = sess
-      .map(s => ({ id: (s.origin_ref || "").replace("lesson:", ""), mins: s.duration_minutes }))
-      .filter(m => theory[m.id])
-      .map(m => ({ title: theory[m.id], mins: m.mins }));
-    if (!matches.length) return hide();
-    // A concurrent re-render may have superseded us; re-check the guard.
-    if (_wizDupNudgeDismissed || !formItems.some(fi => fi.type === "theory")) return hide();
-    const when = date === todayStr() ? "today" : "that day";
-    const list = matches.map(m => `${escHtml(m.title)}${m.mins ? ` (${m.mins} min)` : ""}`).join(", ");
-    box.innerHTML =
-      `<div style="position:relative;border:1px solid #e6c98a;background:#fdf6e6;border-radius:12px;padding:12px 34px 12px 13px;margin-bottom:12px;color:#5c4a25;font-size:.85rem;line-height:1.5">
-        <button type="button" onclick="window._wizDismissDupNudge()" aria-label="Dismiss" style="position:absolute;top:7px;right:8px;background:none;border:none;color:#a48a52;font-size:1.15rem;line-height:1;cursor:pointer;padding:2px 4px">&times;</button>
-        <strong style="display:block;margin-bottom:3px;color:#4a3a1c">Looks like you're adding something that's already logged.</strong>
-        You completed ${list} in the app ${when}, so it's already in your history and counted, no need to add it by hand. To share it to the community, you can add it when you finish logging.
-      </div>`;
-    box.style.display = "";
-  } catch (_) { hide(); }
+    const refIds = (sess || []).map(s => (s.origin_ref || "").replace("lesson:", "")).filter(Boolean);
+    if (refIds.length) {
+      const { data: lessons } = await db.from("lessons").select("id,title,course").in("id", refIds);
+      const th = {};
+      (lessons || []).forEach(l => { if (l.course === "theory") th[l.id] = l.title; });
+      out = (sess || [])
+        .map(s => ({ id: (s.origin_ref || "").replace("lesson:", ""), mins: s.duration_minutes }))
+        .filter(m => th[m.id])
+        .map(m => ({ title: th[m.id], mins: m.mins }));
+    }
+  } catch (_) {}
+  _wizAutoTheoryCache[date] = out;
+  return out;
 }
-window._wizDismissDupNudge = () => {
-  _wizDupNudgeDismissed = true;
-  const box = document.getElementById("wiz-dup-nudge");
-  if (box) { box.style.display = "none"; box.innerHTML = ""; }
-};
+
+// Confirm overlay shown when Theory is picked on a day with auto-logged theory.
+function _wizShowTheoryDupConfirm(matches, date, onProceed) {
+  document.getElementById("wiz-theory-dup-backdrop")?.remove();
+  const when = date === todayStr() ? "today" : "that day";
+  const list = matches.map(m => `${escHtml(m.title)}${m.mins ? ` (${m.mins} min)` : ""}`).join(", ");
+  const wrap = document.createElement("div");
+  wrap.id = "wiz-theory-dup-backdrop";
+  wrap.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(20,14,8,.5);padding:22px";
+  wrap.innerHTML =
+    `<div style="background:#fffdf9;border:1px solid #e6c98a;border-radius:16px;max-width:340px;width:100%;padding:20px 20px 16px;box-shadow:0 18px 50px -12px rgba(0,0,0,.4);color:#4a3a1c;font-size:.9rem;line-height:1.5">
+      <strong style="display:block;font-size:1rem;margin-bottom:8px">Looks like this is already logged</strong>
+      <p style="margin:0 0 16px">You completed ${list} in the app ${when}, so your theory time is already counted. Adding it by hand will log it twice.</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button type="button" id="wiz-theory-dup-cancel" style="border:none;background:none;font:inherit;font-weight:600;color:#8a7355;cursor:pointer;padding:9px 12px">Don't add</button>
+        <button type="button" id="wiz-theory-dup-ok" style="border:none;background:#f0a500;color:#fff;font:inherit;font-weight:700;border-radius:9px;cursor:pointer;padding:9px 16px">Add it anyway</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector("#wiz-theory-dup-cancel").onclick = close;
+  wrap.querySelector("#wiz-theory-dup-ok").onclick = () => { close(); onProceed(); };
+  wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
+}
 
 // Show a shadow above the action-bar line while the review section can scroll
 // further, so it reads as scrollable. The whole section scrolls (not the item
