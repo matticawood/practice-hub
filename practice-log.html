@@ -18076,6 +18076,46 @@ function _focusDots(r) {
   return h;
 }
 
+// History items are grouped by track (category + list), mirroring the community
+// feed: one clean uppercase section header per track (colour dot + name + group
+// time) over an aligned list of items.
+const _HIST_GROUP = {
+  piece:        { label: "Repertoire",    order: 1 },
+  book:         { label: "Books",         order: 2 },
+  technique:    { label: "Technique",     order: 3 },
+  sightreading: { label: "Sight-reading", order: 4 },
+  eartraining:  { label: "Ear training",  order: 5 },
+  improvisation:{ label: "Improvisation", order: 6 },
+  theory:       { label: "Theory",        order: 7 },
+  other:        { label: "Other",         order: 8 },
+};
+function _histGroupedItems(items, timingMode) {
+  const groups = {};
+  for (const it of items) {
+    const g = _HIST_GROUP[it.item_type] ? it.item_type : "other";
+    (groups[g] = groups[g] || []).push(it);
+  }
+  const order = Object.keys(groups).sort((a, b) => (_HIST_GROUP[a]?.order || 99) - (_HIST_GROUP[b]?.order || 99));
+  const html = order.map((gt, gi) => {
+    const gitems = groups[gt];
+    const meta = _HIST_GROUP[gt] || { label: "Other" };
+    const color = (TYPE_COLOR[gt] || TYPE_COLOR.other).border;
+    const gmins = gitems.reduce((a, i) => a + (i.duration_minutes || 0), 0);
+    const showTime = timingMode === "per_item" && gmins;
+    return `<div style="${gi ? "margin-top:14px" : ""}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding-bottom:5px;border-bottom:1px solid var(--border);margin-bottom:8px">
+        <span style="display:flex;align-items:center;gap:7px;min-width:0">
+          <span style="width:7px;height:7px;border-radius:2px;background:${color};flex-shrink:0"></span>
+          <span style="font-size:0.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text)">${meta.label}</span>
+        </span>
+        ${showTime ? `<span style="font-size:0.72rem;color:var(--text-muted);flex-shrink:0">${formatMinutes(gmins)}</span>` : ""}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">${gitems.map(it => renderHistoryItem(it, timingMode, true)).join("")}</div>
+    </div>`;
+  }).join("");
+  return `<div>${html}</div>`;
+}
+
 function renderSessionCard(sess, canEdit, expand) {
   const items = sess.practice_items || [];
   // A course lesson (theory or the holistic beginner course) is one lesson to the
@@ -18087,7 +18127,7 @@ function renderSessionCard(sess, canEdit, expand) {
     : "";
   const itemsHTML = (isCourseLesson && items.length > 1)
     ? renderLessonSummaryRow(lessonLabel, sess.duration_minutes, _histSessionType(items))
-    : items.map(item => renderHistoryItem(item, sess.timing_mode)).join("");
+    : _histGroupedItems(items, sess.timing_mode);
   // Game entries are a fixed per-play tally, so their time isn't editable — hide
   // the Edit button (they can still be deleted).
   const canEditTime = canEdit && sess.source !== "app-game";
@@ -18165,7 +18205,7 @@ function renderLessonSummaryRow(label, mins, domType) {
     </div>`;
 }
 
-function renderHistoryItem(item, timingMode) {
+function renderHistoryItem(item, timingMode, plain) {
   const typeInfo = TYPE_MAP[item.item_type] || { icon: "📝", label: "Other" };
   let labelHTML = "";
 
@@ -18231,6 +18271,18 @@ function renderHistoryItem(item, timingMode) {
   const notesToggle = item.notes
     ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;line-height:1.4;white-space:pre-wrap">${escHtml(item.notes)}</div>`
     : "";
+
+  // Plain aligned row for the grouped history list (name left, time right, notes
+  // beneath) — the category header carries the colour, so no per-item box.
+  if (plain) {
+    const durPlain = (item.duration_minutes && timingMode === "per_item")
+      ? `<div style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap;flex-shrink:0;padding-top:1px">${formatMinutes(item.duration_minutes)}</div>`
+      : "";
+    return `<div style="display:flex;justify-content:space-between;gap:14px;align-items:baseline">
+      <div style="min-width:0"><div style="font-size:0.88rem;font-weight:600;color:var(--text);line-height:1.4;overflow-wrap:anywhere">${labelHTML}</div>${notesToggle}</div>
+      ${durPlain}
+    </div>`;
+  }
 
   const tc = TYPE_COLOR[item.item_type] || TYPE_COLOR.other;
   return `
