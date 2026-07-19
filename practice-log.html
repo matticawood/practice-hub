@@ -19192,16 +19192,36 @@ function _wizShowTheoryDupConfirm(matches, date, onProceed, onCancel) {
   wrap.addEventListener("click", e => { if (e.target === wrap) close(); }); // backdrop = dismiss, no change
 }
 
+// Does this theory item look like the auto-logged COURSE lessons (rather than,
+// say, theory from a book)? True when it's bare (no descriptive text), or its
+// notes/label reference the course ("lesson(s)", "theory course"), or the text
+// contains one of that day's auto-logged lesson titles. If it has text that
+// clearly isn't the course, we stay quiet.
+function _theoryLooksLikeCourse(fi, matches) {
+  const block  = document.getElementById(`item-block-${fi.id}`);
+  const notes  = block?.querySelector('[data-field="notes"]')?.value?.trim() || "";
+  const label  = block?.querySelector('[data-field="label"]')?.value?.trim() || "";
+  const sheets = (fi.selectedTheorySheets || []).map(s => s.title || s.slug).filter(Boolean).join(" ");
+  const text = `${notes} ${label} ${sheets}`.trim();
+  if (!text) return true;                                   // bare item
+  const low = text.toLowerCase();
+  if (/\blessons?\b/.test(low)) return true;                // "lesson" / "lessons"
+  if (/theory course|the course/.test(low)) return true;    // names the course
+  if (matches.some(m => m.title && low.includes(m.title.toLowerCase()))) return true; // a lesson title
+  return false;                                             // has text, but not course-like
+}
+
 // Gate a "commit the current item" action (add-another / go-to-review): if the
-// current item is a theory item on a day with auto-logged theory (and they
-// haven't already chosen to add anyway), ask first. "Add it anyway" proceeds and
-// won't ask again this session; "Don't add it" drops the theory item.
+// current item is a theory item that looks like the auto-logged course lessons on
+// a day that already has them (and they haven't already chosen to add anyway),
+// ask first. "Add it anyway" proceeds and won't ask again this session; "Don't
+// add it" drops the theory item.
 function _wizGuardTheoryThen(proceed) {
   const fi = formItems[_wizItemIdx];
   const date = document.getElementById("session-date")?.value;
   if (!fi || fi.type !== "theory" || _wizTheoryDupAck || !date || !myEmail || !db) { proceed(); return; }
   _wizAutoTheoryFor(date).then(matches => {
-    if (!matches.length) { proceed(); return; }
+    if (!matches.length || !_theoryLooksLikeCourse(fi, matches)) { proceed(); return; }
     _wizShowTheoryDupConfirm(matches, date,
       () => { _wizTheoryDupAck = true; proceed(); },
       () => { removeItem(fi.id); });
