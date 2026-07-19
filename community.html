@@ -6808,6 +6808,19 @@ const _LOG_TYPE_COLOR = {
   other:        { border: "#94a3b8", bg: "rgba(148,163,184,.08)" },
 };
 
+// Practice-log items are grouped by track in the feed card, so the type colour
+// lives in one calm header per group rather than on every row. label + sort order.
+const _LOG_GROUP = {
+  piece:         { label: "Repertoire",    order: 1 },
+  book:          { label: "Books",         order: 2 },
+  technique:     { label: "Technique",     order: 3 },
+  sightreading:  { label: "Sight-reading", order: 4 },
+  eartraining:   { label: "Ear training",  order: 5 },
+  improvisation: { label: "Improvisation", order: 6 },
+  theory:        { label: "Theory",        order: 7 },
+  other:         { label: "Other",         order: 8 },
+};
+
 // ── Practice-log item type icons (matches practice-log.html) ─────────────────
 const _LOG_TYPE_SVG = {
   piece:        `<svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>`,
@@ -6888,7 +6901,8 @@ function _practiceLogSessionBodyHTML(p) {
   }
   resolvedItems = _mergedItems;
 
-  const itemsHtml = resolvedItems.map(item => {
+  // One compact item row (primary label + optional muted secondary + time).
+  const _logItemRow = (item) => {
     let labelHTML = "";
     const t = item.item_type;
     if (t === "piece") {
@@ -6904,24 +6918,38 @@ function _practiceLogSessionBodyHTML(p) {
     } else {
       labelHTML = escHtml(item.label || item.piece_label || t || "Practice");
       if (item.piece_label && item.label && item.piece_label !== item.label) {
-        labelHTML += `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">📚 ${escHtml(item.piece_label)}</div>`;
+        labelHTML += `<span style="color:var(--text-muted);font-weight:400"> · ${escHtml(item.piece_label)}</span>`;
       }
     }
     const notesHtml = item.notes && !item._fromText ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:1px;line-height:1.35">${escHtml(item.notes)}</div>` : "";
-    const durHtml = item.duration_minutes ? `<span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;flex-shrink:0;margin-left:8px">${formatMinutes(item.duration_minutes)}</span>` : "";
-    const tc = _LOG_TYPE_COLOR[item.item_type] || _LOG_TYPE_COLOR.other;
-    // Compact single-line row: coloured type icon + label + time on one line,
-    // notes small beneath. No per-item box, so long logs stay short while every
-    // item is still visible. A thin top rule separates rows.
-    return `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 2px;border-top:1px solid var(--border)">
-      <span style="flex-shrink:0;margin-top:1px;opacity:.75;color:${tc.border};display:inline-flex">${_logTypeIconSVG(item.item_type)}</span>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
-          <span style="font-size:0.82rem;font-weight:600;color:var(--text);line-height:1.35;min-width:0;overflow-wrap:anywhere">${labelHTML}</span>
-          ${durHtml}
-        </div>
-        ${notesHtml}
+    const durHtml = item.duration_minutes ? `<span style="font-size:0.75rem;color:var(--text-muted);white-space:nowrap;flex-shrink:0;margin-left:10px">${formatMinutes(item.duration_minutes)}</span>` : "";
+    return `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:2px 0">
+      <div style="min-width:0"><span style="font-size:0.82rem;font-weight:600;color:var(--text);line-height:1.4;overflow-wrap:anywhere">${labelHTML}</span>${notesHtml}</div>
+      ${durHtml}
+    </div>`;
+  };
+
+  // Group items by track: the colour becomes one calm header per group rather
+  // than a box on every row, so long logs stay organised and compact while every
+  // item is still visible.
+  const _grouped = {};
+  for (const it of resolvedItems) {
+    const g = _LOG_GROUP[it.item_type] ? it.item_type : "other";
+    (_grouped[g] = _grouped[g] || []).push(it);
+  }
+  const _gorder = Object.keys(_grouped).sort((a, b) => (_LOG_GROUP[a]?.order || 99) - (_LOG_GROUP[b]?.order || 99));
+  const itemsHtml = _gorder.map((gt, gi) => {
+    const gitems = _grouped[gt];
+    const meta = _LOG_GROUP[gt] || { label: "Other" };
+    const color = (_LOG_TYPE_COLOR[gt] || _LOG_TYPE_COLOR.other).border;
+    const gmins = gitems.reduce((a, i) => a + (i.duration_minutes || 0), 0);
+    return `<div style="${gi < _gorder.length - 1 ? "margin-bottom:12px" : ""}">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">
+        <span style="width:8px;height:8px;border-radius:2px;background:${color};flex-shrink:0"></span>
+        <span style="font-size:0.78rem;font-weight:700;color:var(--text)">${meta.label}</span>
+        <span style="font-size:0.72rem;color:var(--text-muted)">· ${gitems.length}${gmins ? ` · ${formatMinutes(gmins)}` : ""}</span>
       </div>
+      <div style="padding-left:15px;display:flex;flex-direction:column;gap:2px">${gitems.map(_logItemRow).join("")}</div>
     </div>`;
   }).join("");
 
@@ -6937,7 +6965,7 @@ function _practiceLogSessionBodyHTML(p) {
       </div>
       <span style="font-size:0.8rem;color:#b45309;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.25);border-radius:20px;padding:3px 10px;white-space:nowrap;flex-shrink:0;margin-left:8px">⏱ ${escHtml(durLabel)}</span>
     </div>
-    ${itemCount ? `<div style="margin-top:8px;border-bottom:1px solid var(--border)">${itemsHtml}</div>` : ""}
+    ${itemCount ? `<div style="margin-top:10px">${itemsHtml}</div>` : ""}
     ${notesHtml}
   </div>`;
 }
