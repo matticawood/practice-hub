@@ -6294,10 +6294,25 @@ async function loadPosts() {
   if (logPostsWithSession.length) {
     const sessionIds = [...new Set(logPostsWithSession.flatMap(p =>
       [p.session_id, ...(Array.isArray(p.extra_session_ids) ? p.extra_session_ids : [])]).filter(Boolean))];
-    const [{ data: sessionRows }, { data: itemRows }] = await Promise.all([
-      db.from("practice_sessions").select("id,session_date,duration_minutes,notes,focus_rating").in("id", sessionIds),
-      db.from("practice_items").select("id,session_id,item_type,piece_label,label,duration_minutes,notes,sort_order,piece_request,theory_slug").in("session_id", sessionIds).order("sort_order"),
-    ]);
+    const { data: sessionRows } = await db.from("practice_sessions")
+      .select("id,session_date,duration_minutes,notes,focus_rating").in("id", sessionIds);
+    // IMPORTANT: page the practice_items fetch. A busy feed (300 posts) can
+    // reference more than PostgREST's default 1000-row cap of items; the old
+    // single unbounded query silently truncated at 1000 and, because it ordered
+    // by sort_order, dropped the *later* items of the *largest* sessions, so big
+    // logs showed only their first few items in the feed (they were all still in
+    // the member's own history). Page by session_id+sort_order until exhausted.
+    const itemRows = [];
+    for (let from = 0; ; from += 1000) {
+      const { data: page, error } = await db.from("practice_items")
+        .select("id,session_id,item_type,piece_label,label,duration_minutes,notes,sort_order,piece_request,theory_slug")
+        .in("session_id", sessionIds)
+        .order("session_id", { ascending: true }).order("sort_order", { ascending: true })
+        .range(from, from + 999);
+      if (error || !page || !page.length) break;
+      itemRows.push(...page);
+      if (page.length < 1000) break;
+    }
     const sessionMap = {};
     (sessionRows || []).forEach(s => { sessionMap[s.id] = { ...s, items: [] }; });
     (itemRows    || []).forEach(i => { if (sessionMap[i.session_id]) sessionMap[i.session_id].items.push(i); });
