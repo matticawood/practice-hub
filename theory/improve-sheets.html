@@ -411,6 +411,15 @@ ${cleaned}`;
     return v;
   }
 
+  // Strip AI citation markup (<cite index='…'>…</cite>) from every string, keeping
+  // the inner text, so the Claude rewrite can't leak citation tags into the sheet.
+  function stripCiteTags(v) {
+    if (typeof v === "string") return v.replace(/<\/?cite\b[^>]*>/gi, "");
+    if (Array.isArray(v)) return v.map(stripCiteTags);
+    if (v && typeof v === "object") { const o = {}; for (const k in v) o[k] = stripCiteTags(v[k]); return o; }
+    return v;
+  }
+
   // ── A4 fit measurement (mirrors the export .ho-page) ──────
   function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function rich(s){ let t = esc(s); return t.replace(/&lt;(\/?)(b|i|em|strong)&gt;/g, "<$1$2>"); }
@@ -484,7 +493,7 @@ ${cleaned}`;
 
         result.improved = improved;
         const kind = improved.takeawaysKind === "takeaways" ? "takeaways" : "practice";
-        const newContent = { title, category, overview: improved.overview || "", pages: improved.pages, glossary: Array.isArray(improved.glossary) ? improved.glossary : [], takeawaysKind: kind, takeaways: improved.takeaways || [] };
+        const newContent = stripCiteTags({ title, category, overview: improved.overview || "", pages: improved.pages, glossary: Array.isArray(improved.glossary) ? improved.glossary : [], takeawaysKind: kind, takeaways: improved.takeaways || [] });
         const { error: saveError } = await db.from("theory_sheets").update({ content: newContent }).eq("id", result.id);
         if (saveError) { result.status = "failed"; result.error = "Save failed: " + saveError.message; }
         else { result.status = "success"; result.error = null; result.content = newContent; markDone(result.id); }
