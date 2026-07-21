@@ -109,6 +109,12 @@ db.auth.getSession().then(({ data:{ session } }) => { if(session) enter(); });
 const norm = s => String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
 const stripComposer = t => String(t||"").replace(/\s+(?:-|—|by)\s+[^-—]+$/i,"").trim();
 const composerTail = t => { const m = String(t||"").match(/\s+(?:-|—|by)\s+([^-—]+)$/i); return m ? m[1].trim() : ""; };
+// Token-overlap matching: split a title (+composer) into meaningful words and
+// score two titles by how much their word-sets overlap, so a match survives
+// extra/missing words, punctuation, or a composer baked into the title.
+const STOP = new Set(["op","no","the","de","a","in","and","for","piano","du","la","le","el","von","der","by","and"]);
+const toks = s => { const set = new Set(); norm(s).split(" ").forEach(w => { if(w.length>1 && !STOP.has(w)) set.add(w); }); return set; };
+function jaccard(a,b){ if(!a.size||!b.size) return 0; let inter=0; a.forEach(w=>{ if(b.has(w)) inter++; }); return inter/(a.size+b.size-inter); }
 
 let CUSTOMS = [], LIB = [], ROWS = [];
 
@@ -122,30 +128,36 @@ async function load(){
     if(cRes.error) throw new Error("custom pieces — " + cRes.error.message);
     if(lRes.error) throw new Error("library — " + lRes.error.message);
     CUSTOMS = cRes.data || []; LIB = lRes.data || [];
-    // precompute library norms once (title, title+composer, composer)
-    const libByTitle = {};
+    // precompute each library piece's normalised forms + token set once
     LIB.forEach(l => {
       l._base = norm(l.title);
       l._full = norm(l.title + " " + (l.composer||""));
-      l._comp = norm(l.composer||"");
-      (libByTitle[l._base] = libByTitle[l._base] || []).push(l);
+      l._toks = toks(l.title + " " + (l.composer||""));
     });
+    const THRESH = 0.45;   // min token overlap to be a candidate
     ROWS = []; const noMatch = [];
     for(const c of CUSTOMS){
       if(c.linked_piece_id) continue;                 // already linked
       if(!c.status) continue;                          // no collection entry → nothing to merge
       const baseNorm = norm(stripComposer(c.title));
       const fullNorm = norm(c.title);
-      const tail = norm(composerTail(c.title) || c.composer || "");
-      let cands = (libByTitle[baseNorm] || []).slice();
-      LIB.forEach(l => { if(l._full === fullNorm && !cands.includes(l)) cands.push(l); });
-      if(!cands.length){ noMatch.push(c); continue; }
-      let best = cands[0], conf = "med";
-      for(const l of cands){ if(tail && l._comp === tail){ best = l; conf = "high"; break; } }
-      if(conf!=="high" && best._full === fullNorm) conf = "high";
-      ROWS.push({ c, cands, targetId: best.id, conf, checked: conf==="high" });
+      const cTok = toks(c.title + " " + (c.composer||""));
+      // score every library piece; exact normalised title/composer is a certain match
+      const scored = [];
+      for(const l of LIB){
+        const exact = (l._base === baseNorm || l._full === fullNorm || l._base === fullNorm);
+        const s = exact ? 1 : jaccard(cTok, l._toks);
+        if(exact || s >= THRESH) scored.push({ l, exact, s });
+      }
+      if(!scored.length){ noMatch.push(c); continue; }
+      scored.sort((a,b)=> (b.exact?1:0)-(a.exact?1:0) || b.s - a.s);
+      const cands = scored.slice(0, 8).map(x => x.l);
+      const best = scored[0];
+      const conf = best.exact ? "high" : "med";
+      ROWS.push({ c, cands, targetId: best.l.id, conf, score: best.s, checked: best.exact });
     }
-    ROWS.sort((a,b)=> (a.conf===b.conf?0:a.conf==="high"?-1:1) || norm(a.c.title).localeCompare(norm(b.c.title)));
+    // exact matches first (pre-ticked), then by descending best score
+    ROWS.sort((a,b)=> (b.conf==="high"?1:0)-(a.conf==="high"?1:0) || (b.score||0) - (a.score||0));
     render(noMatch);
     $("#status").textContent = `${CUSTOMS.length} custom pieces · ${ROWS.length} auto-matched · ${noMatch.length} to link manually`;
   } catch(err){
@@ -172,7 +184,7 @@ function render(noMatch){
               <select data-sel="${i}">${opts}</select>
             </div>
           </div>
-          <span class="badge ${r.conf}">${r.conf==="high"?"confident":"review"}</span>
+          <span class="badge ${r.conf}">${r.conf==="high"?"exact":Math.round((r.score||0)*100)+"% match"}</span>
         </div>`;
       }).join("") + `</div>`;
   }
