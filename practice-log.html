@@ -3419,20 +3419,23 @@
     .dash-chain-cell.chain-right .dash-chain-dot::after { left: 100%; width: 9px; }
     .dash-chain-cell.chain-left  .dash-chain-dot::before { right: 100%; width: 9px; }
     /* "Your day at the piano" daily-objectives card */
-    .dash-daily { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 14px 16px 8px; margin-bottom: 14px; }
-    .dash-daily-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .dash-daily { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; }
+    .dash-daily-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
     .dash-daily-progress { font-size: .76rem; font-weight: 800; color: var(--accent); letter-spacing: .02em; }
     .dash-daily.all-done .dash-daily-progress { color: #2e9e6b; }
-    .dash-daily-list { display: flex; flex-direction: column; }
-    .dash-daily-row { display: flex; align-items: center; gap: 12px; padding: 9px 8px; border-radius: 9px; text-decoration: none; color: var(--text); }
-    .dash-daily-row:hover { background: rgba(120,90,40,.05); }
-    .dash-daily-check { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; color: #fff; }
-    .dash-daily-row.is-done .dash-daily-check { background: var(--accent); border-color: var(--accent); }
-    .dash-daily-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-    .dash-daily-label { font-size: .9rem; font-weight: 600; line-height: 1.3; }
-    .dash-daily-sub { font-size: .75rem; color: var(--text-muted); line-height: 1.3; }
-    .dash-daily-row.is-done .dash-daily-label { color: var(--text-muted); }
-    .dash-daily-go { color: var(--text-muted); font-weight: 700; font-size: .9rem; }
+    /* Daily objectives as tiles that go green when done. */
+    .dday-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
+    .dday-tile { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 5px; padding: 14px 8px 12px; border: 1.5px solid var(--border); border-radius: 13px; background: var(--surface); text-decoration: none; color: var(--text); transition: transform .12s, border-color .12s, background .12s; }
+    .dday-tile:hover { transform: translateY(-2px); border-color: var(--accent); }
+    .dday-tile-ic { width: 26px; height: 26px; color: var(--accent); }
+    .dday-tile-ic svg { width: 100%; height: 100%; display: block; }
+    .dday-tile-label { font-size: .82rem; font-weight: 700; line-height: 1.2; }
+    .dday-tile-hint { font-size: .68rem; color: var(--text-muted); line-height: 1.2; }
+    .dday-tile.is-done { background: rgba(46,158,107,.12); border-color: #2e9e6b; }
+    .dday-tile.is-done .dday-tile-ic { color: #2e9e6b; }
+    .dday-tile.is-done .dday-tile-label { color: #237a52; }
+    .dday-tile-check { position: absolute; top: 7px; right: 7px; width: 17px; height: 17px; background: #2e9e6b; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .dday-tile-check svg { width: 10px; height: 10px; }
     @media (max-width: 1100px) {
       .dash-row-3 { grid-template-columns: 1fr; }
       .dash-bento { display: flex; flex-direction: column; }
@@ -3554,7 +3557,9 @@
       /* Your Journey card: inset + match the 12px vertical rhythm of the other
          floating cards on mobile (it otherwise keeps its larger desktop margin). */
       #dashboard-content #journey-card .journey-card,
+      #dashboard-content #path-headline .path-card,
       #dashboard-content #journey-card .path-card { margin-left: 16px !important; margin-right: 16px !important; margin-bottom: 12px !important; }
+      #dashboard-content #dash-daily-card .dash-daily { margin-left: 16px !important; margin-right: 16px !important; }
       .dash-quick-stats {
         gap: 1px; margin: 0 16px 12px !important;
         border-radius: 18px; overflow: hidden;
@@ -11164,10 +11169,12 @@ async function renderDashboard() {
 
   // ── Render synchronous content ────────────────────────────────────
   el.innerHTML = `
-    <!-- Your Journey: current roadmap trophy + progress + area jars (the headline / where you are) -->
-    <div id="journey-card"></div>
-    <!-- Your day at the piano: the daily-objectives checklist, right under the headline. -->
+    <!-- Your Path headline: stage + progress banner (the dashboard headline). -->
+    <div id="path-headline"></div>
+    <!-- Your day at the piano: the daily-objectives tiles, right under the headline. -->
     <div id="dash-daily-card"></div>
+    <!-- Your objectives + Matt's picks + skill jars (the long-term "path detail"). -->
+    <div id="journey-card"></div>
     <!-- Your next move: the single top data-driven nudge from the shared insights engine. -->
     <div id="dash-nextmove-card"></div>
     <!-- Tidy-up card: custom pieces gone dormant (finished-but-unmarked triage). -->
@@ -12764,10 +12771,10 @@ function _renderJourneyCard(returnParts) {
   if (returnParts) return { T, stage, goals, goalRows, rolledRows, rolled, jars, recsHtml,
     doneCount, totalGoals, manyGoals, goalsCollapsed, pct, nextLine, trophy, isNew, baselineBtn, mins };
   if (!el) return;
-  // Two cards: a compact "where you are" status card (stage, progress, the per-track
-  // skill jars) and a separate "what to work on" card (objectives + Matt's picks), so
-  // the status reads at a glance and the task list has its own, less busy space.
-  el.innerHTML = `<div class="path-card rg-card rg-card--status">
+  // The compact "where you are" status headline (stage + progress) renders into a
+  // separate top slot (#path-headline) so it can lead as the dashboard headline, with
+  // the daily card beneath it; the objectives + Matt's picks + skill jars stay here.
+  const statusHTML = `<div class="path-card rg-card rg-card--status">
     <a class="rg-head" href="/practice-log.html?goto=roadmap" aria-label="Open your roadmap">
       <div class="jc-trophy${isNew ? " jc-trophy--veiled" : ""}" style="--trophy:url('${trophy}')"><img src="${trophy}" alt="" draggable="false"></div>
       <div class="rg-head-info">
@@ -12778,8 +12785,8 @@ function _renderJourneyCard(returnParts) {
       </div>
       <svg class="jc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </a>
-  </div>
-  <div class="path-card rg-card rg-card--tasks">
+  </div>`;
+  const bodyHTML = `<div class="path-card rg-card rg-card--tasks">
     <div class="rg-sub"><span class="rg-sub-txt">Your objectives &middot; <strong>${doneCount}/${goals.length}</strong></span>${baselineBtn}</div>
     <div class="rg-goals${goalsCollapsed ? " rg-collapsed" : ""}">${goalRows}${rolled.length ? `<div class="rg-roll-head">Still to catch up from earlier</div>${rolledRows}` : ""}</div>
     ${manyGoals ? `<button type="button" class="rg-goals-toggle" onclick="_rgToggleGoals()">${goalsCollapsed ? `Show all ${totalGoals} &#9662;` : "Show fewer &#9652;"}</button>` : ""}
@@ -12788,6 +12795,9 @@ function _renderJourneyCard(returnParts) {
   <div class="path-card rg-card rg-card--areas">
     <div class="jc-jars">${jars}</div>
   </div>`;
+  const headEl = document.getElementById('path-headline');
+  if (headEl) { headEl.innerHTML = statusHTML; el.innerHTML = bodyHTML; }
+  else { el.innerHTML = statusHTML + bodyHTML; }
 
   // Fade the picks shelf's right edge only when it actually overflows, so a lone
   // remaining pick isn't clipped. Re-checked on resize.
@@ -13571,14 +13581,22 @@ function _renderNextMoveCard() {
 // Log-based rows tick from the item types in what the member logs today; the skill
 // and theory rows tick from in-app activity. Own dashboard only.
 const _DAILY_CHECK = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+const _DDAY_SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const DDAY_IC = {
+  piece:  _DDAY_SVG('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'),
+  scales: _DDAY_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16M12 4v16M16 4v16"/>'),
+  sight:  _DDAY_SVG('<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'),
+  skill:  _DDAY_SVG('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>'),
+  theory: _DDAY_SVG('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
+};
 function _pickDailySkill() {
   if (!_insightTrainers) return null;
   const todayStr = toDateStr(new Date());
   const TOOLS = [
-    { key: 'note',     label: 'Note Recognition',     href: '/tools.html?section=note' },
-    { key: 'chord',    label: 'Chord Recognition',    href: '/tools.html?section=chord' },
-    { key: 'ear',      label: 'Ear Training',         href: '/tools.html?section=ear' },
-    { key: 'interval', label: 'Interval Recognition', href: '/tools.html?section=interval' },
+    { key: 'note',     short: 'Reading',   href: '/tools.html?section=note' },
+    { key: 'chord',    short: 'Chords',    href: '/tools.html?section=chord' },
+    { key: 'ear',      short: 'Ear',       href: '/tools.html?section=ear' },
+    { key: 'interval', short: 'Intervals', href: '/tools.html?section=interval' },
   ];
   const rows = k => (_insightTrainers[k] || []);
   const lastMs = k => { const r = rows(k); return r.length ? new Date(r[r.length - 1].t).getTime() : 0; };
@@ -13588,8 +13606,8 @@ function _pickDailySkill() {
   const pick = TOOLS.slice().sort((a, b) => lastMs(a.key) - lastMs(b.key))[0];
   const b = best(pick.key);
   // Gentle target: one step over their own best (rotation stops any one score being ground).
-  const sub = b > 0 ? `Aim for ${b + 1} — your best is ${b}` : `Give it a first go`;
-  return { label: `Today's skill: ${pick.label}`, sub, href: pick.href, done: playedToday(pick.key) };
+  const hint = b > 0 ? `aim for ${b + 1}` : 'first go';
+  return { tileLabel: pick.short, hint, href: pick.href, done: playedToday(pick.key) };
 }
 function _dailyTheoryObjective(types) {
   if (!_goalTheory) return null;
@@ -13597,11 +13615,7 @@ function _dailyTheoryObjective(types) {
   const doneN  = Object.values(_goalTheory.done   || {}).reduce((a, b) => a + b, 0);
   if (totalN === 0 || doneN >= totalN) return null; // no live course, or finished → hide
   const started = doneN > 0;
-  return {
-    label: started ? 'Continue the Theory course' : 'Start the Theory course',
-    sub:   started ? 'Keep building your understanding' : 'Understanding accelerates everything',
-    href:  '/courses.html', done: types.has('theory'),
-  };
+  return { hint: started ? 'continue' : 'start', href: '/courses.html', done: types.has('theory') };
 }
 function _renderDailyCard() {
   const el = document.getElementById('dash-daily-card');
@@ -13614,29 +13628,30 @@ function _renderDailyCard() {
     .forEach(s => (s.practice_items || []).forEach(i => types.add(i.item_type)));
 
   const rows = [
-    { label: 'Practise a piece',   sub: 'The heart of your day',         done: types.has('piece') || types.has('book'), wizard: true },
-    { label: 'Scales & technique', sub: 'A few minutes of foundations',  done: types.has('technique'),                  wizard: true },
-    { label: 'Sight-reading',      sub: 'Read something new',            done: types.has('sightreading'),               wizard: true },
+    { ic: 'piece',  label: 'Pieces',        hint: 'your main practice', done: types.has('piece') || types.has('book'), wizard: true },
+    { ic: 'scales', label: 'Scales',        hint: '&amp; technique',    done: types.has('technique'),                  wizard: true },
+    { ic: 'sight',  label: 'Sight-reading', hint: 'read something new', done: types.has('sightreading'),               wizard: true },
   ];
-  const skill = _pickDailySkill();  if (skill)  rows.push(skill);
-  const theory = _dailyTheoryObjective(types); if (theory) rows.push(theory);
+  const skill = _pickDailySkill();
+  if (skill)  rows.push({ ic: 'skill',  label: skill.tileLabel, hint: skill.hint, done: skill.done, href: skill.href });
+  const theory = _dailyTheoryObjective(types);
+  if (theory) rows.push({ ic: 'theory', label: 'Theory',        hint: theory.hint, done: theory.done, href: theory.href });
 
-  const total = rows.length;
-  const doneCount = rows.filter(r => r.done).length;
-  const allDone = doneCount === total;
+  const total = rows.length, doneCount = rows.filter(r => r.done).length, allDone = doneCount === total;
   el.innerHTML = `
     <div class="dash-daily${allDone ? ' all-done' : ''}">
       <div class="dash-daily-head">
         <div class="dash-card-eyebrow" style="margin-bottom:0"><span class="dash-card-eyebrow-dot"></span>Your day at the piano</div>
         <div class="dash-daily-progress">${allDone ? 'All done today' : `${doneCount} of ${total} today`}</div>
       </div>
-      <div class="dash-daily-list">
+      <div class="dday-tiles">
         ${rows.map(r => {
           const act = r.wizard ? `href="#" onclick="openWizard(); return false;"` : `href="${r.href}"`;
-          return `<a class="dash-daily-row${r.done ? ' is-done' : ''}" ${act}>
-            <span class="dash-daily-check">${r.done ? _DAILY_CHECK : ''}</span>
-            <span class="dash-daily-body"><span class="dash-daily-label">${r.label}</span><span class="dash-daily-sub">${r.sub}</span></span>
-            <span class="dash-daily-go">${r.done ? '' : '&rarr;'}</span>
+          return `<a class="dday-tile${r.done ? ' is-done' : ''}" ${act}>
+            ${r.done ? `<span class="dday-tile-check">${_DAILY_CHECK}</span>` : ''}
+            <span class="dday-tile-ic">${DDAY_IC[r.ic] || ''}</span>
+            <span class="dday-tile-label">${r.label}</span>
+            <span class="dday-tile-hint">${r.hint}</span>
           </a>`;
         }).join('')}
       </div>
