@@ -13615,7 +13615,35 @@ function _dailyTheoryObjective(types) {
   const doneN  = Object.values(_goalTheory.done   || {}).reduce((a, b) => a + b, 0);
   if (totalN === 0 || doneN >= totalN) return null; // no live course, or finished → hide
   const started = doneN > 0;
-  return { hint: started ? 'continue' : 'start', href: '/courses.html', done: types.has('theory') };
+  const totals = _goalTheory.totals || {}, done = _goalTheory.done || {};
+  const cur = Object.keys(totals).map(Number).sort((a, b) => a - b).find(L => (done[L] || 0) < totals[L]);
+  const hint = !started ? 'start'
+             : (cur != null ? `Lesson ${(done[cur] || 0) + 1}` : 'continue');
+  return { hint, href: '/courses.html', done: types.has('theory') };
+}
+// The specific piece to nudge today: the goal piece they've gone longest without
+// practising (the clearest "what to do"), else a piece they're learning. Short-titled.
+function _dailyPieceHint() {
+  const todayMs = new Date(toDateStr(new Date()) + 'T00:00:00').getTime();
+  const short = t => { t = (t || '').trim(); return t.length > 20 ? t.slice(0, 19).trimEnd() + '…' : t; };
+  const goals = (allGoals || []).filter(g => g.piece_label);
+  if (goals.length) {
+    let best = null;
+    goals.forEach(g => {
+      const lbl = g.piece_label.trim().toLowerCase();
+      let last = null;
+      (allSessions || []).forEach(s => {
+        if ((s.practice_items || []).some(i => (i.piece_label || i.label || '').trim().toLowerCase() === lbl))
+          if (!last || s.session_date > last) last = s.session_date;
+      });
+      const gap = last ? Math.round((todayMs - new Date(last + 'T00:00:00').getTime()) / 86400000) : 9999;
+      if (!best || gap > best.gap) best = { label: g.piece_label, gap };
+    });
+    if (best) return short(best.label);
+  }
+  // Fallback: a custom piece they're learning (library titles aren't loaded here).
+  const learning = (_insightCollections || []).find(c => c.status === 'learning' && c.user_pieces && c.user_pieces.title);
+  return learning ? short(learning.user_pieces.title) : null;
 }
 function _renderDailyCard() {
   const el = document.getElementById('dash-daily-card');
@@ -13628,8 +13656,8 @@ function _renderDailyCard() {
     .forEach(s => (s.practice_items || []).forEach(i => types.add(i.item_type)));
 
   const rows = [
-    { ic: 'piece',  label: 'Pieces',        hint: 'your main practice', done: types.has('piece') || types.has('book'), wizard: true },
-    { ic: 'scales', label: 'Scales',        hint: '&amp; technique',    done: types.has('technique'),                  wizard: true },
+    { ic: 'piece',  label: 'Pieces',        hint: _dailyPieceHint() || 'your main practice', done: types.has('piece') || types.has('book'), wizard: true },
+    { ic: 'scales', label: 'Scales',        hint: 'hands together',     done: types.has('technique'),                  wizard: true },
     { ic: 'sight',  label: 'Sight-reading', hint: 'read something new', done: types.has('sightreading'),               wizard: true },
   ];
   const skill = _pickDailySkill();
