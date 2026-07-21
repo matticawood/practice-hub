@@ -170,12 +170,38 @@ function render(noMatch){
         </div>`;
       }).join("") + `</div>`;
   }
+  // No clean auto-match — let the owner search the library and link manually
+  // (handles renamed cases like "Trinity Grade 4 Exercises" → the library book).
+  const libLabel = l => `${l.title}${l.composer?" — "+l.composer:""}${l.kind==="book"?" [book]":""}`;
+  const libByLabel = {}; LIB.forEach(l => { libByLabel[libLabel(l)] = l.id; });
+  const datalist = `<datalist id="libdl">${LIB.map(l=>`<option value="${esc(libLabel(l))}"></option>`).join("")}</datalist>`;
   $("#nomatch").innerHTML = noMatch.length
-    ? `<div class="card"><div class="grp-title" style="color:var(--muted)">${noMatch.length} custom pieces with no library match (left as-is)</div>` +
-      noMatch.slice(0,200).map(c=>`<div class="row"><div class="meta"><div class="t">${esc(c.title)}</div><div class="s">${esc(c.email)} · ${esc(c.status)}</div></div></div>`).join("") +
-      (noMatch.length>200?`<div class="s" style="padding-top:8px">…and ${noMatch.length-200} more</div>`:"") + `</div>`
+    ? `<div class="card">${datalist}<div class="grp-title" style="color:var(--muted)">${noMatch.length} custom pieces with no auto-match — search the library to link them</div>` +
+      noMatch.slice(0,300).map(c=>`<div class="row"><div class="meta">
+        <div class="t">${esc(c.title)}</div>
+        <div class="s">${esc(c.email)} · <span class="pill ${c.status==="completed"?"completed":""}">${esc(c.status)}</span></div>
+        <div style="margin-top:5px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input list="libdl" class="man-search" data-uid="${c.user_piece_id}" placeholder="search library to link…" style="flex:1;min-width:220px">
+          <button class="btn man-merge" data-uid="${c.user_piece_id}">Merge</button>
+        </div></div></div>`).join("") +
+      (noMatch.length>300?`<div class="s" style="padding-top:8px">…and ${noMatch.length-300} more</div>`:"") + `</div>`
     : "";
-  wire(); updateCount();
+  wire(); wireManual(libByLabel); updateCount();
+}
+
+function wireManual(libByLabel){
+  document.querySelectorAll('.man-merge').forEach(b=>{
+    b.onclick = async () => {
+      const uid = Number(b.dataset.uid);
+      const inp = document.querySelector(`.man-search[data-uid="${uid}"]`);
+      const id = libByLabel[(inp.value||"").trim()];
+      if(!id){ alert("Type and pick a library piece from the list first."); return; }
+      b.disabled = true; b.textContent = "…";
+      const { error } = await db.rpc("merge_custom_into_library", { p_user_piece_id: uid, p_library_piece_id: id });
+      if(error){ alert("Failed: " + error.message); b.disabled=false; b.textContent="Merge"; return; }
+      load();
+    };
+  });
 }
 
 function wire(){
