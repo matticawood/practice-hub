@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Merge Studio — The Practice Room</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { --accent:#7c3aed; --border:#e6e1d8; --muted:#8a7d6c; --text:#2b2018; --surface:#fff; --bg:#faf7f3; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.5; }
+  .wrap { max-width:960px; margin:0 auto; padding:20px 18px 80px; }
+  h1 { font-size:1.4rem; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:.9rem; margin:0 0 18px; }
+  .hr { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+  .hr .back { color:var(--accent); text-decoration:none; font-size:.85rem; font-weight:600; }
+  .hr .sp { flex:1; }
+  .btn { border:1px solid var(--border); background:var(--surface); border-radius:8px; padding:8px 14px; font:inherit; font-weight:600; cursor:pointer; color:var(--text); }
+  .btn:hover { border-color:#cfc7ba; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  input { border:1px solid var(--border); border-radius:8px; padding:9px 11px; font:inherit; background:#fff; }
+  .hide { display:none; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:12px; }
+  .toolbar { position:sticky; top:0; background:var(--bg); padding:10px 0; z-index:5; display:flex; gap:10px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--border); margin-bottom:14px; }
+  .count { color:var(--muted); font-size:.85rem; }
+  .grp-title { display:flex; align-items:baseline; gap:8px; font-weight:700; font-size:.95rem; margin-bottom:8px; }
+  .grp-title .lib-composer { color:var(--muted); font-weight:400; font-size:.85rem; }
+  .row { display:flex; align-items:flex-start; gap:10px; padding:7px 0; border-top:1px solid #f0ece4; }
+  .row:first-child { border-top:none; }
+  .row .meta { flex:1; min-width:0; }
+  .row .t { font-weight:600; font-size:.9rem; }
+  .row .s { color:var(--muted); font-size:.78rem; margin-top:1px; }
+  .badge { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 7px; border-radius:20px; white-space:nowrap; }
+  .badge.high { background:rgba(16,185,129,.14); color:#0f7a54; }
+  .badge.med { background:rgba(245,158,11,.16); color:#8a5a06; }
+  .pill { font-size:.7rem; padding:1px 7px; border-radius:20px; background:#f1ede6; color:var(--muted); }
+  .pill.completed { background:rgba(16,185,129,.14); color:#0f7a54; }
+  select { border:1px solid var(--border); border-radius:7px; padding:5px 8px; font:inherit; font-size:.82rem; max-width:100%; background:#fff; }
+  .empty { color:var(--muted); font-size:.9rem; padding:20px 0; }
+  .status { font-size:.85rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hr"><a class="back" href="/studio.html">&larr; Studios</a><span class="sp"></span><span id="hdr-email" class="count"></span><button class="btn" id="signout">Sign out</button></div>
+  <h1>Merge Studio</h1>
+  <p class="sub">Merge members' free-typed custom pieces into their library equivalents, so a completed piece leaves rotation on Stats and duplicate entries collapse into one.</p>
+
+  <div id="login" class="card" style="max-width:380px">
+    <div id="loginStep1">
+      <label style="font-size:.85rem;font-weight:600">Owner email</label>
+      <div style="display:flex;gap:8px;margin-top:6px"><input id="email" type="email" placeholder="you@example.com" style="flex:1"><button class="btn primary" id="sendCode">Send code</button></div>
+    </div>
+    <div id="loginStep2" class="hide" style="margin-top:8px">
+      <div style="display:flex;gap:8px"><input id="code" placeholder="6-digit code" style="flex:1"><button class="btn primary" id="verify">Verify</button></div>
+    </div>
+    <div id="loginErr" style="color:#b91c1c;font-size:.82rem;margin-top:8px"></div>
+  </div>
+
+  <div id="app" class="hide">
+    <div class="toolbar">
+      <button class="btn" id="tickHigh">Tick all confident matches</button>
+      <button class="btn" id="untickAll">Untick all</button>
+      <span class="sp" style="flex:1"></span>
+      <span class="count" id="selCount">0 selected</span>
+      <button class="btn primary" id="applyBtn" disabled>Apply merges</button>
+    </div>
+    <div id="status" class="status"></div>
+    <div id="groups"></div>
+    <div id="nomatch"></div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+
+// ── auth ──
+$("#sendCode").onclick = async () => {
+  const email = $("#email").value.trim(); if(!email) return;
+  $("#loginErr").textContent = "";
+  const { error } = await db.auth.signInWithOtp({ email, options:{ shouldCreateUser:false } });
+  if(error){ $("#loginErr").textContent = error.message; return; }
+  $("#loginStep1").classList.add("hide"); $("#loginStep2").classList.remove("hide");
+};
+$("#verify").onclick = async () => {
+  const email = $("#email").value.trim(), tok = $("#code").value.trim();
+  const { error } = await db.auth.verifyOtp({ email, token:tok, type:"email" });
+  if(error){ $("#loginErr").textContent = error.message; return; }
+  enter();
+};
+$("#signout").onclick = async () => { await db.auth.signOut(); location.reload(); };
+
+async function enter(){
+  const { data:{ session } } = await db.auth.getSession();
+  if(!session) return;
+  $("#hdr-email").textContent = session.user.email;
+  $("#login").classList.add("hide"); $("#app").classList.remove("hide");
+  load();
+}
+db.auth.getSession().then(({ data:{ session } }) => { if(session) enter(); });
+
+// ── matching ──
+const norm = s => String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
+const stripComposer = t => String(t||"").replace(/\s+(?:-|—|by)\s+[^-—]+$/i,"").trim();
+const composerTail = t => { const m = String(t||"").match(/\s+(?:-|—|by)\s+([^-—]+)$/i); return m ? m[1].trim() : ""; };
+
+let CUSTOMS = [], LIB = [], ROWS = [];
+
+async function load(){
+  $("#status").textContent = "Loading…";
+  const [{ data: cust, error: ce }, { data: lib, error: le }] = await Promise.all([
+    db.rpc("get_all_custom_pieces"),
+    db.from("pieces").select("id,title,composer,category").limit(5000)
+  ]);
+  if(ce){ $("#status").textContent = "Error loading custom pieces: " + ce.message; return; }
+  if(le){ $("#status").textContent = "Error loading library: " + le.message; return; }
+  CUSTOMS = cust || []; LIB = lib || [];
+  // index library by normalised base title
+  const libByTitle = {};
+  LIB.forEach(l => { const k = norm(l.title); (libByTitle[k] = libByTitle[k] || []).push(l); });
+
+  ROWS = []; const noMatch = [];
+  for(const c of CUSTOMS){
+    if(c.linked_piece_id) continue;                 // already linked
+    if(!c.status) continue;                          // no collection entry → nothing to merge
+    const baseNorm = norm(stripComposer(c.title));
+    const fullNorm = norm(c.title);
+    const tail = norm(composerTail(c.title) || c.composer || "");
+    // candidates: library pieces whose title matches the custom's base title,
+    // or whose title+composer matches the full custom string.
+    let cands = (libByTitle[baseNorm] || []).slice();
+    LIB.forEach(l => { if(norm(l.title + " " + (l.composer||"")) === fullNorm && !cands.includes(l)) cands.push(l); });
+    if(!cands.length){ noMatch.push(c); continue; }
+    // confidence: high if a candidate's composer matches the custom's tail/composer
+    let best = cands[0], conf = "med";
+    for(const l of cands){ if(tail && norm(l.composer||"") === tail){ best = l; conf = "high"; break; } }
+    if(conf!=="high" && cands.length===1 && (!tail)) conf = "med";
+    if(conf!=="high" && norm(best.title+" "+(best.composer||"")) === fullNorm) conf = "high";
+    ROWS.push({ c, cands, targetId: best.id, conf, checked: conf==="high" });
+  }
+  ROWS.sort((a,b)=> (a.conf===b.conf?0:a.conf==="high"?-1:1) || norm(a.c.title).localeCompare(norm(b.c.title)));
+  render(noMatch);
+}
+
+function render(noMatch){
+  const g = $("#groups");
+  if(!ROWS.length){ g.innerHTML = '<div class="empty">No custom pieces have a library match to merge. 🎉</div>'; }
+  else {
+    g.innerHTML = `<div class="card"><div class="grp-title">${ROWS.length} custom pieces have a library match</div>` +
+      ROWS.map((r,i)=>{
+        const c = r.c;
+        const opts = r.cands.map(l => `<option value="${l.id}"${l.id===r.targetId?" selected":""}>${esc(l.title)}${l.composer?" — "+esc(l.composer):""}${l.category==="book"?" [book]":""}</option>`).join("");
+        return `<div class="row">
+          <input type="checkbox" data-i="${i}" ${r.checked?"checked":""} style="margin-top:4px">
+          <div class="meta">
+            <div class="t">${esc(c.title)}</div>
+            <div class="s">${esc(c.email)} · <span class="pill ${c.status==="completed"?"completed":""}">${esc(c.status)}</span></div>
+            <div style="margin-top:5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span style="color:var(--muted);font-size:.8rem">merge into →</span>
+              <select data-sel="${i}">${opts}</select>
+            </div>
+          </div>
+          <span class="badge ${r.conf}">${r.conf==="high"?"confident":"review"}</span>
+        </div>`;
+      }).join("") + `</div>`;
+  }
+  $("#nomatch").innerHTML = noMatch.length
+    ? `<div class="card"><div class="grp-title" style="color:var(--muted)">${noMatch.length} custom pieces with no library match (left as-is)</div>` +
+      noMatch.slice(0,200).map(c=>`<div class="row"><div class="meta"><div class="t">${esc(c.title)}</div><div class="s">${esc(c.email)} · ${esc(c.status)}</div></div></div>`).join("") +
+      (noMatch.length>200?`<div class="s" style="padding-top:8px">…and ${noMatch.length-200} more</div>`:"") + `</div>`
+    : "";
+  wire(); updateCount();
+}
+
+function wire(){
+  document.querySelectorAll('#groups input[type=checkbox]').forEach(cb=>{
+    cb.onchange = () => { ROWS[+cb.dataset.i].checked = cb.checked; updateCount(); };
+  });
+  document.querySelectorAll('#groups select[data-sel]').forEach(sel=>{
+    sel.onchange = () => { ROWS[+sel.dataset.sel].targetId = Number(sel.value); };
+  });
+}
+function updateCount(){
+  const n = ROWS.filter(r=>r.checked).length;
+  $("#selCount").textContent = n + " selected";
+  $("#applyBtn").disabled = n===0;
+}
+$("#tickHigh").onclick = () => { ROWS.forEach((r)=> r.checked = r.conf==="high"); document.querySelectorAll('#groups input[type=checkbox]').forEach(cb=> cb.checked = ROWS[+cb.dataset.i].checked); updateCount(); };
+$("#untickAll").onclick = () => { ROWS.forEach(r=> r.checked=false); document.querySelectorAll('#groups input[type=checkbox]').forEach(cb=> cb.checked=false); updateCount(); };
+
+$("#applyBtn").onclick = async () => {
+  const todo = ROWS.filter(r=>r.checked);
+  if(!todo.length) return;
+  if(!confirm(`Merge ${todo.length} custom piece(s) into their library entries? This updates members' collections.`)) return;
+  $("#applyBtn").disabled = true;
+  let done=0, fail=0;
+  for(const r of todo){
+    $("#status").textContent = `Merging ${done+fail+1} of ${todo.length}…`;
+    const { error } = await db.rpc("merge_custom_into_library", { p_user_piece_id: r.c.user_piece_id, p_library_piece_id: r.targetId });
+    if(error){ fail++; console.error(r.c.title, error.message); } else done++;
+  }
+  $("#status").textContent = `Done: ${done} merged${fail?`, ${fail} failed (see console)`:""}. Reloading…`;
+  setTimeout(load, 1200);
+};
+</script>
+</body>
+</html>
