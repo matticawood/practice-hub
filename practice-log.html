@@ -13447,25 +13447,30 @@ function _renderNextMoveCard() {
   let insights = [];
   try { insights = _computeInsights() || []; } catch (e) { return; }
   if (!insights.length) return;
-  // Prefer a course-correction with an action, then any course-correction, then any actionable, then anything.
-  const move = insights.find(i => i.correct && i.cta)
-            || insights.find(i => i.correct)
-            || insights.find(i => i.cta)
-            || insights[0];
-  if (!move) return;
-  const ctaHtml = move.cta
-    ? `<div style="margin-top:9px"><a href="${move.cta.href}" onclick="_nextMoveClick(event,'${move.cta.href}')" style="font-size:.82rem;font-weight:700;color:var(--accent);text-decoration:none">${move.cta.label} &rarr;</a></div>`
+  // A genuine "move" = a course-correction, or a time-sensitive/goal action
+  // (deadline, comeback, weekly-goal progress, goal-not-started, neglected goal).
+  const ACTION_PRIOS = new Set([10, 12, 14, 16, 18]);
+  const isAction = i => i.correct || ACTION_PRIOS.has(i.prio);
+  const move   = insights.find(isAction);
+  const praise = insights.find(i => !isAction(i));
+  const pick = move || praise;
+  if (!pick) return;
+  const isMove   = !!move;
+  const accent   = isMove ? 'var(--accent)' : '#2e9e6b';
+  const eyebrow  = isMove ? 'Your next move' : 'You&rsquo;re on track';
+  const ctaHtml = pick.cta
+    ? `<div style="margin-top:9px"><a href="${pick.cta.href}" onclick="_nextMoveClick(event,'${pick.cta.href}')" style="font-size:.82rem;font-weight:700;color:${accent};text-decoration:none">${pick.cta.label} &rarr;</a></div>`
     : '';
   el.innerHTML = `
-    <div class="dash-nextmove" style="border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface);border-radius:var(--radius);padding:13px 16px;margin-bottom:14px">
-      <div class="dash-card-eyebrow" style="color:var(--accent);margin-bottom:7px"><span class="dash-card-eyebrow-dot" style="background:var(--accent)"></span>Your next move</div>
+    <div class="dash-nextmove" style="border:1px solid var(--border);border-left:3px solid ${accent};background:var(--surface);border-radius:var(--radius);padding:13px 16px;margin-bottom:14px">
+      <div class="dash-card-eyebrow" style="color:${accent};margin-bottom:7px"><span class="dash-card-eyebrow-dot" style="background:${accent}"></span>${eyebrow}</div>
       <div style="display:flex;gap:10px;align-items:flex-start">
-        <span style="flex:0 0 auto;line-height:1">${_emojiToSvg(move.icon)}</span>
-        <span style="font-size:.9rem;line-height:1.45">${move.text}</span>
+        <span style="flex:0 0 auto;line-height:1">${_emojiToSvg(pick.icon)}</span>
+        <span style="font-size:.9rem;line-height:1.45">${pick.text}</span>
       </div>
       ${ctaHtml}
     </div>`;
-  _logUx('nextmove_shown', { prio: move.prio || null, study: move.study || null, href: (move.cta && move.cta.href) || null });
+  _logUx('nextmove_shown', { kind: isMove ? 'move' : 'praise', prio: pick.prio || null, study: pick.study || null, href: (pick.cta && pick.cta.href) || null });
 }
 
 // ── Insight evidence: the research members can tap to read why an action helps ──
