@@ -9416,6 +9416,15 @@ async function loadData() {
         done: (thP.data || []).filter(p => _fsIds.has(p.lesson_id)).length };
     } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _goalCollectionTiers = null; _goalCollectionIds = null; _dormantCustomPieces = null; _fsCourse = null; /* _goalAllPieces kept — loaded separately */ }
 
+    // Custom-piece completion status by title (RLS-safe RPC so it also works when
+    // the owner views another member — a direct user_collections read would be
+    // blocked for them). Feeds the repertoire card's "done" tagging.
+    try {
+      const { data: cps } = await db.rpc("get_custom_piece_statuses", { p_email: viewingEmail });
+      _customStatusByName = {};
+      (cps || []).forEach(r => { if (r.title) _customStatusByName[r.title.trim().toLowerCase()] = r.status; });
+    } catch (e) { _customStatusByName = {}; }
+
     // Reading/library/game achievement extras (Badges tab).
     try { await loadAchievementExtras(); } catch (e) { /* badges fill in later */ }
 
@@ -12942,6 +12951,7 @@ function _emojiToSvg(e, size = 15) {
 }
 
 let _insightTrainers = null, _insightCollections = null; // loaded in loadData
+let _customStatusByName = {}; // lower(title) -> status for custom pieces (self-or-owner RPC, RLS-safe)
 let _pathTheoryStarted = false; // has the member completed any theory lesson
 let _goalPieceTiers = null;     // difficulties of the member's completed pieces (roadmap goals)
 let _goalCollectionTiers = null;// difficulties of every piece in the collection (any status)
@@ -13745,12 +13755,10 @@ function renderDeepDive() {
     if (p && p.title) _nameToStatus[p.title.trim().toLowerCase()] = p.status;
   });
   // Custom pieces (user_pieces) aren't in myCollection, which is library-only, so
-  // pull their status from the collection rows too — otherwise a custom piece
-  // marked complete keeps showing "in rotation" here (reported by a member).
-  (_insightCollections || []).forEach(r => {
-    const t = r && r.user_piece_id && r.user_pieces && r.user_pieces.title;
-    if (t) _nameToStatus[t.trim().toLowerCase()] = r.status;
-  });
+  // merge their status in from the RLS-safe RPC map — otherwise a custom piece
+  // marked complete keeps showing "in rotation" (and it fails in the owner's
+  // view-another-member mode, where a direct collection read is blocked).
+  Object.entries(_customStatusByName || {}).forEach(([k, v]) => { if (v) _nameToStatus[k] = v; });
 
   // One unified repertoire model: each practised piece gets a state
   //   rotation → practised in the last 30 days
