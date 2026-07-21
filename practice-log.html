@@ -11131,6 +11131,8 @@ async function renderDashboard() {
   el.innerHTML = `
     <!-- Your Journey: current roadmap trophy + progress + area jars (gated to launch with the roadmap) -->
     <div id="journey-card"></div>
+    <!-- Your next move: the single top data-driven nudge from the shared insights engine. -->
+    <div id="dash-nextmove-card"></div>
     <!-- Tidy-up card: custom pieces gone dormant (finished-but-unmarked triage). -->
     <div id="pieces-tidy-card"></div>
 
@@ -11263,6 +11265,9 @@ async function renderDashboard() {
       }
     } catch(e) {}
   }
+
+  // Your next move: the single top data-driven nudge (shares the insights engine).
+  try { _renderNextMoveCard(); } catch(e) {}
 
   // ── Async: user's leaderboard ranks (all boards) ────────────────
   try {
@@ -13155,14 +13160,12 @@ function _maybeStartPathTour() {
   });
 }
 
-function renderInsights() {
-  const el = document.getElementById('stats-insights');
-  if (!el) return;
+// Shared insights engine: builds the prioritised, de-clustered nudge array from
+// the member's data. Pure compute, no DOM, so both the Stats card and the
+// Dashboard "next move" read from one source. Returns [] when there's too little data.
+function _computeInsights() {
   const sessions = allSessions || [];
-  if (sessions.length < 3) {
-    el.innerHTML = `<div class="stats-insights-card"><div class="stats-insights-hdr">${_emojiToSvg('💡', 16)} Insights</div><div class="stats-insight-row" style="opacity:.55;font-style:italic">Log a few practice sessions and insights about your habits will appear here.</div></div>`;
-    return;
-  }
+  if (sessions.length < 3) return [];
 
   const insights = [];
   const today    = new Date(); today.setHours(0,0,0,0);
@@ -13381,11 +13384,6 @@ function renderInsights() {
   if (bestStreak >= 10 && currentStreak < bestStreak * 0.5)
     insights.push({ prio: 54, icon: '🏆', text: `Your record is <strong>${bestStreak} days</strong> in a row. Today is a good day to start chasing it.`, why: 'Repeating practice in a consistent daily slot is what turns it into an automatic habit that sticks.', study: 'wood' });
 
-  if (!insights.length) {
-    el.innerHTML = `<div class="stats-insights-card"><div class="stats-insights-hdr">${_emojiToSvg('💡', 16)} Insights</div><div class="stats-insight-row" style="opacity:.55;font-style:italic">Keep logging sessions and new insights will appear as your practice history grows.</div></div>`;
-    return;
-  }
-
   // Order by priority, then ensure two course-corrections never sit adjacent.
   insights.sort((a, b) => (a.prio || 50) - (b.prio || 50));
   for (let i = 1; i < insights.length; i++) {
@@ -13394,7 +13392,22 @@ function renderInsights() {
       if (j > -1) { const [m] = insights.splice(j, 1); insights.splice(i, 0, m); }
     }
   }
+  return insights;
+}
 
+// Render the Stats-tab insights card from the shared engine.
+function renderInsights() {
+  const el = document.getElementById('stats-insights');
+  if (!el) return;
+  const insights = _computeInsights();
+  if ((allSessions || []).length < 3) {
+    el.innerHTML = `<div class="stats-insights-card"><div class="stats-insights-hdr">${_emojiToSvg('💡', 16)} Insights</div><div class="stats-insight-row" style="opacity:.55;font-style:italic">Log a few practice sessions and insights about your habits will appear here.</div></div>`;
+    return;
+  }
+  if (!insights.length) {
+    el.innerHTML = `<div class="stats-insights-card"><div class="stats-insights-hdr">${_emojiToSvg('💡', 16)} Insights</div><div class="stats-insight-row" style="opacity:.55;font-style:italic">Keep logging sessions and new insights will appear as your practice history grows.</div></div>`;
+    return;
+  }
   el.innerHTML = `
     <div class="stats-insights-card">
       <div class="stats-insights-hdr">${_emojiToSvg('💡', 16)} Insights</div>
@@ -13405,6 +13418,52 @@ function renderInsights() {
         </div>`
       ).join('')}
     </div>`;
+}
+
+// ── Dashboard "Your next move": surface the single top actionable insight ─────
+// Reads the shared engine and picks the highest-priority nudge the member can act
+// on now (prefer a course-correction with a CTA). Instrumented via ux_events so we
+// can measure whether it actually drives behaviour.
+function _logUx(event, props) {
+  try { db.rpc('log_ux_event', { p_event: event, p_props: props || {} }); } catch (e) {}
+}
+function _nextMoveClick(e, href) {
+  if (!href) { _logUx('nextmove_click', {}); return; }
+  e.preventDefault();
+  let done = false;
+  const go = () => { if (!done) { done = true; window.location.href = href; } };
+  try { Promise.resolve(db.rpc('log_ux_event', { p_event: 'nextmove_click', p_props: { href } })).finally(go); }
+  catch (_) { go(); }
+  setTimeout(go, 400); // never let logging block navigation
+}
+function _renderNextMoveCard() {
+  const el = document.getElementById('dash-nextmove-card');
+  if (!el) return;
+  el.innerHTML = '';
+  // Own dashboard only (don't log or show when the owner is viewing another member).
+  if (viewingEmail && myEmail && viewingEmail !== myEmail) return;
+  let insights = [];
+  try { insights = _computeInsights() || []; } catch (e) { return; }
+  if (!insights.length) return;
+  // Prefer a course-correction with an action, then any course-correction, then any actionable, then anything.
+  const move = insights.find(i => i.correct && i.cta)
+            || insights.find(i => i.correct)
+            || insights.find(i => i.cta)
+            || insights[0];
+  if (!move) return;
+  const ctaHtml = move.cta
+    ? `<div style="margin-top:9px"><a href="${move.cta.href}" onclick="_nextMoveClick(event,'${move.cta.href}')" style="font-size:.82rem;font-weight:700;color:var(--accent);text-decoration:none">${move.cta.label} &rarr;</a></div>`
+    : '';
+  el.innerHTML = `
+    <div class="dash-nextmove" style="border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface);border-radius:var(--radius);padding:13px 16px;margin-bottom:14px">
+      <div class="dash-card-eyebrow" style="color:var(--accent);margin-bottom:7px"><span class="dash-card-eyebrow-dot" style="background:var(--accent)"></span>Your next move</div>
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <span style="flex:0 0 auto;line-height:1">${_emojiToSvg(move.icon)}</span>
+        <span style="font-size:.9rem;line-height:1.45">${move.text}</span>
+      </div>
+      ${ctaHtml}
+    </div>`;
+  _logUx('nextmove_shown', { prio: move.prio || null, study: move.study || null, href: (move.cta && move.cta.href) || null });
 }
 
 // ── Insight evidence: the research members can tap to read why an action helps ──
