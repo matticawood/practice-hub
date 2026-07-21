@@ -114,38 +114,44 @@ let CUSTOMS = [], LIB = [], ROWS = [];
 
 async function load(){
   $("#status").textContent = "Loading…";
-  const [{ data: cust, error: ce }, { data: lib, error: le }] = await Promise.all([
-    db.rpc("get_all_custom_pieces"),
-    db.from("pieces").select("id,title,composer,kind").limit(5000)
-  ]);
-  if(ce){ $("#status").textContent = "Error loading custom pieces: " + ce.message; return; }
-  if(le){ $("#status").textContent = "Error loading library: " + le.message; return; }
-  CUSTOMS = cust || []; LIB = lib || [];
-  // index library by normalised base title
-  const libByTitle = {};
-  LIB.forEach(l => { const k = norm(l.title); (libByTitle[k] = libByTitle[k] || []).push(l); });
-
-  ROWS = []; const noMatch = [];
-  for(const c of CUSTOMS){
-    if(c.linked_piece_id) continue;                 // already linked
-    if(!c.status) continue;                          // no collection entry → nothing to merge
-    const baseNorm = norm(stripComposer(c.title));
-    const fullNorm = norm(c.title);
-    const tail = norm(composerTail(c.title) || c.composer || "");
-    // candidates: library pieces whose title matches the custom's base title,
-    // or whose title+composer matches the full custom string.
-    let cands = (libByTitle[baseNorm] || []).slice();
-    LIB.forEach(l => { if(norm(l.title + " " + (l.composer||"")) === fullNorm && !cands.includes(l)) cands.push(l); });
-    if(!cands.length){ noMatch.push(c); continue; }
-    // confidence: high if a candidate's composer matches the custom's tail/composer
-    let best = cands[0], conf = "med";
-    for(const l of cands){ if(tail && norm(l.composer||"") === tail){ best = l; conf = "high"; break; } }
-    if(conf!=="high" && cands.length===1 && (!tail)) conf = "med";
-    if(conf!=="high" && norm(best.title+" "+(best.composer||"")) === fullNorm) conf = "high";
-    ROWS.push({ c, cands, targetId: best.id, conf, checked: conf==="high" });
+  try {
+    const [cRes, lRes] = await Promise.all([
+      db.rpc("get_all_custom_pieces"),
+      db.from("pieces").select("id,title,composer,kind").limit(5000)
+    ]);
+    if(cRes.error) throw new Error("custom pieces — " + cRes.error.message);
+    if(lRes.error) throw new Error("library — " + lRes.error.message);
+    CUSTOMS = cRes.data || []; LIB = lRes.data || [];
+    // precompute library norms once (title, title+composer, composer)
+    const libByTitle = {};
+    LIB.forEach(l => {
+      l._base = norm(l.title);
+      l._full = norm(l.title + " " + (l.composer||""));
+      l._comp = norm(l.composer||"");
+      (libByTitle[l._base] = libByTitle[l._base] || []).push(l);
+    });
+    ROWS = []; const noMatch = [];
+    for(const c of CUSTOMS){
+      if(c.linked_piece_id) continue;                 // already linked
+      if(!c.status) continue;                          // no collection entry → nothing to merge
+      const baseNorm = norm(stripComposer(c.title));
+      const fullNorm = norm(c.title);
+      const tail = norm(composerTail(c.title) || c.composer || "");
+      let cands = (libByTitle[baseNorm] || []).slice();
+      LIB.forEach(l => { if(l._full === fullNorm && !cands.includes(l)) cands.push(l); });
+      if(!cands.length){ noMatch.push(c); continue; }
+      let best = cands[0], conf = "med";
+      for(const l of cands){ if(tail && l._comp === tail){ best = l; conf = "high"; break; } }
+      if(conf!=="high" && best._full === fullNorm) conf = "high";
+      ROWS.push({ c, cands, targetId: best.id, conf, checked: conf==="high" });
+    }
+    ROWS.sort((a,b)=> (a.conf===b.conf?0:a.conf==="high"?-1:1) || norm(a.c.title).localeCompare(norm(b.c.title)));
+    render(noMatch);
+    $("#status").textContent = `${CUSTOMS.length} custom pieces · ${ROWS.length} auto-matched · ${noMatch.length} to link manually`;
+  } catch(err){
+    $("#status").textContent = "Load error: " + (err && err.message ? err.message : err);
+    console.error("merge-studio load", err);
   }
-  ROWS.sort((a,b)=> (a.conf===b.conf?0:a.conf==="high"?-1:1) || norm(a.c.title).localeCompare(norm(b.c.title)));
-  render(noMatch);
 }
 
 function render(noMatch){
