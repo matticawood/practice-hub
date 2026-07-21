@@ -53,7 +53,7 @@ function _achMaxPieceMins(s) {
   });
   return Object.values(totals).reduce((m, v) => Math.max(m, v), 0);
 }
-// Number of unique scales/techniques practised
+// Number of unique scales/techniques practiced
 function _achUniqueScales(s) {
   const set = new Set();
   s.forEach(ss => (ss.practice_items || []).forEach(i => {
@@ -132,7 +132,7 @@ function _achMaxMonthDays(s) {
   return Object.values(byMonth).reduce((m, set) => Math.max(m, set.size), 0);
 }
 
-// Most minutes practised within a single calendar month
+// Most minutes practiced within a single calendar month
 function _achMaxMonthMins(s) {
   const byMonth = {};
   s.forEach(ss => {
@@ -153,7 +153,7 @@ function _isoWeekKey(dateStr) {
   const week = 1 + Math.round(((dt - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
   return dt.getUTCFullYear() + "-W" + week;
 }
-// True if any calendar week (Mon–Sun) has all 7 days practised
+// True if any calendar week (Mon–Sun) has all 7 days practiced
 function _achHasPerfectWeek(s) {
   const byWeek = {};
   s.forEach(ss => {
@@ -175,7 +175,7 @@ function _achRenaissanceCount(s) {
     _achItemTypeSessions(s, "book")          >= 1,
   ].filter(Boolean).length;
 }
-// True if any Saturday and its following Sunday were both practised
+// True if any Saturday and its following Sunday were both practiced
 function _achHasWeekendWarrior(s) {
   const dates = new Set(s.map(x => x.session_date).filter(Boolean));
   for (const ds of dates) {

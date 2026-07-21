@@ -839,7 +839,7 @@
   }
 
   // ── Premium extras: practice streak + stat count-up ──
-  let _mmDayMin = {};                       // 'YYYY-MM-DD' → minutes practised that day (drives the streak)
+  let _mmDayMin = {};                       // 'YYYY-MM-DD' → minutes practiced that day (drives the streak)
   let _mmStreak = { current: 0, best: 0 };
   const _reduceMotion = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
