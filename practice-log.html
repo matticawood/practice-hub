@@ -7534,6 +7534,9 @@
     <!-- ── Insights ── -->
     <div id="stats-insights" style="margin-bottom:28px"></div>
 
+    <!-- Practice quality: focus-rating trend + one correlation finding -->
+    <div id="stats-quality" style="margin-bottom:28px"></div>
+
     <!-- Personal bests / records -->
     <div id="stats-personal-bests" style="margin-bottom:28px"></div>
 
@@ -13422,6 +13425,67 @@ function renderInsights() {
     </div>`;
 }
 
+// ── Practice quality: focus-rating trend + one correlation finding ────────────
+// Uses the optional end-of-session focus rating (1-5) the member already gives.
+// Deliberate-practice evidence: hours pay off only when the practice is focused.
+function renderPracticeQuality() {
+  const el = document.getElementById('stats-quality');
+  if (!el) return;
+  el.innerHTML = '';
+  const rated = (allSessions || [])
+    .filter(s => s.focus_rating != null && s.focus_rating > 0)
+    .sort((a, b) => (a.session_date < b.session_date ? -1 : 1));
+  if (rated.length < 4) return; // not enough ratings to say anything useful yet
+  const avg = a => a.reduce((s, x) => s + x.focus_rating, 0) / a.length;
+  const recentN = rated.slice(-20);
+  const avgFocus = avg(recentN);
+
+  // Trend: recent half vs earlier half of the window.
+  let trendTxt = '', trendArrow = '';
+  if (recentN.length >= 6) {
+    const half = Math.floor(recentN.length / 2);
+    const diff = avg(recentN.slice(half)) - avg(recentN.slice(0, half));
+    if (diff >= 0.4) { trendTxt = 'trending up'; trendArrow = '&uarr;'; }
+    else if (diff <= -0.4) { trendTxt = 'dipping'; trendArrow = '&darr;'; }
+    else { trendTxt = 'holding steady'; trendArrow = '&rarr;'; }
+  }
+
+  // Correlation: focus by session length (short vs long).
+  let corr = '';
+  const withLen = recentN.filter(s => (s.duration_minutes || 0) > 0);
+  const short = withLen.filter(s => s.duration_minutes < 30);
+  const long  = withLen.filter(s => s.duration_minutes >= 30);
+  if (short.length >= 3 && long.length >= 3) {
+    const sf = avg(short), lf = avg(long);
+    if (Math.abs(sf - lf) >= 0.5) {
+      corr = sf > lf
+        ? ` Your focus is sharper in <strong>shorter sessions</strong> (${sf.toFixed(1)} under 30 min vs ${lf.toFixed(1)} over) &mdash; short, focused blocks are working for you.`
+        : ` Your focus <strong>holds up in longer sessions</strong> (${lf.toFixed(1)} over 30 min vs ${sf.toFixed(1)} under) &mdash; you settle in the longer you play.`;
+    }
+  }
+
+  // Sparkline of the last up-to-14 ratings.
+  const spark = recentN.slice(-14).map(s => {
+    const h = Math.round((s.focus_rating / 5) * 100);
+    const c = s.focus_rating >= 4 ? 'var(--accent)' : s.focus_rating >= 3 ? 'var(--accent-dim, #c9a24a)' : 'var(--border)';
+    return `<span style="display:inline-block;width:7px;height:22px;position:relative;vertical-align:bottom"><span style="position:absolute;bottom:0;left:0;right:0;height:${h}%;background:${c};border-radius:2px"></span></span>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="stats-insights-card">
+      <div class="stats-insights-hdr">${_emojiToSvg('🎯', 16)} Practice quality</div>
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="font-size:1.6rem;font-weight:800;line-height:1">${avgFocus.toFixed(1)}<span style="font-size:.8rem;font-weight:600;color:var(--text-muted)"> / 5</span></div>
+        <div style="display:flex;gap:3px;align-items:flex-end">${spark}</div>
+        ${trendTxt ? `<div style="font-size:.8rem;color:var(--text-muted)">${trendArrow} ${trendTxt}</div>` : ''}
+      </div>
+      <div class="stats-insight-row" style="padding-left:0;padding-right:0">
+        <span>Your focus has averaged <strong>${avgFocus.toFixed(1)} of 5</strong> across recent sessions.${corr}
+        <span class="stats-insight-why"><span class="iw-label">The research:</span> Hours only pay off when the practice behind them is focused. Attention is the active ingredient. <button type="button" class="stats-insight-cite" onclick="showInsightStudy('bonneville')">${INSIGHT_CITE['bonneville'] || 'the research'}</button></span></span>
+      </div>
+    </div>`;
+}
+
 // ── Dashboard "Your next move": surface the single top actionable insight ─────
 // Reads the shared engine and picks the highest-priority nudge the member can act
 // on now (prefer a course-correction with a CTA). Instrumented via ux_events so we
@@ -14067,6 +14131,8 @@ function renderStats() {
   renderPersonalBests();
   // Insights — shown immediately after headline stats
   renderInsights();
+  // Practice quality — focus trend + correlation ("What's working")
+  renderPracticeQuality();
   // Extended summary stats
   renderExtendedStats();
   // Per-goal projections (own profile only)
