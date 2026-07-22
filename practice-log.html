@@ -3481,6 +3481,11 @@
     .dfm-thumb { flex-shrink: 0; position: relative; width: 96px; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #14110c; }
     .dfm-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .dfm-thumb--none { background: radial-gradient(circle at 50% 40%, #2c2519, #14110c); }
+    /* Stylized placeholder thumbnail for content with no real image (Monday Music Tips,
+       polls, plain posts, and community questions/discussions/wins/resources). */
+    .dfm-thumb--styl { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 5px; text-align: center; color: #fff; background: linear-gradient(135deg, var(--c1), var(--c2)); }
+    .dfm-styl-ic { width: 17px; height: 17px; flex-shrink: 0; opacity: .96; }
+    .dfm-styl-lbl { font-size: .5rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; line-height: 1.12; }
     .dfm-thumb-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.92); color: #1a1410; }
     .dfm-thumb-play svg { width: 13px; height: 13px; margin-left: 1px; }
     .dfm-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -11762,7 +11767,7 @@ async function renderDashboard() {
           const t = postThumb(p);
           const thumb = t
             ? `<span class="dfm-thumb">${t.src ? `<img src="${escHtml(t.src)}" alt="" loading="lazy" onerror="this.style.display='none'"/>` : ""}${t.video ? playIc : ""}</span>`
-            : `<span class="dfm-thumb dfm-thumb--none"><span class="dfm-thumb-ini">${escHtml((name[0] || "?").toUpperCase())}</span></span>`;
+            : _dashStylThumb(["question", "discussion", "win", "resource"].includes(p.type) ? p.type : "post");
           return `<a class="dfm-item" href="/community.html" style="align-items:flex-start">
             ${thumb}
             <span class="dfm-body">
@@ -11853,6 +11858,14 @@ async function renderDashboard() {
         return img ? escC(img.url) : null;
       };
       const rows = cfRows || [];
+      // Which of these posts carry a poll? (so no-image posts get a poll thumbnail, not a plain one)
+      let pollSet = new Set();
+      if (rows.length) {
+        try {
+          const { data: pr } = await db.from("content_feed_post_polls").select("post_id").in("post_id", rows.map(r => r.id));
+          pollSet = new Set((pr || []).map(x => x.post_id));
+        } catch(e) {}
+      }
       if (!rows.length) {
         cfEl.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;padding:14px 16px">No content yet.</div>';
       } else {
@@ -11861,8 +11874,12 @@ async function renderDashboard() {
           const isVid = p.type === "youtube" || (Array.isArray(p.media) && p.media.some(m => m.type === "mux"));
           const dd = new Date(p.published_at);
           const meta = (p.type === "youtube" ? "Video" : p.type === "blog" ? "Monday Music Tips" : "Post") + " &middot; " + dd.getDate() + " " + _cfM[dd.getMonth()];
+          // Real image → show it; otherwise a stylized placeholder by kind (MMT / poll / post).
+          const thumb = th
+            ? `<span class="dfm-thumb"><img src="${th}" alt="" loading="lazy" onerror="this.style.display='none'">${isVid ? '<span class="dfm-thumb-play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span>' : ''}</span>`
+            : _dashStylThumb(p.type === "blog" ? "mmt" : pollSet.has(p.id) ? "poll" : "post");
           return `<a class="dfm-item" href="/content-feed.html?post=${p.id}">
-            <span class="dfm-thumb${th ? '' : ' dfm-thumb--none'}">${th ? `<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}${isVid ? '<span class="dfm-thumb-play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span>' : ''}</span>
+            ${thumb}
             <span class="dfm-body"><span class="dfm-title">${escC(p.title || 'Untitled')}</span><span class="dfm-meta">${meta}</span></span>
           </a>`;
         }).join('');
@@ -12030,6 +12047,26 @@ async function renderDashboard() {
 // (Matt's Content and Community posts are pure-CSS scroll boxes and need no JS.)
 
 const _DASH_STACK_BP = 900;
+
+// Stylized placeholder thumbnail for content/posts that have no real image. Each
+// kind gets a branded gradient, an icon, and a short label so there's always
+// something in the thumbnail slot rather than a blank block.
+function _dashStylThumb(kind) {
+  const K = {
+    mmt:        { l: "Monday Music Tips", a: "#4338ca", b: "#6366f1", i: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>' },
+    poll:       { l: "Poll",       a: "#0d9488", b: "#14b8a6", i: '<line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/>' },
+    post:       { l: "Post",       a: "#64748b", b: "#94a3b8", i: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>' },
+    question:   { l: "Question",   a: "#d97706", b: "#f59e0b", i: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
+    discussion: { l: "Discussion", a: "#6366f1", b: "#818cf8", i: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' },
+    win:        { l: "Win",        a: "#ca8a04", b: "#eab308", i: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>' },
+    resource:   { l: "Resource",   a: "#0284c7", b: "#38bdf8", i: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>' },
+  };
+  const k = K[kind] || K.post;
+  return `<span class="dfm-thumb dfm-thumb--styl" style="--c1:${k.a};--c2:${k.b}">
+    <svg class="dfm-styl-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${k.i}</svg>
+    <span class="dfm-styl-lbl">${k.l}</span>
+  </span>`;
+}
 
 function _dashFillFocus() {
   const card = document.getElementById('dash-focus-card');   // .db-focus
