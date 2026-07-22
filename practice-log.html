@@ -9467,6 +9467,8 @@ async function loadData() {
         const _num = _pub.filter(l => l.level === _nextL.level).findIndex(l => l.id === _nextL.id) + 1;
         _nextTheoryLesson = { id: _nextL.id, title: _nextL.title, level: _nextL.level, num: _num };
       } else _nextTheoryLesson = null;
+      // Completed lessons by curriculum position — the theory gate for phasing games in.
+      _theoryDoneKeys = new Set(_pub.filter(l => _doneSet.has(l.id)).map(l => `${l.level}:${l.sort_order}`));
       _pathTheoryStarted = Object.values(done).some(n => n > 0);
       // Absolute Beginner Course progress, for the dashboard "Start here" card:
       // total = lessons in the course, live = any published (gates real visibility),
@@ -13031,6 +13033,7 @@ let _goalCollectionIds = null;  // Set of piece_ids already in the member's coll
 let _goalAllPieces = null;      // library pieces (id,title,composer,difficulty,kind) for recs
 let _goalTheory = null;         // { totals:{level:n}, done:{level:n} } published theory lessons
 let _nextTheoryLesson = null;   // { id, title } the next uncompleted published theory lesson
+let _theoryDoneKeys = null;     // Set of "level:sort_order" for completed theory lessons (game unlock gates)
 let _dormantCustomPieces = null;// custom pieces gone quiet (learning, 14d+ no practice, unacked) for the tidy-up card
 let _fsCourse = null;           // { total, live, done } for The Absolute Beginner Course "Start here" card
 let _nextFsLesson = null;       // { id, title, num } next uncompleted Absolute Beginner Course lesson
@@ -13698,10 +13701,26 @@ function _pickDailySkill() {
     if (next) active.push(next);
   });
   if (!active.length) return null; // every baseline + extra for this stage is done
-  // Absolute beginners start with note reading — the foundational skill — before
-  // ear training, intervals or chords.
-  let pool = active;
-  if (parts && parts._fsBeginner) { const noteOnly = active.filter(g => g.type === 'note'); if (noteOnly.length) pool = noteOnly; }
+  // Phase games in — a game type appears once ANY of three conditions is met:
+  //   (1) THEORY: completed the lesson that teaches it;
+  //   (2) READINESS: note reading is solid enough (staggered by note keys hit);
+  //   (3) DEMONSTRATION: they've scored above a "you can do it" bar in that game.
+  // Note reading is the foundation and is always available.
+  const ANCHOR = { chord: '1:10', interval: '1:11', ear: '2:6' };  // theory lesson (level:sort_order)
+  const DEMO   = { chord: 7, interval: 9, ear: 8 };                // score that proves competence
+  const noteObj = stageGoals.find(g => g.type === 'note' && g.match && g.match.keys && g.match.keys.length);
+  const noteKeys = (noteObj && noteObj.match.keys) || [];
+  const noteHit = noteObj ? noteKeys.filter(k => _variantBest('note', noteObj.match, k) >= noteObj.target).length : 0;
+  const nTot = noteKeys.length || 4;
+  const READY = { chord: Math.ceil(nTot * 0.5), interval: Math.ceil(nTot * 0.75), ear: nTot };
+  const unlocked = t => t === 'note'
+    || (_theoryDoneKeys && _theoryDoneKeys.has(ANCHOR[t]))
+    || (READY[t] != null && noteHit >= READY[t])
+    || (bestOverall(t) >= (DEMO[t] || Infinity));
+  let pool = active.filter(g => unlocked(g.type));
+  // Absolute beginners start with note reading before anything else.
+  if (parts && parts._fsBeginner) { const noteOnly = pool.filter(g => g.type === 'note'); if (noteOnly.length) pool = noteOnly; }
+  if (!pool.length) return null;
   // Pick the one you're FURTHEST from completing (most need); tie-break least-recent.
   const goal = pool.slice().sort((a, b) => (progress(a) - progress(b)) || (lastMs(a.type) - lastMs(b.type)))[0];
   const m = goal.match, type = goal.type;
