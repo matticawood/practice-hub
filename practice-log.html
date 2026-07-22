@@ -11798,12 +11798,15 @@ async function renderDashboard() {
         // Render every step; the fill-pass (_dashFillFocus) trims any that overflow the card
         // and updates the "+N more steps" note, so the card fills to the height it snaps to.
         const steps = Array.isArray(focus.steps) ? focus.steps.filter(s => s && (s.text || '').trim()) : [];
-        const stepsHTML = steps.map((s, i) => `
+        const stepsArr = steps.map((s, i) => `
             <div class="dfocus-step">
               <span class="dfocus-step-num">${i + 1}</span>
               <span class="dfocus-step-txt">${escHtml(s.text || '')}</span>
-            </div>`).join('');
-        const moreSteps = 0;
+            </div>`);
+        // Stored so _dashFillFocus can rebuild the step list at the height it snaps to.
+        window._focusStepsHTML = stepsArr;
+        window._focusStepTotal = steps.length;
+        const stepsHTML = stepsArr.join('');
         focusEl.innerHTML =
           `<div class="dfocus-head">
             <div class="dcontent-head" style="margin-bottom:0">
@@ -11850,8 +11853,9 @@ async function renderDashboard() {
       const rows = cfRows || [];
       if (!rows.length) {
         cfEl.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;padding:14px 16px">No content yet.</div>';
+        window._mattItemsHTML = [];
       } else {
-        cfEl.innerHTML = rows.map(p => {
+        const itemsHTML = rows.map(p => {
           const th = _cfThumb(p);
           const isVid = p.type === "youtube" || (Array.isArray(p.media) && p.media.some(m => m.type === "mux"));
           const dd = new Date(p.published_at);
@@ -11860,7 +11864,13 @@ async function renderDashboard() {
             <span class="dfm-thumb${th ? '' : ' dfm-thumb--none'}">${th ? `<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}${isVid ? '<span class="dfm-thumb-play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span>' : ''}</span>
             <span class="dfm-body"><span class="dfm-title">${escC(p.title || 'Untitled')}</span><span class="dfm-meta">${meta}</span></span>
           </a>`;
-        }).join('') + '<a href="/content-feed.html" class="dash-card-article-link dfm-all">All posts &rarr;</a>';
+        });
+        // Stored so _dashFillMattContent can rebuild the list at the height it snaps to
+        // (as many items as the live-stream card is tall on desktop, 3 when stacked on mobile).
+        window._mattItemsHTML  = itemsHTML;
+        window._mattFooterHTML = '<a href="/content-feed.html" class="dash-card-article-link dfm-all">All posts &rarr;</a>';
+        cfEl.innerHTML = itemsHTML.join('') + window._mattFooterHTML;
+        _dashFillMattContent();
       }
       if (false) {
         const p = rows[0];
@@ -12011,11 +12021,19 @@ async function renderDashboard() {
   setTimeout(_dashFillPass, 400);
 }
 
-// ── Fill-pass: keep the stretched dashboard cards full to their bottom edge ──
-// The From Matt / Community / Go Deeper rows use align-items:stretch, so the
-// shorter card matches its taller sibling. These helpers drop any overflowing
-// rows (and update the "+N more" note) so content top-aligns and fills without
-// spilling, with the footer link pinned to the bottom.
+// ── Fill-pass: snap the shorter card in each stretch row to its taller sibling ──
+// The From Matt / Go Deeper rows use align-items:stretch. Left to itself, the
+// card with MORE content would grow the row and dictate the height. We want the
+// opposite: the sibling with the fixed asset (the live-stream video / the
+// article+term reads) sets the height, and the list card fills to it — showing
+// as many rows as fit and no more. To measure the sibling's natural height we
+// briefly collapse the list card (so it can't inflate the row), read the
+// sibling, then cap the list card to that height and trim overflowing rows.
+// Below 900px the cards stack, so there's nothing to snap to: show a short set.
+
+const _DASH_STACK_BP = 900;
+
+// Generic trim: remove trailing rows until `el` no longer overflows.
 function _dashTrimToFit(el, sel) {
   if (!el) return;
   let guard = 0;
@@ -12026,33 +12044,86 @@ function _dashTrimToFit(el, sel) {
     guard++;
   }
 }
-function _dashFillFocus(card) {
-  if (!card) return;
+
+function _dashFillMattContent() {
+  const card    = document.querySelector('.db-mattcontent');
+  const streams = document.querySelector('.db-streams');
+  const list    = document.getElementById('dash-content-feed-card');
+  if (!card || !list || !Array.isArray(window._mattItemsHTML)) return;
+  const footer = window._mattFooterHTML || '';
+  const items  = window._mattItemsHTML;
+  const streamsVisible = streams && streams.offsetParent !== null;
+
+  // Stacked (mobile) or no live-stream to match: just show the first three.
+  if (window.innerWidth <= _DASH_STACK_BP || !streamsVisible) {
+    card.style.height = '';
+    list.innerHTML = items.slice(0, 3).join('') + footer;
+    return;
+  }
+
+  // Desktop: rebuild full, snap to the live-stream height, trim overflow.
+  list.innerHTML = items.join('') + footer;
+  card.style.height = '';
+  list.style.maxHeight = '0px';                               // collapse so streams defines the row
+  const H = Math.round(streams.getBoundingClientRect().height);
+  list.style.maxHeight = '';
+  card.style.height = H + 'px';                               // snap Matt's Content to the live-stream height
+  _dashTrimToFit(list, '.dfm-item');
+}
+
+function _dashFillFocus() {
+  const card = document.getElementById('dash-focus-card');   // .db-focus
+  const ref  = document.querySelector('.db-daily');          // article + term (the height to match)
+  if (!card || !ref) return;
   const wrap = card.querySelector('.dfocus-steps');
   const more = card.querySelector('.dfocus-more');
-  if (wrap) {
-    let guard = 0;
-    while (card.scrollHeight > card.clientHeight + 1 && guard < 40) {
-      const steps = wrap.querySelectorAll('.dfocus-step');
-      if (steps.length <= 1) break;
-      steps[steps.length - 1].remove();
-      guard++;
-    }
-    if (more) {
-      const total = parseInt(more.dataset.total || '0', 10);
-      const shown = wrap.querySelectorAll('.dfocus-step').length;
-      const rem   = total - shown;
-      if (rem > 0) { more.textContent = `+${rem} more step${rem === 1 ? '' : 's'}`; more.style.display = ''; }
-      else { more.style.display = 'none'; }
-    }
+  if (!wrap || !Array.isArray(window._focusStepsHTML)) return;
+  const total = window._focusStepTotal || window._focusStepsHTML.length;
+  const setMore = (shown) => {
+    if (!more) return;
+    const rem = total - shown;
+    if (rem > 0) { more.textContent = `+${rem} more step${rem === 1 ? '' : 's'}`; more.style.display = ''; }
+    else { more.style.display = 'none'; }
+  };
+
+  wrap.innerHTML = window._focusStepsHTML.join('');           // rebuild all steps
+  card.style.height = '';
+  const refVisible = ref && ref.offsetParent !== null;
+
+  // Stacked (mobile) or nothing to match: show everything at natural height.
+  if (window.innerWidth <= _DASH_STACK_BP || !refVisible) { setMore(total); return; }
+
+  // Desktop: snap to the article+term height, trim overflowing steps.
+  card.style.maxHeight = '0px';                               // collapse so the reads define the row
+  const H = Math.round(ref.getBoundingClientRect().height);
+  card.style.maxHeight = '';
+  card.style.height = H + 'px';
+  let guard = 0;
+  while (card.scrollHeight > card.clientHeight + 1 && guard < 40) {
+    const steps = wrap.querySelectorAll('.dfocus-step');
+    if (steps.length <= 1) break;
+    steps[steps.length - 1].remove();
+    guard++;
   }
+  setMore(wrap.querySelectorAll('.dfocus-step').length);
 }
+
 function _dashFillPass() {
   try {
-    _dashTrimToFit(document.getElementById('dash-content-feed-card'), '.dfm-item');
+    _dashFillMattContent();
     _dashTrimToFit(document.getElementById('dash-posts-preview'), '.dfm-item');
-    _dashFillFocus(document.getElementById('dash-focus-card'));
+    _dashFillFocus();
   } catch(e) {}
+}
+
+// Re-run when the viewport crosses the stack breakpoint (mobile ⇄ desktop).
+if (!window._dashFillResizeHooked) {
+  window._dashFillResizeHooked = true;
+  let _dashFillRT;
+  window.addEventListener('resize', () => {
+    clearTimeout(_dashFillRT);
+    _dashFillRT = setTimeout(_dashFillPass, 200);
+  });
 }
 
 // ── Live event banner helpers ──────────────────────────────────────────
