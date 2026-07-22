@@ -9430,7 +9430,7 @@ async function loadData() {
         db.from("ear_game_scores").select("score, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
         db.from("user_collections").select("status, created_at, piece_id, pieces(difficulty), user_piece_id, user_pieces(id, title, difficulty, last_practiced_at, dormancy_acked_at)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, sort_order, title, status").eq("course", "theory"),
-        db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true),
+        db.from("lesson_progress").select("lesson_id, completed, completed_at").eq("email", viewingEmail).eq("completed", true),
         db.from("interval_game_scores").select("score, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase()),
         db.from("lessons").select("id, status, title, sort_order").eq("course", "first-steps")
       ]);
@@ -9481,6 +9481,18 @@ async function loadData() {
         const _num = _pub.filter(l => l.level === _nextL.level).findIndex(l => l.id === _nextL.id) + 1;
         _nextTheoryLesson = { id: _nextL.id, title: _nextL.title, level: _nextL.level, num: _num };
       } else _nextTheoryLesson = null;
+      // The theory lesson completed TODAY (latest, published), so a done theory card
+      // shows the lesson you just finished — not the next one that's queued up.
+      const _todayStr = toDateStr(new Date());
+      const _pubById = new Map(_pub.map(l => [l.id, l]));
+      const _thToday = (thP.data || [])
+        .filter(p => p.completed_at && _pubById.has(p.lesson_id) && toDateStr(new Date(p.completed_at)) === _todayStr)
+        .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at));
+      if (_thToday.length) {
+        const _l = _pubById.get(_thToday[0].lesson_id);
+        const _n = _pub.filter(l => l.level === _l.level).findIndex(l => l.id === _l.id) + 1;
+        _lastTheoryLesson = { id: _l.id, title: _l.title, level: _l.level, num: _n };
+      } else _lastTheoryLesson = null;
       // Completed lessons by curriculum position — the theory gate for phasing games in.
       _theoryDoneKeys = new Set(_pub.filter(l => _doneSet.has(l.id)).map(l => `${l.level}:${l.sort_order}`));
       _pathTheoryStarted = Object.values(done).some(n => n > 0);
@@ -13047,6 +13059,7 @@ let _goalCollectionIds = null;  // Set of piece_ids already in the member's coll
 let _goalAllPieces = null;      // library pieces (id,title,composer,difficulty,kind) for recs
 let _goalTheory = null;         // { totals:{level:n}, done:{level:n} } published theory lessons
 let _nextTheoryLesson = null;   // { id, title } the next uncompleted published theory lesson
+let _lastTheoryLesson = null;   // { id, title } the theory lesson completed TODAY (for the done card)
 let _theoryDoneKeys = null;     // Set of "level:sort_order" for completed theory lessons (game unlock gates)
 let _dormantCustomPieces = null;// custom pieces gone quiet (learning, 14d+ no practice, unacked) for the tidy-up card
 let _fsCourse = null;           // { total, live, done } for The Absolute Beginner Course "Start here" card
@@ -13755,13 +13768,16 @@ function _pickDailySkill() {
   return { title: link.game, blurb: `Reach a score of ${aim} ${link.phrase}`, href: link.href, done: playedToday(type) };
 }
 function _dailyTheoryObjective(types) {
-  if (!_nextTheoryLesson) return null; // no live course / all lessons done → hide
-  const L = _nextTheoryLesson;
+  const doneToday = types.has('theory');
+  // When a lesson was completed today, show THAT lesson on the (green) done card;
+  // otherwise show the next lesson to do.
+  const L = (doneToday && _lastTheoryLesson) ? _lastTheoryLesson : _nextTheoryLesson;
+  if (!L) return null; // no live course / all lessons done and none finished today → hide
   return {
     title: `Theory · Level ${L.level}`,
     blurb: `Lesson ${L.num}: ${L.title}`,
     href:  '/courses.html?lesson=' + encodeURIComponent(L.id),
-    done:  types.has('theory'),
+    done:  doneToday,
   };
 }
 function _renderDailyCard() {
