@@ -3991,6 +3991,9 @@
       font-size: .7rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
     .dgoal-status.is-done { color: #16a34a; }
     .dgoal-when { font-size: .7rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .dgoal-barrow { display: flex; align-items: center; gap: 11px; }
+    .dgoal-barrow .dgoal-bar { flex: 1; min-width: 0; }
+    .dgoal-barmeta { flex-shrink: 0; font-size: .68rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
     .dgoal-bar { height: 6px; border-radius: 99px; overflow: hidden; background: color-mix(in srgb, var(--gcol) 15%, transparent); }
     .dgoal-bar > i { display: block; height: 100%; border-radius: 99px; background: var(--gcol); transition: width .5s cubic-bezier(.4,0,.2,1); }
     .dgoal-bar > i.done { background: #22c55e; }
@@ -11317,29 +11320,32 @@ async function renderDashboard() {
       const logged = pgCalcHours(g);
       const done   = hasHrs && logged >= g.target_hours;
 
-      // The single right-aligned status: deadline countdown when there's a date,
-      // otherwise the hours tally. The bar underneath carries the progress visually.
-      let status = '';
+      // Right-aligned status = the deadline countdown (a date goal) OR, if there's no
+      // date, the hours tally. When a goal has BOTH, the deadline sits top-right and the
+      // hours tally rides on the bar below — so every goal shows all of its info.
+      const hasDate = (gt === 'deadline' || gt === 'both') && g.target_date;
+      const hrsStr  = hasHrs ? `${logged < 1 ? Math.round(logged * 60) + 'm' : logged.toFixed(1) + 'h'} / ${g.target_hours}h` : '';
+      let status = '', barMeta = '';
       if (done) {
         status = `<span class="pg-pill pg-pill-done">Complete</span>`;
-      } else if ((gt === 'deadline' || gt === 'both') && g.target_date) {
+      } else if (hasDate) {
         const t    = new Date(normDate(g.target_date) + 'T00:00:00');
         const days = Math.round((t - today) / 86400000);
         const txt  = days < 0 ? `Overdue ${Math.abs(days)}d` : days === 0 ? 'Due today' : `${days}d left`;
         status = days < 0  ? `<span class="pg-pill pg-pill-danger">${txt}</span>`
                : days <= 7 ? `<span class="pg-pill pg-pill-warn">${txt}</span>`
                :             `<span class="dgoal-when">${txt}</span>`;
+        if (hasHrs) barMeta = hrsStr;   // both → hours ride the bar
       } else if (hasHrs) {
-        const lstr = logged < 1 ? `${Math.round(logged * 60)}m` : `${logged.toFixed(1)}h`;
-        status = `<span class="dgoal-when">${lstr} / ${g.target_hours}h</span>`;
+        status = `<span class="dgoal-when">${hrsStr}</span>`;   // hours-only → top-right
       }
 
       const hrsPct = hasHrs ? Math.min(100, Math.round((logged / g.target_hours) * 100)) : 0;
       return `<div class="dgoal" style="--gcol:${cat.color}">
         <span class="dgoal-ic">${typeIconSVG(cat.type)}</span>
         <div class="dgoal-body">
-          <div class="dgoal-top"><span class="dgoal-name">${escHtml(g.piece_label || '')}</span><span class="dgoal-status">${status}</span></div>
-          ${hasHrs ? `<div class="dgoal-bar"><i style="width:${hrsPct}%"></i></div>` : ''}
+          <div class="dgoal-top"><span class="dgoal-name">${escHtml(g.piece_label || '')}</span>${status ? `<span class="dgoal-status">${status}</span>` : ''}</div>
+          ${hasHrs ? `<div class="dgoal-barrow"><div class="dgoal-bar"><i style="width:${hrsPct}%"></i></div>${barMeta ? `<span class="dgoal-barmeta">${barMeta}</span>` : ''}</div>` : ''}
         </div>
       </div>`;
     }).join('');
