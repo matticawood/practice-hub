@@ -13616,15 +13616,20 @@ function _skillDeepLink(type, m, key) {
   const p = new URLSearchParams({ section: type, auto: '1' });
   const kTxt = key ? key.replace('b', '♭').replace('#', '♯') : '';
   if (type === 'note') {
+    if (m.clef) p.set('clef', m.clef);
+    if (m.range) p.set('range', m.range);
     if (key) { p.set('mode', 'key'); p.set('key', key); return { href: '/tools.html?' + p, game: 'Note Recognition', variant: `in ${kTxt}` }; }
     p.set('mode', 'normal'); if (m.acc) p.set('acc', '1');
-    return { href: '/tools.html?' + p, game: 'Note Recognition', variant: m.acc ? 'with accidentals' : 'any notes' };
+    const nv = m.clef === 'bass' ? 'bass clef' : m.range === 'ledger' ? 'ledger lines' : m.range === 'full' ? 'full range' : m.acc ? 'with accidentals' : 'any notes';
+    return { href: '/tools.html?' + p, game: 'Note Recognition', variant: nv };
   }
   if (type === 'interval') {
     if (m.side) p.set('side', m.side);
     if (m.tier) p.set('tier', m.tier);
+    if (m.play && m.side === 'listening') p.set('play', m.play);
     if (key) { p.set('keymode', 'key'); p.set('key', key); } else p.set('keymode', 'free');
-    return { href: '/tools.html?' + p, game: 'Interval Training', variant: `${m.side === 'listening' ? 'hearing' : 'reading'}${kTxt ? `, ${kTxt}` : ''}` };
+    const iv = `${m.side === 'listening' ? 'hearing' : 'reading'}${m.play === 'melodic' && m.side === 'listening' ? ', melodic' : ''}${kTxt ? `, ${kTxt}` : ''}`;
+    return { href: '/tools.html?' + p, game: 'Interval Training', variant: iv };
   }
   if (type === 'chord') {
     const TIER = { 1: ['triad', 'root'], 2: ['triad', 'inv'], 3: ['triad', 'spread'], 4: ['seventh', 'root'], 5: ['seventh', 'inv'], 6: ['seventh', 'spread'] };
@@ -13635,11 +13640,26 @@ function _skillDeepLink(type, m, key) {
   }
   if (type === 'ear') {
     if (m.set) p.set('set', m.set);
+    if (m.answer_type) p.set('answer', m.answer_type);
     if (key) { p.set('scope', 'key'); p.set('key', key); } else p.set('scope', 'any');
     const SET = { major_minor: 'major vs minor', triads: 'triad quality', sevenths: 'seventh quality', extensions: 'extended chords' };
-    return { href: '/tools.html?' + p, game: 'Ear Training', variant: `${SET[m.set] || 'chords'}${kTxt ? `, ${kTxt}` : ''}` };
+    const ev = `${SET[m.set] || 'chords'}${m.answer_type === 'exact' ? ', exact' : ''}${kTxt ? `, ${kTxt}` : ''}`;
+    return { href: '/tools.html?' + p, game: 'Ear Training', variant: ev };
   }
   return null;
+}
+// Best score for a SPECIFIC variant (tier/set/side/mode/clef/… + key), so progress
+// and targets gate on the exact objective, not the member's best in the game overall.
+function _variantBest(type, m, key) {
+  const wantKey = key || null;
+  return (_insightTrainers[type] || []).filter(r => {
+    if ((r.key_signature || null) !== wantKey) return false;
+    if (type === 'note')      { if (m.clef && r.clef !== m.clef) return false; if (m.range && r.range !== m.range) return false; if (m.acc != null && !!r.accidentals !== !!m.acc) return false; }
+    else if (type === 'chord'){ if (m.tier != null && r.tier !== m.tier) return false; if (m.mode && r.mode !== m.mode) return false; }
+    else if (type === 'ear')  { if (m.set && r.chord_set !== m.set) return false; if (m.answer_type && r.answer_type !== m.answer_type) return false; }
+    else if (type === 'interval') { if (m.side && r.side !== m.side) return false; if (m.tier && r.tier !== m.tier) return false; if (m.key_mode && r.key_mode !== m.key_mode) return false; if (m.play && r.playback !== m.play) return false; }
+    return true;
+  }).reduce((x, r) => Math.max(x, r.v || 0), 0);
 }
 function _pickDailySkill() {
   if (!_insightTrainers) return null;
@@ -13656,13 +13676,12 @@ function _pickDailySkill() {
   const isGameObj = g => g && GAME.includes(g.type) && g.match && g.target;
   const rows = k => (_insightTrainers[k] || []);
   const lastMs = k => { const r = rows(k); return r.length ? new Date(r[r.length - 1].t).getTime() : 0; };
-  const bestInKey = (k, key) => rows(k).filter(r => r.key_signature === key).reduce((x, r) => Math.max(x, r.v || 0), 0);
   const bestOverall = k => rows(k).reduce((x, r) => Math.max(x, r.v || 0), 0);
   const playedToday = k => rows(k).some(r => toDateStr(new Date(r.t)) === todayStr);
   const progress = g => {
     const keys = (g.match.keys && g.match.keys.length) ? g.match.keys : null;
-    if (!keys) return bestOverall(g.type) >= g.target ? 1 : 0;
-    return keys.filter(kk => bestInKey(g.type, kk) >= g.target).length / keys.length;
+    if (!keys) return _variantBest(g.type, g.match, null) >= g.target ? 1 : 0;
+    return keys.filter(kk => _variantBest(g.type, g.match, kk) >= g.target).length / keys.length;
   };
   const met = g => progress(g) >= 1;
   // Per game group: the baseline if unmet, else the next unmet Extra in its chain.
@@ -13678,12 +13697,12 @@ function _pickDailySkill() {
   const m = goal.match, type = goal.type;
   // Your weakest key within the objective (lowest best score there).
   let key = null;
-  if (m.keys && m.keys.length) key = m.keys.slice().sort((a, b) => bestInKey(type, a) - bestInKey(type, b))[0];
+  if (m.keys && m.keys.length) key = m.keys.slice().sort((a, b) => _variantBest(type, m, a) - _variantBest(type, m, b))[0];
   const link = _skillDeepLink(type, m, key);
   if (!link) return null;
-  // Target: a step above your best IN THIS KEY, capped at the objective's target;
-  // for a key you've never played, a fair starter from your ability in the game.
-  const vBest = key ? bestInKey(type, key) : bestOverall(type);
+  // Target: a step above your best AT THIS VARIANT, capped at the objective's target;
+  // for one you've never played, a fair starter from your ability in the game.
+  const vBest = _variantBest(type, m, key);
   let aim;
   if (vBest > 0) aim = Math.min(vBest + 2, goal.target);
   else { const ob = bestOverall(type); aim = ob > 0 ? Math.min(goal.target, Math.max(3, Math.round(ob * 0.6))) : Math.max(3, Math.ceil(goal.target / 2)); }
