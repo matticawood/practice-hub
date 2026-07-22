@@ -3487,11 +3487,11 @@
     .dfm-title { font-size: .84rem; font-weight: 700; color: var(--text); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .dfm-meta { font-size: .68rem; font-weight: 600; color: var(--text-muted); }
     .dfm-all { align-self: flex-start; margin: 12px 16px 14px; }
-    /* Matt's Content / Community posts fill the stretched card: rows top-aligned, the "all posts"
-       footer pinned to the bottom. A JS fill-pass (_dashTrimToFit) drops any overflowing rows so
-       the content reaches the card's bottom edge without spilling past it. */
-    #dash-content-feed-card, #dash-posts-preview { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-    #dash-content-feed-card .dfm-all, #dash-posts-preview .dfm-all { margin-top: auto; }
+    /* Matt's Content / Community posts are scroll boxes (like the Activity feed): they hold many
+       rows but their height is set by the sibling card (live streams / activity) via the stretch
+       grid — the rows live in an absolute scroll layer so they never inflate the row. */
+    #dash-content-feed-card, #dash-posts-preview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .db-mattcontent, .db-posts { min-height: 360px; }   /* fallback height when there is no sibling to match (stacked / hidden stream) */
     .db-focus { overflow: hidden; }
     /* Community posts: badge chip beside the name, snippet line, initial fallback. */
     .dfm-thumb-ini { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 1rem; font-weight: 800; color: rgba(255,255,255,.85); }
@@ -11715,7 +11715,7 @@ async function renderDashboard() {
     }
   } catch(e) { /* feed unavailable */ }
 
-  // ── Async: community posts preview (last 3, with media thumbnails) ─
+  // ── Async: community posts preview (scroll box, with media thumbnails) ─
   try {
     const postsEl = document.getElementById('dash-posts-preview');
     if (postsEl) {
@@ -11723,7 +11723,7 @@ async function renderDashboard() {
         .select("id,email,name,type,content,created_at,media")
         .neq("type", "practice_log")
         .order("created_at", { ascending: false })
-        .limit(3);
+        .limit(20);
       const postRows = pdata || [];
 
       // Ensure avatar map has entries for these emails
@@ -11772,8 +11772,10 @@ async function renderDashboard() {
             </span>
           </a>`;
         }).join('');
-        postsEl.innerHTML = rowsHTML +
-          `<a class="dash-card-article-link dfm-all" href="/community.html" style="text-decoration:none">See all posts →</a>`;
+        // Scroll box like the Activity feed: many posts, but height matches the Activity card.
+        postsEl.innerHTML =
+          `<div class="dash-feed-scrollwrap" style="position:relative;flex:1;min-height:0"><div class="dash-feed-scroll" style="position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch">${rowsHTML}</div></div>` +
+          `<div style="padding:8px 16px 12px;flex-shrink:0;border-top:1px solid var(--border)"><a class="dash-card-article-link" href="/community.html" style="text-decoration:none">See all posts →</a></div>`;
       }
     }
   } catch(e) { /* posts unavailable */ }
@@ -11839,7 +11841,7 @@ async function renderDashboard() {
         .from("content_feed_posts")
         .select("id,type,title,body,url,youtube_id,media,published_at")
         .order("published_at", { ascending: false })
-        .limit(8);
+        .limit(20);
       const escC = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
       const _cfM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
       const _cfThumb = pp => {
@@ -11853,7 +11855,6 @@ async function renderDashboard() {
       const rows = cfRows || [];
       if (!rows.length) {
         cfEl.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;padding:14px 16px">No content yet.</div>';
-        window._mattItemsHTML = [];
       } else {
         const itemsHTML = rows.map(p => {
           const th = _cfThumb(p);
@@ -11864,13 +11865,11 @@ async function renderDashboard() {
             <span class="dfm-thumb${th ? '' : ' dfm-thumb--none'}">${th ? `<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}${isVid ? '<span class="dfm-thumb-play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span>' : ''}</span>
             <span class="dfm-body"><span class="dfm-title">${escC(p.title || 'Untitled')}</span><span class="dfm-meta">${meta}</span></span>
           </a>`;
-        });
-        // Stored so _dashFillMattContent can rebuild the list at the height it snaps to
-        // (as many items as the live-stream card is tall on desktop, 3 when stacked on mobile).
-        window._mattItemsHTML  = itemsHTML;
-        window._mattFooterHTML = '<a href="/content-feed.html" class="dash-card-article-link dfm-all">All posts &rarr;</a>';
-        cfEl.innerHTML = itemsHTML.join('') + window._mattFooterHTML;
-        _dashFillMattContent();
+        }).join('');
+        // Scroll box like the Activity feed: many rows, but height matches the live-stream card.
+        cfEl.innerHTML =
+          `<div class="dash-feed-scrollwrap" style="position:relative;flex:1;min-height:0"><div class="dash-feed-scroll" style="position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch">${itemsHTML}</div></div>` +
+          `<div style="padding:8px 16px 12px;flex-shrink:0;border-top:1px solid var(--border)"><a href="/content-feed.html" class="dash-card-article-link" style="text-decoration:none">All posts &rarr;</a></div>`;
       }
       if (false) {
         const p = rows[0];
@@ -12021,55 +12020,16 @@ async function renderDashboard() {
   setTimeout(_dashFillPass, 400);
 }
 
-// ── Fill-pass: snap the shorter card in each stretch row to its taller sibling ──
-// The From Matt / Go Deeper rows use align-items:stretch. Left to itself, the
-// card with MORE content would grow the row and dictate the height. We want the
-// opposite: the sibling with the fixed asset (the live-stream video / the
-// article+term reads) sets the height, and the list card fills to it — showing
-// as many rows as fit and no more. To measure the sibling's natural height we
-// briefly collapse the list card (so it can't inflate the row), read the
-// sibling, then cap the list card to that height and trim overflowing rows.
-// Below 900px the cards stack, so there's nothing to snap to: show a short set.
+// ── Fill-pass: snap Weekly Focus to its Go Deeper sibling (article + term) ──
+// Go Deeper uses align-items:stretch. Left to itself, whichever card has MORE
+// content grows the row. We want the article+term reads to set the height and
+// Weekly Focus to fill to it — showing as many steps as fit, no more. To read
+// the sibling's natural height we briefly collapse the focus card (so it can't
+// inflate the row), then cap it to that height and trim overflowing steps.
+// Below 900px the cards stack, so there's nothing to snap to: show everything.
+// (Matt's Content and Community posts are pure-CSS scroll boxes and need no JS.)
 
 const _DASH_STACK_BP = 900;
-
-// Generic trim: remove trailing rows until `el` no longer overflows.
-function _dashTrimToFit(el, sel) {
-  if (!el) return;
-  let guard = 0;
-  while (el.scrollHeight > el.clientHeight + 1 && guard < 40) {
-    const items = el.querySelectorAll(sel);
-    if (items.length <= 1) break;
-    items[items.length - 1].remove();
-    guard++;
-  }
-}
-
-function _dashFillMattContent() {
-  const card    = document.querySelector('.db-mattcontent');
-  const streams = document.querySelector('.db-streams');
-  const list    = document.getElementById('dash-content-feed-card');
-  if (!card || !list || !Array.isArray(window._mattItemsHTML)) return;
-  const footer = window._mattFooterHTML || '';
-  const items  = window._mattItemsHTML;
-  const streamsVisible = streams && streams.offsetParent !== null;
-
-  // Stacked (mobile) or no live-stream to match: just show the first three.
-  if (window.innerWidth <= _DASH_STACK_BP || !streamsVisible) {
-    card.style.height = '';
-    list.innerHTML = items.slice(0, 3).join('') + footer;
-    return;
-  }
-
-  // Desktop: rebuild full, snap to the live-stream height, trim overflow.
-  list.innerHTML = items.join('') + footer;
-  card.style.height = '';
-  list.style.maxHeight = '0px';                               // collapse so streams defines the row
-  const H = Math.round(streams.getBoundingClientRect().height);
-  list.style.maxHeight = '';
-  card.style.height = H + 'px';                               // snap Matt's Content to the live-stream height
-  _dashTrimToFit(list, '.dfm-item');
-}
 
 function _dashFillFocus() {
   const card = document.getElementById('dash-focus-card');   // .db-focus
@@ -12110,8 +12070,6 @@ function _dashFillFocus() {
 
 function _dashFillPass() {
   try {
-    _dashFillMattContent();
-    _dashTrimToFit(document.getElementById('dash-posts-preview'), '.dfm-item');
     _dashFillFocus();
   } catch(e) {}
 }
