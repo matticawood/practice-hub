@@ -3487,9 +3487,12 @@
     .dfm-title { font-size: .84rem; font-weight: 700; color: var(--text); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .dfm-meta { font-size: .68rem; font-weight: 600; color: var(--text-muted); }
     .dfm-all { align-self: flex-start; margin: 12px 16px 14px; }
-    /* Matt's Content / Community posts fill the stretched card and centre their rows so the
-       equal-height cards read as balanced rather than top-heavy with an empty void below. */
-    #dash-content-feed-card, #dash-posts-preview { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+    /* Matt's Content / Community posts fill the stretched card: rows top-aligned, the "all posts"
+       footer pinned to the bottom. A JS fill-pass (_dashTrimToFit) drops any overflowing rows so
+       the content reaches the card's bottom edge without spilling past it. */
+    #dash-content-feed-card, #dash-posts-preview { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    #dash-content-feed-card .dfm-all, #dash-posts-preview .dfm-all { margin-top: auto; }
+    .db-focus { overflow: hidden; }
     /* Community posts: badge chip beside the name, snippet line, initial fallback. */
     .dfm-thumb-ini { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 1rem; font-weight: 800; color: rgba(255,255,255,.85); }
     .dfm-postbadge { margin-left: 7px; padding: 1px 7px; border-radius: 999px; font-size: .6rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; vertical-align: middle; color: #6366f1; background: color-mix(in srgb, #6366f1 14%, transparent); }
@@ -11790,15 +11793,17 @@ async function renderDashboard() {
           <div style="font-size:.82rem;color:var(--text-muted)">No focus set yet.</div>`;
       } else {
         const introSnippet = focus.intro
-          ? (focus.intro.length > 150 ? focus.intro.slice(0, 150).replace(/\s+\S*$/, '') + '…' : focus.intro)
+          ? (focus.intro.length > 300 ? focus.intro.slice(0, 300).replace(/\s+\S*$/, '') + '…' : focus.intro)
           : '';
+        // Render every step; the fill-pass (_dashFillFocus) trims any that overflow the card
+        // and updates the "+N more steps" note, so the card fills to the height it snaps to.
         const steps = Array.isArray(focus.steps) ? focus.steps.filter(s => s && (s.text || '').trim()) : [];
-        const stepsHTML = steps.slice(0, 3).map((s, i) => `
+        const stepsHTML = steps.map((s, i) => `
             <div class="dfocus-step">
               <span class="dfocus-step-num">${i + 1}</span>
               <span class="dfocus-step-txt">${escHtml(s.text || '')}</span>
             </div>`).join('');
-        const moreSteps = steps.length > 3 ? steps.length - 3 : 0;
+        const moreSteps = 0;
         focusEl.innerHTML =
           `<div class="dfocus-head">
             <div class="dcontent-head" style="margin-bottom:0">
@@ -11816,7 +11821,7 @@ async function renderDashboard() {
             ${stepsHTML ? `<div class="dfocus-right">
               <div class="dfocus-try">This week, try this</div>
               <div class="dfocus-steps">${stepsHTML}</div>
-              ${moreSteps ? `<div class="dfocus-more">+${moreSteps} more step${moreSteps === 1 ? '' : 's'}</div>` : ''}
+              <div class="dfocus-more" data-total="${steps.length}" style="display:none"></div>
             </div>` : ''}
           </div>`;
       }
@@ -11831,7 +11836,7 @@ async function renderDashboard() {
         .from("content_feed_posts")
         .select("id,type,title,body,url,youtube_id,media,published_at")
         .order("published_at", { ascending: false })
-        .limit(3);
+        .limit(8);
       const escC = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
       const _cfM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
       const _cfThumb = pp => {
@@ -11998,6 +12003,56 @@ async function renderDashboard() {
       }
     } catch(e) {}
   }
+
+  // Now that every card's content has loaded and the stretch-grid rows have
+  // settled to their final (tallest-sibling) heights, fill/trim the list cards
+  // so their content reaches the bottom edge. A delayed retry catches late reflow.
+  requestAnimationFrame(_dashFillPass);
+  setTimeout(_dashFillPass, 400);
+}
+
+// ── Fill-pass: keep the stretched dashboard cards full to their bottom edge ──
+// The From Matt / Community / Go Deeper rows use align-items:stretch, so the
+// shorter card matches its taller sibling. These helpers drop any overflowing
+// rows (and update the "+N more" note) so content top-aligns and fills without
+// spilling, with the footer link pinned to the bottom.
+function _dashTrimToFit(el, sel) {
+  if (!el) return;
+  let guard = 0;
+  while (el.scrollHeight > el.clientHeight + 1 && guard < 40) {
+    const items = el.querySelectorAll(sel);
+    if (items.length <= 1) break;
+    items[items.length - 1].remove();
+    guard++;
+  }
+}
+function _dashFillFocus(card) {
+  if (!card) return;
+  const wrap = card.querySelector('.dfocus-steps');
+  const more = card.querySelector('.dfocus-more');
+  if (wrap) {
+    let guard = 0;
+    while (card.scrollHeight > card.clientHeight + 1 && guard < 40) {
+      const steps = wrap.querySelectorAll('.dfocus-step');
+      if (steps.length <= 1) break;
+      steps[steps.length - 1].remove();
+      guard++;
+    }
+    if (more) {
+      const total = parseInt(more.dataset.total || '0', 10);
+      const shown = wrap.querySelectorAll('.dfocus-step').length;
+      const rem   = total - shown;
+      if (rem > 0) { more.textContent = `+${rem} more step${rem === 1 ? '' : 's'}`; more.style.display = ''; }
+      else { more.style.display = 'none'; }
+    }
+  }
+}
+function _dashFillPass() {
+  try {
+    _dashTrimToFit(document.getElementById('dash-content-feed-card'), '.dfm-item');
+    _dashTrimToFit(document.getElementById('dash-posts-preview'), '.dfm-item');
+    _dashFillFocus(document.getElementById('dash-focus-card'));
+  } catch(e) {}
 }
 
 // ── Live event banner helpers ──────────────────────────────────────────
