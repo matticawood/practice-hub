@@ -13616,8 +13616,9 @@ function _skillDeepLink(type, m, key) {
   const p = new URLSearchParams({ section: type, auto: '1' });
   const kTxt = key ? key.replace('b', '♭').replace('#', '♯') : '';
   if (type === 'note') {
-    p.set('mode', 'key'); if (key) p.set('key', key);
-    return { href: '/tools.html?' + p, game: 'Note Recognition', variant: kTxt ? `in ${kTxt}` : '' };
+    if (key) { p.set('mode', 'key'); p.set('key', key); return { href: '/tools.html?' + p, game: 'Note Recognition', variant: `in ${kTxt}` }; }
+    p.set('mode', 'normal'); if (m.acc) p.set('acc', '1');
+    return { href: '/tools.html?' + p, game: 'Note Recognition', variant: m.acc ? 'with accidentals' : 'any notes' };
   }
   if (type === 'interval') {
     if (m.side) p.set('side', m.side);
@@ -13643,26 +13644,37 @@ function _skillDeepLink(type, m, key) {
 function _pickDailySkill() {
   if (!_insightTrainers) return null;
   const todayStr = toDateStr(new Date());
-  // The current stage's game objectives already encode the level-appropriate
-  // variant (keys/tier/mode/set/side) + target — the ideal source, no guessing.
-  let stageGoals = [];
-  try { const parts = _renderJourneyCard(true); stageGoals = (parts && parts.goals) || []; } catch (e) {}
+  // The current stage's game objectives encode the level-appropriate variant +
+  // target; once a baseline is met we flow into its Extra stretch chain so the
+  // daily task keeps pushing and never goes stale.
+  let parts = null;
+  try { parts = _renderJourneyCard(true); } catch (e) {}
+  const stageGoals = (parts && parts.goals) || [];
+  const stageIdx = (parts && parts.T) ? parts.T.idx : -1;
+  const extras = (window.ROADMAP && window.ROADMAP.extras && stageIdx >= 0) ? (window.ROADMAP.extras[stageIdx] || {}) : {};
   const GAME = ['note', 'chord', 'ear', 'interval'];
-  const goals = stageGoals.filter(g => GAME.includes(g.type) && g.match && g.target);
-  if (!goals.length) return null;
+  const isGameObj = g => g && GAME.includes(g.type) && g.match && g.target;
   const rows = k => (_insightTrainers[k] || []);
   const lastMs = k => { const r = rows(k); return r.length ? new Date(r[r.length - 1].t).getTime() : 0; };
   const bestInKey = (k, key) => rows(k).filter(r => r.key_signature === key).reduce((x, r) => Math.max(x, r.v || 0), 0);
   const bestOverall = k => rows(k).reduce((x, r) => Math.max(x, r.v || 0), 0);
   const playedToday = k => rows(k).some(r => toDateStr(new Date(r.t)) === todayStr);
-  // Fraction of the objective already met (keys at target, or overall vs target).
   const progress = g => {
     const keys = (g.match.keys && g.match.keys.length) ? g.match.keys : null;
     if (!keys) return bestOverall(g.type) >= g.target ? 1 : 0;
     return keys.filter(kk => bestInKey(g.type, kk) >= g.target).length / keys.length;
   };
-  // Pick the game you're FURTHEST from completing (most need); tie-break least-recent.
-  const goal = goals.slice().sort((a, b) => (progress(a) - progress(b)) || (lastMs(a.type) - lastMs(b.type)))[0];
+  const met = g => progress(g) >= 1;
+  // Per game group: the baseline if unmet, else the next unmet Extra in its chain.
+  const active = [];
+  stageGoals.filter(isGameObj).forEach(bg => {
+    if (!met(bg)) { active.push(bg); return; }
+    const next = (extras[bg.group] || []).filter(isGameObj).find(e => !met(e));
+    if (next) active.push(next);
+  });
+  if (!active.length) return null; // every baseline + extra for this stage is done
+  // Pick the one you're FURTHEST from completing (most need); tie-break least-recent.
+  const goal = active.slice().sort((a, b) => (progress(a) - progress(b)) || (lastMs(a.type) - lastMs(b.type)))[0];
   const m = goal.match, type = goal.type;
   // Your weakest key within the objective (lowest best score there).
   let key = null;
