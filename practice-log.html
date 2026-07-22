@@ -4017,12 +4017,15 @@
     .si-area-meta { font-size: .68rem; font-weight: 600; color: var(--text-muted); }
     .si-area-bar { height: 6px; border-radius: 99px; background: color-mix(in srgb, var(--ac, var(--text-muted)) 15%, transparent); overflow: hidden; }
     .si-area-fill { display: block; height: 100%; border-radius: 99px; background: var(--ac); }
-    .si-area-pct { flex: 0 0 auto; font-size: .9rem; font-weight: 800; color: var(--ac); min-width: 34px; text-align: right; }
+    .si-area-pct { flex: 0 0 auto; font-size: .9rem; font-weight: 800; color: var(--ac); min-width: 34px; text-align: right; align-self: flex-start; }
+    .si-area-mo { font-size: .64rem; font-weight: 700; color: var(--text-muted); display: inline-flex; align-items: center; gap: 5px; }
+    .si-area-mo::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .75; }
+    .si-area-mo--idle { color: #d97706; }
     /* Practice-tool mastery cards */
-    /* Flex-grow (not grid) so a wrapped last row stretches to fill the width — no orphan
-       tile hanging on the left — and align-items:stretch keeps a row's cards equal height. */
-    .si-tools { display: flex; flex-wrap: wrap; align-items: stretch; gap: 12px; }
-    .si-tool { flex: 1 1 150px; display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface); text-decoration: none; transition: transform .15s, border-color .15s; }
+    /* Four recognition tools: 4-across on desktop, a clean 2x2 on mobile (never 3+1). */
+    .si-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: stretch; }
+    @media (max-width: 760px) { .si-tools { grid-template-columns: repeat(2, 1fr); } }
+    .si-tool { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface); text-decoration: none; transition: transform .15s, border-color .15s; }
     .si-tool:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--tc) 45%, var(--border)); }
     .si-tool-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
     .si-tool-name { font-size: .78rem; font-weight: 800; color: var(--text); }
@@ -14953,10 +14956,20 @@ function _renderStatsImprove() {
 
   const mins = _rmTrackMinutes();
   const T = _rmLevelFor('total', mins.total / 60);
+  // Recent momentum: minutes per area in the last 30 days — flags an area going stale,
+  // which the dashboard's at-a-glance bars don't surface.
+  const _T2T = { piece: 'repertoire', book: 'repertoire', technique: 'technique', sightreading: 'sight_reading', theory: 'musicianship', eartraining: 'musicianship', improvisation: 'musicianship' };
+  const _recent = { repertoire: 0, technique: 0, sight_reading: 0, musicianship: 0 };
+  const _cut = new Date(Date.now() - 30 * 86400000);
+  (allSessions || []).forEach(s => {
+    if (!s.session_date || new Date(s.session_date) < _cut) return;
+    (s.practice_items || []).forEach(it => { const tk = _T2T[it.item_type]; if (tk && _recent[tk] != null) _recent[tk] += it.duration_minutes || 0; });
+  });
   const areas = Object.keys(AREA_LBL).map(k => {
     const L = _rmLevelFor(k, mins[k] / 60);
     return { key: k, label: AREA_LBL[k], color: AREA_COL[k], mins: mins[k], idx: L.idx,
-             stage: L.cur.name, next: L.next, progress: L.next ? L.progress : 1, diff: L.idx - T.idx };
+             stage: L.cur.name, next: L.next, progress: L.next ? L.progress : 1, diff: L.idx - T.idx,
+             toNextH: L.next ? Math.max(0, L.next.hours - mins[k] / 60) : null, recent: _recent[k] };
   });
 
   // ── 1. Weakest link: the area most behind the overall stage (bottleneck) ──
@@ -14993,8 +15006,9 @@ function _renderStatsImprove() {
       <span class="si-area-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${AREA_ICO[a.key]}</svg></span>
       <span class="si-area-main">
         <span class="si-area-top"><span class="si-area-name">${a.label}</span>${tag}</span>
-        <span class="si-area-meta">Stage ${a.idx + 1} &middot; ${escHtml(a.stage)} &middot; ${_rmFmtHrs(a.mins)}</span>
+        <span class="si-area-meta">${escHtml(a.stage)} &middot; ${_rmFmtHrs(a.mins)} &middot; ${a.next ? `${a.toNextH < 1 ? 'under 1' : Math.ceil(a.toNextH)}h to ${escHtml(a.next.name)}` : 'top stage reached'}</span>
         <span class="si-area-bar"><span class="si-area-fill" style="width:${a.next ? pct : 100}%"></span></span>
+        <span class="si-area-mo${a.recent > 0 ? '' : ' si-area-mo--idle'}">${a.recent > 0 ? _rmFmtHrs(a.recent) + ' in the last 30 days' : 'Not practiced in 30 days'}</span>
       </span>
       <span class="si-area-pct">${a.next ? pct + '%' : '&#9733;'}</span>
     </div>`;
