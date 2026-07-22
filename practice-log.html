@@ -3496,8 +3496,14 @@
        rows but their height is set by the sibling card (live streams / activity) via the stretch
        grid — the rows live in an absolute scroll layer so they never inflate the row. */
     #dash-content-feed-card, #dash-posts-preview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-    .db-mattcontent, .db-posts { min-height: 360px; }   /* fallback height when there is no sibling to match (stacked / hidden stream) */
-    .db-focus { overflow: hidden; }
+    /* Scroll-box cards (Matt's Content / Community posts / Weekly Focus): the sibling
+       card sets the row height via the stretch grid and these scroll internally, so
+       heights stay equal at every width with no JS. min-height is the floor when there
+       is no sibling to match (stacked on mobile / hidden stream). */
+    .db-mattcontent, .db-posts, .db-focus { min-height: 360px; }
+    .db-focus { display: flex; flex-direction: column; overflow: hidden; }
+    .dfocus-scrollwrap { position: relative; flex: 1; min-height: 0; }
+    .dfocus-scroll { position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     /* Community posts: badge chip beside the name, snippet line, initial fallback. */
     .dfm-thumb-ini { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 1rem; font-weight: 800; color: rgba(255,255,255,.85); }
     .dfm-postbadge { margin-left: 7px; padding: 1px 7px; border-radius: 999px; font-size: .6rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; vertical-align: middle; color: #6366f1; background: color-mix(in srgb, #6366f1 14%, transparent); }
@@ -3624,7 +3630,6 @@
       .dash-community-grid > .dash-card { grid-column: auto; }
       .dash-bento { display: flex; flex-direction: column; }
       .dash-bento > .dash-card { grid-column: auto; grid-row: auto; }
-      .db-streams { order: 1; } .db-daily { order: 2; }
       /* Single column: keep the activity/community feed tall and scrollable inside
          (the feed scrolls within the fixed-height card). */
       #dash-activity-card { min-height: 480px !important; height: 480px; }
@@ -3866,18 +3871,6 @@
     .dash-card-article-excerpt {
       font-size: .8rem; color: var(--text-muted); line-height: 1.5;
       margin-top: 8px;
-    }
-    /* Today section (DESKTOP only): the Term of the day shows in FULL — its height
-       sets the row. Article of the day and Weekly Focus fill that same height and
-       fade out where their text exceeds it. On mobile they're stacked, so the text
-       shows in full (no fill/fade — that would collapse a stacked card to zero). */
-    @media (min-width: 1101px) {
-      .db-article, .db-focus { display: flex; flex-direction: column; }
-      .dash-card-article-excerpt, .dash-focus-intro {
-        flex: 1 1 0; min-height: 0; overflow: hidden;
-        -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.3em), transparent 100%);
-        mask-image: linear-gradient(to bottom, #000 calc(100% - 1.3em), transparent 100%);
-      }
     }
     /* Learn content cards (Article / Term / Focus): colour-coded icon badge + eyebrow,
        a bold title, a colour chip, and a clamped, scannable body — so each reads at a
@@ -11809,18 +11802,15 @@ async function renderDashboard() {
         const introSnippet = focus.intro
           ? (focus.intro.length > 300 ? focus.intro.slice(0, 300).replace(/\s+\S*$/, '') + '…' : focus.intro)
           : '';
-        // Render every step; the fill-pass (_dashFillFocus) trims any that overflow the card
-        // and updates the "+N more steps" note, so the card fills to the height it snaps to.
         const steps = Array.isArray(focus.steps) ? focus.steps.filter(s => s && (s.text || '').trim()) : [];
-        const stepsArr = steps.map((s, i) => `
+        const stepsHTML = steps.map((s, i) => `
             <div class="dfocus-step">
               <span class="dfocus-step-num">${i + 1}</span>
               <span class="dfocus-step-txt">${escHtml(s.text || '')}</span>
-            </div>`);
-        // Stored so _dashFillFocus can rebuild the step list at the height it snaps to.
-        window._focusStepsHTML = stepsArr;
-        window._focusStepTotal = steps.length;
-        const stepsHTML = stepsArr.join('');
+            </div>`).join('');
+        // Scroll box (like Matt's Content / Community posts): head stays put, the body
+        // scrolls inside the height set by the article+term sibling — so both Go Deeper
+        // cards stay exactly equal-height at every width, with no JS.
         focusEl.innerHTML =
           `<div class="dfocus-head">
             <div class="dcontent-head" style="margin-bottom:0">
@@ -11829,18 +11819,19 @@ async function renderDashboard() {
             </div>
             <span class="dfocus-pill">This week</span>
           </div>
-          <div class="dfocus-body">
-            <div class="dfocus-left">
-              <div class="dfocus-headline">${escHtml(focus.headline)}</div>
-              ${introSnippet ? `<div class="dfocus-intro">${escHtml(introSnippet)}</div>` : ''}
-              <a href="/focus.html?post=${focus.id}" class="dash-card-article-link dfocus-link">See full focus →</a>
+          <div class="dfocus-scrollwrap"><div class="dfocus-scroll">
+            <div class="dfocus-body">
+              <div class="dfocus-left">
+                <div class="dfocus-headline">${escHtml(focus.headline)}</div>
+                ${introSnippet ? `<div class="dfocus-intro">${escHtml(introSnippet)}</div>` : ''}
+                <a href="/focus.html?post=${focus.id}" class="dash-card-article-link dfocus-link">See full focus →</a>
+              </div>
+              ${stepsHTML ? `<div class="dfocus-right">
+                <div class="dfocus-try">This week, try this</div>
+                <div class="dfocus-steps">${stepsHTML}</div>
+              </div>` : ''}
             </div>
-            ${stepsHTML ? `<div class="dfocus-right">
-              <div class="dfocus-try">This week, try this</div>
-              <div class="dfocus-steps">${stepsHTML}</div>
-              <div class="dfocus-more" data-total="${steps.length}" style="display:none"></div>
-            </div>` : ''}
-          </div>`;
+          </div></div>`;
       }
     }
   } catch(e) { /* focus unavailable */ }
@@ -12036,24 +12027,7 @@ async function renderDashboard() {
       }
     } catch(e) {}
   }
-
-  // Now that every card's content has loaded and the stretch-grid rows have
-  // settled to their final (tallest-sibling) heights, fill/trim the list cards
-  // so their content reaches the bottom edge. A delayed retry catches late reflow.
-  requestAnimationFrame(_dashFillPass);
-  setTimeout(_dashFillPass, 400);
 }
-
-// ── Fill-pass: snap Weekly Focus to its Go Deeper sibling (article + term) ──
-// Go Deeper uses align-items:stretch. Left to itself, whichever card has MORE
-// content grows the row. We want the article+term reads to set the height and
-// Weekly Focus to fill to it — showing as many steps as fit, no more. To read
-// the sibling's natural height we briefly collapse the focus card (so it can't
-// inflate the row), then cap it to that height and trim overflowing steps.
-// Below 900px the cards stack, so there's nothing to snap to: show everything.
-// (Matt's Content and Community posts are pure-CSS scroll boxes and need no JS.)
-
-const _DASH_STACK_BP = 900;
 
 // Stylized placeholder thumbnail for content/posts that have no real image. Each
 // kind gets a branded gradient, an icon, and a short label so there's always
@@ -12073,59 +12047,6 @@ function _dashStylThumb(kind) {
     <svg class="dfm-styl-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${k.i}</svg>
     <span class="dfm-styl-lbl">${k.l}</span>
   </span>`;
-}
-
-function _dashFillFocus() {
-  const card = document.getElementById('dash-focus-card');   // .db-focus
-  const ref  = document.querySelector('.db-daily');          // article + term (the height to match)
-  if (!card || !ref) return;
-  const wrap = card.querySelector('.dfocus-steps');
-  const more = card.querySelector('.dfocus-more');
-  if (!wrap || !Array.isArray(window._focusStepsHTML)) return;
-  const total = window._focusStepTotal || window._focusStepsHTML.length;
-  const setMore = (shown) => {
-    if (!more) return;
-    const rem = total - shown;
-    if (rem > 0) { more.textContent = `+${rem} more step${rem === 1 ? '' : 's'}`; more.style.display = ''; }
-    else { more.style.display = 'none'; }
-  };
-
-  wrap.innerHTML = window._focusStepsHTML.join('');           // rebuild all steps
-  card.style.height = '';
-  const refVisible = ref && ref.offsetParent !== null;
-
-  // Stacked (mobile) or nothing to match: show everything at natural height.
-  if (window.innerWidth <= _DASH_STACK_BP || !refVisible) { setMore(total); return; }
-
-  // Desktop: snap to the article+term height, trim overflowing steps.
-  card.style.maxHeight = '0px';                               // collapse so the reads define the row
-  const H = Math.round(ref.getBoundingClientRect().height);
-  card.style.maxHeight = '';
-  card.style.height = H + 'px';
-  let guard = 0;
-  while (card.scrollHeight > card.clientHeight + 1 && guard < 40) {
-    const steps = wrap.querySelectorAll('.dfocus-step');
-    if (steps.length <= 1) break;
-    steps[steps.length - 1].remove();
-    guard++;
-  }
-  setMore(wrap.querySelectorAll('.dfocus-step').length);
-}
-
-function _dashFillPass() {
-  try {
-    _dashFillFocus();
-  } catch(e) {}
-}
-
-// Re-run when the viewport crosses the stack breakpoint (mobile ⇄ desktop).
-if (!window._dashFillResizeHooked) {
-  window._dashFillResizeHooked = true;
-  let _dashFillRT;
-  window.addEventListener('resize', () => {
-    clearTimeout(_dashFillRT);
-    _dashFillRT = setTimeout(_dashFillPass, 200);
-  });
 }
 
 // ── Live event banner helpers ──────────────────────────────────────────
