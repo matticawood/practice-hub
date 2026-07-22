@@ -9418,7 +9418,7 @@ async function loadData() {
         db.from("lessons").select("id, level, sort_order, title, status").eq("course", "theory"),
         db.from("lesson_progress").select("lesson_id, completed").eq("email", viewingEmail).eq("completed", true),
         db.from("interval_game_scores").select("score, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase()),
-        db.from("lessons").select("id, status").eq("course", "first-steps")
+        db.from("lessons").select("id, status, title, sort_order").eq("course", "first-steps")
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
@@ -9475,6 +9475,11 @@ async function loadData() {
       const _fsIds = new Set(_fsAll.map(l => l.id));
       _fsCourse = { total: _fsAll.length, live: _fsAll.some(l => l.status === "published"),
         done: (thP.data || []).filter(p => _fsIds.has(p.lesson_id)).length };
+      // Next uncompleted Absolute Beginner Course lesson (title + deep-link + number).
+      const _fsDone = new Set((thP.data || []).map(p => p.lesson_id));
+      const _fsPub = _fsAll.filter(l => !l.status || l.status === "published").sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      const _fsNext = _fsPub.find(l => !_fsDone.has(l.id));
+      _nextFsLesson = _fsNext ? { id: _fsNext.id, title: _fsNext.title, num: _fsPub.indexOf(_fsNext) + 1 } : null;
       // The daily card + next-move may have rendered before this background load
       // finished (skill/theory rows depend on it) — re-render them now they're ready.
       try { if (typeof _renderDailyCard === 'function') _renderDailyCard(); } catch (_) {}
@@ -12789,7 +12794,7 @@ function _renderJourneyCard(returnParts) {
   // The trail roadmap reuses this same computed level data (objectives, jars, picks)
   // for its current-stage card, so nothing drifts between the dashboard and the trail.
   if (returnParts) return { T, stage, goals, goalRows, rolledRows, rolled, jars, recsHtml,
-    doneCount, totalGoals, manyGoals, goalsCollapsed, pct, nextLine, trophy, isNew, baselineBtn, mins };
+    doneCount, totalGoals, manyGoals, goalsCollapsed, pct, nextLine, trophy, isNew, baselineBtn, mins, _fsBeginner };
   if (!el) return;
   // The compact "where you are" status headline (stage + progress) renders into a
   // separate top slot (#path-headline) so it can lead as the dashboard headline, with
@@ -13028,6 +13033,7 @@ let _goalTheory = null;         // { totals:{level:n}, done:{level:n} } publishe
 let _nextTheoryLesson = null;   // { id, title } the next uncompleted published theory lesson
 let _dormantCustomPieces = null;// custom pieces gone quiet (learning, 14d+ no practice, unacked) for the tidy-up card
 let _fsCourse = null;           // { total, live, done } for The Absolute Beginner Course "Start here" card
+let _nextFsLesson = null;       // { id, title, num } next uncompleted Absolute Beginner Course lesson
 
 // A custom collection piece is "dormant" when it is still in Learning, has not been
 // practiced for 14 days, and the member has not acknowledged this dormancy since the
@@ -13729,7 +13735,14 @@ function _renderDailyCard() {
   todaySessions.forEach(s => (s.practice_items || []).forEach(i => types.add(i.item_type)));
 
   // Actionable objectives for today (each states the objective plainly, no filler).
-  const rows = [
+  // Absolute beginners follow the Beginner Course, not free practice — so for them
+  // the next course lesson replaces the piece/sight-reading/scales cards until they
+  // finish the course or move on (dismiss / start playing real repertoire).
+  let beginner = false;
+  try { const p = _renderJourneyCard(true); beginner = !!(p && p._fsBeginner); } catch (e) {}
+  const rows = (beginner && _nextFsLesson) ? [
+    { ic: 'piece', title: 'Beginner Course', blurb: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`, done: todaySessions.length > 0, href: '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id) },
+  ] : [
     { ic: 'piece',  title: 'Pieces',        blurb: 'Log one today', done: types.has('piece') || types.has('book'), wizard: true },
     { ic: 'sight',  title: 'Sight-reading', blurb: 'Log some',      done: types.has('sightreading'),               wizard: true },
     { ic: 'scales', title: 'Scales',        blurb: 'Log some',      done: types.has('technique'),                  wizard: true },
