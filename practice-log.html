@@ -3792,8 +3792,8 @@
          full width so the wrapped last row stays symmetric, not left-hung. */
       #dashboard-content .dtools-grid { grid-template-columns: repeat(2, 1fr); }
       #dashboard-content .dtools-grid .dtool:last-child:nth-child(odd) { grid-column: 1 / -1; }
-      /* Stats Band A: inset from the screen edge to match the other stats cards. */
-      #stats-improve { padding-left: 16px; padding-right: 16px; }
+      /* Stats Bands A/B: inset from the screen edge to match the other stats cards. */
+      #stats-improve, #stats-library { padding-left: 16px; padding-right: 16px; }
       /* clamp the article excerpt (it's the long one) to ~5 lines on mobile */
       .dash-card-article-excerpt {
         display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden;
@@ -4052,6 +4052,36 @@
     .si-theory-name { font-size: .9rem; font-weight: 800; color: var(--text); }
     .si-theory-count { font-size: .72rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
     .si-theory-meta { font-size: .68rem; font-weight: 600; color: var(--text-muted); }
+
+    /* ── Stats Band B: "Your library" (coverage) ── */
+    .sl-muted { font-size: .78rem; color: var(--text-muted); }
+    .sl-rep { padding: 15px 16px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface); margin-bottom: 12px; }
+    .sl-rep-head { display: flex; align-items: center; gap: 12px; }
+    .sl-rep-ic { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
+    .sl-rep-ic svg { width: 19px; height: 19px; }
+    .sl-rep-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .sl-rep-title { font-size: .95rem; font-weight: 800; color: var(--text); display: flex; align-items: baseline; gap: 8px; }
+    .sl-rep-count { font-size: 1.1rem; font-weight: 800; color: #d99a00; }
+    .sl-rep-sub { font-size: .72rem; font-weight: 600; color: var(--text-muted); }
+    .sl-grades { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 18px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--border); }
+    .sl-grade { display: flex; align-items: center; gap: 8px; }
+    .sl-grade-lbl { font-size: .66rem; font-weight: 800; color: var(--text-muted); min-width: 30px; }
+    .sl-grade-bar { flex: 1; height: 6px; border-radius: 99px; background: color-mix(in srgb, #f5c518 16%, transparent); overflow: hidden; }
+    .sl-grade-fill { display: block; height: 100%; border-radius: 99px; background: #f5c518; }
+    .sl-grade-n { font-size: .7rem; font-weight: 800; color: var(--text); min-width: 16px; text-align: right; }
+    .sl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 640px) { .sl-grid { grid-template-columns: 1fr; } }
+    .sl-card { display: flex; flex-direction: column; gap: 9px; padding: 15px 16px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface); }
+    .sl-card-head { display: flex; align-items: center; gap: 9px; }
+    .sl-card-ic { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
+    .sl-card-ic svg { width: 16px; height: 16px; }
+    .sl-card-title { font-size: .82rem; font-weight: 800; color: var(--text); }
+    .sl-card-big { display: flex; align-items: baseline; gap: 7px; }
+    .sl-card-num { font-size: 1.7rem; font-weight: 800; color: var(--c); line-height: 1; }
+    .sl-card-of { font-size: .78rem; font-weight: 700; color: var(--text-muted); }
+    .sl-card-sub { font-size: .68rem; font-weight: 600; color: var(--text-muted); }
+    .sl-card-link { font-size: .7rem; font-weight: 800; color: var(--text-muted); text-decoration: none; align-self: flex-start; }
+    .sl-card-link:hover { color: var(--text); }
     .dash-card-article-link {
       display: inline-block; margin-top: 10px; font-size: .78rem; font-weight: 700;
       color: var(--text-muted); text-decoration: none; cursor: pointer;
@@ -7934,6 +7964,9 @@
         <div class="stat-sub" id="stat-month-sub"></div>
       </div>
     </div>
+
+    <!-- Band B — "Your library": pieces by grade, articles read, achievements -->
+    <div id="stats-library" style="margin-bottom:30px"></div>
 
     <!-- ── Insights ── -->
     <div id="stats-insights" style="margin-bottom:28px"></div>
@@ -15100,6 +15133,88 @@ function _renderStatsImprove() {
     ${theoryHTML ? `<div class="si-sub">Knowledge</div>${theoryHTML}` : ''}`;
 }
 
+// ── Band B: "Your library" — coverage across pieces, articles and achievements ──
+// Pieces come from memory (_insightCollections); articles (reading_list) and the
+// achievement count are the only new reads on the page, fetched async and filled in.
+async function _renderStatsLibrary() {
+  const el = document.getElementById('stats-library');
+  if (!el) return;
+  const email = viewingEmail || myEmail;
+  if (!email) { el.innerHTML = ''; return; }
+  const esc = (typeof escHtml === 'function') ? escHtml : (s => s);
+
+  // ── Pieces (in memory) ──
+  const cols = (typeof _insightCollections !== 'undefined' && _insightCollections) ? _insightCollections : [];
+  const diffOf = r => (r.pieces && r.pieces.difficulty != null) ? r.pieces.difficulty
+                     : (r.user_pieces && r.user_pieces.difficulty != null) ? r.user_pieces.difficulty : null;
+  const total = cols.length;
+  const learning = cols.filter(r => r.status === 'learning').length;
+  const completed = cols.filter(r => r.status === 'completed').length;
+  const dormant = (typeof _dormantCustomPieces !== 'undefined' && _dormantCustomPieces) ? _dormantCustomPieces.length : 0;
+  const gradeMap = {};
+  cols.forEach(r => { const d = diffOf(r); if (d != null) gradeMap[d] = (gradeMap[d] || 0) + 1; });
+  const grades = Object.keys(gradeMap).map(Number).sort((a, b) => a - b);
+  const gMax = Math.max(1, ...grades.map(g => gradeMap[g]));
+  const gradeBars = grades.length
+    ? grades.map(g => `<div class="sl-grade"><span class="sl-grade-lbl">Gr ${g}</span><span class="sl-grade-bar"><span class="sl-grade-fill" style="width:${Math.round(gradeMap[g] / gMax * 100)}%"></span></span><span class="sl-grade-n">${gradeMap[g]}</span></div>`).join('')
+    : '<div class="sl-muted">No graded pieces in your collection yet.</div>';
+
+  const pieceSub = total
+    ? `${learning} learning &middot; ${completed} completed${dormant ? ` &middot; ${dormant} gone quiet` : ''}`
+    : 'Add pieces from the library to start building your collection';
+
+  el.innerHTML = `
+    <div class="si-band-head">Your library</div>
+    <div class="sl-rep">
+      <div class="sl-rep-head">
+        <span class="sl-rep-ic" style="--c:#f5c518"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+        <span class="sl-rep-main"><span class="sl-rep-title">Pieces <span class="sl-rep-count">${total}</span></span><span class="sl-rep-sub">${pieceSub}</span></span>
+        <a class="sl-card-link" href="/resources.html">Open library &rarr;</a>
+      </div>
+      ${total ? `<div class="sl-grades">${gradeBars}</div>` : ''}
+    </div>
+    <div class="sl-grid">
+      <div class="sl-card" id="sl-articles"><div class="sl-muted">Loading…</div></div>
+      <div class="sl-card" id="sl-ach"><div class="sl-muted">Loading…</div></div>
+    </div>`;
+
+  // ── Async: articles read (reading_list) + achievements count ──
+  try {
+    const isOwn = email === myEmail;
+    const [rl, tsCount, achRes] = await Promise.all([
+      db.from('reading_list').select('status').eq('email', email),
+      db.from('theory_sheets').select('id', { count: 'exact', head: true }),
+      isOwn ? db.from('achievement_events').select('achievement_id').eq('email', email)
+            : db.rpc('get_user_achievement_events', { p_email: email }),
+    ]);
+    const readCount = (rl.data || []).filter(r => r.status === 'read').length;
+    const readingCount = (rl.data || []).filter(r => r.status === 'reading').length;
+    const totalArticles = tsCount.count || 0;
+    const aEl = document.getElementById('sl-articles');
+    if (aEl) {
+      const pct = totalArticles ? Math.round(readCount / totalArticles * 100) : 0;
+      aEl.innerHTML = `
+        <div class="sl-card-head"><span class="sl-card-ic" style="--c:#0d9488"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></span><span class="sl-card-title">Articles read</span></div>
+        <div class="sl-card-big" style="--c:#0d9488"><span class="sl-card-num">${readCount}</span><span class="sl-card-of">of ${totalArticles}</span></div>
+        <span class="si-area-bar" style="--ac:#0d9488"><span class="si-area-fill" style="width:${pct}%;background:#0d9488"></span></span>
+        <span class="sl-card-sub">${readingCount ? `${readingCount} in progress &middot; ` : ''}Piano Practice Daily library</span>
+        <a class="sl-card-link" href="/resources.html">Browse articles &rarr;</a>`;
+    }
+    const earned = new Set((achRes.data || []).map(r => (r && (r.achievement_id || r.achievement)) || r).filter(Boolean)).size;
+    const totalAch = (typeof ACHIEVEMENTS !== 'undefined' && ACHIEVEMENTS.length) ? ACHIEVEMENTS.length : 0;
+    const chEl = document.getElementById('sl-ach');
+    if (chEl && totalAch) {
+      const pct = Math.round(earned / totalAch * 100);
+      chEl.innerHTML = `
+        <div class="sl-card-head"><span class="sl-card-ic" style="--c:#f59e0b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></span><span class="sl-card-title">Achievements</span></div>
+        <div class="sl-card-big" style="--c:#f59e0b"><span class="sl-card-num">${earned}</span><span class="sl-card-of">of ${totalAch}</span></div>
+        <span class="si-area-bar" style="--ac:#f59e0b"><span class="si-area-fill" style="width:${pct}%;background:#f59e0b"></span></span>
+        <span class="sl-card-sub">${pct}% unlocked</span>
+        <a class="sl-card-link" href="#" onclick="switchMainLbTab('achievements');return false">See all &rarr;</a>`;
+    } else if (chEl) { chEl.innerHTML = ''; }
+  } catch (e) { console.warn('library panel async failed', e); }
+}
+
 function renderStats() {
   const sessionDates = allSessions.map(s => s.session_date);
 
@@ -15161,6 +15276,8 @@ function renderStats() {
 
   // Band A — "Where to improve" (utility-first): weakest area, balance, tool mastery, theory.
   try { _renderStatsImprove(); } catch (e) { console.warn('improve panel failed', e); }
+  // Band B — "Your library" (coverage): pieces, articles, achievements (async, non-blocking).
+  _renderStatsLibrary().catch(e => console.warn('library panel failed', e));
   // Hero summary (big number + narrated insight + category donut)
   renderStatsHero();
   renderPersonalBests();
