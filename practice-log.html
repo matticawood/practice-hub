@@ -13597,25 +13597,63 @@ const DDAY_IC = {
   skill:  _DDAY_SVG('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>'),
   theory: _DDAY_SVG('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
 };
+// Translate a roadmap game objective's `match` variant into a deep-link that
+// launches exactly that game configuration, plus a concise human description.
+function _skillDeepLink(type, m, key) {
+  const p = new URLSearchParams({ section: type, auto: '1' });
+  const kTxt = key ? ' in ' + key.replace('b', '♭').replace('#', '♯') : '';
+  if (type === 'note') {
+    p.set('mode', 'key'); if (key) p.set('key', key);
+    return { href: '/tools.html?' + p, desc: 'note reading' + kTxt };
+  }
+  if (type === 'interval') {
+    if (m.side) p.set('side', m.side);
+    if (m.tier) p.set('tier', m.tier);
+    if (key) { p.set('keymode', 'key'); p.set('key', key); } else p.set('keymode', 'free');
+    return { href: '/tools.html?' + p, desc: (m.side === 'listening' ? 'hearing' : 'reading') + ' intervals' + kTxt };
+  }
+  if (type === 'chord') {
+    const TIER = { 1: ['triad', 'root'], 2: ['triad', 'inv'], 3: ['triad', 'spread'], 4: ['seventh', 'root'], 5: ['seventh', 'inv'], 6: ['seventh', 'spread'] };
+    const fp = TIER[m.tier] || ['triad', 'spread'];
+    p.set('family', fp[0]); p.set('position', fp[1]);
+    if (key) { p.set('mode', 'key'); p.set('key', key); } else p.set('mode', m.mode || 'free');
+    return { href: '/tools.html?' + p, desc: (fp[0] === 'seventh' ? 'sevenths' : 'triads') + (kTxt || ' in any key') };
+  }
+  if (type === 'ear') {
+    if (m.set) p.set('set', m.set);
+    if (key) { p.set('scope', 'key'); p.set('key', key); } else p.set('scope', 'any');
+    const SET = { major_minor: 'major vs minor', triads: 'triad quality', sevenths: 'seventh quality', extensions: 'extended chords' };
+    return { href: '/tools.html?' + p, desc: 'hearing ' + (SET[m.set] || 'chords') + kTxt };
+  }
+  return null;
+}
 function _pickDailySkill() {
   if (!_insightTrainers) return null;
   const todayStr = toDateStr(new Date());
-  const TOOLS = [
-    { key: 'note',     full: 'Note Recognition',     href: '/tools.html?section=note' },
-    { key: 'chord',    full: 'Chord Recognition',    href: '/tools.html?section=chord' },
-    { key: 'ear',      full: 'Ear Training',         href: '/tools.html?section=ear' },
-    { key: 'interval', full: 'Interval Recognition', href: '/tools.html?section=interval' },
-  ];
+  // The current stage's game objectives already encode the level-appropriate
+  // variant (keys/tier/mode/set/side) + target — the ideal source, no guessing.
+  let stageGoals = [];
+  try { const parts = _renderJourneyCard(true); stageGoals = (parts && parts.goals) || []; } catch (e) {}
+  const GAME = ['note', 'chord', 'ear', 'interval'];
+  const goals = stageGoals.filter(g => GAME.includes(g.type) && g.match);
+  if (!goals.length) return null;
   const rows = k => (_insightTrainers[k] || []);
   const lastMs = k => { const r = rows(k); return r.length ? new Date(r[r.length - 1].t).getTime() : 0; };
-  const best = k => rows(k).reduce((m, r) => Math.max(m, r.v || 0), 0);
   const playedToday = k => rows(k).some(r => toDateStr(new Date(r.t)) === todayStr);
-  // Most-neglected first (never-played = 0 sorts first), tie-broken by TOOLS order.
-  const pick = TOOLS.slice().sort((a, b) => lastMs(a.key) - lastMs(b.key))[0];
-  const b = best(pick.key);
-  // Gentle target: one step over their own best (rotation stops any one score being ground).
-  const label = b > 0 ? `Score ${b + 1} in ${pick.full}` : `Try ${pick.full}`;
-  return { label, href: pick.href, done: playedToday(pick.key) };
+  // The stage game the member has left longest (never-played sorts first).
+  const goal = goals.slice().sort((a, b) => lastMs(a.type) - lastMs(b.type))[0];
+  const m = goal.match, type = goal.type;
+  // Weakest key from the objective's keys (lowest best in that key), if it's keyed.
+  let key = null;
+  if (m.keys && m.keys.length) {
+    const bik = kk => rows(type).filter(r => r.key_signature === kk).reduce((x, r) => Math.max(x, r.v || 0), 0);
+    key = m.keys.slice().sort((a, b) => bik(a) - bik(b))[0];
+  }
+  const link = _skillDeepLink(type, m, key);
+  if (!link) return null;
+  const best = rows(type).reduce((x, r) => Math.max(x, r.v || 0), 0);
+  const aim = best > 0 ? `Score ${best + 1}` : 'Try';   // gentle: one over their own best
+  return { label: `${aim}: ${link.desc}`, href: link.href, done: playedToday(type) };
 }
 function _dailyTheoryObjective(types) {
   if (!_nextTheoryLesson) return null; // no live course / all lessons done → hide
