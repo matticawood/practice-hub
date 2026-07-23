@@ -6332,6 +6332,8 @@
     .ddc-tip-row { display: flex; align-items: center; gap: 6px; font-size: .66rem; font-weight: 600; line-height: 1.5; }
     .ddc-tip-row i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
     .ddc-tip-row b { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .ddc-tip-extra { opacity: .72; }
+    .ddc-tip-extra:first-of-type { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,.18); }
 
     /* Plot chrome: hairline gridlines sitting quietly behind the series. */
     .dd-plot { position: relative; }
@@ -14854,18 +14856,32 @@ function renderDeepDive() {
     { label: '30–60m', min:  30, max:  60 },
     { label: '1–2h',   min:  60, max: 120 },
     { label: '2h+',    min: 120, max: Infinity },
-  ].map(b => ({ ...b, count: 0 }));
+  ].map(b => ({ ...b, count: 0, focusSum: 0, focusN: 0,
+                area: { repertoire: 0, technique: 0, sight_reading: 0, musicianship: 0 } }));
   sessions.forEach(s => {
     const m = s.duration_minutes || 0;
     const b = buckets.find(x => m >= x.min && m < x.max);
-    if (b) b.count++;
+    if (!b) return;
+    b.count++;
+    if (s.focus_rating > 0) { b.focusSum += s.focus_rating; b.focusN++; }
+    (s.practice_items || []).forEach(it => {
+      const k = _DD_T2A[it.item_type];
+      if (k) b.area[k] += it.duration_minutes || 0;
+    });
   });
   const maxBucket = Math.max(...buckets.map(b => b.count), 1);
 
+  // Reframed: how much practice TIME comes from each session length, split by area —
+  // "where do my hours actually come from, and what do I do in a short session?" —
+  // with session count and average focus carried in the tooltip.
   distHTML = {
-    kind: 'bars', labels: buckets.map(b => b.label), fmt: v => `${Math.round(v)}`,
-    peak: buckets.findIndex(b => b.count === maxBucket),
-    series: [{ name: 'Sessions', color: '#f5c518', data: buckets.map(b => b.count) }],
+    kind: 'stackbars', labels: buckets.map(b => b.label), fmt: v => formatMinutes(Math.round(v)),
+    series: _DD_AREAS.map(a => ({ name: a.lab, color: a.c, data: buckets.map(b => b.area[a.k]) })),
+    legend: _DD_AREAS.map(a => ({ name: a.lab, color: a.c })),
+    extra: [
+      { label: 'Sessions', values: buckets.map(b => String(b.count)) },
+      { label: 'Avg focus', values: buckets.map(b => b.focusN ? (b.focusSum / b.focusN).toFixed(1) + ' / 5' : '—') },
+    ],
   };
 
   // ── Practice consistency ──────────────────────────────────────────
@@ -15237,7 +15253,9 @@ function _ddDrawChart(host, spec) {
       const i = +r.dataset.i, x = xPos(i);
       cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.style.opacity = '1';
       const rows = series.map(se => `<span class="ddc-tip-row"><i style="background:${se.color}"></i>${escHtml(se.name || '')}<b>${escHtml(fmt(se.data[i] || 0))}</b></span>`).join('');
-      tip.innerHTML = `<span class="ddc-tip-h">${escHtml(labels[i] || '')}</span>${rows}`;
+      const extra = (spec.extra || []).map(x =>
+        `<span class="ddc-tip-row ddc-tip-extra">${escHtml(x.label)}<b>${escHtml(String(x.values[i] ?? '—'))}</b></span>`).join('');
+      tip.innerHTML = `<span class="ddc-tip-h">${escHtml(labels[i] || '')}</span>${rows}${extra}`;
       tip.style.opacity = '1';
       const left = Math.max(4, Math.min(W - 150, x - 70));
       tip.style.left = left + 'px';
