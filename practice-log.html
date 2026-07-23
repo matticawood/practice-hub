@@ -15913,10 +15913,25 @@ function _renderStatsImprove() {
     }
     const setting = _settingOf(rows, t.key);
     const plays = rows.length;
-    // Where they are now: the settings of their most recent play.
-    const last = rows[rows.length - 1];
+    // Where they are now is the settings they actually play, not whatever they last
+    // touched: a single curious go at something hard should not flip the whole card
+    // and hide the level they are really working at. So it is the most-played setting
+    // across their recent games, ties going to the more recent.
+    const recent = rows.slice(-12);
+    const tally = new Map();
+    recent.forEach((r, i) => {
+      const id = setting(r).id;
+      const e = tally.get(id) || { n: 0, lastAt: -1, row: r };
+      e.n++; e.lastAt = i; e.row = r;
+      tally.set(id, e);
+    });
+    const home = [...tally.values()].sort((a, b) => b.n - a.n || b.lastAt - a.lastAt)[0];
+    const last = home.row;
     const cur = setting(last);
     const here = rows.filter(r => setting(r).id === cur.id);
+    // Everything else they have played, so the other settings are not simply lost.
+    const others = [...tally.entries()].filter(([id]) => id !== cur.id)
+      .map(([, e]) => `${setting(e.row).label} (${e.n})`);
     const bestHere = Math.max(...here.map(r => r.v));
     const asked = here.reduce((s, r) => s + (r.a || 0), 0);
     const got   = here.reduce((s, r) => s + (r.v || 0), 0);
@@ -15939,7 +15954,7 @@ function _renderStatsImprove() {
       <span class="si-tool-head"><span class="si-tool-name">${t.label}</span><span class="si-tool-plays">${plays} play${plays !== 1 ? 's' : ''}</span></span>
       <span class="si-tool-best"><span class="si-tool-best-num">${bestHere}</span><span class="si-tool-best-lbl">best here</span></span>
       ${_sparkByDiff(here.length >= 2 ? here : rows, setting, t.color)}
-      <span class="si-tool-basis" title="Your current settings: ${escHtml(cur.label)}">${escHtml(cur.label)}</span>
+      <span class="si-tool-basis" title="What you mostly play: ${escHtml(cur.label)}${others.length ? `&#10;Also played recently: ${escHtml(others.join('; '))}` : ''}">${escHtml(cur.label)}</span>
       <span class="si-tool-foot">${accTxt}${nudge}</span>
     </a>`;
   }).join('');
