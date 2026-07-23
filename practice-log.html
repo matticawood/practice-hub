@@ -6309,6 +6309,30 @@
       #dd-chart-body .dd-bar-chart, #dd-chart-body .dd-stack,
       #dd-chart-body .dd-area, #dd-chart-body .dd-plot { height: 170px; }
     }
+    /* ── SVG chart engine ── */
+    .ddc-wrap { position: relative; }
+    .ddc-svg { display: block; width: 100%; height: auto; overflow: visible; }
+    .ddc-grid { stroke: color-mix(in srgb, var(--text-muted) 15%, transparent); stroke-width: 1; shape-rendering: crispEdges; }
+    .ddc-ylab { fill: var(--text-muted); font-size: 10px; font-weight: 700; text-anchor: end; opacity: .85; font-variant-numeric: tabular-nums; }
+    .ddc-xlab { fill: var(--text-muted); font-size: 10px; font-weight: 700; text-anchor: middle; }
+    .ddc-cross { stroke: color-mix(in srgb, var(--text-muted) 45%, transparent); stroke-width: 1; stroke-dasharray: 3 3; transition: opacity .12s; }
+    .ddc-hit { cursor: crosshair; }
+    /* Series draw in with a soft reveal so switching views feels alive. */
+    .ddc-fill { animation: ddcFade .45s ease both; }
+    .ddc-stroke { animation: ddcFade .45s ease both; }
+    .ddc-bar { animation: ddcGrow .5s cubic-bezier(.22,1,.36,1) both; transform-box: fill-box; transform-origin: bottom; }
+    @keyframes ddcFade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes ddcGrow { from { transform: scaleY(0); opacity: .5; } to { transform: scaleY(1); opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .ddc-fill, .ddc-stroke, .ddc-bar { animation: none; } }
+    /* Hover readout */
+    .ddc-tip { position: absolute; top: 4px; pointer-events: none; transition: opacity .13s ease;
+      background: #1a1410; color: #fff; border-radius: 9px; padding: 7px 10px; min-width: 116px;
+      box-shadow: 0 8px 22px -8px rgba(0,0,0,.45); z-index: 3; }
+    .ddc-tip-h { display: block; font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; opacity: .65; margin-bottom: 4px; }
+    .ddc-tip-row { display: flex; align-items: center; gap: 6px; font-size: .66rem; font-weight: 600; line-height: 1.5; }
+    .ddc-tip-row i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+    .ddc-tip-row b { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
+
     /* Plot chrome: hairline gridlines sitting quietly behind the series. */
     .dd-plot { position: relative; }
     .dd-ygrid { position: absolute; inset: 0; pointer-events: none; }
@@ -14798,22 +14822,11 @@ function renderDeepDive() {
   const maxDowMins = Math.max(...dowOrder.map(d => dayMins[d]), 1);
   const peakDow    = dowOrder.reduce((a, b) => dayMins[a] > dayMins[b] ? a : b);
 
-  dowHTML = `
-    <div>
-      <div class="dd-bar-chart">
-        ${dowOrder.map((dow, i) => {
-          const pct    = Math.round((dayMins[dow] / maxDowMins) * 100);
-          const isPeak = dow === peakDow;
-          const avg    = dayCnt[dow] ? Math.round(dayMins[dow] / dayCnt[dow]) : 0;
-          return `<div class="dd-bar-col" data-tip="${dowLabels[i]}: ${dayCnt[dow]} session${dayCnt[dow]!==1?'s':''}, avg ${formatMinutes(avg)}" onclick="showMiniTip(event,this)" title="${dowLabels[i]}: ${dayCnt[dow]} sessions, avg ${formatMinutes(avg)}">
-            <div class="dd-bar${isPeak ? ' dd-bar-hi' : ''}" style="height:${Math.max(pct,2)}%"></div>
-          </div>`;
-        }).join('')}
-      </div>
-      <div class="dd-bar-labels">
-        ${dowOrder.map((dow, i) => `<div class="dd-bar-label">${dowLabels[i]}</div>`).join('')}
-      </div>
-    </div>`;
+  dowHTML = {
+    kind: 'bars', labels: dowLabels, fmt: v => formatMinutes(Math.round(v)),
+    peak: dowOrder.indexOf(peakDow),
+    series: [{ name: 'Practice', color: '#f5c518', data: dowOrder.map(d => dayMins[d]) }],
+  };
 
   // ── Session length distribution ───────────────────────────────────
   const buckets = [
@@ -14830,22 +14843,11 @@ function renderDeepDive() {
   });
   const maxBucket = Math.max(...buckets.map(b => b.count), 1);
 
-  distHTML = `
-    <div>
-      <div class="dd-bar-chart">
-        ${buckets.map(b => {
-          const pct    = Math.round((b.count / maxBucket) * 100);
-          const isPeak = b.count === maxBucket;
-          return `<div class="dd-bar-col" data-tip="${b.label}: ${b.count} session${b.count!==1?'s':''}" onclick="showMiniTip(event,this)" title="${b.label}: ${b.count} session${b.count!==1?'s':''}">
-            ${b.count > 0 ? `<div class="dd-bar-count">${b.count}</div>` : ''}
-            <div class="dd-bar${isPeak ? ' dd-bar-hi' : ''}" style="height:${Math.max(pct,2)}%"></div>
-          </div>`;
-        }).join('')}
-      </div>
-      <div class="dd-bar-labels">
-        ${buckets.map(b => `<div class="dd-bar-label">${b.label}</div>`).join('')}
-      </div>
-    </div>`;
+  distHTML = {
+    kind: 'bars', labels: buckets.map(b => b.label), fmt: v => `${Math.round(v)}`,
+    peak: buckets.findIndex(b => b.count === maxBucket),
+    series: [{ name: 'Sessions', color: '#f5c518', data: buckets.map(b => b.count) }],
+  };
 
   // ── Practice consistency ──────────────────────────────────────────
   const sortedDates = [...new Set(sessions.map(s => s.session_date))].sort();
@@ -15030,22 +15032,16 @@ function renderDeepDive() {
     _sMonths.push({ lab: _MON[ref.getMonth()], acc, total: _AREAS.reduce((t, a) => t + acc[a.k], 0) });
   }
   const _sMax = Math.max(1, ..._sMonths.map(m => m.total));
-  splitHTML = `
-    <div>
-      <div class="dd-stack">${_sMonths.map(m => `
-        <div class="dd-stack-col" title="${m.lab}: ${formatMinutes(Math.round(m.total))}">
-          <div class="dd-stack-bar" style="height:${Math.max(2, Math.round((m.total / _sMax) * 100))}%">
-            ${m.total ? _AREAS.map(a => m.acc[a.k] ? `<i style="height:${(m.acc[a.k] / m.total) * 100}%;background:${a.c}"></i>` : '').join('') : ''}
-          </div>
-        </div>`).join('')}</div>
-      <div class="dd-bar-labels">${_sMonths.map(m => `<div class="dd-bar-label">${m.lab}</div>`).join('')}</div>
-      <div class="dd-legend">${_AREAS.map(a => `<span class="dd-leg"><i style="background:${a.c}"></i>${a.lab}</span>`).join('')}</div>
-    </div>`;
+  splitHTML = {
+    kind: 'stack', labels: _sMonths.map(m => m.lab), fmt: v => formatMinutes(Math.round(v)),
+    series: _AREAS.map(a => ({ name: a.lab, color: a.c, data: _sMonths.map(m => m.acc[a.k]) })),
+    legend: _AREAS.map(a => ({ name: a.lab, color: a.c })),
+  };
 
   } // end if (hasData)
 
   // One chart window: the views live behind a switcher rather than as separate boxes.
-  window._ddCharts = { trend: monthlyHTML, area: splitHTML, dow: dowHTML, lengths: distHTML };
+  window._ddSpecs = { area: splitHTML, dow: dowHTML, lengths: distHTML };
   el.innerHTML = `
     <div class="dd-section-hdr">Practice Deep Dive</div>
     <div class="dd-panel">
@@ -15076,6 +15072,126 @@ function renderDeepDive() {
 let _monthlyRange = '1Y';
 window.setMonthlyRange = function(r) { _monthlyRange = r; renderMonthlyChart(); };
 
+// ── Deep Dive chart engine ────────────────────────────────────────────────
+// Hand-written SVG with real pixel scales (measured, not percentage divs), so text
+// stays crisp and proportions are true. Smooth gradient areas, nice axis ticks, and
+// a hover tooltip driven by invisible band rects.
+let _ddUid = 0;
+function _ddNiceMax(v) {
+  if (!(v > 0)) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / pow;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * pow;
+}
+// Catmull-Rom style smoothing, clamped so the curve can't overshoot below the axis.
+function _ddSmooth(pts) {
+  if (!pts.length) return '';
+  if (pts.length < 3) return 'M' + pts.map(p => `${p.x},${p.y}`).join(' L');
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const t = 0.2;
+    d += ` C${p1.x + (p2.x - p0.x) * t},${p1.y + (p2.y - p0.y) * t}` +
+         ` ${p2.x - (p3.x - p1.x) * t},${p2.y - (p3.y - p1.y) * t} ${p2.x},${p2.y}`;
+  }
+  return d;
+}
+function _ddDrawChart(host, spec) {
+  if (!host || !spec) return;
+  const W = Math.max(300, Math.round(host.clientWidth || 640));
+  const H = spec.height || 230;
+  const P = { t: 16, r: 14, b: 28, l: 50 };
+  const iw = Math.max(10, W - P.l - P.r), ih = Math.max(10, H - P.t - P.b);
+  const labels = spec.labels || [], series = spec.series || [];
+  const n = Math.max(1, labels.length);
+  const stacked = spec.kind === 'stack';
+  const totals = labels.map((_, i) => stacked
+    ? series.reduce((s, se) => s + (se.data[i] || 0), 0)
+    : Math.max(...series.map(se => se.data[i] || 0)));
+  const yMax = _ddNiceMax(Math.max(...totals, 0));
+  const yAt = v => P.t + ih - (v / yMax) * ih;
+  const xLine = i => P.l + (n > 1 ? (i / (n - 1)) * iw : iw / 2);
+  const xBand = i => P.l + ((i + 0.5) / n) * iw;
+  const bandW = iw / n;
+  const uid = 'ddc' + (++_ddUid);
+  const fmt = spec.fmt || (v => String(Math.round(v)));
+  const base = P.t + ih;
+
+  let grid = '', yLabs = '';
+  for (let t = 0; t <= 4; t++) {
+    const v = (yMax / 4) * t, y = yAt(v);
+    grid += `<line x1="${P.l}" y1="${y.toFixed(1)}" x2="${W - P.r}" y2="${y.toFixed(1)}" class="ddc-grid"/>`;
+    yLabs += `<text x="${P.l - 10}" y="${(y + 3.5).toFixed(1)}" class="ddc-ylab">${escHtml(t === 0 ? '0' : fmt(v))}</text>`;
+  }
+  const xPos = (spec.kind === 'bars' || stacked) ? xBand : xLine;
+  const xLabs = labels.map((l, i) => l ? `<text x="${xPos(i).toFixed(1)}" y="${H - 9}" class="ddc-xlab">${escHtml(l)}</text>` : '').join('');
+
+  let defs = '', body = '';
+  if (spec.kind === 'area') {
+    series.forEach((se, si) => {
+      const gid = `${uid}a${si}`;
+      defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${se.color}" stop-opacity=".45"/>
+        <stop offset="100%" stop-color="${se.color}" stop-opacity=".03"/></linearGradient>`;
+      const pts = se.data.map((v, i) => ({ x: xLine(i), y: yAt(v) }));
+      const line = _ddSmooth(pts);
+      body += `<path d="${line} L${pts[pts.length - 1].x},${base} L${pts[0].x},${base} Z" fill="url(#${gid})" class="ddc-fill"/>`
+            + `<path d="${line}" fill="none" stroke="${se.color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" class="ddc-stroke"/>`;
+    });
+  } else if (stacked) {
+    const acc = new Array(n).fill(0);
+    series.forEach((se, si) => {
+      const gid = `${uid}s${si}`;
+      defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${se.color}" stop-opacity=".92"/>
+        <stop offset="100%" stop-color="${se.color}" stop-opacity=".62"/></linearGradient>`;
+      const upper = acc.map((v, i) => v + (se.data[i] || 0));
+      const up = upper.map((v, i) => ({ x: xLine(i), y: yAt(v) }));
+      const lo = acc.map((v, i) => ({ x: xLine(i), y: yAt(v) })).reverse();
+      const loPath = _ddSmooth(lo).replace(/^M/, 'L');
+      body += `<path d="${_ddSmooth(up)} ${loPath} Z" fill="url(#${gid})" class="ddc-fill"/>`;
+      upper.forEach((v, i) => acc[i] = v);
+    });
+  } else {
+    defs += `<linearGradient id="${uid}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e2e6ed"/><stop offset="100%" stop-color="#c6cdd9"/></linearGradient>`
+          + `<linearGradient id="${uid}p" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffe27a"/><stop offset="45%" stop-color="#f5c518"/><stop offset="100%" stop-color="#d29c00"/></linearGradient>`;
+    const bw = Math.max(6, Math.min(52, bandW * 0.6));
+    (series[0]?.data || []).forEach((v, i) => {
+      const h = Math.max(v > 0 ? 3 : 0, base - yAt(v));
+      body += `<rect x="${(xBand(i) - bw / 2).toFixed(1)}" y="${(base - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="6"
+        fill="url(#${spec.peak === i ? uid + 'p' : uid + 'b'})" class="ddc-bar"/>`;
+    });
+  }
+
+  // Invisible bands drive the hover readout.
+  const hit = labels.map((l, i) => `<rect class="ddc-hit" data-i="${i}" x="${(xPos(i) - bandW / 2).toFixed(1)}" y="${P.t}" width="${bandW.toFixed(1)}" height="${ih}" fill="transparent"/>`).join('');
+
+  host.innerHTML =
+    `<div class="ddc-wrap"><svg class="ddc-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img">
+      <defs>${defs}</defs>
+      <g class="ddc-gridg">${grid}</g>
+      <g class="ddc-body">${body}</g>
+      <line class="ddc-cross" x1="0" y1="${P.t}" x2="0" y2="${base}" style="opacity:0"/>
+      <g class="ddc-axis">${yLabs}${xLabs}</g>
+      <g>${hit}</g>
+    </svg><div class="ddc-tip" style="opacity:0"></div></div>`;
+
+  // Hover: crosshair + tooltip listing each series' value for that band.
+  const svg = host.querySelector('.ddc-svg'), tip = host.querySelector('.ddc-tip'), cross = host.querySelector('.ddc-cross');
+  host.querySelectorAll('.ddc-hit').forEach(r => {
+    r.addEventListener('mouseenter', () => {
+      const i = +r.dataset.i, x = xPos(i);
+      cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.style.opacity = '1';
+      const rows = series.map(se => `<span class="ddc-tip-row"><i style="background:${se.color}"></i>${escHtml(se.name || '')}<b>${escHtml(fmt(se.data[i] || 0))}</b></span>`).join('');
+      tip.innerHTML = `<span class="ddc-tip-h">${escHtml(labels[i] || '')}</span>${rows}`;
+      tip.style.opacity = '1';
+      const left = Math.max(4, Math.min(W - 150, x - 70));
+      tip.style.left = left + 'px';
+    });
+  });
+  svg.addEventListener('mouseleave', () => { tip.style.opacity = '0'; cross.style.opacity = '0'; });
+}
+
 // ── Deep Dive: one chart window, switchable views (YouTube-Studio style) ──
 const _DD_VIEWS = [
   { k: 'trend',   lab: 'Trend' },
@@ -15087,13 +15203,27 @@ let _ddMetric = 'trend';
 window.setDdMetric = function (m) { _ddMetric = m; _ddPaintChart(); };
 function _ddPaintChart() {
   const body = document.getElementById('dd-chart-body');
-  if (!body || !window._ddCharts) return;
+  if (!body) return;
   document.querySelectorAll('.dd-tab').forEach(b => b.classList.toggle('is-active', b.dataset.dd === _ddMetric));
   // The date-range control only applies to the time-based trend view.
   const rng = document.getElementById('dd-range-wrap');
   if (rng) rng.style.visibility = (_ddMetric === 'trend') ? 'visible' : 'hidden';
-  body.innerHTML = window._ddCharts[_ddMetric] || '';
-  if (_ddMetric === 'trend') renderMonthlyChart();
+  if (_ddMetric === 'trend') { renderMonthlyChart(); return; }
+  const spec = (window._ddSpecs || {})[_ddMetric];
+  if (!spec) { body.innerHTML = ''; return; }
+  _ddDrawChart(body, spec);
+  const lg = spec.legend;
+  if (lg) body.insertAdjacentHTML('beforeend',
+    `<div class="dd-legend">${lg.map(l => `<span class="dd-leg"><i style="background:${l.color}"></i>${escHtml(l.name)}</span>`).join('')}</div>`);
+}
+// Charts are drawn at measured pixel width, so re-draw when the window resizes.
+if (!window._ddResizeHooked) {
+  window._ddResizeHooked = true;
+  let _ddRT;
+  window.addEventListener('resize', () => {
+    clearTimeout(_ddRT);
+    _ddRT = setTimeout(() => { if (document.getElementById('dd-chart-body')) _ddPaintChart(); }, 180);
+  });
 }
 function renderMonthlyChart() {
   const el = document.getElementById('dd-monthly-chart');
@@ -15149,20 +15279,11 @@ function renderMonthlyChart() {
   const totalMins = buckets.reduce((s, b) => s + b.mins, 0);
   const n = buckets.length;
 
-  const grid = [1, 0.75, 0.5, 0.25, 0];
-  const peak = buckets.reduce((a, b) => (b.mins > a ? b.mins : a), 0);
-
-  el.innerHTML = `
-    <div class="dd-trend-total">${formatMinutes(totalMins)}<span> in this range</span></div>
-    <div class="dd-plot">
-      <div class="dd-ygrid">${grid.map(f => `<div class="dd-yline" style="bottom:${f * 100}%"><span>${f === 0 ? '0' : formatMinutes(Math.round(maxMins * f))}</span></div>`).join('')}</div>
-      <div class="dd-combo">${buckets.map((b, i) => `
-        <div class="dd-combo-col">
-          <span class="dd-combo-val">${formatMinutes(b.mins)}</span>
-          <div class="dd-combo-bar${b.mins === peak && peak > 0 ? ' is-peak' : ''}" style="height:${Math.max(b.mins > 0 ? 2 : 0, (b.mins / maxMins) * 100)}%;animation-delay:${i * 35}ms"></div>
-        </div>`).join('')}</div>
-    </div>
-    <div class="dd-bar-labels dd-labels-inset">${buckets.map(b => `<div class="dd-bar-label">${b.label}</div>`).join('')}</div>`;
+  el.innerHTML = `<div class="dd-trend-total">${formatMinutes(totalMins)}<span> in this range</span></div><div id="dd-trend-plot"></div>`;
+  _ddDrawChart(document.getElementById('dd-trend-plot'), {
+    kind: 'area', labels: buckets.map(b => b.label), fmt: v => formatMinutes(Math.round(v)),
+    series: [{ name: 'Practice', color: '#f5c518', data: buckets.map(b => b.mins) }],
+  });
 }
 
 // ── Band A: "Where to improve" — the utility-first top of the Stats page ──
