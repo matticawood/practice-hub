@@ -16118,11 +16118,26 @@ function _renderStatsKpis({ streak, streakSub, totalMins, avgPerDay, pieces }) {
   const today = day(new Date());
   const dayKey = d => toDateStr(d);
 
-  // minutes per day for the last 14 days (streak momentum)
-  const dayMins = {};
-  sessions.forEach(s => { if (s.session_date) dayMins[s.session_date] = (dayMins[s.session_date] || 0) + (s.duration_minutes || 0); });
+  // The streak itself, day by day, for the last 14 days: it climbs while they keep
+  // going and drops to zero when it breaks. Replayed through the canonical streak
+  // logic (which honours streak saves) by asking it for each day in turn, so the
+  // line can never disagree with the number above it.
+  const dateSet = sessions.map(s => s.session_date).filter(Boolean);
+  const _streakAsOf = d => {
+    if (window.StreakCalc) {
+      try {
+        const tz = (typeof streakData !== 'undefined' && streakData?.timezone) || StreakCalc.captureTimezone();
+        return StreakCalc.deriveStreakState(dateSet, tz, d).current_streak;
+      } catch (e) {}
+    }
+    // Fallback: walk back over consecutive practiced days.
+    const have = new Set(dateSet);
+    let n = 0, cur = new Date(d);
+    while (have.has(dayKey(cur))) { n++; cur.setDate(cur.getDate() - 1); }
+    return n;
+  };
   const last14 = [];
-  for (let i = 13; i >= 0; i--) { const d = new Date(today); d.setDate(d.getDate() - i); last14.push(dayMins[dayKey(d)] || 0); }
+  for (let i = 13; i >= 0; i--) { const d = new Date(today); d.setDate(d.getDate() - i); last14.push(_streakAsOf(d)); }
 
   // per-week buckets for the last 10 weeks
   const weeks = [];
@@ -16135,29 +16150,36 @@ function _renderStatsKpis({ streak, streakSub, totalMins, avgPerDay, pieces }) {
       const d = day(new Date(s.session_date + 'T12:00:00'));
       if (d >= start && d <= end) { mins += (s.duration_minutes || 0); cnt++; days.add(s.session_date); }
     });
-    weeks.push({ mins, cnt, avg: days.size ? Math.round(mins / days.size) : 0 });
+    // Sessions logged up to the end of this week: a running total only ever climbs,
+    // so the line reads as progress rather than as a busy week followed by a quiet one.
+    let cum = 0;
+    sessions.forEach(s => { if (s.session_date && day(new Date(s.session_date + 'T12:00:00')) <= end) cum++; });
+    weeks.push({ mins, cnt, cum, avg: days.size ? Math.round(mins / days.size) : 0 });
   }
 
-  // distinct pieces per month for the last 6 months
+  // Distinct pieces touched by the end of each of the last 6 months. Cumulative: once
+  // you have practiced a piece it stays counted, so the line matches the all-time
+  // figure above it instead of dipping every quiet month.
   const months = [];
   for (let m = 5; m >= 0; m--) {
-    const ref = new Date(today.getFullYear(), today.getMonth() - m, 1);
+    const ref = new Date(today.getFullYear(), today.getMonth() - m + 1, 1);   // start of the NEXT month
     const set = new Set();
     sessions.forEach(s => {
       if (!s.session_date) return;
-      const d = new Date(s.session_date + 'T12:00:00');
-      if (d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth())
-        (s.practice_items || []).forEach(i => {
-          if (i.item_type === 'piece' && (i.piece_label || i.label)) set.add((i.piece_label || i.label).trim().toLowerCase());
-        });
+      if (new Date(s.session_date + 'T12:00:00') >= ref) return;
+      (s.practice_items || []).forEach(i => {
+        if (i.item_type === 'piece' && (i.piece_label || i.label)) set.add((i.piece_label || i.label).trim().toLowerCase());
+      });
     });
     months.push(set.size);
   }
 
   const spark = (vals, color) => {
     if (!vals || vals.length < 2 || Math.max(...vals) <= 0) return '<span class="skpi-spark-empty"></span>';
-    const mx = Math.max(...vals), w = 100, h = 22;
-    const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${(h - 2) - (v / mx) * (h - 4)}`).join(' ');
+    // Scaled between the series' own low and high: a running total scaled from zero
+    // would sit as a flat line pinned to the top and show nothing.
+    const mx = Math.max(...vals), mn = Math.min(...vals), rng = (mx - mn) || mx || 1, w = 100, h = 22;
+    const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${(h - 2) - ((v - mn) / rng) * (h - 4)}`).join(' ');
     return `<svg class="skpi-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   };
   const ICO = {
@@ -16180,10 +16202,10 @@ function _renderStatsKpis({ streak, streakSub, totalMins, avgPerDay, pieces }) {
     </div>`;
 
   el.innerHTML =
-    card('flame', 'Current streak', streak, streak === 1 ? 'day' : 'days', streakSub, last14, 'Minutes a day, last 14 days') +
-    card('stack', 'Total sessions', sessions.length, '', 'all time', weeks.map(w => w.cnt), 'Sessions a week, last 10 weeks') +
+    card('flame', 'Current streak', streak, streak === 1 ? 'day' : 'days', streakSub, last14, 'Streak day by day, last 14 days') +
+    card('stack', 'Total sessions', sessions.length, '', 'all time', weeks.map(w => w.cum), 'Sessions logged, last 10 weeks') +
     card('clock', 'Avg / day', formatMinutes(avgPerDay), '', 'per active day', weeks.map(w => w.avg), 'Week by week, last 10 weeks') +
-    card('note',  'Pieces practiced', pieces, '', 'unique pieces', months, 'Different pieces each month, last 6');
+    card('note',  'Pieces practiced', pieces, '', 'unique pieces', months, 'Pieces practiced so far, last 6 months');
 }
 
 function renderStats() {
