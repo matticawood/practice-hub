@@ -15806,18 +15806,30 @@ function _renderStatsImprove() {
     playback:    { harmonic: 'Harmonic', melodic: 'Melodic' },
     side:        { listening: 'By ear', reading: 'By sight' },
   };
-  const _dimText = (dim, raw) => {
+  // "tier" is stored as a bare code and means different things per tool, so it is
+  // translated back into the wording the game itself uses. Chord Recognition packs
+  // chord type and voicing into one number (see crGetTier in tools.html); Intervals
+  // uses it for how much detail the answer needs.
+  const _TIER_LBL = {
+    chord: { 1: 'Triads, root position', 2: 'Triads, inversions', 3: 'Triads, spread voicings',
+             4: '7th chords, root position', 5: '7th chords, inversions', 6: '7th chords, spread voicings' },
+    interval: { number: 'Number only', pm: 'Perfect and major', full: 'Full quality' },
+  };
+  const _dimText = (dim, raw, toolKey) => {
     const v = String(raw);
+    if (dim === 'tier') {
+      const m = _TIER_LBL[toolKey];
+      return (m && m[v]) || `tier ${v}`;
+    }
     if (_DIM_LBL[dim] && _DIM_LBL[dim][v]) return _DIM_LBL[dim][v];
     if (dim === 'accidentals')  return v === 'true' ? 'with accidentals' : 'no accidentals';
     if (dim === 'key_signature') return (v === 'null' || v === '') ? 'any key' : `key of ${v}`;
-    if (dim === 'tier') return `tier ${v}`;
     if (v === 'null' || v === 'undefined' || v === '') return '';
     return _titleCase(v);
   };
   // Only the dials a member actually changed distinguish one group from another, so
   // the label stays short: someone who only ever toggles accidentals sees exactly that.
-  const _toolGroups = rows => {
+  const _toolGroups = (rows, toolKey) => {
     const dims = rows.length ? Object.keys(rows[0]).filter(k => k !== 'v' && k !== 't') : [];
     const varying = dims.filter(d => new Set(rows.map(r => String(r[d]))).size > 1);
     const g = new Map();
@@ -15826,13 +15838,13 @@ function _renderStatsImprove() {
       if (!g.has(k)) g.set(k, { vals: [], r0: r });
       g.get(k).vals.push(r.v);
     });
-    const label = r => varying.map(d => _dimText(d, r[d])).filter(Boolean).join(', ');
+    const label = r => varying.map(d => _dimText(d, r[d], toolKey)).filter(Boolean).join(', ');
     return { varying, groups: [...g.values()], label };
   };
-  const _toolTrend = rows => {
+  const _toolTrend = (rows, toolKey) => {
     const half = a => { const h = Math.floor(a.length / 2); return _avg(a.slice(h)) - _avg(a.slice(0, h)); };
     const verdict = d => (d > 0.75 ? 1 : d < -0.75 ? -1 : 0);
-    const { varying, groups, label } = _toolGroups(rows);
+    const { varying, groups, label } = _toolGroups(rows, toolKey);
     if (!varying.length) {   // every play at the same settings: the whole run is comparable
       const vals = rows.map(r => r.v);
       if (vals.length < 4) return null;
@@ -15847,8 +15859,8 @@ function _renderStatsImprove() {
   // setting is usually just the hardest one attempted, not a weakness. It now reports
   // the plain fact (lowest average) over full setting groups, and needs three plays a
   // side rather than two.
-  const _lowestSetting = rows => {
-    const { varying, groups, label } = _toolGroups(rows);
+  const _lowestSetting = (rows, toolKey) => {
+    const { varying, groups, label } = _toolGroups(rows, toolKey);
     if (!varying.length) return null;
     const usable = groups.filter(x => x.vals.length >= 3);
     if (usable.length < 2) return null;
@@ -15876,7 +15888,7 @@ function _renderStatsImprove() {
     const vals = rows.map(r => r.v);
     const best = Math.max(...vals);
     const plays = rows.length;
-    const trd = _toolTrend(rows);
+    const trd = _toolTrend(rows, t.key);
     // No honest like-for-like comparison available: say nothing rather than guess.
     const trBasis = trd && trd.basis
       ? ` title="Based on your ${escHtml(trd.basis)} plays, so changing settings will not count against you"`
@@ -15887,7 +15899,7 @@ function _renderStatsImprove() {
       : `<span class="si-tool-trend flat"${trBasis}>&mdash; steady</span>`;
     // If the lowest-scoring group is also the one the line is drawn from, saying it
     // twice on one card tells the reader nothing new.
-    const _low0 = _lowestSetting(rows);
+    const _low0 = _lowestSetting(rows, t.key);
     const low = (_low0 && trd && _low0.label === trd.basis) ? null : _low0;
     // The line plots the same series the verdict judged, so the two cannot
     // contradict each other, and it says which setting it is drawn from.
