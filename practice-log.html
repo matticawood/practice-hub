@@ -6318,6 +6318,8 @@
     /* Figures printed on the chart rather than hidden behind a hover. */
     .ddc-vlab { fill: var(--text); font-size: 11px; font-weight: 800; text-anchor: middle; font-variant-numeric: tabular-nums; }
     body.hub-mode .ddc-vlab { fill: #1a1410; }
+    .dd-note { margin: 8px 2px 0; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); font-weight: 600; }
+    body.hub-mode .dd-note { color: #6b6253; }
     .ddc-sublab { fill: var(--text-muted); font-size: 9.5px; font-weight: 600; text-anchor: middle; opacity: .85; font-variant-numeric: tabular-nums; }
     .ddc-cross { stroke: color-mix(in srgb, var(--text-muted) 45%, transparent); stroke-width: 1; stroke-dasharray: 3 3; transition: opacity .12s; }
     .ddc-hit { cursor: crosshair; }
@@ -14860,35 +14862,50 @@ function renderDeepDive() {
     { label: '30–60m', min:  30, max:  60 },
     { label: '1–2h',   min:  60, max: 120 },
     { label: '2h+',    min: 120, max: Infinity },
-  ].map(b => ({ ...b, count: 0, focusSum: 0, focusN: 0,
-                area: { repertoire: 0, technique: 0, sight_reading: 0, musicianship: 0 } }));
+  ].map(b => ({ ...b, count: 0, mins: 0, breadthSum: 0 }));
   sessions.forEach(s => {
     const m = s.duration_minutes || 0;
     const b = buckets.find(x => m >= x.min && m < x.max);
     if (!b) return;
     b.count++;
-    if (s.focus_rating > 0) { b.focusSum += s.focus_rating; b.focusN++; }
-    (s.practice_items || []).forEach(it => {
-      const k = _DD_T2A[it.item_type];
-      if (k) b.area[k] += it.duration_minutes || 0;
-    });
+    b.mins += m;
+    // Breadth = how many of the four roadmap areas this one session touched.
+    const seen = new Set();
+    (s.practice_items || []).forEach(it => { const k = _DD_T2A[it.item_type]; if (k) seen.add(k); });
+    b.breadthSum += seen.size;
   });
-  const maxBucket = Math.max(...buckets.map(b => b.count), 1);
 
-  // Session count per band, with the two figures that matter printed on the chart
-  // rather than hidden in a tooltip: how many sessions, and how much of your total
-  // practice time that band actually accounts for. (No area split — a given session
-  // length has no consistent composition, so stacking it would be noise.)
-  const _distTotal = buckets.reduce((s, b) => s + _DD_AREAS.reduce((t, a) => t + b.area[a.k], 0), 0) || 1;
+  // Three things visible at once, none of them hidden in a tooltip:
+  //   bars  = how much practice time each length band actually gave you (impact)
+  //   above = how many sessions were that length (frequency)
+  //   line  = how many of the four areas a session of that length typically covers (breadth)
+  // Frequency and impact disagree sharply for most people, and that gap is the lesson.
+  const _distTotal = buckets.reduce((s, b) => s + b.mins, 0) || 1;
+  const _maxMins = Math.max(...buckets.map(b => b.mins), 1);
   distHTML = {
-    kind: 'bars', labels: buckets.map(b => b.label), fmt: v => `${Math.round(v)} sessions`,
-    peak: buckets.findIndex(b => b.count === maxBucket),
-    series: [{ name: 'Sessions', color: '#f5c518', data: buckets.map(b => b.count) }],
-    valueLabels: buckets.map(b => b.count ? String(b.count) : ''),
-    subLabels: buckets.map(b => {
-      const mins = _DD_AREAS.reduce((t, a) => t + b.area[a.k], 0);
-      return mins ? `${formatMinutes(Math.round(mins))} · ${Math.round((mins / _distTotal) * 100)}%` : '';
-    }),
+    kind: 'bars', height: 260, labels: buckets.map(b => b.label),
+    fmt: v => formatMinutes(Math.round(v)),
+    peak: buckets.findIndex(b => b.mins === _maxMins),
+    series: [
+      { name: 'Practice time', color: '#f5c518', data: buckets.map(b => Math.round(b.mins)) },
+      { name: 'Areas covered', color: '#6366f1', axis: 2, fmt: v => v.toFixed(1),
+        data: buckets.map(b => b.count ? +(b.breadthSum / b.count).toFixed(2) : null) },
+    ],
+    y2: { max: 4, color: '#6366f1', fmt: v => String(Math.round(v)) },
+    valueLabels: buckets.map(b => b.count ? `${b.count} session${b.count === 1 ? '' : 's'}` : ''),
+    subLabels: buckets.map(b => b.mins ? `${Math.round((b.mins / _distTotal) * 100)}% of your time` : ''),
+    legend: [
+      { name: 'Practice time (left)', color: '#f5c518' },
+      { name: 'Areas covered per session (right)', color: '#6366f1' },
+    ],
+    note: (() => {
+      const most = buckets.reduce((a, b) => (b.mins > a.mins ? b : a), buckets[0]);
+      const often = buckets.reduce((a, b) => (b.count > a.count ? b : a), buckets[0]);
+      if (!most.mins) return '';
+      if (most.label !== often.label)
+        return `Most of your sessions are ${often.label}, but ${Math.round((most.mins / _distTotal) * 100)}% of your practice time comes from your ${most.label} ones.`;
+      return `Your ${most.label} sessions are both your most common and where most of your practice time comes from.`;
+    })(),
   };
 
   // ── Practice consistency ──────────────────────────────────────────
@@ -15159,16 +15176,24 @@ function _ddDrawChart(host, spec) {
   if (!host || !spec) return;
   const W = Math.max(300, Math.round(host.clientWidth || 640));
   const H = spec.height || 230;
-  const P = { t: spec.valueLabels ? 24 : 16, r: 14, b: spec.subLabels ? 44 : 28, l: 50 };
+  const hasY2 = !!spec.y2;
+  // Left gutter sized to the widest tick label so axis text can never clip.
+  const _probe = spec.fmt ? spec.fmt(_ddNiceMax(Math.max(...(spec.series || []).flatMap(s => s.data || []), 0))) : '000';
+  const P = { t: (spec.valueLabels ? 24 : 16) + (hasY2 ? 10 : 0), r: hasY2 ? 44 : 14, b: spec.subLabels ? 44 : 28,
+              l: Math.max(46, String(_probe).length * 6.4 + 14) };
   const iw = Math.max(10, W - P.l - P.r), ih = Math.max(10, H - P.t - P.b);
   const labels = spec.labels || [], series = spec.series || [];
   const n = Math.max(1, labels.length);
   const stacked = spec.kind === 'stack' || spec.kind === 'stackbars';
+  const s1 = series.filter(se => se.axis !== 2);   // primary axis
+  const s2 = series.filter(se => se.axis === 2);   // secondary (right) axis
   const totals = labels.map((_, i) => stacked
-    ? series.reduce((s, se) => s + (se.data[i] || 0), 0)
-    : Math.max(...series.map(se => se.data[i] || 0)));
+    ? s1.reduce((s, se) => s + (se.data[i] || 0), 0)
+    : Math.max(...s1.map(se => se.data[i] || 0), 0));
   const yMax = _ddNiceMax(Math.max(...totals, 0));
   const yAt = v => P.t + ih - (v / yMax) * ih;
+  const yMax2 = hasY2 ? (spec.y2.max || _ddNiceMax(Math.max(...s2.flatMap(se => se.data || []), 0))) : 1;
+  const yAt2 = v => P.t + ih - (v / yMax2) * ih;
   const xLine = i => P.l + (n > 1 ? (i / (n - 1)) * iw : iw / 2);
   const xBand = i => P.l + ((i + 0.5) / n) * iw;
   const bandW = iw / n;
@@ -15181,6 +15206,10 @@ function _ddDrawChart(host, spec) {
     const v = (yMax / 4) * t, y = yAt(v);
     grid += `<line x1="${P.l}" y1="${y.toFixed(1)}" x2="${W - P.r}" y2="${y.toFixed(1)}" class="ddc-grid"/>`;
     yLabs += `<text x="${P.l - 10}" y="${(y + 3.5).toFixed(1)}" class="ddc-ylab">${escHtml(t === 0 ? '0' : fmt(v))}</text>`;
+    if (hasY2) {
+      const v2 = (yMax2 / 4) * t;
+      yLabs += `<text x="${W - P.r + 9}" y="${(y + 3.5).toFixed(1)}" class="ddc-ylab ddc-ylab2" style="text-anchor:start;fill:${spec.y2.color || 'var(--text-muted)'}">${escHtml(t === 0 ? '0' : (spec.y2.fmt ? spec.y2.fmt(v2) : String(Math.round(v2))))}</text>`;
+    }
   }
   const xPos = (spec.kind === 'bars' || stacked) ? xBand : xLine;
   const xLabY = H - (spec.subLabels ? 26 : 9);
@@ -15235,7 +15264,7 @@ function _ddDrawChart(host, spec) {
     defs += `<linearGradient id="${uid}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e2e6ed"/><stop offset="100%" stop-color="#c6cdd9"/></linearGradient>`
           + `<linearGradient id="${uid}p" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffe27a"/><stop offset="45%" stop-color="#f5c518"/><stop offset="100%" stop-color="#d29c00"/></linearGradient>`;
     const bw = Math.max(6, Math.min(52, bandW * 0.6));
-    (series[0]?.data || []).forEach((v, i) => {
+    (s1[0]?.data || []).forEach((v, i) => {
       const h = Math.max(v > 0 ? 3 : 0, base - yAt(v));
       body += `<rect x="${(xBand(i) - bw / 2).toFixed(1)}" y="${(base - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="6"
         fill="url(#${spec.peak === i ? uid + 'p' : uid + 'b'})" class="ddc-bar"/>`;
@@ -15243,6 +15272,19 @@ function _ddDrawChart(host, spec) {
       if (vl) body += `<text x="${xBand(i).toFixed(1)}" y="${(base - h - 8).toFixed(1)}" class="ddc-vlab">${escHtml(vl)}</text>`;
     });
   }
+
+  // Secondary-axis series ride on top as a line with labelled dots.
+  s2.forEach(se => {
+    const pts = se.data.map((v, i) => (v == null ? null : { x: xPos(i), y: yAt2(v), v }));
+    const run = pts.filter(Boolean);
+    if (!run.length) return;
+    body += `<path d="${run.map((p, j) => `${j ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" fill="none"
+      stroke="${se.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4" class="ddc-stroke"/>`;
+    run.forEach(p => {
+      body += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" fill="#fff" stroke="${se.color}" stroke-width="2.4"/>`;
+      body += `<text x="${p.x.toFixed(1)}" y="${(p.y - 11).toFixed(1)}" class="ddc-vlab" style="fill:${se.color}">${escHtml(se.fmt ? se.fmt(p.v) : String(p.v))}</text>`;
+    });
+  });
 
   // Invisible bands drive the hover readout.
   const hit = labels.map((l, i) => `<rect class="ddc-hit" data-i="${i}" x="${(xPos(i) - bandW / 2).toFixed(1)}" y="${P.t}" width="${bandW.toFixed(1)}" height="${ih}" fill="transparent"/>`).join('');
@@ -15308,6 +15350,7 @@ function _ddPaintChart() {
   const lg = spec.legend;
   if (lg) body.insertAdjacentHTML('beforeend',
     `<div class="dd-legend">${lg.map(l => `<span class="dd-leg"><i style="background:${l.color}"></i>${escHtml(l.name)}</span>`).join('')}</div>`);
+  if (spec.note) body.insertAdjacentHTML('beforeend', `<p class="dd-note">${escHtml(spec.note)}</p>`);
 }
 // Charts are drawn at measured pixel width, so re-draw when the window resizes.
 if (!window._ddResizeHooked) {
