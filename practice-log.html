@@ -4051,6 +4051,7 @@
     .si-tool-nudge { font-size: .64rem; font-weight: 700; color: var(--text-muted); line-height: 1.3; }
     .si-tool-nudge.is-up { color: var(--tc); }
     .si-tool-nudge.is-top { color: #b8860b; }
+    .si-tool-nudge.is-down { color: #b45309; }
     /* The settings the member is currently playing at. */
     .si-tool-basis { display: block; margin-top: 2px; font-size: .58rem; font-weight: 700; letter-spacing: .03em;
       color: var(--text-muted); opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -15874,6 +15875,27 @@ function _renderStatsImprove() {
     });
     return bestOpt;
   };
+  // The gentlest single-dial step DOWN, so a member who is struggling gets a variant
+  // to try rather than being told to keep grinding at something too hard.
+  const _nextStepDown = (row, toolKey) => {
+    const dials = TOOL_LADDER[toolKey] || [];
+    let bestOpt = null;
+    dials.forEach(d => {
+      const cur = _stepOf(d, row);
+      if (!cur) return;
+      if (d.keyed && String(row[d.k]) === 'key') {
+        // Inside a key, the gentler option is a key carrying fewer sharps or flats.
+        if (_keyAcc(row.key_signature || 'C') > 0 && (!bestOpt || 0.5 < bestOpt.cost))
+          bestOpt = { cost: 0.5, label: 'a key with fewer sharps or flats' };
+        return;
+      }
+      const easier = d.steps.filter(x => x[2] < cur[2]).sort((a, b) => b[2] - a[2])[0];
+      if (!easier) return;
+      const cost = cur[2] - easier[2];
+      if (!bestOpt || cost < bestOpt.cost) bestOpt = { cost, label: easier[1] };
+    });
+    return bestOpt;
+  };
   // Score over time for the settings the card is reporting on, so the line and the
   // figure above it describe the same thing. Shaded by difficulty as a fallback for
   // members with too few plays at their current settings to draw, where the line
@@ -15929,14 +15951,13 @@ function _renderStatsImprove() {
     const last = home.row;
     const cur = setting(last);
     const here = rows.filter(r => setting(r).id === cur.id);
-    // Everything else they have played, so the other settings are not simply lost.
-    const others = [...tally.entries()].filter(([id]) => id !== cur.id)
-      .map(([, e]) => `${setting(e.row).label} (${e.n})`);
+
     const bestHere = Math.max(...here.map(r => r.v));
     const asked = here.reduce((s, r) => s + (r.a || 0), 0);
     const got   = here.reduce((s, r) => s + (r.v || 0), 0);
     const acc = asked ? Math.round((got / asked) * 100) : null;
     const up = _nextStepUp(last, t.key);
+    const down = _nextStepDown(last, t.key);
     // Ready to move on when they are answering accurately at these settings, over
     // enough plays to mean it. Accuracy is used rather than the raw score because
     // score is a per-minute rate: it says how fast, not how well.
@@ -15945,16 +15966,21 @@ function _renderStatsImprove() {
     // on: one play at 20% says something even though it cannot promote anyone.
     const accTxt = acc != null
       ? `<span class="si-tool-acc">${acc}% right${here.length === 1 ? ' (1 play)' : ''}</span>` : '';
-    const nudge = !up
-      ? `<span class="si-tool-nudge is-top">Hardest settings, keep sharpening</span>`
-      : ready
-        ? `<span class="si-tool-nudge is-up">Ready for ${escHtml(up.label)}</span>`
-        : `<span class="si-tool-nudge">Keep going at these settings</span>`;
+    // Getting under half of them right means these settings are too hard to learn
+    // much from, so name an easier variant instead of saying "keep going".
+    const struggling = acc != null && acc < 55 && here.length >= 2;
+    const nudge = ready && up
+      ? `<span class="si-tool-nudge is-up">Ready for ${escHtml(up.label)}</span>`
+      : struggling && down
+        ? `<span class="si-tool-nudge is-down">Maybe try ${escHtml(down.label)}</span>`
+        : !up
+          ? `<span class="si-tool-nudge is-top">Hardest settings, keep sharpening</span>`
+          : `<span class="si-tool-nudge">Keep going at these settings</span>`;
     return `<a class="si-tool" ${href} style="--tc:${t.color}">
       <span class="si-tool-head"><span class="si-tool-name">${t.label}</span><span class="si-tool-plays">${plays} play${plays !== 1 ? 's' : ''}</span></span>
       <span class="si-tool-best"><span class="si-tool-best-num">${bestHere}</span><span class="si-tool-best-lbl">best here</span></span>
       ${_sparkByDiff(here.length >= 2 ? here : rows, setting, t.color)}
-      <span class="si-tool-basis" title="What you mostly play: ${escHtml(cur.label)}${others.length ? `&#10;Also played recently: ${escHtml(others.join('; '))}` : ''}">${escHtml(cur.label)}</span>
+      <span class="si-tool-basis">${escHtml(cur.label)}</span>
       <span class="si-tool-foot">${accTxt}${nudge}</span>
     </a>`;
   }).join('');
