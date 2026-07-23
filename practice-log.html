@@ -14865,49 +14865,48 @@ function renderDeepDive() {
     { label: '30–60m', min:  30, max:  60 },
     { label: '1–2h',   min:  60, max: 120 },
     { label: '2h+',    min: 120, max: Infinity },
-  ].map(b => ({ ...b, count: 0, mins: 0, breadthSum: 0 }));
+  ].map(b => ({ ...b, count: 0, mins: 0, wkday: 0, wkend: 0 }));
   sessions.forEach(s => {
     const m = s.duration_minutes || 0;
     const b = buckets.find(x => m >= x.min && m < x.max);
     if (!b) return;
     b.count++;
     b.mins += m;
-    // Breadth = how many of the four roadmap areas this one session touched.
-    const seen = new Set();
-    (s.practice_items || []).forEach(it => { const k = _DD_T2A[it.item_type]; if (k) seen.add(k); });
-    b.breadthSum += seen.size;
+    // Weekday vs weekend comes from the date, so unlike anything derived from how
+    // finely a session was logged it says something real about when you play.
+    const d = new Date(s.session_date + 'T12:00:00').getDay();
+    b[(d === 0 || d === 6) ? 'wkend' : 'wkday'] += m;
   });
 
   // Three things visible at once, none of them hidden in a tooltip:
-  //   bars  = how much practice time each length band actually gave you (impact)
-  //   above = how many sessions were that length (frequency)
-  //   line  = how many of the four areas a session of that length typically covers (breadth)
+  //   bar height = how much practice time each length band actually gave you (impact)
+  //   bar split  = whether that time lands on weekdays or weekends (when you play)
+  //   labels     = how many sessions were that length, and their share of your total
   // Frequency and impact disagree sharply for most people, and that gap is the lesson.
   const _distTotal = buckets.reduce((s, b) => s + b.mins, 0) || 1;
-  const _maxMins = Math.max(...buckets.map(b => b.mins), 1);
   distHTML = {
-    kind: 'bars', height: 260, labels: buckets.map(b => b.label),
+    kind: 'stackbars', height: 260, labels: buckets.map(b => b.label),
     fmt: v => formatMinutes(Math.round(v)),
-    peak: buckets.findIndex(b => b.mins === _maxMins),
     series: [
-      { name: 'Practice time', color: '#f5c518', data: buckets.map(b => Math.round(b.mins)) },
-      { name: 'Areas covered', color: '#6366f1', axis: 2, fmt: v => v.toFixed(1),
-        data: buckets.map(b => b.count ? +(b.breadthSum / b.count).toFixed(2) : null) },
+      { name: 'Weekdays', color: '#f5c518', data: buckets.map(b => Math.round(b.wkday)) },
+      { name: 'Weekends', color: '#c9a227', data: buckets.map(b => Math.round(b.wkend)) },
     ],
-    y2: { max: 4, color: '#6366f1', fmt: v => String(Math.round(v)) },
     valueLabels: buckets.map(b => b.count ? `${b.count} session${b.count === 1 ? '' : 's'}` : ''),
     subLabels: buckets.map(b => b.mins ? `${Math.round((b.mins / _distTotal) * 100)}% of your time` : ''),
-    legend: [
-      { name: 'Practice time (left)', color: '#f5c518' },
-      { name: 'Areas covered per session (right)', color: '#6366f1' },
-    ],
+    legend: [{ name: 'Weekdays', color: '#f5c518' }, { name: 'Weekends', color: '#c9a227' }],
     note: (() => {
       const most = buckets.reduce((a, b) => (b.mins > a.mins ? b : a), buckets[0]);
       const often = buckets.reduce((a, b) => (b.count > a.count ? b : a), buckets[0]);
       if (!most.mins) return '';
-      if (most.label !== often.label)
-        return `Most of your sessions are ${often.label}, but ${Math.round((most.mins / _distTotal) * 100)}% of your practice time comes from your ${most.label} ones.`;
-      return `Your ${most.label} sessions are both your most common and where most of your practice time comes from.`;
+      const wkend = buckets.reduce((s, b) => s + b.wkend, 0);
+      const wkPct = Math.round((wkend / _distTotal) * 100);
+      const lead = most.label !== often.label
+        ? `Most of your sessions are ${often.label}, but ${Math.round((most.mins / _distTotal) * 100)}% of your practice time comes from your ${most.label} ones.`
+        : `Your ${most.label} sessions are both your most common and where most of your practice time comes from.`;
+      const when = wkPct <= 5 ? ` Almost all of it lands on weekdays: weekends account for just ${wkPct}%.`
+                 : wkPct >= 45 ? ` Weekends carry ${wkPct}% of it, so your practice leans on your days off.`
+                 : ` Weekends account for ${wkPct}% of your time.`;
+      return lead + when;
     })(),
   };
 
@@ -15248,6 +15247,9 @@ function _ddDrawChart(host, spec) {
         body += `<rect x="${(xBand(i) - bw / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, y0 - y1).toFixed(1)}" fill="url(#${gid})" class="ddc-bar"/>`;
         acc[i] += v;
       });
+    });
+    (spec.valueLabels || []).forEach((vl, i) => {
+      if (vl) body += `<text x="${xBand(i).toFixed(1)}" y="${(yAt(acc[i]) - 8).toFixed(1)}" class="ddc-vlab">${escHtml(vl)}</text>`;
     });
   } else if (stacked) {
     const acc = new Array(n).fill(0);
