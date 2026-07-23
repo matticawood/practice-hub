@@ -15808,7 +15808,7 @@ function _renderStatsImprove() {
       // Chord Recognition has its own clef dial (treble / bass / mixed), which its
       // leaderboard treats as a separate board, so it belongs on the ladder too.
       { k: 'clef', steps: [['treble', 'treble clef', 0], ['bass', 'bass clef', 1], ['mixed', 'mixed clefs', 2]] },
-      { k: 'mode', steps: [['key', 'within one key', 0], ['free', 'any key', 1]] },
+      { k: 'mode', keyed: true, steps: [['key', 'within one key', 0], ['free', 'any key', 4]] },
     ],
     ear: [
       { k: 'chord_set',   steps: [['major_minor', 'major and minor', 0], ['triads', 'all triads', 1],
@@ -15818,12 +15818,27 @@ function _renderStatsImprove() {
     interval: [
       { k: 'tier',     steps: [['number', 'interval numbers', 0], ['pm', 'perfect and major', 1], ['full', 'full quality', 2]] },
       { k: 'side',     steps: [['reading', 'by sight', 0], ['listening', 'by ear', 2]] },
-      { k: 'key_mode', steps: [['key', 'within one key', 0], ['free', 'any key', 1]] },
+      { k: 'key_mode', keyed: true, steps: [['key', 'within one key', 0], ['free', 'any key', 4]] },
     ],
   };
+  // Keys are not interchangeable: playing in C is not playing in F# major, so a key
+  // counts by how many sharps or flats it carries. Half a rung each keeps a key
+  // change smaller than a change of chord type or clef, but not free.
+  const KEY_ACC = {
+    C:0, Am:0, G:1, Em:1, D:2, Bm:2, A:3, 'F#m':3, E:4, 'C#m':4, B:5, 'G#m':5, 'F#':6, 'D#m':6, 'C#':7, 'A#m':7,
+    F:1, Dm:1, Bb:2, Gm:2, Eb:3, Cm:3, Ab:4, Fm:4, Db:5, Bbm:5, Gb:6, Ebm:6, Cb:7, Abm:7,
+  };
+  const _keyAcc = k => (KEY_ACC[k] != null ? KEY_ACC[k] : 3);
+  // A dial marked `keyed` splits its "within one key" option into one rung per key.
   const _stepOf = (dial, row) => {
-    const v = row[dial.k];
-    return dial.steps.find(s => String(s[0]) === String(v)) || null;
+    const raw = String(row[dial.k]);
+    const st = dial.steps.find(s => String(s[0]) === raw);
+    if (!st) return null;
+    if (dial.keyed && raw === 'key') {
+      const k = row.key_signature || 'C';
+      return [`key:${k}`, `in ${k}`, st[2] + _keyAcc(k) * 0.5];
+    }
+    return st;
   };
   // A setting's identity, difficulty and name, derived from the ladder.
   const _settingOf = (rows0, toolKey) => {
@@ -15844,6 +15859,12 @@ function _renderStatsImprove() {
     dials.forEach(d => {
       const cur = _stepOf(d, row);
       if (!cur) return;
+      // Inside a key, the next step is a key carrying more sharps or flats, which is
+      // a gentler move than abandoning the key altogether.
+      if (d.keyed && String(row[d.k]) === 'key' && _keyAcc(row.key_signature || 'C') < 7) {
+        if (!bestOpt || 0.5 < bestOpt.cost) bestOpt = { cost: 0.5, label: 'a key with more sharps or flats' };
+        return;
+      }
       const harder = d.steps.filter(s => s[2] > cur[2]).sort((a, b) => a[2] - b[2])[0];
       if (!harder) return;
       const cost = harder[2] - cur[2];
@@ -15851,8 +15872,10 @@ function _renderStatsImprove() {
     });
     return bestOpt;
   };
-  // Score over time, drawn as one line but shaded by how hard the settings were, so a
-  // dip caused by stepping up reads as a step up rather than as getting worse.
+  // Score over time for the settings the card is reporting on, so the line and the
+  // figure above it describe the same thing. Shaded by difficulty as a fallback for
+  // members with too few plays at their current settings to draw, where the line
+  // covers everything and a dip caused by stepping up should read as a step up.
   const _sparkByDiff = (rows, setting, color) => {
     if (!rows || rows.length < 2) return '';
     const pts = rows.slice(-18);
@@ -15911,7 +15934,7 @@ function _renderStatsImprove() {
     return `<a class="si-tool" ${href} style="--tc:${t.color}">
       <span class="si-tool-head"><span class="si-tool-name">${t.label}</span><span class="si-tool-plays">${plays} play${plays !== 1 ? 's' : ''}</span></span>
       <span class="si-tool-best"><span class="si-tool-best-num">${bestHere}</span><span class="si-tool-best-lbl">best here</span></span>
-      ${_sparkByDiff(rows, setting, t.color)}
+      ${_sparkByDiff(here.length >= 2 ? here : rows, setting, t.color)}
       <span class="si-tool-basis" title="Your current settings: ${escHtml(cur.label)}">${escHtml(cur.label)}</span>
       <span class="si-tool-foot">${nudge}</span>
     </a>`;
