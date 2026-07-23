@@ -10008,6 +10008,17 @@ async function loadData() {
         }
       }
     } catch (e) { /* focus insights simply won't fire */ }
+    // Community-wide average focus per session-length band. Most members have too
+    // few ratings of their own to see the shape, so this gives them a reference.
+    try {
+      const { data: fbl } = await db.rpc("get_focus_by_length");
+      if (fbl && fbl.length) {
+        _focusByLength = [0, 1, 2, 3, 4].map(i => {
+          const r = fbl.find(x => x.band === i);
+          return r && r.rated >= 10 ? +r.avg_focus : null;
+        });
+      }
+    } catch (e) { /* reference line simply won't draw */ }
 
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
@@ -13796,6 +13807,7 @@ function _emojiToSvg(e, size = 15) {
 }
 
 let _insightTrainers = null, _insightCollections = null; // loaded in loadData
+let _focusByLength = null; // community avg focus per session-length band, loaded in loadData
 let _customStatusByName = {}; // lower(title) -> status for custom pieces (self-or-owner RPC, RLS-safe)
 let _pathTheoryStarted = false; // has the member completed any theory lesson
 let _goalPieceTiers = null;     // difficulties of the member's completed pieces (roadmap goals)
@@ -14865,48 +14877,66 @@ function renderDeepDive() {
     { label: '30–60m', min:  30, max:  60 },
     { label: '1–2h',   min:  60, max: 120 },
     { label: '2h+',    min: 120, max: Infinity },
-  ].map(b => ({ ...b, count: 0, mins: 0, wkday: 0, wkend: 0 }));
+  ].map(b => ({ ...b, count: 0, mins: 0, focusSum: 0, focusN: 0 }));
   sessions.forEach(s => {
     const m = s.duration_minutes || 0;
     const b = buckets.find(x => m >= x.min && m < x.max);
     if (!b) return;
     b.count++;
     b.mins += m;
-    // Weekday vs weekend comes from the date, so unlike anything derived from how
-    // finely a session was logged it says something real about when you play.
-    const d = new Date(s.session_date + 'T12:00:00').getDay();
-    b[(d === 0 || d === 6) ? 'wkend' : 'wkday'] += m;
+    if (s.focus_rating > 0) { b.focusSum += s.focus_rating; b.focusN++; }
   });
 
-  // Three things visible at once, none of them hidden in a tooltip:
-  //   bar height = how much practice time each length band actually gave you (impact)
-  //   bar split  = whether that time lands on weekdays or weekends (when you play)
+  // The question this chart answers: how long a session actually works for you.
+  //   bar height = practice time each length band gave you (impact)
   //   labels     = how many sessions were that length, and their share of your total
-  // Frequency and impact disagree sharply for most people, and that gap is the lesson.
+  //   line       = your average focus rating for sessions of that length
+  // Focus against length is the relationship worth knowing: it shows where quality
+  // peaks and where a longer sit-down stops paying. Members rarely have enough of
+  // their own ratings for the shape to be readable, so the community average rides
+  // alongside as a faint reference.
   const _distTotal = buckets.reduce((s, b) => s + b.mins, 0) || 1;
+  const _maxMins = Math.max(...buckets.map(b => b.mins), 1);
+  const _myFocus = buckets.map(b => (b.focusN >= 3 ? +(b.focusSum / b.focusN).toFixed(2) : null));
+  const _refFocus = (typeof _focusByLength !== 'undefined' && _focusByLength) ? _focusByLength : null;
+  const _myRated = buckets.reduce((s, b) => s + b.focusN, 0);
+  const _focusSeries = [];
+  if (_refFocus) _focusSeries.push({ name: 'All members', color: '#b9b0a2', axis: 2, faint: true,
+                                     fmt: v => v.toFixed(1), data: _refFocus });
+  if (_myFocus.some(v => v != null)) _focusSeries.push({ name: 'Your focus', color: '#6366f1', axis: 2,
+                                                        fmt: v => v.toFixed(1), data: _myFocus });
   distHTML = {
-    kind: 'stackbars', height: 260, labels: buckets.map(b => b.label),
+    kind: 'bars', height: 260, labels: buckets.map(b => b.label),
     fmt: v => formatMinutes(Math.round(v)),
-    series: [
-      { name: 'Weekdays', color: '#f5c518', data: buckets.map(b => Math.round(b.wkday)) },
-      { name: 'Weekends', color: '#c9a227', data: buckets.map(b => Math.round(b.wkend)) },
-    ],
+    peak: buckets.findIndex(b => b.mins === _maxMins),
+    series: [{ name: 'Practice time', color: '#f5c518', data: buckets.map(b => Math.round(b.mins)) },
+             ..._focusSeries],
+    ...(_focusSeries.length ? { y2: { max: 5, color: '#6366f1', fmt: v => String(Math.round(v)) } } : {}),
     valueLabels: buckets.map(b => b.count ? `${b.count} session${b.count === 1 ? '' : 's'}` : ''),
     subLabels: buckets.map(b => b.mins ? `${Math.round((b.mins / _distTotal) * 100)}% of your time` : ''),
-    legend: [{ name: 'Weekdays', color: '#f5c518' }, { name: 'Weekends', color: '#c9a227' }],
+    legend: [{ name: 'Practice time (left)', color: '#f5c518' },
+             ..._focusSeries.map(s => ({ name: `${s.name}, focus out of 5 (right)`, color: s.color }))],
     note: (() => {
       const most = buckets.reduce((a, b) => (b.mins > a.mins ? b : a), buckets[0]);
       const often = buckets.reduce((a, b) => (b.count > a.count ? b : a), buckets[0]);
       if (!most.mins) return '';
-      const wkend = buckets.reduce((s, b) => s + b.wkend, 0);
-      const wkPct = Math.round((wkend / _distTotal) * 100);
       const lead = most.label !== often.label
         ? `Most of your sessions are ${often.label}, but ${Math.round((most.mins / _distTotal) * 100)}% of your practice time comes from your ${most.label} ones.`
         : `Your ${most.label} sessions are both your most common and where most of your practice time comes from.`;
-      const when = wkPct <= 5 ? ` Almost all of it lands on weekdays: weekends account for just ${wkPct}%.`
-                 : wkPct >= 45 ? ` Weekends carry ${wkPct}% of it, so your practice leans on your days off.`
-                 : ` Weekends account for ${wkPct}% of your time.`;
-      return lead + when;
+      // Where does focus peak? Prefer the member's own ratings, fall back to everyone's.
+      const src = _myFocus.some(v => v != null) ? _myFocus : _refFocus;
+      const mine = src === _myFocus;
+      let tail = '';
+      if (src) {
+        let bi = -1;
+        src.forEach((v, i) => { if (v != null && (bi < 0 || v > src[bi])) bi = i; });
+        if (bi >= 0) tail = mine
+          ? ` Your focus peaks at ${buckets[bi].label} (${src[bi].toFixed(1)} out of 5), so that is the length that works best for you.`
+          : ` You have not rated enough sessions to see your own pattern yet. Across all members focus peaks at ${buckets[bi].label} (${src[bi].toFixed(1)} out of 5), then falls off for longer sittings. Rate a few sessions to see your own shape.`;
+      } else if (!_myRated) {
+        tail = ' Rate your focus when you log a session to see which session length works best for you.';
+      }
+      return lead + tail;
     })(),
   };
 
@@ -15284,10 +15314,14 @@ function _ddDrawChart(host, spec) {
     const run = pts.filter(Boolean);
     if (!run.length) return;
     body += `<path d="${run.map((p, j) => `${j ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" fill="none"
-      stroke="${se.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4" class="ddc-stroke"/>`;
+      stroke="${se.color}" stroke-width="${se.faint ? 1.8 : 2.4}" stroke-linecap="round" stroke-linejoin="round"
+      stroke-dasharray="${se.faint ? '3 5' : '6 4'}" opacity="${se.faint ? '.75' : '1'}" class="ddc-stroke"/>`;
     run.forEach(p => {
-      body += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" fill="#fff" stroke="${se.color}" stroke-width="2.4"/>`;
-      body += `<text x="${p.x.toFixed(1)}" y="${(p.y - 11).toFixed(1)}" class="ddc-vlab" style="fill:${se.color}">${escHtml(se.fmt ? se.fmt(p.v) : String(p.v))}</text>`;
+      body += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${se.faint ? 3 : 4.5}" fill="#fff"
+        stroke="${se.color}" stroke-width="${se.faint ? 1.8 : 2.4}" opacity="${se.faint ? '.8' : '1'}"/>`;
+      // Only the member's own line is labelled; the reference would double every number.
+      if (!se.faint)
+        body += `<text x="${p.x.toFixed(1)}" y="${(p.y - 11).toFixed(1)}" class="ddc-vlab" style="fill:${se.color}">${escHtml(se.fmt ? se.fmt(p.v) : String(p.v))}</text>`;
     });
   });
 
