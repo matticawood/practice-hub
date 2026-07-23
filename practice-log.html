@@ -6303,11 +6303,31 @@
        height to match so shape and detail are actually readable. */
     #dd-chart-body { min-height: 230px; }
     #dd-chart-body .dd-bar-chart, #dd-chart-body .dd-stack { height: 210px; }
-    #dd-chart-body .dd-area { height: 210px; }
+    #dd-chart-body .dd-area, #dd-chart-body .dd-plot { height: 210px; }
     @media (max-width: 760px) {
       #dd-chart-body { min-height: 190px; }
-      #dd-chart-body .dd-bar-chart, #dd-chart-body .dd-stack, #dd-chart-body .dd-area { height: 170px; }
+      #dd-chart-body .dd-bar-chart, #dd-chart-body .dd-stack,
+      #dd-chart-body .dd-area, #dd-chart-body .dd-plot { height: 170px; }
     }
+    /* Plot chrome: y-axis gridlines behind the series, labels in a left gutter. */
+    .dd-plot { position: relative; }
+    .dd-ygrid { position: absolute; inset: 0; pointer-events: none; }
+    .dd-yline { position: absolute; left: 44px; right: 0; border-top: 1px dashed color-mix(in srgb, var(--text-muted) 26%, transparent); }
+    .dd-yline span { position: absolute; left: -44px; top: -7px; width: 38px; text-align: right;
+      font-size: .54rem; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    /* Combo: CSS bars (so they can be styled) with an SVG line overlaid. */
+    .dd-combo { position: absolute; left: 44px; right: 0; top: 0; bottom: 0; display: flex; align-items: flex-end; gap: 5px; }
+    .dd-combo-col { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 0; }
+    .dd-combo-bar { width: 100%; border-radius: 4px 4px 0 0;
+      background: linear-gradient(180deg, #f7d24a, #edb800); transition: height .5s cubic-bezier(.4,0,.2,1); }
+    .dd-lineover { position: absolute; left: 44px; right: 0; top: 0; bottom: 0; width: auto; height: 100%; overflow: visible; }
+    .dd-labels-inset { padding-left: 44px; }
+    /* Small key so the two series are named. */
+    .dd-key { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px;
+      font-size: .58rem; font-weight: 700; color: var(--text-muted); }
+    .dd-key-bar, .dd-key-line { display: inline-block; }
+    .dd-key-bar { width: 9px; height: 9px; border-radius: 2px; background: #edb800; }
+    .dd-key-line { width: 13px; height: 2px; border-radius: 2px; background: #8a6d1f; margin-left: 8px; }
 
     .dd-panes-3 { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); }
     .dd-panes-3 > .dd-pane + .dd-pane { border-left: 1px solid var(--border); }
@@ -15103,33 +15123,31 @@ function renderMonthlyChart() {
 
   const maxMins = Math.max(...buckets.map(b => b.mins), 1);
   const totalMins = buckets.reduce((s, b) => s + b.mins, 0);
-  const W = 300, H = 78, PAD = 5, n = buckets.length;
-  const pts = buckets.map((b, i) => ({
-    x: PAD + (n > 1 ? (i / (n - 1)) * (W - 2 * PAD) : (W / 2)),
-    y: H - PAD - (b.mins / maxMins) * (H - 2 * PAD),
-  }));
-  const smooth = (p) => {
-    if (p.length < 2) return p.length ? `M ${p[0].x},${p[0].y} L ${p[0].x},${p[0].y}` : '';
-    let d = `M ${p[0].x},${p[0].y}`;
-    for (let i = 0; i < p.length - 1; i++) { const a = p[i], b = p[i + 1], cx = (a.x + b.x) / 2; d += ` C ${cx},${a.y} ${cx},${b.y} ${b.x},${b.y}`; }
-    return d;
-  };
-  const linePath = smooth(pts);
-  const areaPath = `${linePath} L ${pts[n - 1].x},${H} L ${pts[0].x},${H} Z`;
-  const lastPt = pts[n - 1];
+  const n = buckets.length;
+
+  // Combo chart: bars are the actual minutes per period, the line is a 3-period
+  // rolling average so the underlying direction is readable through a spiky series.
+  const roll = buckets.map((b, i) => {
+    const lo = Math.max(0, i - 1), hi = Math.min(n - 1, i + 1);
+    let s = 0, c = 0;
+    for (let j = lo; j <= hi; j++) { s += buckets[j].mins; c++; }
+    return s / c;
+  });
+  const linePts = roll.map((v, i) => `${n > 1 ? (i / (n - 1)) * 100 : 50},${100 - (v / maxMins) * 100}`).join(' ');
+  const grid = [1, 0.75, 0.5, 0.25, 0];
 
   el.innerHTML = `
-    <div class="dd-trend-total">${formatMinutes(totalMins)}<span> in this range</span></div>
-    <svg class="dd-area" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <defs><linearGradient id="ddAreaGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.32"/>
-        <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02"/>
-      </linearGradient></defs>
-      <path d="${areaPath}" fill="url(#ddAreaGrad)"/>
-      <path d="${linePath}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-      <line x1="${lastPt.x}" y1="${lastPt.y}" x2="${lastPt.x}" y2="${H}" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="2 2" vector-effect="non-scaling-stroke" opacity="0.5"/>
-    </svg>
-    <div class="dd-bar-labels">${buckets.map(b => `<div class="dd-bar-label">${b.label}</div>`).join('')}</div>`;
+    <div class="dd-trend-total">${formatMinutes(totalMins)}<span> in this range</span>
+      <span class="dd-key"><i class="dd-key-bar"></i>Practice<i class="dd-key-line"></i>3-period average</span>
+    </div>
+    <div class="dd-plot">
+      <div class="dd-ygrid">${grid.map(f => `<div class="dd-yline" style="bottom:${f * 100}%"><span>${f === 0 ? '0' : formatMinutes(Math.round(maxMins * f))}</span></div>`).join('')}</div>
+      <div class="dd-combo">${buckets.map(b => `<div class="dd-combo-col" title="${b.label || ''} ${formatMinutes(b.mins)}"><div class="dd-combo-bar" style="height:${Math.max(b.mins > 0 ? 2 : 0, (b.mins / maxMins) * 100)}%"></div></div>`).join('')}</div>
+      <svg class="dd-lineover" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="${linePts}" fill="none" stroke="#8a6d1f" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="dd-bar-labels dd-labels-inset">${buckets.map(b => `<div class="dd-bar-label">${b.label}</div>`).join('')}</div>`;
 }
 
 // ── Band A: "Where to improve" — the utility-first top of the Stats page ──
