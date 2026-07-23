@@ -15793,6 +15793,26 @@ function _renderStatsImprove() {
     keys.sort((x, y) => _avg(g[x]) - _avg(g[y]));
     return { label: (lblMap && lblMap[keys[0]]) || _titleCase(keys[0]), avg: Math.round(_avg(g[keys[0]])) };
   };
+  // Trend has to compare like with like. Raw scores fall when someone moves from
+  // treble clef to grand staff, or from easy chord sets to hard ones, and calling
+  // that "slipping" punishes them for taking on something harder. So the verdict is
+  // measured inside one variant, and withheld when no variant has enough plays.
+  const _toolTrend = (rows, dim) => {
+    const half = a => { const h = Math.floor(a.length / 2); return _avg(a.slice(h)) - _avg(a.slice(0, h)); };
+    const verdict = d => (d > 0.75 ? 1 : d < -0.75 ? -1 : 0);
+    if (dim) {
+      const g = {};
+      rows.forEach(r => { const k = r[dim]; if (k == null || k === '') return; (g[k] = g[k] || []).push(r.v); });
+      const variants = Object.keys(g);
+      const usable = variants.filter(k => g[k].length >= 4).sort((a, b) => g[b].length - g[a].length);
+      if (usable.length) return { tr: verdict(half(g[usable[0]])), basis: usable[0], mixed: variants.length > 1 };
+      // They have spread their plays across variants with too few of each to judge.
+      if (variants.length > 1) return null;
+    }
+    const vals = rows.map(r => r.v);
+    if (vals.length < 4) return null;
+    return { tr: verdict(half(vals)), basis: null, mixed: false };
+  };
   const TRAINERS = [
     { key: 'note',     label: 'Note Reading',   color: '#10b981', href: '/tools.html?section=note',     dim: 'clef',      lbl: { treble: 'Treble clef', bass: 'Bass clef', grand: 'Grand staff' } },
     { key: 'chord',    label: 'Chord Reading',  color: '#8b5cf6', href: '/tools.html?section=chord',    dim: 'mode' },
@@ -15813,8 +15833,15 @@ function _renderStatsImprove() {
     const vals = rows.map(r => r.v);
     const best = Math.max(...vals);
     const plays = rows.length;
-    const tr = (function () { if (vals.length < 4) return 0; const h = Math.floor(vals.length / 2); const d = _avg(vals.slice(h)) - _avg(vals.slice(0, h)); return d > 0.75 ? 1 : d < -0.75 ? -1 : 0; })();
-    const trIco = tr > 0 ? '<span class="si-tool-trend up">&#9650; improving</span>' : tr < 0 ? '<span class="si-tool-trend down">&#9660; slipping</span>' : '<span class="si-tool-trend flat">&mdash; steady</span>';
+    const trd = _toolTrend(rows, t.dim);
+    // No honest like-for-like comparison available: say nothing rather than guess.
+    const trBasis = trd && trd.basis
+      ? ` title="Based on your ${escHtml((t.lbl && t.lbl[trd.basis]) || _titleCase(trd.basis))} plays${trd.mixed ? ', so changing settings will not count against you' : ''}"`
+      : '';
+    const trIco = !trd ? ''
+      : trd.tr > 0 ? `<span class="si-tool-trend up"${trBasis}>&#9650; improving</span>`
+      : trd.tr < 0 ? `<span class="si-tool-trend down"${trBasis}>&#9660; slipping</span>`
+      : `<span class="si-tool-trend flat"${trBasis}>&mdash; steady</span>`;
     const wk = _weakGroup(rows, t.dim, t.lbl);
     return `<a class="si-tool" ${href} style="--tc:${t.color}">
       <span class="si-tool-head"><span class="si-tool-name">${t.label}</span><span class="si-tool-plays">${plays} play${plays !== 1 ? 's' : ''}</span></span>
