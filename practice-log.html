@@ -10058,7 +10058,10 @@ async function loadData() {
   // Everything below (insights, badges, share-icons) belongs to other tabs and
   // used to block this first paint for ~4 extra round-trips. It now streams in
   // the background and re-renders whatever is on screen when it lands.
-  switchMainLbTab('dashboard');
+  // Respect a Hub tab the member picked while the data was still loading: forcing
+  // 'dashboard' here threw them back to Home after they had already clicked Stats.
+  const _picked = document.querySelector('.msn-item.active')?.dataset.msnVal;
+  switchMainLbTab(_picked || 'dashboard');
   renderSessions(true);
   renderLeaderboard();
   loadWeeklyGoal();
@@ -14458,8 +14461,10 @@ function _renderNextMoveCard() {
   const el = document.getElementById('dash-nextmove-card');
   if (!el) return;
   el.innerHTML = '';
-  // Own dashboard only (don't log or show when the owner is viewing another member).
-  if (viewingEmail && myEmail && viewingEmail !== myEmail) return;
+  // Normally your own dashboard only, but the owner reviewing a member needs to see
+  // what that member is being shown. Everything below reads from the loaded data,
+  // which is already the viewed member's.
+  if (viewingEmail && myEmail && viewingEmail !== myEmail && !isOwner()) return;
   let insights = [];
   try { insights = _computeInsights() || []; } catch (e) { return; }
   if (!insights.length) return;
@@ -14683,7 +14688,7 @@ function _renderDailyCard() {
   const el = document.getElementById('dash-daily-card');
   if (!el) return;
   el.innerHTML = '';
-  if (viewingEmail && myEmail && viewingEmail !== myEmail) return; // own dashboard only
+  if (viewingEmail && myEmail && viewingEmail !== myEmail && !isOwner()) return; // own dashboard, or the owner reviewing a member
   const todayStr = toDateStr(new Date());
   const todaySessions = (allSessions || []).filter(s => s.session_date === todayStr);
   const types = new Set();
@@ -23656,6 +23661,11 @@ async function switchViewingEmail(email) {
   if (typeof _practiceBaseline !== "undefined") _practiceBaseline = null;
   // Same for the DB-backed self-checks, so they re-fetch for the newly-viewed member.
   if (typeof _selfChecks !== "undefined") _selfChecks = null;
+  // Goals are cached in globals and the dashboard only refetches when they are empty,
+  // so without this it would keep showing the previous member's goals.
+  weeklyGoalMins = null;
+  allGoals = [];
+  if (typeof _goalsLoaded !== "undefined") _goalsLoaded = false;
 
   // Always switch back to the log/hub tab when changing user
   document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.mainTab === "log"));
