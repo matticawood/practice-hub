@@ -6386,6 +6386,14 @@
     .dd-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
     .dd-leg { display: inline-flex; align-items: center; gap: 5px; font-size: .58rem; font-weight: 700; color: var(--text-muted); }
     .dd-leg i { width: 8px; height: 8px; border-radius: 2px; }
+    /* Toggleable legend: click to overlay that area's line on the trend. */
+    .dd-leg-btn { font-family: inherit; cursor: pointer; border: 1px solid var(--border); background: none;
+      padding: 4px 9px; border-radius: 99px; transition: all .15s; }
+    .dd-leg-btn i { opacity: .35; transition: opacity .15s; }
+    .dd-leg-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--text-muted) 40%, transparent); }
+    .dd-leg-btn.is-on { color: var(--text); border-color: color-mix(in srgb, var(--text-muted) 45%, transparent);
+      background: color-mix(in srgb, var(--text-muted) 8%, transparent); }
+    .dd-leg-btn.is-on i { opacity: 1; }
     /* Consistency: ring beside a wrapping strip of label-over-value figures. */
     .dd-consist { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; }
     .dd-consist .dd-ring-wrap { margin: 0; flex: 0 0 auto; }
@@ -14822,10 +14830,21 @@ function renderDeepDive() {
   const maxDowMins = Math.max(...dowOrder.map(d => dayMins[d]), 1);
   const peakDow    = dowOrder.reduce((a, b) => dayMins[a] > dayMins[b] ? a : b);
 
+  // Split each weekday by area, so you can see not just when you practise but what.
+  const _dowArea = { repertoire: [0,0,0,0,0,0,0], technique: [0,0,0,0,0,0,0], sight_reading: [0,0,0,0,0,0,0], musicianship: [0,0,0,0,0,0,0] };
+  sessions.forEach(s => {
+    if (!s.session_date) return;
+    const slot = dowOrder.indexOf(new Date(s.session_date + 'T12:00:00').getDay());
+    if (slot < 0) return;
+    (s.practice_items || []).forEach(it => {
+      const k = _DD_T2A[it.item_type];
+      if (k) _dowArea[k][slot] += it.duration_minutes || 0;
+    });
+  });
   dowHTML = {
-    kind: 'bars', labels: dowLabels, fmt: v => formatMinutes(Math.round(v)),
-    peak: dowOrder.indexOf(peakDow),
-    series: [{ name: 'Practice', color: '#f5c518', data: dowOrder.map(d => dayMins[d]) }],
+    kind: 'stackbars', labels: dowLabels, fmt: v => formatMinutes(Math.round(v)),
+    series: _DD_AREAS.map(a => ({ name: a.lab, color: a.c, data: _dowArea[a.k] })),
+    legend: _DD_AREAS.map(a => ({ name: a.lab, color: a.c })),
   };
 
   // ── Session length distribution ───────────────────────────────────
@@ -15070,7 +15089,7 @@ function renderDeepDive() {
 // Practice trend chart with a Strava-style time horizon: weekly buckets for the
 // short ranges (so the trend has enough points) and monthly for the long ones.
 let _monthlyRange = '1Y';
-window.setMonthlyRange = function(r) { _monthlyRange = r; renderMonthlyChart(); };
+window.setMonthlyRange = function(r) { _monthlyRange = r; _ddPaintChart(); };
 
 // ── Deep Dive chart engine ────────────────────────────────────────────────
 // Hand-written SVG with real pixel scales (measured, not percentage divs), so text
@@ -15083,16 +15102,33 @@ function _ddNiceMax(v) {
   const n = v / pow;
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * pow;
 }
-// Catmull-Rom style smoothing, clamped so the curve can't overshoot below the axis.
+// Monotone cubic (Fritsch-Carlson). Unlike Catmull-Rom this cannot overshoot the
+// data range, so a run of zeros followed by a rise never dips below the axis.
 function _ddSmooth(pts) {
-  if (!pts.length) return '';
-  if (pts.length < 3) return 'M' + pts.map(p => `${p.x},${p.y}`).join(' L');
+  const n = pts.length;
+  if (n === 0) return '';
+  if (n === 1) return `M${pts[0].x},${pts[0].y}`;
+  if (n === 2) return `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}`;
+  const dx = [], slope = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = pts[i + 1].x - pts[i].x || 1;
+    slope[i] = (pts[i + 1].y - pts[i].y) / dx[i];
+  }
+  const t = new Array(n);
+  t[0] = slope[0]; t[n - 1] = slope[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    t[i] = (slope[i - 1] * slope[i] <= 0) ? 0 : (slope[i - 1] + slope[i]) / 2;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    if (slope[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i] / slope[i], b = t[i + 1] / slope[i], s = a * a + b * b;
+    if (s > 9) { const tau = 3 / Math.sqrt(s); t[i] = tau * a * slope[i]; t[i + 1] = tau * b * slope[i]; }
+  }
   let d = `M${pts[0].x},${pts[0].y}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
-    const t = 0.2;
-    d += ` C${p1.x + (p2.x - p0.x) * t},${p1.y + (p2.y - p0.y) * t}` +
-         ` ${p2.x - (p3.x - p1.x) * t},${p2.y - (p3.y - p1.y) * t} ${p2.x},${p2.y}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i];
+    d += ` C${pts[i].x + h / 3},${pts[i].y + t[i] * h / 3}` +
+         ` ${pts[i + 1].x - h / 3},${pts[i + 1].y - t[i + 1] * h / 3} ${pts[i + 1].x},${pts[i + 1].y}`;
   }
   return d;
 }
@@ -15104,7 +15140,7 @@ function _ddDrawChart(host, spec) {
   const iw = Math.max(10, W - P.l - P.r), ih = Math.max(10, H - P.t - P.b);
   const labels = spec.labels || [], series = spec.series || [];
   const n = Math.max(1, labels.length);
-  const stacked = spec.kind === 'stack';
+  const stacked = spec.kind === 'stack' || spec.kind === 'stackbars';
   const totals = labels.map((_, i) => stacked
     ? series.reduce((s, se) => s + (se.data[i] || 0), 0)
     : Math.max(...series.map(se => se.data[i] || 0)));
@@ -15129,14 +15165,32 @@ function _ddDrawChart(host, spec) {
   let defs = '', body = '';
   if (spec.kind === 'area') {
     series.forEach((se, si) => {
-      const gid = `${uid}a${si}`;
-      defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${se.color}" stop-opacity=".45"/>
-        <stop offset="100%" stop-color="${se.color}" stop-opacity=".03"/></linearGradient>`;
       const pts = se.data.map((v, i) => ({ x: xLine(i), y: yAt(v) }));
       const line = _ddSmooth(pts);
-      body += `<path d="${line} L${pts[pts.length - 1].x},${base} L${pts[0].x},${base} Z" fill="url(#${gid})" class="ddc-fill"/>`
-            + `<path d="${line}" fill="none" stroke="${se.color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" class="ddc-stroke"/>`;
+      if (!se.line) {   // filled series; overlays draw as a stroke only
+        const gid = `${uid}a${si}`;
+        defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${se.color}" stop-opacity=".45"/>
+          <stop offset="100%" stop-color="${se.color}" stop-opacity=".03"/></linearGradient>`;
+        body += `<path d="${line} L${pts[pts.length - 1].x},${base} L${pts[0].x},${base} Z" fill="url(#${gid})" class="ddc-fill"/>`;
+      }
+      body += `<path d="${line}" fill="none" stroke="${se.color}" stroke-width="${se.line ? 2 : 2.6}"${se.line ? ' stroke-dasharray="0"' : ''} stroke-linecap="round" stroke-linejoin="round" class="ddc-stroke"/>`;
+    });
+  } else if (spec.kind === 'stackbars') {
+    // Categorical stacked bars (weekdays aren't a continuous series, so no curve).
+    const bw = Math.max(6, Math.min(52, bandW * 0.6));
+    const acc = new Array(n).fill(0);
+    series.forEach((se, si) => {
+      const gid = `${uid}sb${si}`;
+      defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${se.color}" stop-opacity=".95"/>
+        <stop offset="100%" stop-color="${se.color}" stop-opacity=".68"/></linearGradient>`;
+      se.data.forEach((v, i) => {
+        if (!v) return;
+        const y0 = yAt(acc[i]), y1 = yAt(acc[i] + v);
+        body += `<rect x="${(xBand(i) - bw / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, y0 - y1).toFixed(1)}" fill="url(#${gid})" class="ddc-bar"/>`;
+        acc[i] += v;
+      });
     });
   } else if (stacked) {
     const acc = new Array(n).fill(0);
@@ -15207,9 +15261,19 @@ function _ddPaintChart() {
   document.querySelectorAll('.dd-tab').forEach(b => b.classList.toggle('is-active', b.dataset.dd === _ddMetric));
   // The date-range control only applies to the time-based trend view.
   const rng = document.getElementById('dd-range-wrap');
-  if (rng) rng.style.visibility = (_ddMetric === 'trend') ? 'visible' : 'hidden';
+  // Both time-based views honour the date range.
+  if (rng) rng.style.visibility = (_ddMetric === 'trend' || _ddMetric === 'area') ? 'visible' : 'hidden';
   if (_ddMetric === 'trend') { renderMonthlyChart(); return; }
-  const spec = (window._ddSpecs || {})[_ddMetric];
+  let spec = (window._ddSpecs || {})[_ddMetric];
+  if (_ddMetric === 'area') {
+    document.querySelectorAll('.dd-range-tg').forEach(b => b.classList.toggle('active', b.dataset.range === _monthlyRange));
+    const B = _ddRangeBuckets(_monthlyRange);
+    spec = {
+      kind: 'stack', labels: B.labels, fmt: v => formatMinutes(Math.round(v)),
+      series: _DD_AREAS.map(a => ({ name: a.lab, color: a.c, data: B.areas[a.k] })),
+      legend: _DD_AREAS.map(a => ({ name: a.lab, color: a.c })),
+    };
+  }
   if (!spec) { body.innerHTML = ''; return; }
   _ddDrawChart(body, spec);
   const lg = spec.legend;
@@ -15225,33 +15289,51 @@ if (!window._ddResizeHooked) {
     _ddRT = setTimeout(() => { if (document.getElementById('dd-chart-body')) _ddPaintChart(); }, 180);
   });
 }
-function renderMonthlyChart() {
-  // The trend view owns the whole chart body (there's no separate sub-container now).
-  const el = document.getElementById('dd-chart-body');
-  if (!el) return;
-  // Keep the range toggle's active highlight in sync (the buttons live outside
-  // this container, so they aren't replaced when the chart redraws).
-  document.querySelectorAll('.dd-range-tg').forEach(b => b.classList.toggle('active', b.dataset.range === _monthlyRange));
+const _DD_T2A = { piece:'repertoire', book:'repertoire', technique:'technique', sightreading:'sight_reading',
+                  theory:'musicianship', eartraining:'musicianship', improvisation:'musicianship' };
+const _DD_AREAS = [
+  { k: 'repertoire',    c: '#f5c518', lab: 'Repertoire' },
+  { k: 'technique',     c: '#6366f1', lab: 'Technique' },
+  { k: 'sight_reading', c: '#10b981', lab: 'Sight-reading' },
+  { k: 'musicianship',  c: '#a855f7', lab: 'Musicianship' },
+];
+// Which area lines are overlaid on the trend. Off by default so the headline stays simple.
+const _ddOverlays = { repertoire: false, technique: false, sight_reading: false, musicianship: false };
+window.toggleDdOverlay = function (k) { _ddOverlays[k] = !_ddOverlays[k]; renderMonthlyChart(); };
+
+// Bucket the sessions for a range, returning the total AND the per-area split, so
+// the trend and the stacked view share one time axis and both honour the range.
+function _ddRangeBuckets(range) {
   const sessions = allSessions || [];
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const dayMins = {};
-  sessions.forEach(s => { if (s.session_date) dayMins[s.session_date] = (dayMins[s.session_date] || 0) + (s.duration_minutes || 0); });
+  const dayMins = {}, dayArea = {};
+  sessions.forEach(s => {
+    if (!s.session_date) return;
+    dayMins[s.session_date] = (dayMins[s.session_date] || 0) + (s.duration_minutes || 0);
+    const a = dayArea[s.session_date] || (dayArea[s.session_date] = { repertoire:0, technique:0, sight_reading:0, musicianship:0 });
+    (s.practice_items || []).forEach(it => { const k = _DD_T2A[it.item_type]; if (k) a[k] += it.duration_minutes || 0; });
+  });
+  const labels = [], total = [], areas = { repertoire:[], technique:[], sight_reading:[], musicianship:[] };
+  const add = (mins, ar, label) => { labels.push(label); total.push(mins); _DD_AREAS.forEach(a => areas[a.k].push(ar[a.k] || 0)); };
 
-  const range = _monthlyRange;
-  const buckets = []; // { mins, label }
   if (range === '3M' || range === '6M') {
     const nWeeks = range === '3M' ? 13 : 26;
     const start = new Date(today);
     start.setDate(start.getDate() - (nWeeks - 1) * 7);
-    start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // back to Monday
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
     let lastMonth = -1;
     for (let w = 0; w < nWeeks; w++) {
       const ws = new Date(start); ws.setDate(start.getDate() + w * 7);
-      let mins = 0;
-      for (let d = 0; d < 7; d++) { const dt = new Date(ws); dt.setDate(ws.getDate() + d); mins += dayMins[toDateStr(dt)] || 0; }
+      let mins = 0; const ar = { repertoire:0, technique:0, sight_reading:0, musicianship:0 };
+      for (let d = 0; d < 7; d++) {
+        const dt = new Date(ws); dt.setDate(ws.getDate() + d);
+        const key = toDateStr(dt);
+        mins += dayMins[key] || 0;
+        const da = dayArea[key]; if (da) _DD_AREAS.forEach(a => ar[a.k] += da[a.k]);
+      }
       const mo = ws.getMonth();
-      buckets.push({ mins, label: mo !== lastMonth ? MONTHS[mo] : '' });
+      add(mins, ar, mo !== lastMonth ? MONTHS[mo] : '');
       lastMonth = mo;
     }
   } else {
@@ -15264,26 +15346,41 @@ function renderMonthlyChart() {
         nMonths = Math.max(3, Math.min((today.getFullYear() - fy) * 12 + (today.getMonth() - (fm - 1)) + 1, 60));
       }
     }
-    const monthSum = {};
-    sessions.forEach(s => { const k = s.session_date.slice(0, 7); monthSum[k] = (monthSum[k] || 0) + (s.duration_minutes || 0); });
+    const mSum = {}, mArea = {};
+    sessions.forEach(s => {
+      if (!s.session_date) return;
+      const k = s.session_date.slice(0, 7);
+      mSum[k] = (mSum[k] || 0) + (s.duration_minutes || 0);
+      const a = mArea[k] || (mArea[k] = { repertoire:0, technique:0, sight_reading:0, musicianship:0 });
+      (s.practice_items || []).forEach(it => { const t = _DD_T2A[it.item_type]; if (t) a[t] += it.duration_minutes || 0; });
+    });
     const sparse = nMonths > 14;
     for (let i = nMonths - 1; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       const showLabel = !sparse || d.getMonth() % 3 === 0;
-      const label = showLabel ? MONTHS[d.getMonth()] + (d.getMonth() === 0 ? ` '${String(d.getFullYear()).slice(2)}` : '') : '';
-      buckets.push({ mins: monthSum[key] || 0, label });
+      add(mSum[key] || 0, mArea[key] || {}, showLabel ? MONTHS[d.getMonth()] + (d.getMonth() === 0 ? ` '${String(d.getFullYear()).slice(2)}` : '') : '');
     }
   }
+  return { labels, total, areas };
+}
 
-  const maxMins = Math.max(...buckets.map(b => b.mins), 1);
-  const totalMins = buckets.reduce((s, b) => s + b.mins, 0);
-  const n = buckets.length;
+function renderMonthlyChart() {
+  // The trend view owns the whole chart body (there's no separate sub-container now).
+  const el = document.getElementById('dd-chart-body');
+  if (!el) return;
+  document.querySelectorAll('.dd-range-tg').forEach(b => b.classList.toggle('active', b.dataset.range === _monthlyRange));
+  const B = _ddRangeBuckets(_monthlyRange);
+  const totalMins = B.total.reduce((a, b) => a + b, 0);
+  const series = [{ name: 'All practice', color: '#f5c518', data: B.total }];
+  _DD_AREAS.forEach(a => { if (_ddOverlays[a.k]) series.push({ name: a.lab, color: a.c, data: B.areas[a.k], line: true }); });
 
-  el.innerHTML = `<div class="dd-trend-total">${formatMinutes(totalMins)}<span> in this range</span></div><div id="dd-trend-plot"></div>`;
+  el.innerHTML = `<div class="dd-trend-total">${formatMinutes(totalMins)}<span> in this range</span></div>`
+    + `<div id="dd-trend-plot"></div>`
+    + `<div class="dd-legend">${_DD_AREAS.map(a =>
+        `<button type="button" class="dd-leg dd-leg-btn${_ddOverlays[a.k] ? ' is-on' : ''}" onclick="toggleDdOverlay('${a.k}')"><i style="background:${a.c}"></i>${a.lab}</button>`).join('')}</div>`;
   _ddDrawChart(document.getElementById('dd-trend-plot'), {
-    kind: 'area', labels: buckets.map(b => b.label), fmt: v => formatMinutes(Math.round(v)),
-    series: [{ name: 'Practice', color: '#f5c518', data: buckets.map(b => b.mins) }],
+    kind: 'area', labels: B.labels, fmt: v => formatMinutes(Math.round(v)), series,
   });
 }
 
