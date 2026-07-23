@@ -4729,8 +4729,8 @@
     }
     /* ── Clean two-line breakdown rows (name+value over a full-width bar) ── */
     .bd2-row {
-      flex-direction: column; align-items: stretch; gap: 6px;
-      padding: 8px 8px; margin: 0 -8px;
+      flex-direction: column; align-items: stretch; gap: 5px;
+      padding: 9px 8px; margin: 0 -8px;
     }
     .bd2-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
     .bd2-name {
@@ -4744,7 +4744,12 @@
       font-size: .74rem; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums;
     }
     body.hub-mode .bd2-val { color: #1a1410; }
-    .bd2-lvl { font-size: .58rem; font-weight: 700; letter-spacing: .04em; color: var(--text-muted); opacity: .75; }
+    /* Rank replaces the old level badge: position in this list is real, whereas the
+       Lv 1-10 ladder competed with the roadmap's own levels. */
+    .bd2-rank { display: inline-block; min-width: 1.1em; margin-right: 7px; font-size: .68rem; font-weight: 800;
+      color: var(--text-muted); opacity: .6; font-variant-numeric: tabular-nums; }
+    .bd2-sub { font-size: .64rem; font-weight: 600; color: var(--text-muted); opacity: .82;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .bd2-track { height: 5px; border-radius: 3px; background: #ececf1; overflow: hidden; }
     .bd2-fill { height: 100%; border-radius: 3px; background: #d3d7df; transition: width .4s ease; }
     .bd2-fill.is-top { background: var(--accent); }
@@ -19465,17 +19470,20 @@ function renderBreakdown() {
         const name = libPieceRef
           ? (libPieceRef.composer ? `${libPieceRef.title} — ${libPieceRef.composer}` : libPieceRef.title)
           : (item.label || item.piece_label || "Untitled piece");
-        if (!pieceTotals[key]) pieceTotals[key] = { name, mins: 0, pieceKey: key };
+        if (!pieceTotals[key]) pieceTotals[key] = { name, mins: 0, pieceKey: key, sess: new Set(), last: null };
         pieceTotals[key].mins += mins;
         pieceTotals[key].name  = name;
+        pieceTotals[key].sess.add(sess.id);
+        if (!pieceTotals[key].last || sess.session_date > pieceTotals[key].last) pieceTotals[key].last = sess.session_date;
 
       } else if (item.item_type === "technique") {
         const parts = (item.label || "").split(",").map(s => s.trim()).filter(Boolean);
         parts.forEach(part => {
           if (seenTechsThisSession.has(part)) return; // only count once per session
           seenTechsThisSession.add(part);
-          if (!techniqueCounts[part]) techniqueCounts[part] = { name: part, count: 0, techKey: part };
+          if (!techniqueCounts[part]) techniqueCounts[part] = { name: part, count: 0, techKey: part, last: null };
           techniqueCounts[part].count++;
+          if (!techniqueCounts[part].last || sess.session_date > techniqueCounts[part].last) techniqueCounts[part].last = sess.session_date;
         });
 
       } else if (item.item_type === "book") {
@@ -19489,8 +19497,10 @@ function renderBreakdown() {
         const bookName = (item.piece_label || item.label || "").trim();
         if (!bookName) return;
         const key = `book:${bookName.toLowerCase()}`;
-        if (!pieceTotals[key]) pieceTotals[key] = { name: bookName, mins: 0, pieceKey: key, isBook: true };
+        if (!pieceTotals[key]) pieceTotals[key] = { name: bookName, mins: 0, pieceKey: key, isBook: true, sess: new Set(), last: null };
         pieceTotals[key].mins += mins;
+        pieceTotals[key].sess.add(sess.id);
+        if (!pieceTotals[key].last || sess.session_date > pieceTotals[key].last) pieceTotals[key].last = sess.session_date;
       }
 
       // If a technique/theory/sightreading item has a linked book, count it in the breakdown too
@@ -19504,8 +19514,10 @@ function renderBreakdown() {
         if (mins <= 0) return;
         const bookName = item.piece_label.trim();
         const key = `book:${bookName.toLowerCase()}`;
-        if (!pieceTotals[key]) pieceTotals[key] = { name: bookName, mins: 0, pieceKey: key, isBook: true };
+        if (!pieceTotals[key]) pieceTotals[key] = { name: bookName, mins: 0, pieceKey: key, isBook: true, sess: new Set(), last: null };
         pieceTotals[key].mins += mins;
+        pieceTotals[key].sess.add(sess.id);
+        if (!pieceTotals[key].last || sess.session_date > pieceTotals[key].last) pieceTotals[key].last = sess.session_date;
       }
     });
   });
@@ -19535,24 +19547,40 @@ function renderBreakdown() {
 
 const BD_INITIAL_COUNT = 5;
 
+// "Last touched" in the same shorthand the Repertoire card uses.
+function _bdAgo(dateStr) {
+  if (!dateStr) return '';
+  const d = Math.round((new Date(toDateStr(new Date()) + 'T12:00:00') - new Date(dateStr + 'T12:00:00')) / 86400000);
+  if (!isFinite(d) || d < 0) return '';
+  return d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d}d ago`;
+}
+
 function renderBreakdownPieces(items) {
   const el = document.getElementById("breakdown-pieces");
   if (!items.length) { el.innerHTML = `<div class="breakdown-empty">No data for this period</div>`; return; }
+  // Bars compare against the biggest; the share figure is of the whole period, so
+  // the row says both "how does this rank" and "how much of my time was it".
   const maxMins = items[0].mins;
+  const allMins = items.reduce((s, x) => s + x.mins, 0) || 1;
   const visible = items.slice(0, BD_INITIAL_COUNT);
   const rows = visible.map((item, i) => {
     const rank = i + 1;
     const pct  = maxMins > 0 ? Math.round((item.mins / maxMins) * 100) : 0;
     const time = formatMinutes(Math.round(item.mins));
-    const lvl  = getLevel(item.mins, PIECE_LEVELS);
+    const share = Math.round((item.mins / allMins) * 100);
+    const nSess = item.sess ? item.sess.size : 0;
     const rowType = item.isBook ? "book" : "piece";
+    const sub = [`${share}% of your piece time`,
+                 nSess ? `${nSess} session${nSess === 1 ? '' : 's'}` : '',
+                 _bdAgo(item.last)].filter(Boolean).join(' · ');
     return `
-      <div class="breakdown-row breakdown-clickable bd2-row" data-bd-type="${rowType}" data-bd-key="${escHtml(item.pieceKey)}" data-bd-name="${escHtml(item.name)}" title="${escHtml(item.name)} · ${lvl.label} ${escHtml(lvl.name)} — view sessions">
+      <div class="breakdown-row breakdown-clickable bd2-row" data-bd-type="${rowType}" data-bd-key="${escHtml(item.pieceKey)}" data-bd-name="${escHtml(item.name)}" title="${escHtml(item.name)} — view sessions">
         <div class="bd2-line">
-          <span class="bd2-name">${escHtml(item.name)}</span>
-          <span class="bd2-val">${time}<span class="bd2-lvl">${lvl.label}</span></span>
+          <span class="bd2-name"><span class="bd2-rank">${rank}</span>${escHtml(item.name)}</span>
+          <span class="bd2-val">${time}</span>
         </div>
         <div class="bd2-track"><div class="bd2-fill${rank === 1 ? ' is-top' : ''}" style="width:${pct}%"></div></div>
+        <div class="bd2-sub">${escHtml(sub)}</div>
       </div>`;
   }).join("");
   const more = items.length > BD_INITIAL_COUNT
@@ -19565,19 +19593,22 @@ function renderBreakdownTechniques(items) {
   const el = document.getElementById("breakdown-techniques");
   if (!items.length) { el.innerHTML = `<div class="breakdown-empty">No data for this period</div>`; return; }
   const maxCount = items[0].count;
+  const allCount = items.reduce((s, x) => s + x.count, 0) || 1;
   const visible = items.slice(0, BD_INITIAL_COUNT);
   const rows = visible.map((item, i) => {
     const rank  = i + 1;
     const pct   = maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0;
     const label = `${item.count}×`;
-    const lvl   = getLevel(item.count, SCALE_LEVELS);
+    const share = Math.round((item.count / allCount) * 100);
+    const sub = [`${share}% of your technique work`, _bdAgo(item.last)].filter(Boolean).join(' · ');
     return `
-      <div class="breakdown-row breakdown-clickable bd2-row" data-bd-type="technique" data-bd-key="${escHtml(item.techKey)}" data-bd-name="${escHtml(item.name)}" title="${escHtml(item.name)} · ${item.count} session${item.count !== 1 ? "s" : ""} · ${lvl.label} ${escHtml(lvl.name)} — view notes">
+      <div class="breakdown-row breakdown-clickable bd2-row" data-bd-type="technique" data-bd-key="${escHtml(item.techKey)}" data-bd-name="${escHtml(item.name)}" title="${escHtml(item.name)} · ${item.count} session${item.count !== 1 ? "s" : ""} — view notes">
         <div class="bd2-line">
-          <span class="bd2-name">${escHtml(item.name)}</span>
-          <span class="bd2-val">${label}<span class="bd2-lvl">${lvl.label}</span></span>
+          <span class="bd2-name"><span class="bd2-rank">${rank}</span>${escHtml(item.name)}</span>
+          <span class="bd2-val">${label}</span>
         </div>
         <div class="bd2-track"><div class="bd2-fill${rank === 1 ? ' is-top' : ''}" style="width:${pct}%"></div></div>
+        <div class="bd2-sub">${escHtml(sub)}</div>
       </div>`;
   }).join("");
   const more = items.length > BD_INITIAL_COUNT
