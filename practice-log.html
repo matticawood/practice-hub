@@ -6315,6 +6315,10 @@
     .ddc-grid { stroke: color-mix(in srgb, var(--text-muted) 15%, transparent); stroke-width: 1; shape-rendering: crispEdges; }
     .ddc-ylab { fill: var(--text-muted); font-size: 10px; font-weight: 700; text-anchor: end; opacity: .85; font-variant-numeric: tabular-nums; }
     .ddc-xlab { fill: var(--text-muted); font-size: 10px; font-weight: 700; text-anchor: middle; }
+    /* Figures printed on the chart rather than hidden behind a hover. */
+    .ddc-vlab { fill: var(--text); font-size: 11px; font-weight: 800; text-anchor: middle; font-variant-numeric: tabular-nums; }
+    body.hub-mode .ddc-vlab { fill: #1a1410; }
+    .ddc-sublab { fill: var(--text-muted); font-size: 9.5px; font-weight: 600; text-anchor: middle; opacity: .85; font-variant-numeric: tabular-nums; }
     .ddc-cross { stroke: color-mix(in srgb, var(--text-muted) 45%, transparent); stroke-width: 1; stroke-dasharray: 3 3; transition: opacity .12s; }
     .ddc-hit { cursor: crosshair; }
     /* Series draw in with a soft reveal so switching views feels alive. */
@@ -14871,17 +14875,20 @@ function renderDeepDive() {
   });
   const maxBucket = Math.max(...buckets.map(b => b.count), 1);
 
-  // Reframed: how much practice TIME comes from each session length, split by area —
-  // "where do my hours actually come from, and what do I do in a short session?" —
-  // with session count and average focus carried in the tooltip.
+  // Session count per band, with the two figures that matter printed on the chart
+  // rather than hidden in a tooltip: how many sessions, and how much of your total
+  // practice time that band actually accounts for. (No area split — a given session
+  // length has no consistent composition, so stacking it would be noise.)
+  const _distTotal = buckets.reduce((s, b) => s + _DD_AREAS.reduce((t, a) => t + b.area[a.k], 0), 0) || 1;
   distHTML = {
-    kind: 'stackbars', labels: buckets.map(b => b.label), fmt: v => formatMinutes(Math.round(v)),
-    series: _DD_AREAS.map(a => ({ name: a.lab, color: a.c, data: buckets.map(b => b.area[a.k]) })),
-    legend: _DD_AREAS.map(a => ({ name: a.lab, color: a.c })),
-    extra: [
-      { label: 'Sessions', values: buckets.map(b => String(b.count)) },
-      { label: 'Avg focus', values: buckets.map(b => b.focusN ? (b.focusSum / b.focusN).toFixed(1) + ' / 5' : '—') },
-    ],
+    kind: 'bars', labels: buckets.map(b => b.label), fmt: v => `${Math.round(v)} sessions`,
+    peak: buckets.findIndex(b => b.count === maxBucket),
+    series: [{ name: 'Sessions', color: '#f5c518', data: buckets.map(b => b.count) }],
+    valueLabels: buckets.map(b => b.count ? String(b.count) : ''),
+    subLabels: buckets.map(b => {
+      const mins = _DD_AREAS.reduce((t, a) => t + b.area[a.k], 0);
+      return mins ? `${formatMinutes(Math.round(mins))} · ${Math.round((mins / _distTotal) * 100)}%` : '';
+    }),
   };
 
   // ── Practice consistency ──────────────────────────────────────────
@@ -15152,7 +15159,7 @@ function _ddDrawChart(host, spec) {
   if (!host || !spec) return;
   const W = Math.max(300, Math.round(host.clientWidth || 640));
   const H = spec.height || 230;
-  const P = { t: 16, r: 14, b: 28, l: 50 };
+  const P = { t: spec.valueLabels ? 24 : 16, r: 14, b: spec.subLabels ? 44 : 28, l: 50 };
   const iw = Math.max(10, W - P.l - P.r), ih = Math.max(10, H - P.t - P.b);
   const labels = spec.labels || [], series = spec.series || [];
   const n = Math.max(1, labels.length);
@@ -15176,7 +15183,9 @@ function _ddDrawChart(host, spec) {
     yLabs += `<text x="${P.l - 10}" y="${(y + 3.5).toFixed(1)}" class="ddc-ylab">${escHtml(t === 0 ? '0' : fmt(v))}</text>`;
   }
   const xPos = (spec.kind === 'bars' || stacked) ? xBand : xLine;
-  const xLabs = labels.map((l, i) => l ? `<text x="${xPos(i).toFixed(1)}" y="${H - 9}" class="ddc-xlab">${escHtml(l)}</text>` : '').join('');
+  const xLabY = H - (spec.subLabels ? 26 : 9);
+  const xLabs = labels.map((l, i) => l ? `<text x="${xPos(i).toFixed(1)}" y="${xLabY}" class="ddc-xlab">${escHtml(l)}</text>` : '').join('')
+    + (spec.subLabels || []).map((s, i) => s ? `<text x="${xPos(i).toFixed(1)}" y="${H - 9}" class="ddc-sublab">${escHtml(s)}</text>` : '').join('');
 
   let defs = '', body = '';
   if (spec.kind === 'area') {
@@ -15230,6 +15239,8 @@ function _ddDrawChart(host, spec) {
       const h = Math.max(v > 0 ? 3 : 0, base - yAt(v));
       body += `<rect x="${(xBand(i) - bw / 2).toFixed(1)}" y="${(base - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="6"
         fill="url(#${spec.peak === i ? uid + 'p' : uid + 'b'})" class="ddc-bar"/>`;
+      const vl = spec.valueLabels && spec.valueLabels[i];
+      if (vl) body += `<text x="${xBand(i).toFixed(1)}" y="${(base - h - 8).toFixed(1)}" class="ddc-vlab">${escHtml(vl)}</text>`;
     });
   }
 
