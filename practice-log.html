@@ -6334,6 +6334,10 @@
     body.hub-mode .ddc-vlab { fill: #1a1410; }
     .dd-note { margin: 8px 2px 0; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); font-weight: 600; }
     body.hub-mode .dd-note { color: #6b6253; }
+    /* Narrow bands: shrink on-chart type a step so it stays inside its band. */
+    .ddc-tight .ddc-vlab { font-size: 9.5px; stroke-width: 3px; }
+    .ddc-tight .ddc-sublab { font-size: 8.5px; }
+    .ddc-tight .ddc-xlab { font-size: 9.5px; }
     .ddc-sublab { fill: var(--text-muted); font-size: 9.5px; font-weight: 600; text-anchor: middle; opacity: .85; font-variant-numeric: tabular-nums; }
     .ddc-cross { stroke: color-mix(in srgb, var(--text-muted) 45%, transparent); stroke-width: 1; stroke-dasharray: 3 3; transition: opacity .12s; }
     .ddc-hit { cursor: crosshair; }
@@ -14933,6 +14937,7 @@ function renderDeepDive() {
     ...(_focusSeries.length ? { ticks: 5, y2: { max: 5, color: '#6366f1', fmt: v => String(Math.round(v)) } } : {}),
     valueLabels: buckets.map(b => b.count ? `${b.count} session${b.count === 1 ? '' : 's'}` : ''),
     subLabels: buckets.map(b => b.mins ? `${Math.round((b.mins / _distTotal) * 100)}% of your time` : ''),
+    subLabelsShort: buckets.map(b => b.mins ? `${Math.round((b.mins / _distTotal) * 100)}%` : ''),
     legend: [{ name: 'Practice time (left)', color: '#f5c518' },
              ..._focusSeries.map(s => ({ name: `${s.name}, focus out of 5 (right)`, color: s.color }))],
     note: (() => {
@@ -15285,8 +15290,13 @@ function _ddDrawChart(host, spec) {
   }
   const xPos = (spec.kind === 'bars' || stacked) ? xBand : xLine;
   const xLabY = H - (spec.subLabels ? 26 : 9);
+  // Narrow bands cannot hold the long form of a label, so fall back to the short
+  // variant rather than letting neighbouring labels run into each other.
+  const _tight = bandW < 92;
+  const _subs = (_tight && spec.subLabelsShort) ? spec.subLabelsShort : (spec.subLabels || []);
+  const _vals = (_tight && spec.valueLabelsShort) ? spec.valueLabelsShort : (spec.valueLabels || []);
   const xLabs = labels.map((l, i) => l ? `<text x="${xPos(i).toFixed(1)}" y="${xLabY}" class="ddc-xlab">${escHtml(l)}</text>` : '').join('')
-    + (spec.subLabels || []).map((s, i) => s ? `<text x="${xPos(i).toFixed(1)}" y="${H - 9}" class="ddc-sublab">${escHtml(s)}</text>` : '').join('');
+    + _subs.map((s, i) => s ? `<text x="${xPos(i).toFixed(1)}" y="${H - 9}" class="ddc-sublab">${escHtml(s)}</text>` : '').join('');
 
   let defs = '', body = '';
   if (spec.kind === 'area') {
@@ -15318,7 +15328,7 @@ function _ddDrawChart(host, spec) {
         acc[i] += v;
       });
     });
-    (spec.valueLabels || []).forEach((vl, i) => {
+    _vals.forEach((vl, i) => {
       if (vl) body += `<text x="${xBand(i).toFixed(1)}" y="${(yAt(acc[i]) - 8).toFixed(1)}" class="ddc-vlab">${escHtml(vl)}</text>`;
     });
   } else if (stacked) {
@@ -15343,7 +15353,7 @@ function _ddDrawChart(host, spec) {
       const h = Math.max(v > 0 ? 3 : 0, base - yAt(v));
       body += `<rect x="${(xBand(i) - bw / 2).toFixed(1)}" y="${(base - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="6"
         fill="url(#${spec.peak === i ? uid + 'p' : uid + 'b'})" class="ddc-bar"/>`;
-      const vl = spec.valueLabels && spec.valueLabels[i];
+      const vl = _vals[i];
       if (vl) body += `<text x="${xBand(i).toFixed(1)}" y="${(base - h - 8).toFixed(1)}" class="ddc-vlab">${escHtml(vl)}</text>`;
     });
   }
@@ -15369,7 +15379,7 @@ function _ddDrawChart(host, spec) {
   const hit = labels.map((l, i) => `<rect class="ddc-hit" data-i="${i}" x="${(xPos(i) - bandW / 2).toFixed(1)}" y="${P.t}" width="${bandW.toFixed(1)}" height="${ih}" fill="transparent"/>`).join('');
 
   host.innerHTML =
-    `<div class="ddc-wrap"><svg class="ddc-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img">
+    `<div class="ddc-wrap"><svg class="ddc-svg${_tight ? ' ddc-tight' : ''}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img">
       <defs>${defs}</defs>
       <g class="ddc-gridg">${grid}</g>
       <g class="ddc-body">${body}</g>
