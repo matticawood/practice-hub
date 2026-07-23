@@ -6302,8 +6302,18 @@
       }
       .stats-hero { margin-bottom: 14px !important; }
       /* Grids: inset the grid, gap the cells, each cell a small floating card. */
-      .stats-grid, .pb-grid, .stats-proj-grid {
+      .stats-grid, .pb-grid, .stats-proj-grid, .skpi-grid {
         gap: 10px !important; margin-left: 16px !important; margin-right: 16px !important; grid-auto-rows: 1fr;
+      }
+      /* Goal projections card + KPI/personal-best tiles: inset like the other cards. */
+      .sgoal-card {
+        margin-left: 16px !important; margin-right: 16px !important;
+        border: none !important; border-radius: 16px !important;
+        box-shadow: 0 1px 2px rgba(60,40,20,.04), 0 12px 26px -12px rgba(60,40,20,.16) !important;
+      }
+      .skpi, .pb-tile {
+        border: none !important; border-radius: 16px !important;
+        box-shadow: 0 1px 2px rgba(60,40,20,.04), 0 12px 26px -12px rgba(60,40,20,.16) !important;
       }
       #stats-section .stat-card, .pb-card, .stats-proj-card,
       .dd-card {
@@ -12492,19 +12502,16 @@ function renderGoalProjections() {
     wkBadge = 'Behind pace'; wkBadgeColor = '#ef4444'; wkBadgeBg = '#ef444422'; wkBarColor = '#ef4444';
   }
 
-  const wkStats = [{ label: 'This week', value: `${formatMinutes(wkMins)} of ${formatMinutes(wkGoal)}` }];
-  if (!wkDone && daysLeftInclToday > 0) {
-    wkStats.push({ label: 'Days left', value: String(daysLeftInclToday) });
-    wkStats.push({ label: 'Needed', value: `${formatMinutes(Math.round(reqPerDay))}/day`, tone: 'warn' });
-  }
+  const wkFigure = `${formatMinutes(wkMins)} of ${formatMinutes(wkGoal)}`;
+  const wkChip = (!wkDone && daysLeftInclToday > 0)
+    ? `${formatMinutes(Math.round(reqPerDay))}/day needed` : '';
 
   const weeklyCard = `
     <div class="dgoal" style="--gcol:${wkBarColor === 'var(--accent)' ? '#f5c518' : wkBarColor}">
       <span class="dgoal-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2.5v3M16 2.5v3"/></svg></span>
       <div class="dgoal-body">
         <div class="dgoal-top"><span class="dgoal-name">Weekly practice</span><span class="dgoal-status"><span class="pg-pill" style="color:${wkBadgeColor};background:${wkBadgeBg}">${wkBadge}</span></span></div>
-        <div class="dgoal-barrow"><div class="dgoal-bar"><i style="width:${wkPct}%"></i></div></div>
-        ${_sgoalStats(wkStats)}
+        <div class="dgoal-barrow"><div class="dgoal-bar"><i style="width:${wkPct}%"></i></div><span class="dgoal-tpill">${wkFigure}</span>${wkChip ? `<span class="dgoal-tpill">${wkChip}</span>` : ''}</div>
       </div>
     </div>`;
 
@@ -12532,7 +12539,9 @@ function renderGoalProjections() {
 
     let badgeText = '', badgeColor = '#6b7280', badgeBg = '#6b728022';
     let barPct = 0, barColor = cat.color;
-    const stats = [];   // {label, value, tone} — shown as a labelled stat row, not prose
+    // Two compact readouts only: progress and time. The bar + status pill carry the rest,
+    // so a goal reads at a glance instead of as a block of figures.
+    let figure = '', timeChip = '';
 
     // ── Deadline component ──────────────────────────────────────────
     if ((goalType === 'deadline' || goalType === 'both') && g.target_date) {
@@ -12540,11 +12549,9 @@ function renderGoalProjections() {
       const totalDays = Math.max(1, Math.round((target - created) / 86400000));
       const daysLeft  = Math.round((target - today) / 86400000);
       const targetStr = target.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
-      stats.push({ label: 'Deadline', value: targetStr });
-      stats.push(daysLeft < 0
-        ? { label: 'Overdue by', value: `${Math.abs(daysLeft)}d`, tone: 'bad' }
-        : daysLeft === 0 ? { label: 'Due', value: 'Today', tone: 'warn' }
-        : { label: 'Days left', value: String(daysLeft) });
+      timeChip = daysLeft < 0 ? `${Math.abs(daysLeft)}d over`
+               : daysLeft === 0 ? 'Due today'
+               : `${daysLeft}d left`;
 
       if (goalType === 'both' && g.target_hours) {
         // Hours + deadline: check if on track
@@ -12564,18 +12571,7 @@ function renderGoalProjections() {
         } else {
           badgeText = 'Behind pace'; badgeColor = '#ef4444'; badgeBg = '#ef444422'; barColor = '#ef4444';
         }
-        stats.push({ label: 'Logged', value: `${logged.toFixed(1)}h of ${g.target_hours}h` });
-        stats.push({ label: 'Pace', value: `${pace.toFixed(1)}h/wk` });
-        if (daysLeft > 0 && logged < g.target_hours) {
-          const reqPace = hoursLeft / (daysLeft / 7);
-          stats.push({ label: 'Needed', value: `${reqPace.toFixed(1)}h/wk`, tone: reqPace > pace ? 'warn' : null });
-          // Forward-looking ETA at the current pace (alongside the required pace).
-          if (pace > 0) {
-            const projDate = new Date(today);
-            projDate.setDate(projDate.getDate() + Math.round((hoursLeft / pace) * 7));
-            stats.push({ label: 'At this pace', value: projDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) });
-          }
-        }
+        figure = `${logged.toFixed(1)}h of ${g.target_hours}h`;
       } else if (goalType === 'deadline') {
         // Pure deadline — time status, plus a real projection read: how much has
         // actually gone in, at what pace, and what that means for the date.
@@ -12584,39 +12580,28 @@ function renderGoalProjections() {
         badgeText = daysLeft < 0 ? 'Overdue' : daysLeft === 0 ? 'Due today' : daysLeft < 7 ? 'Due soon' : 'Active';
         badgeColor = daysLeft < 0 ? '#ef4444' : daysLeft < 7 ? '#f59e0b' : '#6b7280';
         badgeBg    = badgeColor + '22';
-        stats.push({ label: 'Logged', value: `${logged.toFixed(1)}h` });
-        if (logged > 0) stats.push({ label: 'Pace', value: `${pace.toFixed(1)}h/wk` });
+        figure = logged > 0 ? `${logged.toFixed(1)}h logged` : 'Not started';
       }
     }
 
     // ── Hours component ─────────────────────────────────────────────
     if (goalType === 'hours' && g.target_hours) {
       barPct = Math.min(100, Math.round((logged / g.target_hours) * 100));
+      figure = `${logged.toFixed(1)}h of ${g.target_hours}h`;
       if (logged >= g.target_hours) {
         badgeText = '✓ Complete'; badgeColor = '#4ade80'; badgeBg = '#4ade8022'; barColor = '#4ade80';
-        stats.push({ label: 'Logged', value: `${logged.toFixed(1)}h of ${g.target_hours}h` });
+      } else if (pace > 0) {
+        badgeText  = `${barPct}% done`;
+        badgeColor = barPct >= 75 ? '#4ade80' : barPct >= 40 ? '#f59e0b' : '#6b7280';
+        badgeBg    = badgeColor + '22';
       } else {
-        const hoursLeft = g.target_hours - logged;
-        stats.push({ label: 'Logged', value: `${logged.toFixed(1)}h of ${g.target_hours}h` });
-        if (pace > 0) {
-          const weeksLeft = hoursLeft / pace;
-          const projDate  = new Date(today);
-          projDate.setDate(projDate.getDate() + Math.round(weeksLeft * 7));
-          badgeText  = `${barPct}% done`;
-          badgeColor = barPct >= 75 ? '#4ade80' : barPct >= 40 ? '#f59e0b' : '#6b7280';
-          badgeBg    = badgeColor + '22';
-          stats.push({ label: 'Pace', value: `${pace.toFixed(1)}h/wk` });
-          stats.push({ label: 'At this pace', value: projDate.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) });
-        } else {
-          badgeText = 'Not started'; badgeColor = '#6b7280'; badgeBg = '#6b728022';
-          stats.push({ label: 'Target', value: `${g.target_hours}h` });
-        }
+        badgeText = 'Not started'; badgeColor = '#6b7280'; badgeBg = '#6b728022';
       }
     }
 
-    const barHtml = (goalType !== 'deadline' || goalType === 'both') && barPct !== undefined
-      ? `<div class="dgoal-barrow"><div class="dgoal-bar"><i style="width:${barPct}%"></i></div></div>`
-      : '';
+    const barHtml = `<div class="dgoal-barrow"><div class="dgoal-bar"><i style="width:${barPct}%"></i></div>`
+      + `${figure ? `<span class="dgoal-tpill">${escHtml(figure)}</span>` : ''}`
+      + `${timeChip ? `<span class="dgoal-tpill">${escHtml(timeChip)}</span>` : ''}</div>`;
 
     // Same row shape as the dashboard's goals card (icon + name + status pill + bar),
     // with the Stats-only projection detail underneath.
@@ -12626,7 +12611,6 @@ function renderGoalProjections() {
         <div class="dgoal-body">
           <div class="dgoal-top"><span class="dgoal-name">${escHtml(g.piece_label || '—')}</span>${badgeText ? `<span class="dgoal-status"><span class="pg-pill" style="color:${badgeColor};background:${badgeBg}">${badgeText}</span></span>` : ''}</div>
           ${barHtml}
-          ${_sgoalStats(stats)}
         </div>
       </div>`;
   }).join('');
