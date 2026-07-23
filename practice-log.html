@@ -4045,13 +4045,13 @@
     .si-tool-best-lbl { font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); }
     .si-tool-spark { width: 100%; height: 20px; display: block; }
     .si-tool-foot { display: flex; flex-direction: column; gap: 2px; }
-    .si-tool-trend { font-size: .62rem; font-weight: 800; }
-    .si-tool-trend.up { color: #0d9488; } .si-tool-trend.down { color: #dc2626; } .si-tool-trend.flat { color: var(--text-muted); }
-    .si-tool-weak { font-size: .62rem; font-weight: 600; color: var(--text-muted);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-    /* Names the setting the line is drawn from, when a member plays more than one. */
+    /* What to do next, not a verdict on the last score. */
+    .si-tool-nudge { font-size: .64rem; font-weight: 700; color: var(--text-muted); line-height: 1.3; }
+    .si-tool-nudge.is-up { color: var(--tc); }
+    .si-tool-nudge.is-top { color: #b8860b; }
+    /* The settings the member is currently playing at. */
     .si-tool-basis { display: block; margin-top: 2px; font-size: .58rem; font-weight: 700; letter-spacing: .03em;
-      color: var(--text-muted); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      color: var(--text-muted); opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .si-tool--empty { justify-content: center; gap: 5px; opacity: .9; }
     .si-tool--empty .si-tool-name { color: var(--tc); }
     .si-tool-empty-txt { font-size: .72rem; color: var(--text-muted); }
@@ -10096,23 +10096,23 @@ async function loadData() {
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
       const [nr, cr, pg, er, uc, thL, thP, it, fsL] = await Promise.all([
-        db.from("note_game_scores").select("score, created_at, clef, accidentals, key_signature, range").eq("email", viewingEmail),
-        db.from("chord_game_scores").select("score, created_at, tier, mode, key_signature").eq("email", viewingEmail),
+        db.from("note_game_scores").select("score, attempts, created_at, clef, accidentals, key_signature, range").eq("email", viewingEmail),
+        db.from("chord_game_scores").select("score, attempts, created_at, tier, mode, key_signature").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
-        db.from("ear_game_scores").select("score, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
+        db.from("ear_game_scores").select("score, attempts, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
         db.from("user_collections").select("status, created_at, piece_id, pieces(difficulty), user_piece_id, user_pieces(id, title, difficulty, last_practiced_at, dormancy_acked_at)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, sort_order, title, status").eq("course", "theory"),
         db.from("lesson_progress").select("lesson_id, completed, completed_at").eq("email", viewingEmail).eq("completed", true),
-        db.from("interval_game_scores").select("score, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase()),
+        db.from("interval_game_scores").select("score, attempts, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase()),
         db.from("lessons").select("id, status, title, sort_order").eq("course", "first-steps")
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
-        note:    byTime(nr.data).map(r => ({ v: r.score, t: r.created_at, clef: r.clef, accidentals: r.accidentals, key_signature: r.key_signature, range: r.range })),
-        chord:   byTime(cr.data).map(r => ({ v: r.score, t: r.created_at, tier: r.tier, mode: r.mode, key_signature: r.key_signature })),
+        note:    byTime(nr.data).map(r => ({ v: r.score, a: r.attempts, t: r.created_at, clef: r.clef, accidentals: r.accidentals, key_signature: r.key_signature, range: r.range })),
+        chord:   byTime(cr.data).map(r => ({ v: r.score, a: r.attempts, t: r.created_at, tier: r.tier, mode: r.mode, key_signature: r.key_signature })),
         passage: byTime(pg.data).map(r => ({ v: r.level, t: r.created_at })),
-        ear:     byTime(er.data).map(r => ({ v: r.score, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type, key_signature: r.key_signature })),
-        interval: byTime(it.data).map(r => ({ v: r.score, t: r.created_at, side: r.side, tier: r.tier, key_mode: r.key_mode, playback: r.playback, key_signature: r.key_signature }))
+        ear:     byTime(er.data).map(r => ({ v: r.score, a: r.attempts, t: r.created_at, chord_set: r.chord_set, answer_type: r.answer_type, key_signature: r.key_signature })),
+        interval: byTime(it.data).map(r => ({ v: r.score, a: r.attempts, t: r.created_at, side: r.side, tier: r.tier, key_mode: r.key_mode, playback: r.playback, key_signature: r.key_signature }))
       };
       _insightCollections = uc.data || [];
       // Completed-piece tiers (for "learn N pieces"), all-collection tiers (for "add a
@@ -15784,104 +15784,87 @@ function _renderStatsImprove() {
 
   // ── 3. Practice-tool mastery ──
   const _avg = a => a.reduce((s, v) => s + v, 0) / a.length;
-  const _spark = (vals, color) => {
-    if (!vals || vals.length < 2) return '';
-    const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx - mn) || 1, w = 60, h = 20;
-    const pts = vals.slice(-16).map((v, i, arr) => `${(i / (arr.length - 1)) * w},${(h - 2) - ((v - mn) / rng) * (h - 4) + 1}`).join(' ');
-    return `<svg class="si-tool-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  // ── Practice-tool cards ────────────────────────────────────────────────
+  // Every trainer is a 60-second game: the score is correct answers per minute, and
+  // `a` is how many were asked, so score/a is accuracy. A raw score is therefore a
+  // throughput rate that swings with luck and, far more, with the settings chosen.
+  // Getting better at these shows up as MOVING UP the settings, not as a rising
+  // number, so the card tracks where a member is on each game's difficulty ladder
+  // and tells them whether to stay put or step up.
+  //
+  // The ladders below are a teaching judgement, not something the data implies.
+  // Each dial lists its options easiest-first with a difficulty weight; a setting's
+  // difficulty is the sum of its dials, and the suggested next step is the gentlest
+  // single-dial increase available. Reorder or reweight freely.
+  const TOOL_LADDER = {
+    note: [
+      { k: 'accidentals', steps: [[false, 'natural notes only', 0], [true, 'with accidentals', 1]] },
+      { k: 'range',       steps: [['stave', 'notes in the stave', 0], ['full', 'the full range', 2], ['ledger', 'ledger lines only', 3]] },
+      { k: 'clef',        steps: [['treble', 'treble clef', 0], ['bass', 'bass clef', 1], ['grand', 'the grand staff', 2], ['mixed', 'mixed clefs', 3]] },
+    ],
+    chord: [
+      { k: 'tier', steps: [[1, 'triads in root position', 0], [2, 'triad inversions', 1], [3, 'spread triads', 2],
+                           [4, '7th chords in root position', 3], [5, '7th chord inversions', 4], [6, 'spread 7th chords', 5]] },
+      { k: 'mode', steps: [['key', 'within one key', 0], ['free', 'any key', 1]] },
+    ],
+    ear: [
+      { k: 'chord_set',   steps: [['major_minor', 'major and minor', 0], ['triads', 'all triads', 1],
+                                  ['sevenths', '7th chords', 2], ['extensions', 'extensions', 3]] },
+      { k: 'answer_type', steps: [['quality', 'quality only', 0], ['exact', 'exact chords', 2]] },
+    ],
+    interval: [
+      { k: 'tier',     steps: [['number', 'interval numbers', 0], ['pm', 'perfect and major', 1], ['full', 'full quality', 2]] },
+      { k: 'side',     steps: [['reading', 'by sight', 0], ['listening', 'by ear', 2]] },
+      { k: 'key_mode', steps: [['key', 'within one key', 0], ['free', 'any key', 1]] },
+    ],
   };
-  const _titleCase = s => String(s).replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  // Trend has to compare like with like, and a "setting" is every difficulty dial at
-  // once, not one of them. Note Reading alone varies clef, accidentals, key signature
-  // and range; Chord Reading spans tiers 1 to 6. Averaging across those and calling
-  // the result "slipping" punishes someone for taking on something harder. So plays
-  // are grouped by their full setting signature, the verdict is measured inside the
-  // group they have played most, and withheld when no group has enough plays.
-  const _DIM_LBL = {
-    clef:        { treble: 'Treble clef', bass: 'Bass clef', grand: 'Grand staff', mixed: 'Mixed clefs' },
-    chord_set:   { major_minor: 'Major/minor', triads: 'Triads', sevenths: 'Sevenths', extensions: 'Extensions' },
-    answer_type: { quality: 'Quality only', exact: 'Exact chords' },
-    mode:        { free: 'Free', key: 'In key' },
-    key_mode:    { free: 'Free', key: 'In key' },
-    playback:    { harmonic: 'Harmonic', melodic: 'Melodic' },
-    side:        { listening: 'By ear', reading: 'By sight' },
+  const _stepOf = (dial, row) => {
+    const v = row[dial.k];
+    return dial.steps.find(s => String(s[0]) === String(v)) || null;
   };
-  // "tier" is stored as a bare code and means different things per tool, so it is
-  // translated back into the wording the game itself uses. Chord Recognition packs
-  // chord type and voicing into one number (see crGetTier in tools.html); Intervals
-  // uses it for how much detail the answer needs.
-  const _TIER_LBL = {
-    chord: { 1: 'Triads, root position', 2: 'Triads, inversions', 3: 'Triads, spread voicings',
-             4: '7th chords, root position', 5: '7th chords, inversions', 6: '7th chords, spread voicings' },
-    interval: { number: 'Number only', pm: 'Perfect and major', full: 'Full quality' },
-  };
-  const _dimText = (dim, raw, toolKey) => {
-    const v = String(raw);
-    if (dim === 'tier') {
-      const m = _TIER_LBL[toolKey];
-      return (m && m[v]) || `tier ${v}`;
-    }
-    if (_DIM_LBL[dim] && _DIM_LBL[dim][v]) return _DIM_LBL[dim][v];
-    if (dim === 'accidentals')  return v === 'true' ? 'with accidentals' : 'no accidentals';
-    if (dim === 'key_signature') return (v === 'null' || v === '') ? 'any key' : `key of ${v}`;
-    if (v === 'null' || v === 'undefined' || v === '') return '';
-    return _titleCase(v);
-  };
-  // Only the dials a member actually changed distinguish one group from another, so
-  // the label stays short: someone who only ever toggles accidentals sees exactly that.
-  const _toolGroups = (rows, toolKey) => {
-    const dims = rows.length ? Object.keys(rows[0]).filter(k => k !== 'v' && k !== 't') : [];
-    const varying = dims.filter(d => new Set(rows.map(r => String(r[d]))).size > 1);
-    const g = new Map();
-    rows.forEach(r => {
-      const k = varying.map(d => `${d}=${r[d]}`).join('|');
-      if (!g.has(k)) g.set(k, { vals: [], r0: r });
-      g.get(k).vals.push(r.v);
-    });
-    // "Free" and "any key" are the same fact stated twice (free mode has no key
-    // signature), so the mode and key dials collapse into a single token.
-    const keyed = varying.includes('mode') || varying.includes('key_mode');
-    const label = r => {
-      const parts = [];
-      varying.forEach(d => {
-        if (d === 'key_signature' && keyed) return;
-        if (d === 'mode' || d === 'key_mode') {
-          parts.push(String(r[d]) === 'key' ? _dimText('key_signature', r.key_signature, toolKey) : 'any key');
-          return;
-        }
-        const txt = _dimText(d, r[d], toolKey);
-        if (txt) parts.push(txt);
-      });
-      return parts.join(', ');
+  // A setting's identity, difficulty and name, derived from the ladder.
+  const _settingOf = (rows0, toolKey) => {
+    const dials = TOOL_LADDER[toolKey] || [];
+    return r => {
+      const steps = dials.map(d => _stepOf(d, r));
+      return {
+        id: dials.map((d, i) => `${d.k}=${steps[i] ? steps[i][0] : r[d.k]}`).join('|'),
+        diff: steps.reduce((s, st) => s + (st ? st[2] : 0), 0),
+        label: steps.filter(Boolean).map(st => st[1]).join(', '),
+      };
     };
-    return { varying, groups: [...g.values()], label };
   };
-  const _toolTrend = (rows, toolKey) => {
-    const half = a => { const h = Math.floor(a.length / 2); return _avg(a.slice(h)) - _avg(a.slice(0, h)); };
-    const verdict = d => (d > 0.75 ? 1 : d < -0.75 ? -1 : 0);
-    const { varying, groups, label } = _toolGroups(rows, toolKey);
-    if (!varying.length) {   // every play at the same settings: the whole run is comparable
-      const vals = rows.map(r => r.v);
-      if (vals.length < 4) return null;
-      return { tr: verdict(half(vals)), basis: null, series: vals };
+  // The gentlest single-dial step up from where they are. Null once maxed out.
+  const _nextStepUp = (row, toolKey) => {
+    const dials = TOOL_LADDER[toolKey] || [];
+    let bestOpt = null;
+    dials.forEach(d => {
+      const cur = _stepOf(d, row);
+      if (!cur) return;
+      const harder = d.steps.filter(s => s[2] > cur[2]).sort((a, b) => a[2] - b[2])[0];
+      if (!harder) return;
+      const cost = harder[2] - cur[2];
+      if (!bestOpt || cost < bestOpt.cost) bestOpt = { cost, label: harder[1] };
+    });
+    return bestOpt;
+  };
+  // Score over time, drawn as one line but shaded by how hard the settings were, so a
+  // dip caused by stepping up reads as a step up rather than as getting worse.
+  const _sparkByDiff = (rows, setting, color) => {
+    if (!rows || rows.length < 2) return '';
+    const pts = rows.slice(-18);
+    const vals = pts.map(r => r.v);
+    const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx - mn) || 1, w = 60, h = 20;
+    const diffs = pts.map(r => setting(r).diff);
+    const dMax = Math.max(...diffs, 1);
+    const xy = i => `${(i / (pts.length - 1)) * w},${(h - 2) - ((vals[i] - mn) / rng) * (h - 4) + 1}`;
+    let segs = '';
+    for (let i = 1; i < pts.length; i++) {
+      // Opacity carries difficulty: the harder the settings, the more solid the line.
+      const op = (0.35 + 0.65 * (diffs[i] / dMax)).toFixed(2);
+      segs += `<polyline points="${xy(i - 1)} ${xy(i)}" fill="none" stroke="${color}" stroke-opacity="${op}" stroke-width="1.7" stroke-linecap="round"/>`;
     }
-    const usable = groups.filter(x => x.vals.length >= 4).sort((a, b) => b.vals.length - a.vals.length);
-    if (!usable.length) return null;   // settings changed too often to compare anything
-    return { tr: verdict(half(usable[0].vals)), basis: label(usable[0].r0), series: usable[0].vals };
-  };
-  // This used to be labelled "weakest", which the data cannot support: raw scores are
-  // not comparable across settings of different difficulty, so the lowest-scoring
-  // setting is usually just the hardest one attempted, not a weakness. It now reports
-  // the plain fact (lowest average) over full setting groups, and needs three plays a
-  // side rather than two.
-  const _lowestSetting = (rows, toolKey) => {
-    const { varying, groups, label } = _toolGroups(rows, toolKey);
-    if (!varying.length) return null;
-    const usable = groups.filter(x => x.vals.length >= 3);
-    if (usable.length < 2) return null;
-    usable.sort((a, b) => _avg(a.vals) - _avg(b.vals));
-    const lab = label(usable[0].r0);
-    return lab ? { label: lab, avg: Math.round(_avg(usable[0].vals)) } : null;
+    return `<svg class="si-tool-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${segs}</svg>`;
   };
   const TRAINERS = [
     { key: 'note',     label: 'Note Reading',   color: '#10b981', href: '/tools.html?section=note' },
@@ -15900,32 +15883,34 @@ function _renderStatsImprove() {
         <span class="si-tool-cta">Try it &rarr;</span>
       </a>`;
     }
-    const vals = rows.map(r => r.v);
-    const best = Math.max(...vals);
+    const setting = _settingOf(rows, t.key);
     const plays = rows.length;
-    const trd = _toolTrend(rows, t.key);
-    // No honest like-for-like comparison available: say nothing rather than guess.
-    const trBasis = trd && trd.basis
-      ? ` title="Based on your ${escHtml(trd.basis)} plays, so changing settings will not count against you"`
-      : '';
-    const trIco = !trd ? ''
-      : trd.tr > 0 ? `<span class="si-tool-trend up"${trBasis}>&#9650; improving</span>`
-      : trd.tr < 0 ? `<span class="si-tool-trend down"${trBasis}>&#9660; slipping</span>`
-      : `<span class="si-tool-trend flat"${trBasis}>&mdash; steady</span>`;
-    // If the lowest-scoring group is also the one the line is drawn from, saying it
-    // twice on one card tells the reader nothing new.
-    const _low0 = _lowestSetting(rows, t.key);
-    const low = (_low0 && trd && _low0.label === trd.basis) ? null : _low0;
-    // The line plots the same series the verdict judged, so the two cannot
-    // contradict each other, and it says which setting it is drawn from.
-    const sparkVals = (trd && trd.series) ? trd.series : vals;
-    const basisLab = trd && trd.basis
-      ? `<span class="si-tool-basis" title="${escHtml(trd.basis)}">${escHtml(trd.basis)}</span>` : '';
+    // Where they are now: the settings of their most recent play.
+    const last = rows[rows.length - 1];
+    const cur = setting(last);
+    const here = rows.filter(r => setting(r).id === cur.id);
+    const bestHere = Math.max(...here.map(r => r.v));
+    const asked = here.reduce((s, r) => s + (r.a || 0), 0);
+    const got   = here.reduce((s, r) => s + (r.v || 0), 0);
+    const acc = asked ? Math.round((got / asked) * 100) : null;
+    const up = _nextStepUp(last, t.key);
+    // Ready to move on when they are answering accurately at these settings, over
+    // enough plays to mean it. Accuracy is used rather than the raw score because
+    // score is a per-minute rate: it says how fast, not how well.
+    const ready = acc != null && acc >= 85 && here.length >= 3;
+    const nudge = !up
+      ? `<span class="si-tool-nudge is-top">Hardest settings, keep sharpening</span>`
+      : ready
+        ? `<span class="si-tool-nudge is-up">Ready for ${escHtml(up.label)}</span>`
+        : acc != null
+          ? `<span class="si-tool-nudge">Keep going here: ${acc}% right${here.length < 3 ? '' : ''}</span>`
+          : `<span class="si-tool-nudge">A few more goes at these settings</span>`;
     return `<a class="si-tool" ${href} style="--tc:${t.color}">
       <span class="si-tool-head"><span class="si-tool-name">${t.label}</span><span class="si-tool-plays">${plays} play${plays !== 1 ? 's' : ''}</span></span>
-      <span class="si-tool-best"><span class="si-tool-best-num">${best}</span><span class="si-tool-best-lbl">best ${t.unit ? t.unit.toLowerCase() : 'score'}</span></span>
-      ${_spark(sparkVals, t.color)}${basisLab}
-      <span class="si-tool-foot">${trIco}${low ? `<span class="si-tool-weak" title="Your lowest-scoring settings so far. Harder settings naturally score lower, so this is not necessarily a weakness.">lowest: ${escHtml(low.label)}</span>` : ''}</span>
+      <span class="si-tool-best"><span class="si-tool-best-num">${bestHere}</span><span class="si-tool-best-lbl">best here</span></span>
+      ${_sparkByDiff(rows, setting, t.color)}
+      <span class="si-tool-basis" title="Your current settings: ${escHtml(cur.label)}">${escHtml(cur.label)}</span>
+      <span class="si-tool-foot">${nudge}</span>
     </a>`;
   }).join('');
 
