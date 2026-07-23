@@ -6292,6 +6292,15 @@
     .dd-panel { border: 1px solid var(--border); border-radius: 13px; background: var(--surface); overflow: hidden; margin-bottom: 14px; }
     body.hub-mode .dd-panel { border-color: #e9e8ed; box-shadow: 0 1px 2px rgba(60,40,20,.05); }
     .dd-pane { padding: 16px 18px; min-width: 0; }
+    /* One chart window with a view switcher, so the graphs are a single system. */
+    .dd-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .dd-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+    .dd-tab { font-family: inherit; font-size: .68rem; font-weight: 800; letter-spacing: .01em; cursor: pointer;
+      padding: 6px 11px; border-radius: 99px; border: 1px solid transparent; background: none; color: var(--text-muted); transition: all .15s; }
+    .dd-tab:hover { color: var(--text); background: color-mix(in srgb, var(--text-muted) 8%, transparent); }
+    .dd-tab.is-active { color: #1a1410; background: color-mix(in srgb, #f5c518 26%, transparent); }
+    #dd-chart-body { min-height: 120px; }
+
     .dd-panes-3 { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); }
     .dd-panes-3 > .dd-pane + .dd-pane { border-left: 1px solid var(--border); }
     body.hub-mode .dd-panes-3, body.hub-mode .dd-panes-3 > .dd-pane + .dd-pane { border-color: #e9e8ed; }
@@ -14717,15 +14726,7 @@ function renderDeepDive() {
   // Monthly Practice is a shell card with a Strava-style range toggle; the actual
   // trend chart is drawn by renderMonthlyChart() into #dd-monthly-chart and
   // re-drawn when the range changes (no need to rebuild the whole deep dive).
-  const _PRANGES = [['3M','3M'],['6M','6M'],['1Y','1Y'],['all','All']];
-  monthlyHTML = `
-    <div class="dd-pane">
-      <div class="dd-card-hdr">
-        <div class="dd-card-title"><span class="dd-hd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></span>Practice Trend</div>
-        <div class="dd-range-toggle">${_PRANGES.map(([k,l]) => `<button class="dd-range-tg${k === _monthlyRange ? ' active' : ''}" data-range="${k}" onclick="setMonthlyRange('${k}')">${l}</button>`).join('')}</div>
-      </div>
-      <div id="dd-monthly-chart"></div>
-    </div>`;
+  monthlyHTML = `<div id="dd-monthly-chart"></div>`;
 
   // ── Day of week pattern ───────────────────────────────────────────
   const dayMins = [0,0,0,0,0,0,0], dayCnt = [0,0,0,0,0,0,0];
@@ -14740,8 +14741,7 @@ function renderDeepDive() {
   const peakDow    = dowOrder.reduce((a, b) => dayMins[a] > dayMins[b] ? a : b);
 
   dowHTML = `
-    <div class="dd-pane">
-      <div class="dd-card-title"><span class="dd-hd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2.5v3M16 2.5v3"/></svg></span>Practice by Day</div>
+    <div>
       <div class="dd-bar-chart">
         ${dowOrder.map((dow, i) => {
           const pct    = Math.round((dayMins[dow] / maxDowMins) * 100);
@@ -14773,8 +14773,7 @@ function renderDeepDive() {
   const maxBucket = Math.max(...buckets.map(b => b.count), 1);
 
   distHTML = `
-    <div class="dd-pane">
-      <div class="dd-card-title"><span class="dd-hd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="14"/></svg></span>Session Lengths</div>
+    <div>
       <div class="dd-bar-chart">
         ${buckets.map(b => {
           const pct    = Math.round((b.count / maxBucket) * 100);
@@ -14974,8 +14973,7 @@ function renderDeepDive() {
   }
   const _sMax = Math.max(1, ..._sMonths.map(m => m.total));
   splitHTML = `
-    <div class="dd-pane">
-      <div class="dd-card-title"><span class="dd-hd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="7"/><rect x="13" y="7" width="3" height="11"/></svg></span>Where your time goes</div>
+    <div>
       <div class="dd-stack">${_sMonths.map(m => `
         <div class="dd-stack-col" title="${m.lab}: ${formatMinutes(Math.round(m.total))}">
           <div class="dd-stack-bar" style="height:${Math.max(2, Math.round((m.total / _sMax) * 100))}%">
@@ -14988,14 +14986,23 @@ function renderDeepDive() {
 
   } // end if (hasData)
 
+  // One chart window: the views live behind a switcher rather than as separate boxes.
+  window._ddCharts = { trend: monthlyHTML, area: splitHTML, dow: dowHTML, lengths: distHTML };
   el.innerHTML = `
     <div class="dd-section-hdr">Practice Deep Dive</div>
     <div class="dd-panel">
-      ${monthlyHTML}
-      <div class="dd-panes-3">${splitHTML}${dowHTML}${distHTML}</div>
+      <div class="dd-pane">
+        <div class="dd-chart-head">
+          <div class="dd-tabs">
+            ${_DD_VIEWS.map(v => `<button class="dd-tab${v.k === _ddMetric ? ' is-active' : ''}" data-dd="${v.k}" onclick="setDdMetric('${v.k}')">${v.lab}</button>`).join('')}
+          </div>
+          <div class="dd-range-toggle" id="dd-range-wrap">${[['3M','3M'],['6M','6M'],['1Y','1Y'],['all','All']].map(([k,l]) => `<button class="dd-range-tg${k === _monthlyRange ? ' active' : ''}" data-range="${k}" onclick="setMonthlyRange('${k}')">${l}</button>`).join('')}</div>
+        </div>
+        <div id="dd-chart-body"></div>
+      </div>
       ${consistencyHTML}
     </div>`;
-  renderMonthlyChart();
+  _ddPaintChart();
 
   // Repertoire is its own section now — one unified status table.
   const repEl = document.getElementById('stats-repertoire');
@@ -15010,6 +15017,26 @@ function renderDeepDive() {
 // short ranges (so the trend has enough points) and monthly for the long ones.
 let _monthlyRange = '1Y';
 window.setMonthlyRange = function(r) { _monthlyRange = r; renderMonthlyChart(); };
+
+// ── Deep Dive: one chart window, switchable views (YouTube-Studio style) ──
+const _DD_VIEWS = [
+  { k: 'trend',   lab: 'Trend' },
+  { k: 'area',    lab: 'By area' },
+  { k: 'dow',     lab: 'By day' },
+  { k: 'lengths', lab: 'Session lengths' },
+];
+let _ddMetric = 'trend';
+window.setDdMetric = function (m) { _ddMetric = m; _ddPaintChart(); };
+function _ddPaintChart() {
+  const body = document.getElementById('dd-chart-body');
+  if (!body || !window._ddCharts) return;
+  document.querySelectorAll('.dd-tab').forEach(b => b.classList.toggle('is-active', b.dataset.dd === _ddMetric));
+  // The date-range control only applies to the time-based trend view.
+  const rng = document.getElementById('dd-range-wrap');
+  if (rng) rng.style.visibility = (_ddMetric === 'trend') ? 'visible' : 'hidden';
+  body.innerHTML = window._ddCharts[_ddMetric] || '';
+  if (_ddMetric === 'trend') renderMonthlyChart();
+}
 function renderMonthlyChart() {
   const el = document.getElementById('dd-monthly-chart');
   if (!el) return;
