@@ -25,11 +25,13 @@ function _achMaxStreak(s) {
   }
   return max;
 }
-// Course lessons (source "app-lesson") auto-log a piece/technique/sightreading/theory item
-// per lesson, all sharing the lesson title. Those are NOT repertoire pieces, deliberate scale
-// practice, or real theory sessions — so the "how many different X" counts exclude them.
-// (Their minutes still count toward practice time and roadmap hours, elsewhere.)
-const _achDeliberate = ss => ss && ss.source !== "app-lesson";
+// The Beginner Course auto-logs a four-track split (piece + technique + sightreading + theory,
+// all sharing the lesson title) per lesson, source "app-lesson". Those aren't repertoire pieces,
+// deliberate scale practice, real theory sessions, or a well-rounded session — so the "how many
+// different X" counts exclude them. Identify such a session by app-lesson + a piece item. The
+// THEORY course also logs via app-lesson but only a theory item (no piece), so its theory sessions
+// STILL count. Minutes/roadmap hours/streak/session-days are unaffected (counted elsewhere).
+const _achDeliberate = ss => !(ss && ss.source === "app-lesson" && (ss.practice_items || []).some(i => i.item_type === "piece"));
 function _achUniquePieces(s) {
   const set = new Set();
   s.forEach(ss => { if (!_achDeliberate(ss)) return; (ss.practice_items || []).forEach(i => {
