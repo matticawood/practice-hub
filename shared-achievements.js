@@ -30,8 +30,11 @@ function _achMaxStreak(s) {
 // deliberate scale practice, real theory sessions, or a well-rounded session — so the "how many
 // different X" counts exclude them. Identify such a session by app-lesson + a piece item. The
 // THEORY course also logs via app-lesson but only a theory item (no piece), so its theory sessions
-// STILL count. Minutes/roadmap hours/streak/session-days are unaffected (counted elsewhere).
-const _achDeliberate = ss => !(ss && ss.source === "app-lesson" && (ss.practice_items || []).some(i => i.item_type === "piece"));
+// STILL count. A QUICK LOG is also excluded: its per-area split is a general estimate that fills the
+// roadmap areas cumulatively, NOT a specific claim (a piece, a scale session, a well-rounded session)
+// — so it must never trigger these achievements. Minutes/roadmap hours/streak/session-days are
+// unaffected (counted elsewhere), so a quick log still earns those.
+const _achDeliberate = ss => !(ss && (ss.source === "quick" || (ss.source === "app-lesson" && (ss.practice_items || []).some(i => i.item_type === "piece"))));
 function _achUniquePieces(s) {
   const set = new Set();
   s.forEach(ss => { if (!_achDeliberate(ss)) return; (ss.practice_items || []).forEach(i => {
