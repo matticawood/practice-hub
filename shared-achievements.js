@@ -25,11 +25,16 @@ function _achMaxStreak(s) {
   }
   return max;
 }
+// Course lessons (source "app-lesson") auto-log a piece/technique/sightreading/theory item
+// per lesson, all sharing the lesson title. Those are NOT repertoire pieces, deliberate scale
+// practice, or real theory sessions — so the "how many different X" counts exclude them.
+// (Their minutes still count toward practice time and roadmap hours, elsewhere.)
+const _achDeliberate = ss => ss && ss.source !== "app-lesson";
 function _achUniquePieces(s) {
   const set = new Set();
-  s.forEach(ss => (ss.practice_items || []).forEach(i => {
+  s.forEach(ss => { if (!_achDeliberate(ss)) return; (ss.practice_items || []).forEach(i => {
     if (i.item_type === "piece" && i.label) set.add(i.label.toLowerCase().trim());
-  }));
+  }); });
   return set.size;
 }
 // Max minutes logged for a single piece across all sessions
@@ -56,11 +61,11 @@ function _achMaxPieceMins(s) {
 // Number of unique scales/techniques practiced
 function _achUniqueScales(s) {
   const set = new Set();
-  s.forEach(ss => (ss.practice_items || []).forEach(i => {
+  s.forEach(ss => { if (!_achDeliberate(ss)) return; (ss.practice_items || []).forEach(i => {
     if (i.item_type === "technique" && i.label) {
       i.label.split(",").forEach(t => { const tr = t.trim().toLowerCase(); if (tr) set.add(tr); });
     }
-  }));
+  }); });
   return set.size;
 }
 // Max sessions on a single scale/technique
@@ -82,7 +87,9 @@ function _achMaxScaleSessions(s) {
 
 // Count sessions that include at least one item of a given type
 function _achItemTypeSessions(s, type) {
-  return s.filter(ss => (ss.practice_items || []).some(i => i.item_type === type)).length;
+  // A course lesson isn't a deliberate session of theory/sight-reading/etc. — exclude it from
+  // session-count badges (the time badges via _achItemTypeMins still count the course's minutes).
+  return s.filter(ss => _achDeliberate(ss) && (ss.practice_items || []).some(i => i.item_type === type)).length;
 }
 
 // Total minutes spent on a given item_type across all sessions
@@ -106,6 +113,7 @@ function _achItemTypeMins(s, type) {
 // Max number of distinct item_types logged in a single session
 function _achMaxVarietyTypes(s) {
   return s.reduce((m, ss) => {
+    if (!_achDeliberate(ss)) return m;   // a course lesson's auto four-track split isn't a well-rounded session
     const types = new Set((ss.practice_items || []).map(i => i.item_type).filter(Boolean));
     return Math.max(m, types.size);
   }, 0);
@@ -115,6 +123,7 @@ function _achMaxVarietyTypes(s) {
 function _achHasCompleteSession(s) {
   const EXTRAS = new Set(["theory", "eartraining", "improvisation", "sightreading"]);
   return s.some(ss => {
+    if (!_achDeliberate(ss)) return false;   // a holistic course lesson isn't a deliberate all-rounder
     const types = new Set((ss.practice_items || []).map(i => i.item_type));
     return types.has("piece") && types.has("technique") && [...types].some(t => EXTRAS.has(t));
   });
