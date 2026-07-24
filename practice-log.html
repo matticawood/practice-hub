@@ -14715,8 +14715,19 @@ function _renderDailyCard() {
   if (viewingEmail && myEmail && viewingEmail !== myEmail && !isOwner()) return; // own dashboard, or the owner reviewing a member
   const todayStr = _memberDayOf();
   const todaySessions = (allSessions || []).filter(s => s.session_date === todayStr);
-  const types = new Set();
-  todaySessions.forEach(s => (s.practice_items || []).forEach(i => types.add(i.item_type)));
+  // Pieces & sight-reading may be credited by the Beginner Course (app-lesson) OR a deliberate
+  // log, but never by games/articles. Scales must be logged specifically (deliberate only) — the
+  // course's auto-split technique slice doesn't count. Nothing here is credited by app-game/article.
+  const types = new Set();          // course lesson + deliberate log → pieces, sight-reading
+  const manualTypes = new Set();    // deliberate log only (manual/quick) → scales
+  todaySessions.forEach(s => {
+    const deliberate = s.source === 'manual' || s.source === 'quick';
+    const creditable = deliberate || s.source === 'app-lesson';
+    (s.practice_items || []).forEach(i => {
+      if (creditable) types.add(i.item_type);
+      if (deliberate) manualTypes.add(i.item_type);
+    });
+  });
 
   // Actionable objectives for today (each states the objective plainly, no filler).
   // Absolute beginners follow the Beginner Course, not free practice — so for them
@@ -14730,7 +14741,7 @@ function _renderDailyCard() {
   ] : [
     { ic: 'piece',  cat: 'Pieces',        desc: 'Log a piece in your practice today', action: LOG, done: types.has('piece') || types.has('book'), wizard: true },
     { ic: 'sight',  cat: 'Sight-reading', desc: 'Log 5 minutes of sight-reading', action: LOG, done: types.has('sightreading'),               wizard: true },
-    { ic: 'scales', cat: 'Scales',        desc: 'Log some scale practice',        action: LOG, done: types.has('technique'),                  wizard: true },
+    { ic: 'scales', cat: 'Scales',        desc: 'Log some scale practice',        action: LOG, done: manualTypes.has('technique'),            wizard: true },
   ];
   const skill = _pickDailySkill();
   if (skill)  rows.push({ ic: 'skill',  cat: skill.title,  desc: skill.blurb,  action: PLAY,   done: skill.done,  href: skill.href });
