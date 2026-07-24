@@ -1484,6 +1484,15 @@
     #wiz-screen-quick .wiz-ql-controls .wiz-dur-group { align-items: center; }
     #wiz-screen-quick .wiz-ql-controls .wiz-dur-grouplabel { text-align: center; }
     .wiz-quick-log-btn { width: 100%; max-width: 280px; padding: 14px 20px !important; font-size: 1rem !important; margin-top: 2px; }
+    .wiz-ql-split { width: 100%; max-width: 320px; margin-top: 2px; }
+    .wiz-ql-split-head { font-size: .8rem; font-weight: 700; color: var(--text-muted); text-align: center; margin-bottom: 9px; line-height: 1.4; }
+    .wiz-ql-split-head span { display: block; font-weight: 500; font-size: .72rem; opacity: .85; }
+    .wiz-ql-split-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+    .wiz-ql-sp { display: flex; align-items: center; gap: 6px; font-size: .83rem; font-weight: 600; }
+    .wiz-ql-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .wiz-ql-sp input { width: 44px; margin-left: auto; text-align: right; font-size: .95rem; font-weight: 700; padding: 4px 6px; border: 1px solid rgba(128,128,128,.35); border-radius: 7px; background: transparent; color: inherit; }
+    .wiz-ql-sp input::-webkit-outer-spin-button, .wiz-ql-sp input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .wiz-ql-sp i { font-style: normal; color: var(--text-muted); font-size: .78rem; }
     .wiz-quick-note { font-size: .78rem; color: var(--text-muted); line-height: 1.5; max-width: 300px; }
 
     /* Quick time editor modal */
@@ -9208,6 +9217,15 @@
                 <button type="button" class="dur-adj" onclick="_qlAdjust(1)">+1</button>
                 <button type="button" class="dur-adj" onclick="_qlAdjust(5)">+5</button>
               </div>
+            </div>
+          </div>
+          <div class="wiz-ql-split">
+            <div class="wiz-ql-split-head">Roughly how did it split?<span id="wiz-ql-splitnote">Fills your area progress. Adjust or leave as your usual.</span></div>
+            <div class="wiz-ql-split-grid">
+              <label class="wiz-ql-sp"><span class="wiz-ql-dot" style="background:#f5c518"></span>Repertoire<input id="wiz-ql-repertoire" type="number" min="0" max="100" step="5" value="45" inputmode="numeric" oninput="_qlSplitSum()"><i>%</i></label>
+              <label class="wiz-ql-sp"><span class="wiz-ql-dot" style="background:#6366f1"></span>Technique<input id="wiz-ql-technique" type="number" min="0" max="100" step="5" value="25" inputmode="numeric" oninput="_qlSplitSum()"><i>%</i></label>
+              <label class="wiz-ql-sp"><span class="wiz-ql-dot" style="background:#10b981"></span>Sight-reading<input id="wiz-ql-sight_reading" type="number" min="0" max="100" step="5" value="10" inputmode="numeric" oninput="_qlSplitSum()"><i>%</i></label>
+              <label class="wiz-ql-sp"><span class="wiz-ql-dot" style="background:#a855f7"></span>Musicianship<input id="wiz-ql-musicianship" type="number" min="0" max="100" step="5" value="20" inputmode="numeric" oninput="_qlSplitSum()"><i>%</i></label>
             </div>
           </div>
           <button type="button" id="wiz-ql-btn" class="btn btn-primary wiz-quick-log-btn" onclick="quickLogSubmit()">Log practice</button>
@@ -21075,7 +21093,8 @@ async function _wizRenderTodaySoFar() {
       const items = s.practice_items || [];
       const mins = s.duration_minutes || items.reduce((a, i) => a + (i.duration_minutes || 0), 0);
       total += mins;
-      const type = (items[0] && items[0].item_type) || "other";
+      // A quick log keeps its neutral icon: its items are a per-area split, not a chosen type.
+      const type = s.source === "quick" ? "other" : ((items[0] && items[0].item_type) || "other");
       const isApp = !!APP_SRC[s.source];
       let name;
       if (isApp) name = (items[0] && items[0].label) ||
@@ -21716,6 +21735,45 @@ function _qlSyncPresets() {
   const v = String(Math.round(Number(inp?.value) || 0));
   document.querySelectorAll("#wiz-screen-quick .dur-preset")
     .forEach(b => b.classList.toggle("active", b.dataset.val === v));
+}
+
+// Quick-log area split. The % fields fill the four roadmap AREAS cumulatively
+// (repertoire/technique/sight-reading/musicianship) so progress-by-area keeps pace with the
+// path. It is NEVER a specific daily claim — the daily card and achievements both exclude
+// source='quick'. Default is the typical split the prior-hours form uses (calibrated so the
+// areas progress evenly, proportional to their hour requirements); the member can adjust per
+// session. On submit the minutes are apportioned across the areas' item types.
+const _QL_AREAS = ['repertoire', 'technique', 'sight_reading', 'musicianship'];
+const _QL_AREA_ITEM = { repertoire: 'piece', technique: 'technique', sight_reading: 'sightreading', musicianship: 'theory' };
+const _QL_DEFAULT = () => (typeof _RM_BL_DEFAULT !== 'undefined') ? _RM_BL_DEFAULT : { repertoire: 45, technique: 25, sight_reading: 10, musicianship: 20 };
+function _qlReadSplit() {
+  let pct = {}, sum = 0;
+  _QL_AREAS.forEach(a => { const v = Math.max(0, parseFloat(document.getElementById('wiz-ql-' + a)?.value) || 0); pct[a] = v; sum += v; });
+  if (sum <= 0) { const d = _QL_DEFAULT(); pct = { ...d }; sum = _QL_AREAS.reduce((s, a) => s + (d[a] || 0), 0); }
+  return { pct, sum };
+}
+function _qlSplitSum() {
+  const el = document.getElementById('wiz-ql-splitnote'); if (!el) return;
+  const sum = _QL_AREAS.reduce((s, a) => s + Math.max(0, parseFloat(document.getElementById('wiz-ql-' + a)?.value) || 0), 0);
+  el.textContent = Math.round(sum) === 100
+    ? 'Fills your area progress. Adjust or leave as your usual.'
+    : `These total ${Math.round(sum)}% — we'll scale them to fit.`;
+}
+function _qlResetSplit() {
+  const d = _QL_DEFAULT();
+  _QL_AREAS.forEach(a => { const el = document.getElementById('wiz-ql-' + a); if (el) el.value = d[a] != null ? d[a] : 0; });
+  _qlSplitSum();
+}
+// Apportion `mins` across the areas by the % fields, largest-remainder so they sum EXACTLY to
+// mins. Returns per-area practice_items (skips zero-minute areas). Labelled "Quick log" so the
+// session still reads as one quick log everywhere its display keys off source='quick'.
+function _qlSplitItems(mins) {
+  const { pct, sum } = _qlReadSplit();
+  const raw = {}, floors = {}; let used = 0;
+  _QL_AREAS.forEach(a => { raw[a] = mins * pct[a] / sum; floors[a] = Math.floor(raw[a]); used += floors[a]; });
+  let rem = mins - used;
+  _QL_AREAS.slice().sort((a, b) => (raw[b] - floors[b]) - (raw[a] - floors[a])).forEach(a => { if (rem > 0) { floors[a]++; rem--; } });
+  return _QL_AREAS.filter(a => floors[a] > 0).map((a, i) => ({ item_type: _QL_AREA_ITEM[a], duration_minutes: floors[a], label: 'Quick log', sort_order: i }));
 }
 
 function _wizValidateCurrentItem() {
@@ -23155,11 +23213,15 @@ async function quickLogSubmit() {
       .insert({ email: myEmail, session_date: dateVal, duration_minutes: mins, timing_mode: "per_item", notes: null, source: "quick" })
       .select("id").single();
     if (error) throw error;
-    await db.from("practice_items").insert({ session_id: sess.id, item_type: "other", duration_minutes: mins, label: "Quick log", sort_order: 0 });
+    // Fill the four roadmap areas by the member's split (not a single unattributed 'other'),
+    // so progress-by-area keeps pace with the path. Still a source='quick' session, so it
+    // reads as one "Quick log" everywhere and never ticks a specific daily/achievement claim.
+    await db.from("practice_items").insert(_qlSplitItems(mins).map(it => ({ ...it, session_id: sess.id })));
     try { await db.rpc("recompute_streak_tokens", { p_email: myEmail }); } catch (_) {}
     if (window._shPing) window._shPing();
     await loadData();
     input.value = "";
+    _qlResetSplit();   // next quick log starts from the typical default again
     // Streak for the success moment, computed like the full save.
     let _saveStreak = 0;
     try {
