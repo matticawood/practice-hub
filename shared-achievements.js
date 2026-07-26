@@ -1147,6 +1147,22 @@ async function insertNotification(type, title, body, linkUrl, sourceId, metadata
  * Pass { force: true } to bypass the debounce.
  * ────────────────────────────────────────────────────────────────────────────── */
 let _tcAchCheckTs = 0;
+// get_my_sessions does NOT return `source`, but the achievement rules (_achDeliberate) exclude First Steps /
+// beginner-course activity by `source === "app-lesson"`. Without this backfill, `source` is undefined in the
+// AWARD paths, the exclusion silently never fires, and course auto-logged items get counted as real pieces/
+// scales (the "new member unlocked 15 achievements" bug). practice-log.html already does this on its own loader;
+// this makes the shared award functions match. (Long-term: add `source` to the get_my_sessions RPC.)
+async function _achBackfillSource(sessions, email) {
+  try {
+    const { data: srcRows } = await db.from("practice_sessions")
+      .select("id,source").eq("email", email).neq("source", "manual");
+    const srcMap = {};
+    (srcRows || []).forEach(r => { srcMap[r.id] = r.source; });
+    (sessions || []).forEach(x => { x.source = srcMap[x.id] || "manual"; });
+  } catch (_) { /* non-fatal: leave sessions as-is */ }
+}
+window._achBackfillSource = _achBackfillSource;
+
 async function tcCheckAchievements(opts) {
   try {
     if (typeof db === "undefined" || !db) return;
@@ -1157,6 +1173,7 @@ async function tcCheckAchievements(opts) {
     _tcAchCheckTs = now;
     const s = await db.rpc("get_my_sessions", { p_email: myEmail });
     if (!s.error) allSessions = s.data || [];
+    await _achBackfillSource(allSessions, myEmail);   // so _achDeliberate can exclude First Steps activity
     const st = await db.from("streak_tokens").select("*").eq("email", myEmail).maybeSingle();
     if (!st.error) streakData = st.data;
     await loadAchievementExtras();
@@ -1181,6 +1198,7 @@ async function tcReconcileAchievements() {
     const s = await db.rpc("get_my_sessions", { p_email: myEmail });
     if (s.error) return;                 // do not revoke on a failed load
     allSessions = s.data || [];
+    await _achBackfillSource(allSessions, myEmail);   // exclude First Steps activity from the re-check
     const st = await db.from("streak_tokens").select("*").eq("email", myEmail).maybeSingle();
     if (!st.error) streakData = st.data;
     await loadAchievementExtras();

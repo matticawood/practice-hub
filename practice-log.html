@@ -13266,7 +13266,12 @@ function _renderJourneyCard(returnParts) {
     // days at this level"). The ring fills toward the cumulative target so it, and
     // the countdown, both move a step every day the member practices (never frozen).
     if (g.type === "days")  { const thr = cumThresh(g, lvl, "days"); return { txt: "", frac: thr ? Math.min(1, days / thr) : 0 }; }
-    if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const have = Math.max(0, Math.min(need, catMins(g.category) - (cumThresh(g, lvl, "min") - need))); return { txt: `${Math.round(have / 60)}/${Math.round(need / 60)} h`, frac: need ? have / need : 0 }; }
+    if (g.type === "hours") { const need = (g.targetMin != null ? g.targetMin : (g.target || 0) * 60); const cm = catMins(g.category); const have = Math.max(0, Math.min(need, cm - (cumThresh(g, lvl, "min") - need))); let frac = need ? have / need : 0;
+      // Any logged time in this area must show a VISIBLE sliver (and never read as "it isn't tracking my sight-reading").
+      // The cumulative offset can hold segment progress at 0 for a member who reached this level via other areas, and a
+      // tiny fraction rounds to a 0%-wide bar - both make the ring/bar disappear. Floor to ~4% whenever the area has any minutes.
+      if (cm > 0 && frac < 0.04) frac = 0.04;
+      return { txt: `${Math.round(have / 60)}/${Math.round(need / 60)} h`, frac }; }
     if (g.type === "piece") { const have = Math.min(g.count, (g.mode === "added" ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length : pieces(g.tier))); return { txt: `${have}/${g.count}`, frac: g.count ? have / g.count : 0 }; }
     if (g.type === "note" || g.type === "chord" || g.type === "ear" || g.type === "interval") { const b = bestMatch(g.type, g.match); return { txt: `best ${b}/${g.target}`, frac: g.target ? Math.min(1, b / g.target) : 0 }; }
     // Theory "complete" goals fill lesson-by-lesson (e.g. 3/13 lessons); the ring
@@ -16162,7 +16167,14 @@ async function _renderStatsLibrary() {
         <span class="sl-card-sub">${readingCount ? `${readingCount} in progress &middot; ` : ''}Piano Practice Daily library</span>
         <a class="sl-card-link" href="/resources.html">Browse articles &rarr;</a>`;
     }
-    const earned = new Set((achRes.data || []).map(r => (r && (r.achievement_id || r.achievement)) || r).filter(Boolean)).size;
+    // Count earned the SAME way the achievements modal does (shared engine), not by raw achievement_events rows:
+    // silently-granted / baseline-covered badges have no DB row, so a raw row count under-reports (they showed in
+    // the modal but not this tile). computeAchievements unions live check() results with DB rows, scoped to the
+    // current ACHIEVEMENTS list, so the tile and the modal pill always agree.
+    const _dbEarned = new Set((achRes.data || []).map(r => (r && (r.achievement_id || r.achievement)) || r).filter(Boolean));
+    const earned = (typeof computeAchievements === 'function')
+      ? computeAchievements(allSessions, _dbEarned).filter(a => a.earned).length
+      : _dbEarned.size;
     const totalAch = (typeof ACHIEVEMENTS !== 'undefined' && ACHIEVEMENTS.length) ? ACHIEVEMENTS.length : 0;
     const chEl = document.getElementById('sl-ach');
     if (chEl && totalAch) {
