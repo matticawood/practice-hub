@@ -348,6 +348,14 @@
     .rg-skey.on .rg-skey-hint { display: none; }
     .rg-skey.on .rg-skey-lbl { color: var(--text-muted); }
     .rg-skey.on .rg-skey-tick { border-style: solid; border-color: transparent; background: linear-gradient(135deg, #10b981, #0d9c6e); }
+    /* Minor keys: a parent row (tap to open its three forms) sitting inside the key list. */
+    .rg-skey--group { font-weight: 700; cursor: pointer; }
+    .rg-caret--sub { width: 13px; height: 13px; margin-left: 0; }
+    .rg-skey-sub { flex-shrink: 0; font-size: .62rem; font-weight: 800; padding: 2px 7px; border-radius: 99px;
+      color: #b07c08; background: color-mix(in srgb, #f5c518 18%, transparent); }
+    .rg-skeys--sub { padding: 0 4px 6px 30px; }
+    .rg-skeys--sub .rg-skey { font-weight: 600; }
+    .rg-skeys--sub + .rg-skey--group { border-top: 1px solid color-mix(in srgb, var(--border) 35%, transparent); }
     .rg-self-hint { flex-shrink: 0; font-size: .6rem; font-weight: 600; color: var(--text-muted); opacity: .55; }
     .rg-keys { flex-shrink: 0; font-size: .62rem; font-weight: 800; padding: 2px 7px; border-radius: 99px;
       color: #b07c08; background: color-mix(in srgb, #f5c518 18%, transparent); }
@@ -13123,17 +13131,13 @@ function _renderJourneyCard(returnParts) {
     const grp = grpOf(g);
     if (grp !== "scales" && grp !== "arps" && grp !== "minors" && grp !== "arpsmin") return null;
     const keys = (g.keys && g.keys.length) ? g.keys : (g.all ? RM_CIRCLE : null);
-    if (!keys || keys.length < 2) return null;
-    // Minor objectives cover three forms per key — make each form its own tick
-    // ("A|natural", "A|harmonic", "A|melodic") so the list shows all three.
-    if (grp === "minors") {
-      // Keyed minors (stages 3-4) list each of the three forms separately; the "all
-      // keys" minors (stages 5-6) roll the three forms into one tick per key.
-      if (g.all) return keys;
-      const units = [];
-      keys.forEach(k => RM_MINOR_FORMS.forEach(f => units.push(k + "|" + f)));
-      return units;
-    }
+    if (!keys) return null;
+    // Minors are still keyed (one entry per key), but each key opens a SECOND drop-down
+    // of its three forms (natural / harmonic / melodic), each ticked on its own — a key
+    // only counts as done once all three are marked. One key is enough for that nested
+    // list, so minors skip the two-key minimum the flat scale/arp lists use.
+    if (grp === "minors") return keys.length ? keys : null;
+    if (keys.length < 2) return null;
     return keys;
   };
   const rmSubKey = (objKey, k) => objKey + ":" + k;
@@ -13147,9 +13151,15 @@ function _renderJourneyCard(returnParts) {
   // would be 8 flats — invalid — so it is single, not a pair.
   const RM_ENH_MIN = { "Db": "C♯", "Ab": "G♯/A♭", "Eb": "E♭/D♯", "Bb": "B♭/A♯" };
   const rmKeyDisplay = (k, minor) => (minor ? RM_ENH_MIN : RM_ENH_MAJ)[k] || rmKeyLabel(k);
+  // Minor forms tick individually as "<objKey>:<key>|<form>". A form also counts as done
+  // if a legacy whole-objective tick ("<objKey>") or a legacy whole-key tick
+  // ("<objKey>:<key>", the old all-keys scheme) is set, so nothing regresses.
+  const rmMinorFormDone = (g, k, f) => selfDone(g.key) || selfDone(rmSubKey(g.key, k)) || selfDone(rmSubKey(g.key, k + "|" + f));
+  const rmMinorKeyDone = (g, k) => RM_MINOR_FORMS.every(f => rmMinorFormDone(g, k, f));
+  const rmUnitDone = (g, k) => grpOf(g) === "minors" ? rmMinorKeyDone(g, k) : selfDone(rmSubKey(g.key, k));
   const rmScaleTicked = (g, keys) => selfDone(g.key)
     ? keys.length
-    : keys.filter(k => selfDone(rmSubKey(g.key, k))).length;
+    : keys.filter(k => rmUnitDone(g, k)).length;
   // Accumulating goals (days, sight-reading & improv minutes) store their OWN per-level
   // target; the tick threshold is the sum of that group's targets across all levels up
   // to the goal's level, so the displayed number stays small/per-level while the tick
@@ -13392,24 +13402,48 @@ function _renderJourneyCard(returnParts) {
         const isArp = grp === "arps" || grp === "arpsmin";
         const typeWord = isArp ? "arpeggio" : "scale";
         const minorArp = grp === "arpsmin";               // minor arpeggios (own group)
-        const rows = mkeys.map(k => {
-          const on = legacy || selfDone(rmSubKey(g.key, k));
-          let lbl;
-          if (grp === "minors") {
-            if (k.indexOf("|") >= 0) {                    // per-form (stages 3-4)
-              const p = k.split("|");
-              lbl = `${rmKeyDisplay(p[0], true)} ${p[1]} minor scale`;
-            } else {                                        // all keys: forms rolled up
-              lbl = `${rmKeyDisplay(k, true)} minor scales (natural, harmonic and melodic)`;
+        const subCaret = o => `<svg class="rg-caret rg-caret--sub${o ? " open" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+        let rows;
+        if (grp === "minors") {
+          // Each key is a parent row that opens a SECOND drop-down of its three forms.
+          // The key ticks green only once all three forms are marked; the objective ticks
+          // once every key is done. Form ticks store as "<objKey>:<key>|<form>".
+          const allUnits = [];
+          mkeys.forEach(k => RM_MINOR_FORMS.forEach(f => allUnits.push(k + "|" + f)));
+          const allUnitsStr = allUnits.join(",");
+          rows = mkeys.map(k => {
+            const kDone = legacy || rmMinorKeyDone(g, k);
+            const kOpen = !!(window._rmOpenMinorKeys && window._rmOpenMinorKeys.has(g.key + "::" + k));
+            const nDone = RM_MINOR_FORMS.filter(f => legacy || rmMinorFormDone(g, k, f)).length;
+            const kChip = (!kDone && nDone > 0) ? `<span class="rg-skey-sub">${nDone}/3</span>` : "";
+            const keyHead = `<div class="rg-skey rg-skey--group${kDone ? " on" : ""}" role="button" tabindex="0" onclick="_rmToggleMinorKeyOpen('${g.key}','${k}',event)">`
+                          + `<span class="rg-skey-tick">${kDone ? CHECK : ""}</span>`
+                          + `<span class="rg-skey-lbl">${escHtml(rmKeyDisplay(k, true) + " minor scales (natural, harmonic and melodic)")}</span>`
+                          + kChip + subCaret(kOpen) + `</div>`;
+            let sub = "";
+            if (kOpen) {
+              const forms = RM_MINOR_FORMS.map(f => {
+                const on = legacy || rmMinorFormDone(g, k, f);
+                const lbl = `${rmKeyDisplay(k, true)} ${f} minor ${typeWord}`;
+                return `<button type="button" class="rg-skey${on ? " on" : ""}" onclick="_rmToggleMinorForm('${g.key}','${k}|${f}','${allUnitsStr}','${k}',event)">`
+                     + `<span class="rg-skey-tick">${on ? CHECK : ""}</span>`
+                     + `<span class="rg-skey-lbl">${escHtml(lbl)}</span>`
+                     + `<span class="rg-skey-hint">mark done</span></button>`;
+              }).join("");
+              sub = `<div class="rg-skeys rg-skeys--sub">${forms}</div>`;
             }
-          } else {
-            lbl = `${rmKeyDisplay(k, minorArp)} ${minorArp ? "minor" : "major"} ${typeWord}`;
-          }
-          return `<button type="button" class="rg-skey${on ? " on" : ""}" onclick="_rmToggleScaleKey('${g.key}','${k}','${keyList}',event)">`
-               + `<span class="rg-skey-tick">${on ? CHECK : ""}</span>`
-               + `<span class="rg-skey-lbl">${escHtml(lbl)}</span>`
-               + `<span class="rg-skey-hint">mark done</span></button>`;
-        }).join("");
+            return keyHead + sub;
+          }).join("");
+        } else {
+          rows = mkeys.map(k => {
+            const on = legacy || selfDone(rmSubKey(g.key, k));
+            const lbl = `${rmKeyDisplay(k, minorArp)} ${minorArp ? "minor" : "major"} ${typeWord}`;
+            return `<button type="button" class="rg-skey${on ? " on" : ""}" onclick="_rmToggleScaleKey('${g.key}','${k}','${keyList}',event)">`
+                 + `<span class="rg-skey-tick">${on ? CHECK : ""}</span>`
+                 + `<span class="rg-skey-lbl">${escHtml(lbl)}</span>`
+                 + `<span class="rg-skey-hint">mark done</span></button>`;
+          }).join("");
+        }
         panel = `<div class="rg-skeys">${rows}</div>`;
       }
       return `<div class="rg-goal rg-goal--scales self${done ? " done" : ""}"${aAttr}>${head}${panel}</div>`;
@@ -14104,6 +14138,45 @@ function _rmToggleScaleKey(objKey, rawKey, keyList, e) {
     if (own) { try { localStorage.removeItem("rm_goal_" + objKey); } catch (_) {} }
   }
   setKey(rawKey, !_selfChecks[objKey + ":" + rawKey]);
+  if (own) _rmSaveSelfChecks().catch(() => {});
+  try { _rmAfterLoad(); } catch (_) { try { _renderJourneyCard(); } catch (__) {} }
+}
+// Minor keys: the second-level drop-down (a key's three forms) is transient UI state.
+window._rmOpenMinorKeys = window._rmOpenMinorKeys || new Set();
+function _rmToggleMinorKeyOpen(objKey, key, e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  const id = objKey + "::" + key;
+  const s = window._rmOpenMinorKeys;
+  if (s.has(id)) s.delete(id); else s.add(id);
+  try { _renderJourneyCard(); } catch (_) {}
+}
+// Tick / untick one FORM of one minor key. Stored as "<objKey>:<key>|<form>"; the key
+// ticks green once all three forms are set, the objective once every key is done.
+function _rmToggleMinorForm(objKey, unit, allUnits, key, e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  if (!_selfChecks || typeof _selfChecks !== "object") _selfChecks = {};
+  const own = !viewingEmail || viewingEmail === myEmail;
+  const FORMS = ["natural", "harmonic", "melodic"];
+  const setKey = (k, on) => {
+    const ck = objKey + ":" + k;
+    if (on) _selfChecks[ck] = true; else delete _selfChecks[ck];
+    if (own) { try { on ? localStorage.setItem("rm_goal_" + ck, "1") : localStorage.removeItem("rm_goal_" + ck); } catch (_) {} }
+  };
+  // Expand a legacy whole-objective tick into explicit per-form ticks first, so
+  // un-ticking one form doesn't silently clear everything else.
+  if (_selfChecks[objKey]) {
+    (allUnits || "").split(",").filter(Boolean).forEach(u => setKey(u, true));
+    delete _selfChecks[objKey];
+    if (own) { try { localStorage.removeItem("rm_goal_" + objKey); } catch (_) {} }
+  }
+  // Expand a legacy whole-key tick ("<objKey>:<key>", the old all-keys scheme) into its
+  // three forms, so un-ticking one form keeps the other two.
+  if (_selfChecks[objKey + ":" + key]) {
+    FORMS.forEach(f => setKey(key + "|" + f, true));
+    delete _selfChecks[objKey + ":" + key];
+    if (own) { try { localStorage.removeItem("rm_goal_" + objKey + ":" + key); } catch (_) {} }
+  }
+  setKey(unit, !_selfChecks[objKey + ":" + unit]);
   if (own) _rmSaveSelfChecks().catch(() => {});
   try { _rmAfterLoad(); } catch (_) { try { _renderJourneyCard(); } catch (__) {} }
 }
