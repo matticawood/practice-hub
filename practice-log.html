@@ -13160,6 +13160,40 @@ function _renderJourneyCard(returnParts) {
   const rmScaleTicked = (g, keys) => selfDone(g.key)
     ? keys.length
     : keys.filter(k => rmUnitDone(g, k)).length;
+  // One minor form button (natural / harmonic / melodic in one key).
+  const rmMinorFormRow = (g, k, f, allUnitsStr, legacy) => {
+    const on = legacy || rmMinorFormDone(g, k, f);
+    return `<button type="button" class="rg-skey${on ? " on" : ""}" onclick="_rmToggleMinorForm('${g.key}','${k}|${f}','${allUnitsStr}','${k}',event)">`
+         + `<span class="rg-skey-tick">${on ? CHECK : ""}</span>`
+         + `<span class="rg-skey-lbl">${escHtml(rmKeyDisplay(k, true) + " " + f + " minor scale")}</span>`
+         + `<span class="rg-skey-hint">mark done</span></button>`;
+  };
+  // A minor objective's drop-down body, shared by baseline and Extra minors so they
+  // behave identically. One key → its three forms directly; several keys → a per-key row
+  // that opens its own three-form sub-list.
+  const rmMinorPanel = (g, keys, legacy) => {
+    const allUnits = [];
+    keys.forEach(k => RM_MINOR_FORMS.forEach(f => allUnits.push(k + "|" + f)));
+    const allUnitsStr = allUnits.join(",");
+    const subCaret = o => `<svg class="rg-caret rg-caret--sub${o ? " open" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+    if (keys.length === 1) {
+      const k = keys[0];
+      return `<div class="rg-skeys">${RM_MINOR_FORMS.map(f => rmMinorFormRow(g, k, f, allUnitsStr, legacy)).join("")}</div>`;
+    }
+    const rows = keys.map(k => {
+      const kDone = legacy || rmMinorKeyDone(g, k);
+      const kOpen = !!(window._rmOpenMinorKeys && window._rmOpenMinorKeys.has(g.key + "::" + k));
+      const nDone = RM_MINOR_FORMS.filter(f => legacy || rmMinorFormDone(g, k, f)).length;
+      const kChip = (!kDone && nDone > 0) ? `<span class="rg-skey-sub">${nDone}/3</span>` : "";
+      const keyHead = `<div class="rg-skey rg-skey--group${kDone ? " on" : ""}" role="button" tabindex="0" onclick="_rmToggleMinorKeyOpen('${g.key}','${k}',event)">`
+                    + `<span class="rg-skey-tick">${kDone ? CHECK : ""}</span>`
+                    + `<span class="rg-skey-lbl">${escHtml(rmKeyDisplay(k, true) + " minor scales (natural, harmonic and melodic)")}</span>`
+                    + kChip + subCaret(kOpen) + `</div>`;
+      const sub = kOpen ? `<div class="rg-skeys rg-skeys--sub">${RM_MINOR_FORMS.map(f => rmMinorFormRow(g, k, f, allUnitsStr, legacy)).join("")}</div>` : "";
+      return keyHead + sub;
+    }).join("");
+    return `<div class="rg-skeys">${rows}</div>`;
+  };
   // Accumulating goals (days, sight-reading & improv minutes) store their OWN per-level
   // target; the tick threshold is the sum of that group's targets across all levels up
   // to the goal's level, so the displayed number stays small/per-level while the tick
@@ -13372,6 +13406,20 @@ function _renderJourneyCard(returnParts) {
     // ── Optional EXTRA tier: coloured card, Extra tag stacked above its indicator ──
     if (tier >= 1) {
       const style = done ? "" : ` style="${tierStyle(tier)}"`;
+      // Minor Extra objectives expand into their forms too, exactly like baseline minors
+      // (one key → its three forms), so the "tick each form off" behaviour is everywhere.
+      const mkeysX = (g.type === "self" && grpOf(g) === "minors") ? rmScaleKeys(g) : null;
+      if (mkeysX) {
+        const openX = !!(window._rmOpenScales && window._rmOpenScales.has(g.key));
+        const legacyX = selfDone(g.key);
+        const caretX = `<svg class="rg-caret${openX ? " open" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+        const headX = `<div class="rg-scale-head" role="button" tabindex="0" onclick="_rmToggleScaleOpen('${g.key}',event)">`
+                    + `<span class="${tickCls}">${done ? CHECK : ring}</span>`
+                    + `<span class="rg-why-body"><span class="rg-why-head">${areaIco}<span class="rg-label">${escHtml(labelText)}</span><span class="rg-x-col"><span class="rg-x-tag">Extra</span>${done ? "" : chip}</span>${caretX}</span></span>`
+                    + `</div>`;
+        const panelX = openX ? rmMinorPanel(g, mkeysX, legacyX) : "";
+        return `<div class="rg-goal rg-goal--x rg-goal--scales self${done ? " done" : ""}"${style}>${headX}${panelX}</div>`;
+      }
       const ind = (g.type === "self")
         ? `<span class="rg-self-hint">${done ? "" : "tap when done"}</span>`
         : chip;
@@ -13410,43 +13458,13 @@ function _renderJourneyCard(returnParts) {
       let panel = "";
       if (open) {
         const grp = grpOf(g);
-        const isArp = grp === "arps" || grp === "arpsmin";
-        const typeWord = isArp ? "arpeggio" : "scale";
-        const minorArp = grp === "arpsmin";               // minor arpeggios (own group)
-        const subCaret = o => `<svg class="rg-caret rg-caret--sub${o ? " open" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
-        let rows;
         if (grp === "minors") {
-          // Each key is a parent row that opens a SECOND drop-down of its three forms.
-          // The key ticks green only once all three forms are marked; the objective ticks
-          // once every key is done. Form ticks store as "<objKey>:<key>|<form>".
-          const allUnits = [];
-          mkeys.forEach(k => RM_MINOR_FORMS.forEach(f => allUnits.push(k + "|" + f)));
-          const allUnitsStr = allUnits.join(",");
-          rows = mkeys.map(k => {
-            const kDone = legacy || rmMinorKeyDone(g, k);
-            const kOpen = !!(window._rmOpenMinorKeys && window._rmOpenMinorKeys.has(g.key + "::" + k));
-            const nDone = RM_MINOR_FORMS.filter(f => legacy || rmMinorFormDone(g, k, f)).length;
-            const kChip = (!kDone && nDone > 0) ? `<span class="rg-skey-sub">${nDone}/3</span>` : "";
-            const keyHead = `<div class="rg-skey rg-skey--group${kDone ? " on" : ""}" role="button" tabindex="0" onclick="_rmToggleMinorKeyOpen('${g.key}','${k}',event)">`
-                          + `<span class="rg-skey-tick">${kDone ? CHECK : ""}</span>`
-                          + `<span class="rg-skey-lbl">${escHtml(rmKeyDisplay(k, true) + " minor scales (natural, harmonic and melodic)")}</span>`
-                          + kChip + subCaret(kOpen) + `</div>`;
-            let sub = "";
-            if (kOpen) {
-              const forms = RM_MINOR_FORMS.map(f => {
-                const on = legacy || rmMinorFormDone(g, k, f);
-                const lbl = `${rmKeyDisplay(k, true)} ${f} minor ${typeWord}`;
-                return `<button type="button" class="rg-skey${on ? " on" : ""}" onclick="_rmToggleMinorForm('${g.key}','${k}|${f}','${allUnitsStr}','${k}',event)">`
-                     + `<span class="rg-skey-tick">${on ? CHECK : ""}</span>`
-                     + `<span class="rg-skey-lbl">${escHtml(lbl)}</span>`
-                     + `<span class="rg-skey-hint">mark done</span></button>`;
-              }).join("");
-              sub = `<div class="rg-skeys rg-skeys--sub">${forms}</div>`;
-            }
-            return keyHead + sub;
-          }).join("");
+          panel = rmMinorPanel(g, mkeys, legacy);
         } else {
-          rows = mkeys.map(k => {
+          const isArp = grp === "arps" || grp === "arpsmin";
+          const typeWord = isArp ? "arpeggio" : "scale";
+          const minorArp = grp === "arpsmin";               // minor arpeggios (own group)
+          const rows = mkeys.map(k => {
             const on = legacy || selfDone(rmSubKey(g.key, k));
             const lbl = `${rmKeyDisplay(k, minorArp)} ${minorArp ? "minor" : "major"} ${typeWord}`;
             return `<button type="button" class="rg-skey${on ? " on" : ""}" onclick="_rmToggleScaleKey('${g.key}','${k}','${keyList}',event)">`
@@ -13454,8 +13472,8 @@ function _renderJourneyCard(returnParts) {
                  + `<span class="rg-skey-lbl">${escHtml(lbl)}</span>`
                  + `<span class="rg-skey-hint">mark done</span></button>`;
           }).join("");
+          panel = `<div class="rg-skeys">${rows}</div>`;
         }
-        panel = `<div class="rg-skeys">${rows}</div>`;
       }
       return `<div class="rg-goal rg-goal--scales self${done ? " done" : ""}"${aAttr}>${head}${panel}</div>`;
     }
