@@ -10235,8 +10235,12 @@ async function loadData() {
     try {
       const { data: cps } = await db.rpc("get_custom_piece_statuses", { p_email: viewingEmail });
       _customStatusByName = {};
-      (cps || []).forEach(r => { if (r.title) _customStatusByName[r.title.trim().toLowerCase()] = r.status; });
-    } catch (e) { _customStatusByName = {}; }
+      _customPieceById = {};
+      (cps || []).forEach(r => {
+        if (r.title) _customStatusByName[r.title.trim().toLowerCase()] = r.status;
+        if (r.user_piece_id != null) _customPieceById[r.user_piece_id] = { title: r.title, status: r.status };
+      });
+    } catch (e) { _customStatusByName = {}; _customPieceById = {}; }
 
     // Reading/library/game achievement extras (Badges tab).
     try { await loadAchievementExtras(); } catch (e) { /* badges fill in later */ }
@@ -13931,6 +13935,7 @@ function _emojiToSvg(e, size = 15) {
 let _insightTrainers = null, _insightCollections = null; // loaded in loadData
 let _focusByLength = null; // community avg focus per session-length band, loaded in loadData
 let _customStatusByName = {}; // lower(title) -> status for custom pieces (self-or-owner RPC, RLS-safe)
+let _customPieceById = {};    // user_piece_id -> {title,status}; keys the repertoire card by the canonical piece so a rename shows one row
 let _pathTheoryStarted = false; // has the member completed any theory lesson
 let _goalPieceTiers = null;     // difficulties of the member's completed pieces (roadmap goals)
 let _goalCollectionTiers = null;// difficulties of every piece in the collection (any status)
@@ -15200,16 +15205,22 @@ function renderDeepDive() {
     const isRecent = new Date(s.session_date + 'T12:00:00') >= thirtyAgo;
     (s.practice_items || []).forEach(i => {
       if (i.item_type !== 'piece' && i.item_type !== 'book') return;
-      const name = (i.piece_label || i.label || '').trim();
-      if (!name) return;
+      // Key a custom piece by its canonical user_piece_id so a rename shows ONE row with the current
+      // title, instead of splitting logged time across the old and new label text. Library books /
+      // legacy items (no id) fall back to the label text as before.
+      const cp = (i.user_piece_id != null && _customPieceById) ? _customPieceById[i.user_piece_id] : null;
+      const label = (i.piece_label || i.label || '').trim();
+      const key  = cp ? ('up:' + i.user_piece_id) : label;
+      const name = cp ? (cp.title || label).trim() : label;
+      if (!key || !name) return;
       const dur = (i.duration_minutes != null && i.duration_minutes > 0)
         ? i.duration_minutes
         : (s.duration_minutes || 0) / Math.max(1, (s.practice_items || []).length);
-      if (!pieceMap[name]) pieceMap[name] = { total: 0, recent: 0, last: null, sessCount: 0 };
-      pieceMap[name].total += dur;
-      pieceMap[name].sessCount++;
-      if (!pieceMap[name].last || s.session_date > pieceMap[name].last) pieceMap[name].last = s.session_date;
-      if (isRecent) pieceMap[name].recent += dur;
+      if (!pieceMap[key]) pieceMap[key] = { name, status: cp ? cp.status : undefined, total: 0, recent: 0, last: null, sessCount: 0 };
+      pieceMap[key].total += dur;
+      pieceMap[key].sessCount++;
+      if (!pieceMap[key].last || s.session_date > pieceMap[key].last) pieceMap[key].last = s.session_date;
+      if (isRecent) pieceMap[key].recent += dur;
     });
   });
 
@@ -15230,14 +15241,15 @@ function renderDeepDive() {
   //   resting  → not practiced this month (and not marked complete)
   //   done     → marked complete in the collection
   // plus this-month minutes (momentum) and days-since-last (freshness).
-  const repItems = Object.entries(pieceMap).map(([name, v]) => {
-    const status   = _nameToStatus[name.trim().toLowerCase()] || null;
+  const repItems = Object.entries(pieceMap).map(([, v]) => {
+    // Custom pieces carry their status from the id map; library/legacy fall back to status-by-name.
+    const status   = (v.status !== undefined) ? v.status : (_nameToStatus[(v.name || '').trim().toLowerCase()] || null);
     const lastDate = v.last ? new Date(v.last + 'T12:00:00') : null;
     const daysAgo  = lastDate ? Math.round((today - lastDate) / 86400000) : null;
     let state = 'resting';
     if (status === 'completed') state = 'done';
     else if (v.recent > 0)      state = 'rotation';
-    return { name, ...v, status, daysAgo, state };
+    return { ...v, status, daysAgo, state };
   }).filter(r => r.status !== 'removed');   // soft-deleted pieces are hidden from the card
 
   const _statePriority = { rotation: 0, resting: 1, done: 2 };
