@@ -89,11 +89,12 @@ export default async (req) => {
     ? [...new Set(body.recipients.map((e) => String(e || "").trim().toLowerCase()).filter(Boolean))]
     : [];
   // Returns a clean lowercase address, or "" if invalid. Rejects consecutive/edge
-  // dots (e.g. "a..b@x.com") which pass a naive regex but Resend rejects — and one
-  // bad address makes Resend reject the whole 100-email batch it sits in.
+  // dots (e.g. "a..b@x.com") AND a one-character TLD (e.g. "x@host.d", a typo of ".de")
+  // — both pass a naive regex but Resend rejects them, and one bad address makes Resend
+  // reject the whole batch it sits in, silently dropping every good address alongside it.
   const normEmail = (e) => {
     e = String(e || "").trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return "";
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s.]{2,}$/.test(e)) return "";   // final TLD label must be 2+ chars
     if (/\.\./.test(e) || /(^\.)|(\.@)|(@\.)|(\.$)/.test(e)) return "";
     return e;
   };
@@ -391,10 +392,27 @@ export default async (req) => {
             body: JSON.stringify(sub.map((m, j) => ({ email: m.to[0], campaign, status: "sent", resend_id: sids[j]?.id || null }))) }).catch(() => {});
           sent += sub.length;
         } else {
-          for (const m of sub) failures.push({ email: m.to[0], error: sout?.message || "resend batch error" });
-          await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
-            body: JSON.stringify(sub.map((m) => ({ email: m.to[0], campaign, status: "failed",
-              error: (sout?.message || "resend batch error").slice(0, 500) }))) }).catch(() => {});
+          // The sub-batch of 10 still failed — a bad address is poisoning it. Fall back to
+          // sending each recipient INDIVIDUALLY (single-send endpoint) so only the genuinely
+          // bad address fails and its good neighbours still receive the email.
+          for (const m of sub) {
+            const ires = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${RESEND}`, "Content-Type": "application/json" },
+              body: JSON.stringify(m),
+            });
+            const iout = await ires.json().catch(() => ({}));
+            if (ires.ok) {
+              await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
+                body: JSON.stringify([{ email: m.to[0], campaign, status: "sent", resend_id: iout.id || null }]) }).catch(() => {});
+              sent += 1;
+            } else {
+              failures.push({ email: m.to[0], error: iout?.message || "resend error" });
+              await sb(`email_log`, { method: "POST", headers: { Prefer: "return=minimal" },
+                body: JSON.stringify([{ email: m.to[0], campaign, status: "failed",
+                  error: (iout?.message || "resend error").slice(0, 500) }]) }).catch(() => {});
+            }
+          }
         }
       }
       continue;
