@@ -295,7 +295,11 @@ async function savePiece(id, extra){
   const s=document.getElementById("saved-"+id); if(s){ s.style.display="inline"; setTimeout(()=>s.style.display="none",1600); }
   return true;
 }
-async function approve(id){ if(await savePiece(id,{status:"published"})){ toast("Published ✓"); render(); } }
+async function approve(id){ if(await savePiece(id,{status:"published"})){
+  // Absorb any member's exact-title custom piece into this now-library piece (moves their
+  // practice history too). Fuzzy/near matches are left for Merge Studio review.
+  let merged=0; try{ const {data}=await db.rpc("auto_merge_exact_customs",{p_library_piece_id:id}); merged=data||0; }catch(e){}
+  toast(merged>0?("Published ✓ — merged "+merged+" member custom piece"+(merged>1?"s":"")):"Published ✓"); render(); } }
 async function unpublish(id){ if(await savePiece(id,{status:"draft"})){ toast("Moved to drafts"); render(); } }
 async function approveAllDrafts(){
   const drafts=PIECES.filter(p=>p.status==="draft").map(p=>p.id);
@@ -304,7 +308,9 @@ async function approveAllDrafts(){
   const {error}=await db.from("pieces").update({status:"published"}).in("id",drafts);
   if(error){ toast("Failed: "+error.message); return; }
   PIECES.forEach(p=>{ if(drafts.includes(p.id)) p.status="published"; });
-  toast("Published "+drafts.length+" pieces"); render();
+  let mergedTotal=0;
+  for(const did of drafts){ try{ const {data}=await db.rpc("auto_merge_exact_customs",{p_library_piece_id:did}); mergedTotal+=(data||0); }catch(e){} }
+  toast("Published "+drafts.length+" pieces"+(mergedTotal>0?(" — merged "+mergedTotal+" member custom"):"")); render();
 }
 async function delPiece(id){
   const p=PIECES.find(x=>x.id===id);
