@@ -2248,6 +2248,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       db.auth.getSession().then(function (res) {
         var c = res && res.data && res.data.session && res.data.session.user && res.data.session.user.created_at;
         window._rmIsNewMember = c ? (Date.parse(c) >= CUTOFF) : false;
+        window._rmJoinedAt = c ? Date.parse(c) : null;   // for tours gated to recent joiners
         doneA = true; check();
       }, function () { window._rmIsNewMember = false; doneA = true; check(); });
     } catch (e) { window._rmIsNewMember = false; doneA = true; check(); }
