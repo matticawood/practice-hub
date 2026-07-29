@@ -10752,6 +10752,7 @@ document.addEventListener("click", e => {
 // Auto-add library pieces to collection as "learning" when a session is saved
 async function autoAddPiecesToCollection(itemDataList) {
   if (viewingEmail !== myEmail) return;
+  window._wizMyPieces = null;   // a save may create a new piece — refresh the picker's list next open
   for (const item of itemDataList) {
     // Custom (non-library) piece: make it first-class + stamp last-practiced, so it
     // can carry a difficulty and count toward roadmap piece objectives. RLS-locked
@@ -22527,7 +22528,7 @@ function wireItemEvents(id) {
     searchInput.addEventListener("input", () => {
       clearTimeout(searchTimeout);
       const q = searchInput.value.trim();
-      if (q.length < 2) { hidePieceDropdown(id); return; }
+      if (q.length < 2) { _wizShowMyPieces(id); return; }   // browse the whole list until they type
       searchTimeout = setTimeout(() => performPieceSearch(id, q), 250);
     });
     searchInput.addEventListener("blur", () => {
@@ -22536,6 +22537,7 @@ function wireItemEvents(id) {
     searchInput.addEventListener("focus", () => {
       const q = searchInput.value.trim();
       if (q.length >= 2) performPieceSearch(id, q);
+      else _wizShowMyPieces(id);   // focusing an empty field shows your full repertoire to pick from
     });
     // Enter = lock in as custom piece
     searchInput.addEventListener("keydown", (e) => {
@@ -22912,78 +22914,105 @@ async function loadMyUserPieces() {
   _myUserPieces = data || [];
 }
 
+// ── "Your pieces" picker ──────────────────────────────────────────────────────
+// The member's own repertoire (every custom piece + every library piece in their
+// collection), cached so the log wizard can (a) browse the FULL list on focus and
+// (b) match by WORD, so a differently-worded title still finds the same piece
+// ("Angels' Voices by Burgmüller" → their "Angels' Voices by J. Burgmüller Op.100
+// No.21"), rather than looking like a brand-new piece and spawning a duplicate.
+async function _wizLoadMyPieces(force) {
+  if (window._wizMyPieces && !force) return window._wizMyPieces;
+  const list = [];
+  try {
+    const { data: ups } = await db.from("user_pieces")
+      .select("id, title, composer, last_practiced_at, linked_piece_id")
+      .eq("email", myEmail);
+    for (const p of (ups || [])) {
+      list.push({ title: p.title, composer: p.composer || "",
+        pieceId: p.linked_piece_id || null, userPieceId: p.linked_piece_id ? null : p.id,
+        last: p.last_practiced_at ? +new Date(p.last_practiced_at) : 0 });
+    }
+    const { data: cols } = await db.from("user_collections")
+      .select("piece_id, created_at, pieces(id, title, composer)")
+      .eq("email", myEmail).not("piece_id", "is", null);
+    const seen = new Set(list.filter(x => x.pieceId).map(x => String(x.pieceId)));
+    for (const c of (cols || [])) {
+      if (!c.pieces || seen.has(String(c.piece_id))) continue;
+      seen.add(String(c.piece_id));
+      list.push({ title: c.pieces.title, composer: c.pieces.composer || "",
+        pieceId: c.piece_id, userPieceId: null,
+        last: c.created_at ? +new Date(c.created_at) : 0 });
+    }
+  } catch (e) { /* fall back to server search only */ }
+  list.sort((a, b) => b.last - a.last);   // most-recently-practised first
+  window._wizMyPieces = list;
+  return list;
+}
+// Split a query into word tokens (unicode-aware, keeps accents + digits so "No. 1"
+// stays distinct from "No. 2").
+function _wizTokens(q) { return (q || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean); }
+const _WIZ_YOURS = ' <span style="font-size:0.7rem;color:#9ca3af;font-weight:500">(yours)</span>';
+function _wizPieceOptionHTML(p, tag) {
+  return `<div class="piece-option"
+       data-piece-id="${escHtml(p.pieceId ? String(p.pieceId) : "")}"
+       data-piece-title="${escHtml(p.title)}"
+       data-piece-composer="${escHtml(p.composer || "")}"
+       ${p.userPieceId ? `data-user-piece-id="${escHtml(String(p.userPieceId))}"` : ""}>
+      <div class="piece-option-title">${escHtml(p.title)}${tag || ""}</div>
+      ${p.composer ? `<div class="piece-option-composer">${escHtml(p.composer)}</div>` : ""}
+    </div>`;
+}
+// Browse: show the member's whole repertoire (recent-first) when the field is focused
+// with no real query yet.
+async function _wizShowMyPieces(id) {
+  const dropdown = document.getElementById(`piece-dropdown-${id}`);
+  if (!dropdown) return;
+  const mine = await _wizLoadMyPieces();
+  if (!mine.length) { dropdown.style.display = "none"; return; }
+  dropdown.innerHTML = mine.map(p => _wizPieceOptionHTML(p, _WIZ_YOURS)).join("");
+  dropdown.style.display = "block";
+}
+
 async function performPieceSearch(id, query) {
+  const dropdown = document.getElementById(`piece-dropdown-${id}`);
+  if (!dropdown) return;
+  const qWords = _wizTokens(query);
+
+  // 1) The member's OWN pieces, matched by WORD (every query word must appear somewhere
+  //    in the title/composer), so a re-worded title still surfaces the existing piece.
+  const mine = await _wizLoadMyPieces();
+  const ownMatches = mine.filter(p => {
+    const hay = (p.title + " " + p.composer).toLowerCase();
+    return qWords.every(w => hay.includes(w));
+  }).slice(0, 8);
+  const ownTitles = new Set(ownMatches.map(p => p.title.toLowerCase()));
+  const ownLibIds = new Set(ownMatches.filter(p => p.pieceId).map(p => String(p.pieceId)));
+
+  // 2) Library pieces (server search), minus anything already shown from the own list.
   const { data } = await db.from("pieces")
     .select("id, title, composer")
     .or(`title.ilike.%${query}%,composer.ilike.%${query}%`)
     .or("kind.is.null,kind.eq.piece")
     .limit(8);
+  const libMatches = (data || []).filter(p =>
+    !ownLibIds.has(String(p.id)) && !ownTitles.has(p.title.toLowerCase()));
 
-  // Also query the user's custom pieces
-  const { data: customData } = await db.from("user_pieces")
-    .select("id, title, composer, linked_piece_id")
-    .eq("email", myEmail)
-    .or(`title.ilike.%${query}%,composer.ilike.%${query}%`)
-    .limit(5);
-
-  const dropdown = document.getElementById(`piece-dropdown-${id}`);
-  if (!dropdown) return;
-
-  const q       = query.toLowerCase();
-  const results = data || [];
-
-  // Merge custom pieces: if linked to a library piece already in results, skip it;
-  // otherwise add it as a custom entry
-  const libIds    = new Set(results.map(p => String(p.id)));
-  const libTitles = new Set(results.map(p => p.title.toLowerCase()));
-  const customResults = [];
-  for (const p of (customData || [])) {
-    if (p.linked_piece_id && libIds.has(String(p.linked_piece_id))) continue; // already shown
-    customResults.push({ ...p, _custom: true, _userPieceId: p.id });
-  }
-
-  // Also surface pieces the user has set a goal for but aren't in the library yet
+  // 3) Piece goals not yet in the library or the own list.
   const goalPieces = allGoals.filter(g =>
-    g.category === "piece" && !g.piece_id &&
-    g.piece_label?.toLowerCase().includes(q)
-  );
-  // Remove any goal pieces that are already covered by library or custom results
-  const allShownTitles = new Set([
-    ...libTitles,
-    ...customResults.map(p => p.title.toLowerCase())
-  ]);
-  const uniqueGoalPieces = goalPieces.filter(g => !allShownTitles.has(g.piece_label.toLowerCase()));
+    g.category === "piece" && !g.piece_id && g.piece_label &&
+    qWords.every(w => g.piece_label.toLowerCase().includes(w)) &&
+    !ownTitles.has(g.piece_label.toLowerCase()) &&
+    !libMatches.some(p => p.title.toLowerCase() === g.piece_label.toLowerCase()));
 
-  if (results.length === 0 && customResults.length === 0 && uniqueGoalPieces.length === 0) {
+  if (!ownMatches.length && !libMatches.length && !goalPieces.length) {
     dropdown.style.display = "none";
     return;
   }
-
   dropdown.innerHTML = [
-    ...results.map(p => `
-      <div class="piece-option"
-           data-piece-id="${escHtml(String(p.id))}"
-           data-piece-title="${escHtml(p.title)}"
-           data-piece-composer="${escHtml(p.composer || '')}">
-        <div class="piece-option-title">${escHtml(p.title)}</div>
-        ${p.composer ? `<div class="piece-option-composer">${escHtml(p.composer)}</div>` : ""}
-      </div>`),
-    ...customResults.map(p => `
-      <div class="piece-option"
-           data-piece-id=""
-           data-piece-title="${escHtml(p.title)}"
-           data-piece-composer="${escHtml(p.composer || '')}"
-           data-user-piece-id="${escHtml(String(p._userPieceId))}">
-        <div class="piece-option-title">${escHtml(p.title)} <span style="font-size:0.7rem;color:#9ca3af;font-weight:500">(custom)</span></div>
-        ${p.composer ? `<div class="piece-option-composer">${escHtml(p.composer)}</div>` : ""}
-      </div>`),
-    ...uniqueGoalPieces.map(g => `
-      <div class="piece-option"
-           data-piece-id=""
-           data-piece-title="${escHtml(g.piece_label)}"
-           data-piece-composer="">
-        <div class="piece-option-title">${escHtml(g.piece_label)} <span style="font-size:0.7rem;color:var(--accent);font-weight:600">your goal</span></div>
-      </div>`)
+    ...ownMatches.map(p => _wizPieceOptionHTML(p, _WIZ_YOURS)),
+    ...libMatches.map(p => _wizPieceOptionHTML({ title: p.title, composer: p.composer, pieceId: p.id, userPieceId: null }, "")),
+    ...goalPieces.map(g => _wizPieceOptionHTML({ title: g.piece_label, composer: "", pieceId: null, userPieceId: null },
+      ' <span style="font-size:0.7rem;color:var(--accent);font-weight:600">your goal</span>')),
   ].join("");
   dropdown.style.display = "block";
 }
