@@ -1055,6 +1055,15 @@ window.SavedPosts = (function() {
 // initSharedHeader (auth can resolve from cache *before* DOMContentLoaded, which
 // previously left the header revealed-but-unbuilt, hiding the bell/search/nav
 // until a manual refresh).
+// "Take the tour again" replays THIS page's tour (dashboard, community, resources each
+// have their own), not always the dashboard's — reload the current page with ?tour=1,
+// which every page's tour code treats as a force. Preserves other params (e.g. ?u=).
+window._shTakeTourAgain = function (e) {
+  if (e && e.preventDefault) e.preventDefault();
+  try { var u = new URL(location.href); u.searchParams.set("tour", "1"); location.href = u.toString(); }
+  catch (_) { location.href = "/practice-log.html?tour=1"; }
+  return false;
+};
 function _shBuildChrome() {
   if (window.__shChromeBuilt) return;
   if (!document.body) return; // body not parsed yet — wait for DOMContentLoaded
@@ -1116,7 +1125,7 @@ function _shBuildChrome() {
           </button>
           <div class="sh-user-menu" id="sh-user-menu">
             <a class="sh-user-menu-item" href="/profile.html">Edit Profile</a>
-            <a class="sh-user-menu-item" href="/practice-log.html?tour=1">Take the tour again</a>
+            <a class="sh-user-menu-item" href="/practice-log.html?tour=1" onclick="return window._shTakeTourAgain(event)">Take the tour again</a>
             <a class="sh-user-menu-item" href="/updates.html">What's New</a>
             <a class="sh-user-menu-item" href="/billing.html">Billing</a>
             <a class="sh-user-menu-item" href="/feedback.html">Report Bug / Request Feature</a>
