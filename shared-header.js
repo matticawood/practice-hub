@@ -1058,10 +1058,17 @@ window.SavedPosts = (function() {
 function _shBuildChrome() {
   if (window.__shChromeBuilt) return;
   if (!document.body) return; // body not parsed yet — wait for DOMContentLoaded
+  // The #app-header element must be parsed before we commit. initSharedHeader can fire
+  // before DOMContentLoaded (auth resolves from cache), so if this runs that early, bail
+  // WITHOUT marking built — a later call (DOMContentLoaded / initSharedHeader) then builds
+  // it. Marking built with header==null left the flag stuck true and the header forever
+  // unpopulated: no bell/search/nav, and the owner "Viewing" bar fell back to a stray
+  // banner until a manual refresh.
+  const header = document.getElementById("app-header");
+  if (!header) return;
   window.__shChromeBuilt = true;
   // Populate the header element
-  const header = document.getElementById("app-header");
-  if (header) {
+  {
     header.innerHTML = `
       <a class="sh-skip" href="#" onclick="return window._shSkipToMain(event)">Skip to content</a>
       <div class="sh-hdr-inner">
