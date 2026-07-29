@@ -22924,24 +22924,28 @@ async function _wizLoadMyPieces(force) {
   if (window._wizMyPieces && !force) return window._wizMyPieces;
   const list = [];
   try {
-    const { data: ups } = await db.from("user_pieces")
-      .select("id, title, composer, last_practiced_at, linked_piece_id")
-      .eq("email", myEmail);
-    for (const p of (ups || [])) {
-      list.push({ title: p.title, composer: p.composer || "",
-        pieceId: p.linked_piece_id || null, userPieceId: p.linked_piece_id ? null : p.id,
-        last: p.last_practiced_at ? +new Date(p.last_practiced_at) : 0 });
-    }
+    // Source of truth is the member's collection (custom + library), so soft-deleted
+    // pieces (status 'removed') are excluded, they shouldn't reappear in the picker.
     const { data: cols } = await db.from("user_collections")
-      .select("piece_id, created_at, pieces(id, title, composer)")
-      .eq("email", myEmail).not("piece_id", "is", null);
-    const seen = new Set(list.filter(x => x.pieceId).map(x => String(x.pieceId)));
+      .select("status, piece_id, user_piece_id, created_at, pieces(id, title, composer), user_pieces(id, title, composer, last_practiced_at, linked_piece_id)")
+      .eq("email", myEmail)
+      .neq("status", "removed");
+    const seen = new Set();
     for (const c of (cols || [])) {
-      if (!c.pieces || seen.has(String(c.piece_id))) continue;
-      seen.add(String(c.piece_id));
-      list.push({ title: c.pieces.title, composer: c.pieces.composer || "",
-        pieceId: c.piece_id, userPieceId: null,
-        last: c.created_at ? +new Date(c.created_at) : 0 });
+      if (c.user_piece_id && c.user_pieces) {
+        const up = c.user_pieces, key = "u" + c.user_piece_id;
+        if (seen.has(key)) continue; seen.add(key);
+        list.push({ title: up.title, composer: up.composer || "",
+          pieceId: up.linked_piece_id || null,
+          userPieceId: up.linked_piece_id ? null : c.user_piece_id,
+          last: up.last_practiced_at ? +new Date(up.last_practiced_at) : (c.created_at ? +new Date(c.created_at) : 0) });
+      } else if (c.piece_id && c.pieces) {
+        const key = "l" + c.piece_id;
+        if (seen.has(key)) continue; seen.add(key);
+        list.push({ title: c.pieces.title, composer: c.pieces.composer || "",
+          pieceId: c.piece_id, userPieceId: null,
+          last: c.created_at ? +new Date(c.created_at) : 0 });
+      }
     }
   } catch (e) { /* fall back to server search only */ }
   list.sort((a, b) => b.last - a.last);   // most-recently-practised first
