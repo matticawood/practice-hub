@@ -22528,7 +22528,7 @@ function wireItemEvents(id) {
     searchInput.addEventListener("input", () => {
       clearTimeout(searchTimeout);
       const q = searchInput.value.trim();
-      if (q.length < 2) { _wizShowMyPieces(id).then(() => _wizScrollPieceIntoView(id)); return; }
+      if (q.length < 2) { _wizShowMyPieces(id).then(() => _wizScrollFieldIntoView(`piece-search-${id}`, `piece-dropdown-${id}`)); return; }
       searchTimeout = setTimeout(() => performPieceSearch(id, q), 250);
     });
     searchInput.addEventListener("blur", () => {
@@ -22537,7 +22537,7 @@ function wireItemEvents(id) {
     searchInput.addEventListener("focus", () => {
       const q = searchInput.value.trim();
       const shown = (q.length >= 2) ? performPieceSearch(id, q) : _wizShowMyPieces(id);
-      Promise.resolve(shown).then(() => _wizScrollPieceIntoView(id));   // reveal the full dropdown
+      Promise.resolve(shown).then(() => _wizScrollFieldIntoView(`piece-search-${id}`, `piece-dropdown-${id}`));   // reveal the full dropdown
     });
     // Enter = lock in as custom piece
     searchInput.addEventListener("keydown", (e) => {
@@ -22596,9 +22596,14 @@ function wireItemEvents(id) {
         if (!seen.has(key)) seen.set(key, { name: goal.piece_label, piece_id: null, fromLib: false, isGoal: true });
       }
       const all = [...seen.values()];
-      const matches = q ? all.filter(b => b.name.toLowerCase().includes(q.toLowerCase())) : all;
+      // Word-based match (same as pieces) so a re-worded book title still finds the
+      // existing one instead of looking new; empty query browses the whole list.
+      const words = _wizTokens(q);
+      const matches = words.length
+        ? all.filter(b => { const hay = b.name.toLowerCase(); return words.every(w => hay.includes(w)); })
+        : all;
       if (!matches.length) { bookDropdown.style.display = "none"; return; }
-      bookDropdown.innerHTML = matches.slice(0, 8).map(b =>
+      bookDropdown.innerHTML = matches.slice(0, 40).map(b =>
         `<div class="piece-option book-option" data-book="${escHtml(b.name)}" data-book-id="${b.piece_id || ""}">
           ${escHtml(b.name)}
           ${b.fromLib ? `<span style="font-size:0.7rem;color:var(--text-muted);margin-left:4px">Library</span>` : ""}
@@ -22607,8 +22612,9 @@ function wireItemEvents(id) {
       ).join("");
       bookDropdown.style.display = "";
     };
-    bookNameInput.addEventListener("input",  () => { showBookSuggestions(bookNameInput.value.trim()); _wizRenderRecentChips(); });
-    bookNameInput.addEventListener("focus",  () => showBookSuggestions(bookNameInput.value.trim()));
+    const _bookScroll = () => _wizScrollFieldIntoView(`book-name-${id}`, `book-dropdown-${id}`);
+    bookNameInput.addEventListener("input",  () => { showBookSuggestions(bookNameInput.value.trim()).then(_bookScroll); _wizRenderRecentChips(); });
+    bookNameInput.addEventListener("focus",  () => showBookSuggestions(bookNameInput.value.trim()).then(_bookScroll));
     bookNameInput.addEventListener("blur",   () => setTimeout(() => { bookDropdown.style.display = "none"; }, 200));
     bookNameInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); lockInBookName(id); }
@@ -22979,10 +22985,10 @@ async function _wizShowMyPieces(id) {
 // The dropdown is absolute inside the wizard's own scroll area (#wiz-item-scroll), so a
 // long list gets clipped at that area's edge. Scroll the piece field up to the top of the
 // scroll area so the full dropdown has room to show below it.
-function _wizScrollPieceIntoView(id) {
-  const dd = document.getElementById(`piece-dropdown-${id}`);
+function _wizScrollFieldIntoView(inputId, dropdownId) {
+  const dd = document.getElementById(dropdownId);
   if (!dd || dd.style.display === "none") return;
-  const wrap = document.getElementById(`piece-search-${id}`)?.closest(".piece-search-wrap");
+  const wrap = document.getElementById(inputId)?.closest(".item-form-group");
   const scroller = document.getElementById("wiz-item-scroll");
   if (!wrap || !scroller) return;
   const wr = wrap.getBoundingClientRect(), sr = scroller.getBoundingClientRect();
