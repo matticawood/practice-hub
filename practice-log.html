@@ -22520,6 +22520,7 @@ function buildTheoryFields(id, prefill) {
 function wireItemEvents(id) {
   const block = document.getElementById(`item-block-${id}`);
   if (!block) return;
+  _wizWatchDropdowns();   // any autocomplete that opens gets scrolled into view (once, container-wide)
 
   // ── Piece search ──
   const searchInput = block.querySelector(`#piece-search-${id}`);
@@ -22528,7 +22529,7 @@ function wireItemEvents(id) {
     searchInput.addEventListener("input", () => {
       clearTimeout(searchTimeout);
       const q = searchInput.value.trim();
-      if (q.length < 2) { _wizShowMyPieces(id).then(() => _wizScrollFieldIntoView(`piece-search-${id}`, `piece-dropdown-${id}`)); return; }
+      if (q.length < 2) { _wizShowMyPieces(id); return; }   // browse the whole list until they type
       searchTimeout = setTimeout(() => performPieceSearch(id, q), 250);
     });
     searchInput.addEventListener("blur", () => {
@@ -22536,8 +22537,8 @@ function wireItemEvents(id) {
     });
     searchInput.addEventListener("focus", () => {
       const q = searchInput.value.trim();
-      const shown = (q.length >= 2) ? performPieceSearch(id, q) : _wizShowMyPieces(id);
-      Promise.resolve(shown).then(() => _wizScrollFieldIntoView(`piece-search-${id}`, `piece-dropdown-${id}`));   // reveal the full dropdown
+      if (q.length >= 2) performPieceSearch(id, q);
+      else _wizShowMyPieces(id);   // focusing an empty field shows your full repertoire to pick from
     });
     // Enter = lock in as custom piece
     searchInput.addEventListener("keydown", (e) => {
@@ -22612,9 +22613,8 @@ function wireItemEvents(id) {
       ).join("");
       bookDropdown.style.display = "";
     };
-    const _bookScroll = () => _wizScrollFieldIntoView(`book-name-${id}`, `book-dropdown-${id}`);
-    bookNameInput.addEventListener("input",  () => { showBookSuggestions(bookNameInput.value.trim()).then(_bookScroll); _wizRenderRecentChips(); });
-    bookNameInput.addEventListener("focus",  () => showBookSuggestions(bookNameInput.value.trim()).then(_bookScroll));
+    bookNameInput.addEventListener("input",  () => { showBookSuggestions(bookNameInput.value.trim()); _wizRenderRecentChips(); });
+    bookNameInput.addEventListener("focus",  () => showBookSuggestions(bookNameInput.value.trim()));
     bookNameInput.addEventListener("blur",   () => setTimeout(() => { bookDropdown.style.display = "none"; }, 200));
     bookNameInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); lockInBookName(id); }
@@ -22985,15 +22985,30 @@ async function _wizShowMyPieces(id) {
 // The dropdown is absolute inside the wizard's own scroll area (#wiz-item-scroll), so a
 // long list gets clipped at that area's edge. Scroll the piece field up to the top of the
 // scroll area so the full dropdown has room to show below it.
-function _wizScrollFieldIntoView(inputId, dropdownId) {
-  const dd = document.getElementById(dropdownId);
-  if (!dd || dd.style.display === "none") return;
-  const wrap = document.getElementById(inputId)?.closest(".item-form-group");
+// Every autocomplete in the logger (piece, book, technique/scales, theory, other,
+// linked-book) is absolute inside #wiz-item-scroll, so it gets clipped by that scroll
+// area's edge. Watch the container once: whenever ANY such dropdown opens, scroll its
+// field up so the full list shows below it. Covers current and future dropdowns.
+function _wizWatchDropdowns() {
   const scroller = document.getElementById("wiz-item-scroll");
-  if (!wrap || !scroller) return;
-  const wr = wrap.getBoundingClientRect(), sr = scroller.getBoundingClientRect();
-  const delta = (wr.top - sr.top) - 12;   // bring the field ~12px below the scroll-area top
-  if (delta > 4) scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: "smooth" });
+  if (!scroller || scroller.dataset.ddWatch) return;
+  scroller.dataset.ddWatch = "1";
+  const reveal = (el) => {
+    if (!el || el.style.display === "none" || !el.offsetParent) return;
+    const wrap = el.closest(".item-form-group");
+    if (!wrap) return;
+    const wr = wrap.getBoundingClientRect(), sr = scroller.getBoundingClientRect();
+    const delta = (wr.top - sr.top) - 12;                 // field ~12px below the scroll-area top
+    if (delta > 4) scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: "smooth" });
+  };
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      const el = m.target;
+      if (el.nodeType === 1 && /-dropdown-|autocomplete/.test(el.id || el.className || "")) {
+        requestAnimationFrame(() => reveal(el));
+      }
+    }
+  }).observe(scroller, { subtree: true, attributes: true, attributeFilter: ["style"] });
 }
 
 async function performPieceSearch(id, query) {
