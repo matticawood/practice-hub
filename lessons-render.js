@@ -242,20 +242,26 @@
     const beats = Array.isArray(opts.beats) ? opts.beats : null;
     const gains = Array.isArray(opts.gains) ? opts.gains : null;   // per-note loudness (accents)
     const staccatos = Array.isArray(opts.staccatos) ? opts.staccatos : null;   // per-note short/detached (overrides clip gate)
-    const spb = 60 / (opts.bpm || 80);   // seconds per beat
-    let cum = 0;
+    const spb = 60 / (opts.bpm || 80);   // seconds per beat (base tempo)
+    // Per-note tempo curve: a multiplier on this note's beat length (>1 = slower,
+    // <1 = faster), parallel to notes. Lets a clip ritardando (poco rit.) or
+    // accelerando by stretching/compressing the pulse across the tail. Null = steady.
+    const tempos = Array.isArray(opts.tempos) ? opts.tempos : null;
+    const tscale = i => (tempos && tempos[i] != null ? tempos[i] : 1);
+    let cumSec = 0;   // elapsed seconds (varies with tempo, so it isn't just cum*spb)
     notes.forEach((nv, i) => {
       const m = (nv == null) ? null : noteToMidi(nv);
       const mul = (gains && gains[i] != null) ? gains[i] : 1;
       // A note flagged staccato plays short (0.3) whatever the clip gate is, so a
       // piece can mix a smooth bar and a staccato bar in one clip.
       const g = (staccatos && staccatos[i]) ? 0.3 : gate;
+      const lspb = spb * tscale(i);   // this note's seconds-per-beat after the tempo curve
       let when, dur;
       if (beats) {
         const bl = (beats[i] != null ? beats[i] : 1);
-        when = ctx.currentTime + 0.03 + (seq ? cum * spb : 0);
-        dur = Math.max(0.08, bl * spb * g);
-        if (seq) cum += bl;
+        when = ctx.currentTime + 0.03 + (seq ? cumSec : 0);
+        dur = Math.max(0.08, bl * lspb * g);
+        if (seq) cumSec += bl * lspb;
       } else {
         const gap = opts.gap || 0.55;
         when = ctx.currentTime + 0.03 + (seq ? i * gap : 0);
@@ -265,11 +271,20 @@
       if (_piano) { try { _piano.play(m, when, { gain: 2.2 * mul, duration: dur }); return; } catch (e) {} }
       synthNote(ctx, m, when, dur, mul);
     });
-    // optional metronome: one tick per beat across the whole clip
+    // optional metronome: one tick per beat across the whole clip. Walk the beats so
+    // the clicks ride any tempo curve (a slowing rit. slows the click too).
     if (opts.click) {
-      const total = beats ? (seq ? beats.reduce((a, b) => a + (b || 0), 0) : Math.max(...beats.map(b => b || 1)))
-                          : notes.length;
-      for (let bt = 0; bt < total - 1e-6; bt++) metroClick(ctx, ctx.currentTime + 0.03 + bt * spb);
+      if (beats && seq) {
+        let t = 0;
+        for (let i = 0; i < notes.length; i++) {
+          const bl = (beats[i] != null ? beats[i] : 1);
+          const lspb = spb * tscale(i);
+          for (let bt = 0; bt < bl - 1e-6; bt++) { metroClick(ctx, ctx.currentTime + 0.03 + t); t += lspb; }
+        }
+      } else {
+        const total = beats ? Math.max(...beats.map(b => b || 1)) : notes.length;
+        for (let bt = 0; bt < total - 1e-6; bt++) metroClick(ctx, ctx.currentTime + 0.03 + bt * spb);
+      }
     }
   }
   function pcMod(m) { return ((m % 12) + 12) % 12; }
@@ -484,13 +499,14 @@
         const bpmAttr = b.bpm ? ` data-bpm="${esc(String(b.bpm))}"` : "";
         const clickAttr = b.click ? ` data-click="1"` : "";
         const gainsAttr = Array.isArray(b.gains) ? ` data-gains="${esc(JSON.stringify(b.gains))}"` : "";
+        const temposAttr = Array.isArray(b.tempos) ? ` data-tempos="${esc(JSON.stringify(b.tempos))}"` : "";
         const stacAttr = b.staccato ? ` data-staccato="1"` : "";
         const stacsAttr = Array.isArray(b.staccatos) ? ` data-staccatos="${esc(JSON.stringify(b.staccatos))}"` : "";
         const legAttr = b.legato ? ` data-legato="1"` : "";
         // voices: independent simultaneous lines (e.g. a held left-hand note under a
         // moving right-hand melody). Each voice is { notes, beats, bpm?, staccato? }.
         const voicesAttr = Array.isArray(b.voices) ? ` data-voices="${esc(JSON.stringify(b.voices))}"` : "";
-        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}${stacAttr}${stacsAttr}${legAttr}${voicesAttr}>
+        return `<div class="lr-play"><button type="button" class="lr-play-btn" data-notes="${esc(JSON.stringify(notes))}" data-seq="${seq ? 1 : 0}"${beatsAttr}${bpmAttr}${clickAttr}${gainsAttr}${temposAttr}${stacAttr}${stacsAttr}${legAttr}${voicesAttr}>
           <span class="lr-play-ico">&#9654;</span><span>${esc(b.label || "Listen")}</span></button></div>`;
       }
       case "keyboard": {
@@ -688,6 +704,7 @@
           bpm: btn.dataset.bpm ? parseFloat(btn.dataset.bpm) : null,
           click: btn.dataset.click === "1",
           gains: parseJson(btn.dataset.gains, null),
+          tempos: parseJson(btn.dataset.tempos, null),
           staccato: btn.dataset.staccato === "1",
           staccatos: parseJson(btn.dataset.staccatos, null),
           legato: btn.dataset.legato === "1"
