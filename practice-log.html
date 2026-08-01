@@ -15137,12 +15137,25 @@ function _renderDailyCard() {
   // areas cumulatively, NOT a specific claim that a piece / sight-reading / scale was practised today.
   const types = new Set();          // course lesson + manual log → pieces, sight-reading
   const manualTypes = new Set();    // manual log only → scales
+  // The cards now name a SPECIFIC scale and piece, so the tick must match THAT one, not
+  // just "any scale" / "any piece". Collect today's logged scale names + piece keys.
+  const _todayScaleLabels = new Set();
+  const _todayPieceIds = new Set(), _todayPieceUpids = new Set(), _todayPieceNames = new Set();
   todaySessions.forEach(s => {
     const deliberate = s.source === 'manual';
     const creditable = deliberate || s.source === 'app-lesson';
     (s.practice_items || []).forEach(i => {
       if (creditable) types.add(i.item_type);
       if (deliberate) manualTypes.add(i.item_type);
+      if (deliberate && i.item_type === 'technique' && i.label) {
+        i.label.split(',').map(x => x.trim()).filter(Boolean).forEach(nm => _todayScaleLabels.add(_normScaleLabel(nm)));
+      }
+      if (creditable && (i.item_type === 'piece' || i.item_type === 'book')) {
+        if (i.user_piece_id != null) _todayPieceUpids.add(String(i.user_piece_id));
+        if (i.piece_id != null) _todayPieceIds.add(String(i.piece_id));
+        const nm = (i.piece_label || i.label || '').trim().toLowerCase();
+        if (nm) _todayPieceNames.add(nm);
+      }
     });
   });
 
@@ -15188,8 +15201,12 @@ function _renderDailyCard() {
       const u0 = ds.units[0];
       sDesc = 'Focus on the ' + escHtml(u0.label);
       const others = ds.units.slice(1).map(u => u.label);
+      const isArp = u0.grp === 'arps' || u0.grp === 'arpsmin';
+      const howTo = isArp
+        ? `<p><strong>New to this arpeggio?</strong> Play two octaves in one hand first, then two octaves in the other hand, then put them together. The thing to watch is the finger crossings: they fall in different places than in a scale, so take them slowly until they are smooth.</p>`
+        : `<p><strong>New to this scale?</strong> Start hands separately, one octave. Play the right hand alone from the bottom note up to the next octave and back, then do the same with the left hand. Once each hand feels comfortable, put them together slowly, watching the points where the thumb crosses under. Then take it up to two octaves. Two octaves is the sweet spot: once that is solid, the same finger pattern simply repeats for three or four.</p>`;
       _dailyDetail.scales = { cat: 'Scales', title: 'Scales',
-        html: `${_dailyScaleKeyboardHTML(u0)}<p>Focus on the <strong>${escHtml(u0.label)}</strong> today.${others.length ? ` Also still open at your stage: ${escHtml(_joinList(others))}.` : ''}</p><p><strong>New to this scale?</strong> Start hands separately, one octave. Play the right hand alone from the bottom note up to the next octave and back, then do the same with the left hand. Once each hand feels comfortable, put them together slowly, watching the points where the thumb crosses under. Then take it up to two octaves. Two octaves is the sweet spot: once that is solid, the same finger pattern simply repeats for three or four.</p><p><strong>To push it further:</strong> crescendo up to the top and diminuendo back down, try it staccato, or play it in different rhythms to test how comfortable it really is.</p>`,
+        html: `${_dailyScaleKeyboardHTML(u0)}<p>Focus on the <strong>${escHtml(u0.label)}</strong> today.${others.length ? ` Also still open at your stage: ${escHtml(_joinList(others))}.` : ''}</p>${howTo}<p><strong>To push it further:</strong> crescendo up to the top and diminuendo back down, try it staccato, or play it in different rhythms to test how comfortable it really is.</p>`,
         actions: [ { text: 'Log it', primary: true, onclick: 'closeDailyDetail(); openWizard();' } ] };
     } else {
       sDesc = 'Practice some scales';
@@ -15197,10 +15214,22 @@ function _renderDailyCard() {
         html: `<p>Work through the scales for your current stage.</p><p><strong>New to one?</strong> Hands separately for one octave first, right hand then left, then hands together slowly, watching the thumb crossings, then out to two octaves. Two octaves is the sweet spot: once it is solid, the same finger pattern repeats for more.</p><p><strong>To push it further:</strong> crescendo up and diminuendo back down, try it staccato, or play it in different rhythms.</p>`,
         actions: [ { text: 'Log it', primary: true, onclick: 'closeDailyDetail(); openWizard();' } ] };
     }
+    // Tick only when the SPECIFIC named scale / piece is logged today (any of the day's
+    // suggested open scales count for the scale card). The "add a new piece" state has no
+    // specific piece to match, so any piece counts there.
+    const pk2 = pk;
+    const pieceDone = (pk2.mode === 'new')
+      ? (types.has('piece') || types.has('book'))
+      : !!((pk2.userPieceId != null && _todayPieceUpids.has(String(pk2.userPieceId)))
+        || (pk2.pieceId != null && _todayPieceIds.has(String(pk2.pieceId)))
+        || (pk2.name && _todayPieceNames.has(pk2.name.trim().toLowerCase())));
+    const scaleDone = (ds && ds.units && ds.units.length)
+      ? ds.units.some(u => _todayScaleLabels.has(_normScaleLabel(u.label)))
+      : manualTypes.has('technique');
     rows = [
-      { ic: 'piece',  cat: 'Pieces',        desc: pDesc,                     action: LOG, done: types.has('piece') || types.has('book'), wizard: true, detail: 'piece' },
-      { ic: 'sight',  cat: 'Sight-reading', desc: 'Sight-read for 5 minutes', action: LOG, done: types.has('sightreading'),              wizard: true, detail: 'sight' },
-      { ic: 'scales', cat: 'Scales',        desc: sDesc,                     action: LOG, done: manualTypes.has('technique'),            wizard: true, detail: 'scales' },
+      { ic: 'piece',  cat: 'Pieces',        desc: pDesc,                     action: LOG, done: pieceDone,                 wizard: true, detail: 'piece' },
+      { ic: 'sight',  cat: 'Sight-reading', desc: 'Sight-read for 5 minutes', action: LOG, done: types.has('sightreading'), wizard: true, detail: 'sight' },
+      { ic: 'scales', cat: 'Scales',        desc: sDesc,                     action: LOG, done: scaleDone,                 wizard: true, detail: 'scales' },
     ];
   }
   const skill = _pickDailySkill();
