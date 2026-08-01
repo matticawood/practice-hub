@@ -3717,6 +3717,12 @@
     .dsk-piano { width: 100%; }
     .dsk-piano svg { width: 100%; height: auto; }
     .dsk-hand-note { font-size: .62rem; color: var(--text-muted); margin-top: 6px; text-align: center; }
+    /* Aligned RH/LH fingering chart under the keyboard. */
+    .dsk-fing { display: grid; gap: 4px 3px; margin: 12px 0 2px; align-items: center; }
+    .dsk-fing-lbl { font-size: .62rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; padding-right: 8px; text-align: right; }
+    .dsk-fc { text-align: center; font-size: .85rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; padding: 2px 0; border-radius: 5px; }
+    .dsk-fc-note { font-size: .72rem; font-weight: 800; color: var(--text-muted); }
+    .dsk-fc-cross { color: #3a2c00; background: color-mix(in srgb, var(--accent) 34%, transparent); }
     @media (max-width: 1100px) {
       .dash-row-3 { grid-template-columns: 1fr; }
       .dash-community-grid { display: flex; flex-direction: column; }
@@ -26072,14 +26078,29 @@ function keDailyScaleKeyboard(unit) {
       fingObj = MINOR_FINGERING[rootSemi] || null;
     } else { intervals = MAJOR_INTERVALS; fingObj = MAJOR_FINGERING[rootSemi] || null; }
     const highlight = intervals.map(iv => (rootSemi + iv) % 12);
-    const svg = hand => buildPianoSVG(highlight, false, fingObj ? buildFingerMap(rootSemi, intervals, fingObj, hand) : null);
-    const btn = (hand, lbl) => `<button type="button" class="dsk-hand-btn${hand === 'rh' ? ' on' : ''}" data-hand="${hand}" onclick="_dailyScaleFingerHand('${hand}')">${lbl}</button>`;
-    return `<div class="dsk-piano-wrap">`
-      + (fingObj ? `<div class="dsk-hand-toggle"><span class="dsk-hand-lbl">Fingering</span>${btn('rh', 'Right hand')}${btn('lh', 'Left hand')}</div>` : '')
-      + `<div class="dsk-piano" data-hand="rh">${svg('rh')}</div>`
-      + (fingObj ? `<div class="dsk-piano" data-hand="lh" style="display:none">${svg('lh')}</div>` : '')
-      + (fingObj ? `<div class="dsk-hand-note">Standard fingering. It can vary by edition.</div>` : '')
-      + `</div>`;
+    // Piano shows the NOTES; the fingers go in an aligned RH/LH text chart below, so both
+    // hands read at once (the on-key overlay could only ever show one hand at a time).
+    const svg = buildPianoSVG(highlight, false, null);
+    let chart = '';
+    if (fingObj && fingObj.rh && fingObj.lh && typeof keScaleNotes === 'function') {
+      const names = keScaleNotes(unit.key, intervals);
+      if (names && names.length) {
+        const fmt = n => String(n).replace(/#/g, '♯').replace(/b/g, '♭');
+        const noteCells = [...names, names[0]];   // add the octave note
+        const rh = [...fingObj.rh, fingObj.rhTop == null ? fingObj.rh[fingObj.rh.length - 1] : fingObj.rhTop];
+        const lh = [...fingObj.lh, fingObj.lhTop == null ? fingObj.lh[fingObj.lh.length - 1] : fingObj.lhTop];
+        const cols = noteCells.length;
+        // Highlight the thumb (finger 1) where it falls mid-scale: that is the thumb-under
+        // / cross-over point, so the groups between them are the hand positions.
+        const fc = (v, cross) => `<span class="dsk-fc${cross ? ' dsk-fc-cross' : ''}">${v}</span>`;
+        chart = `<div class="dsk-fing" style="grid-template-columns:auto repeat(${cols},1fr)">`
+          + `<span class="dsk-fing-lbl"></span>${noteCells.map(n => `<span class="dsk-fc dsk-fc-note">${fmt(n)}</span>`).join('')}`
+          + `<span class="dsk-fing-lbl">RH</span>${rh.map((v, i) => fc(v, v === 1 && i > 0)).join('')}`
+          + `<span class="dsk-fing-lbl">LH</span>${lh.map((v, i) => fc(v, v === 1 && i > 0 && i < lh.length - 1)).join('')}`
+          + `</div><div class="dsk-hand-note">Fingers below the notes (1 is the thumb). Highlighted numbers are where the thumb crosses under. Standard fingering, it can vary by edition.</div>`;
+      }
+    }
+    return `<div class="dsk-piano-wrap"><div class="dsk-piano">${svg}</div>${chart}</div>`;
   } catch (e) { return ''; }
 }
 
