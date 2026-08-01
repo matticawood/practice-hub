@@ -10304,6 +10304,20 @@ async function loadData() {
       });
     } catch (e) { _customStatusByName = {}; _customPieceById = {}; }
 
+    // Library-piece completion status by piece_id (RLS-safe RPC, same reason as the
+    // custom map above). The up-front _insightCollections read is a DIRECT user_collections
+    // query, which returns nothing when the owner views another member, so a completed
+    // library piece showed as "in rotation" with a Completed count of 0. This map is the
+    // owner-safe source the repertoire card tags "done" from.
+    try {
+      const { data: ucol } = await db.rpc("get_user_collection", { p_email: viewingEmail });
+      _libStatusById = {}; _libStatusByName = {};
+      (ucol || []).forEach(r => {
+        if (r.piece_id != null && r.status) _libStatusById[r.piece_id] = r.status;
+        if (r.title && r.status) _libStatusByName[r.title.trim().toLowerCase()] = r.status;
+      });
+    } catch (e) { _libStatusById = {}; _libStatusByName = {}; }
+
     // Both the collection statuses (from the Promise.all above) and the custom-piece
     // statuses are loaded now, so the repertoire card can tag completed pieces. Refresh
     // Stats immediately if it's the active tab (e.g. restored on refresh) rather than
@@ -14116,6 +14130,8 @@ let _insightTrainers = null, _insightCollections = null; // loaded in loadData
 let _focusByLength = null; // community avg focus per session-length band, loaded in loadData
 let _customStatusByName = {}; // lower(title) -> status for custom pieces (self-or-owner RPC, RLS-safe)
 let _customPieceById = {};    // user_piece_id -> {title,status}; keys the repertoire card by the canonical piece so a rename shows one row
+let _libStatusById = {};      // library piece_id -> status (get_user_collection RPC, RLS-safe so it works when the owner views a member; the direct user_collections read does not)
+let _libStatusByName = {};    // lower(title) -> status for library pieces (same RLS-safe RPC), covers legacy items logged by label with no piece_id
 let _pathTheoryStarted = false; // has the member completed any theory lesson
 let _goalPieceTiers = null;     // difficulties of the member's completed pieces (roadmap goals)
 let _goalCollectionTiers = null;// difficulties of every piece in the collection (any status)
@@ -15719,13 +15735,24 @@ function renderDeepDive() {
   // marked complete keeps showing "in rotation" (and it fails in the owner's
   // view-another-member mode, where a direct collection read is blocked).
   Object.entries(_customStatusByName || {}).forEach(([k, v]) => { if (v) _nameToStatus[k] = v; });
+  // Library statuses from the RLS-safe RPC (owner-view-safe, and present before the
+  // Collection tab lazy-loads myCollection), keyed by title for legacy label-only logs.
+  if (typeof _libStatusByName !== 'undefined' && _libStatusByName) {
+    Object.entries(_libStatusByName).forEach(([k, v]) => { if (v) _nameToStatus[k] = v; });
+  }
   // Library pieces: resolve status by piece_id from the collection statuses that load
   // UP FRONT (_insightCollections), not from myCollection, which only loads when the
   // Collection tab is opened. Otherwise a completed library piece is mis-tagged as "in
   // rotation" on a fresh Stats visit (Shaun's bug: Stats renders before the lazy load).
+  // Prefer the RLS-safe map (works in owner-view-member mode); fall back to the direct
+  // read for anything not in it. Without this, a library piece marked complete showed
+  // as "in rotation" whenever the owner viewed another member (Completed count 0).
   const _idToStatus = {};
   ((typeof _insightCollections !== 'undefined' && _insightCollections) ? _insightCollections : [])
     .forEach(r => { if (r.piece_id != null && r.status) _idToStatus[r.piece_id] = r.status; });
+  if (typeof _libStatusById !== 'undefined' && _libStatusById) {
+    Object.entries(_libStatusById).forEach(([id, st]) => { if (st) _idToStatus[id] = st; });
+  }
 
   // One unified repertoire model: each practiced piece gets a state
   //   rotation → practiced in the last 30 days
