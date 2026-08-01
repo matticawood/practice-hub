@@ -10286,6 +10286,14 @@ async function loadData() {
       });
     } catch (e) { _customStatusByName = {}; _customPieceById = {}; }
 
+    // Both the collection statuses (from the Promise.all above) and the custom-piece
+    // statuses are loaded now, so the repertoire card can tag completed pieces. Refresh
+    // Stats immediately if it's the active tab (e.g. restored on refresh) rather than
+    // waiting for the slower badges / shared-post loads below — that late re-render was
+    // the window where completed pieces showed as "in rotation".
+    try { if (document.querySelector('.msn-item.active')?.dataset.msnVal === 'stats') renderStats(); } catch (e) {}
+    try { if (typeof _renderDailyCard === 'function') _renderDailyCard(); } catch (e) {}
+
     // Reading/library/game achievement extras (Badges tab).
     try { await loadAchievementExtras(); } catch (e) { /* badges fill in later */ }
 
@@ -15004,8 +15012,12 @@ function _pickDailyPiece() {
   const nameToStatus = {};
   Object.values(myCollection || {}).forEach(p => { if (p && p.title) nameToStatus[p.title.trim().toLowerCase()] = p.status; });
   Object.entries(_customStatusByName || {}).forEach(([k, v]) => { if (v) nameToStatus[k] = v; });
+  const idToStatus = {};
+  ((typeof _insightCollections !== 'undefined' && _insightCollections) ? _insightCollections : [])
+    .forEach(r => { if (r.piece_id != null && r.status) idToStatus[r.piece_id] = r.status; });
   const items = Object.values(map).map(v => {
-    const status = (v.status !== undefined) ? v.status : (nameToStatus[(v.name || '').trim().toLowerCase()] || null);
+    const status = (v.status !== undefined) ? v.status
+      : ((v.pieceId != null && idToStatus[v.pieceId]) || nameToStatus[(v.name || '').trim().toLowerCase()] || null);
     const daysAgo = v.last ? Math.round((today - new Date(v.last + 'T12:00:00')) / 86400000) : null;
     const state = status === 'completed' ? 'done' : (v.recent > 0 ? 'rotation' : 'resting');
     return { ...v, status, daysAgo, state };
@@ -15594,7 +15606,7 @@ function renderDeepDive() {
       const dur = (i.duration_minutes != null && i.duration_minutes > 0)
         ? i.duration_minutes
         : (s.duration_minutes || 0) / Math.max(1, (s.practice_items || []).length);
-      if (!pieceMap[key]) pieceMap[key] = { name, status: cp ? cp.status : undefined, total: 0, recent: 0, last: null, sessCount: 0 };
+      if (!pieceMap[key]) pieceMap[key] = { name, status: cp ? cp.status : undefined, pieceId: (!cp && i.piece_id != null) ? i.piece_id : null, total: 0, recent: 0, last: null, sessCount: 0 };
       pieceMap[key].total += dur;
       pieceMap[key].sessCount++;
       if (!pieceMap[key].last || s.session_date > pieceMap[key].last) pieceMap[key].last = s.session_date;
@@ -15613,6 +15625,13 @@ function renderDeepDive() {
   // marked complete keeps showing "in rotation" (and it fails in the owner's
   // view-another-member mode, where a direct collection read is blocked).
   Object.entries(_customStatusByName || {}).forEach(([k, v]) => { if (v) _nameToStatus[k] = v; });
+  // Library pieces: resolve status by piece_id from the collection statuses that load
+  // UP FRONT (_insightCollections), not from myCollection, which only loads when the
+  // Collection tab is opened. Otherwise a completed library piece is mis-tagged as "in
+  // rotation" on a fresh Stats visit (Shaun's bug: Stats renders before the lazy load).
+  const _idToStatus = {};
+  ((typeof _insightCollections !== 'undefined' && _insightCollections) ? _insightCollections : [])
+    .forEach(r => { if (r.piece_id != null && r.status) _idToStatus[r.piece_id] = r.status; });
 
   // One unified repertoire model: each practiced piece gets a state
   //   rotation → practiced in the last 30 days
@@ -15620,8 +15639,10 @@ function renderDeepDive() {
   //   done     → marked complete in the collection
   // plus this-month minutes (momentum) and days-since-last (freshness).
   const repItems = Object.entries(pieceMap).map(([, v]) => {
-    // Custom pieces carry their status from the id map; library/legacy fall back to status-by-name.
-    const status   = (v.status !== undefined) ? v.status : (_nameToStatus[(v.name || '').trim().toLowerCase()] || null);
+    // Custom pieces carry their status from the id map; library pieces resolve by
+    // piece_id (up-front data), then fall back to status-by-name for legacy items.
+    const status   = (v.status !== undefined) ? v.status
+                   : ((v.pieceId != null && _idToStatus[v.pieceId]) || _nameToStatus[(v.name || '').trim().toLowerCase()] || null);
     const lastDate = v.last ? new Date(v.last + 'T12:00:00') : null;
     const daysAgo  = lastDate ? Math.round((today - lastDate) / 86400000) : null;
     let state = 'resting';
