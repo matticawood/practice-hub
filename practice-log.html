@@ -14190,9 +14190,16 @@ function askCustomPieceDifficulty(id, title) {
     _dormantCustomPieces = (_dormantCustomPieces || []).filter(p => p.id !== id);
     if (diff != null && Array.isArray(_goalPieceTiers)) _goalPieceTiers.push(diff);
     if (diff != null && Array.isArray(_goalCollectionTiers)) _goalCollectionTiers.push(diff);
+    // Keep the local status maps in step so the repertoire card and the daily card both
+    // stop treating this piece as "in rotation" without needing a full reload.
+    if (_customPieceById && _customPieceById[id]) _customPieceById[id].status = 'completed';
+    if (_customStatusByName && title) _customStatusByName[String(title).trim().toLowerCase()] = 'completed';
     showToast("Marked as finished. Nice work!", 3500);
     renderPiecesTidyCard();
     try { _renderJourneyCard(); } catch (e) {}
+    // Refresh the daily card so a piece completed from it is replaced by the next one to
+    // practise (they still need something to play even if they finished this one first).
+    try { if (typeof _renderDailyCard === 'function') _renderDailyCard(); } catch (e) {}
   }));
 }
 // Self-check roadmap objectives (scales, ear/improv) the member ticks themselves.
@@ -15117,7 +15124,7 @@ function _renderDailyCard() {
     let pDesc;
     if (pk.mode === 'continue' || pk.mode === 'revive') {
       const ago = pk.daysAgo == null ? '' : (pk.daysAgo <= 0 ? 'today' : pk.daysAgo === 1 ? '1 day ago' : pk.daysAgo + ' days ago');
-      pDesc = (pk.mode === 'continue' ? 'Come back to ' : 'Revisit ') + escHtml(pk.name);
+      pDesc = 'Log some practice on ' + escHtml(pk.name);
       _dailyDetail.piece = { cat: 'Pieces', title: pk.name,
         html: `<p>Of the pieces you are actively working on, this is the one you have played least recently${ago ? ` (last practised ${ago})` : ''}. A little attention today stops it slipping away.</p><p>If you have actually finished it, mark it complete so it counts towards your roadmap and makes room for something new.</p>`,
         actions: [ { text: 'Keep working on it', primary: true, onclick: 'closeDailyDetail(); openWizard();' },
@@ -15136,12 +15143,10 @@ function _renderDailyCard() {
     const ds = parts && parts.dailyScales;
     let sDesc;
     if (ds && ds.units && ds.units.length) {
-      const face = ds.units.slice(0, 2);
-      sDesc = 'Practice ' + escHtml(_joinList(face));
-      const more = ds.units.length - face.length;
-      const listHtml = more > 0 ? `${_joinList(face)} (and ${more} more at this stage)` : _joinList(ds.units);
+      sDesc = 'Focus on the ' + escHtml(ds.units[0]);
+      const others = ds.units.slice(1);
       _dailyDetail.scales = { cat: 'Scales', title: 'Scales',
-        html: `<p>From your roadmap: <strong>${escHtml(listHtml)}</strong>.</p><p>Play them hands together, up and down, at a steady even pace. ${ds.tier === 3 ? 'You have ticked off the scales for your level, so this cycles the ones you have practised least.' : 'These are the ones from your roadmap you have not ticked off yet.'}</p>`,
+        html: `<p>Focus on the <strong>${escHtml(ds.units[0])}</strong> today.${others.length ? ` Still open at your stage: ${escHtml(_joinList(others))}.` : ''}</p><p>Play hands together, up and down, at a steady even pace. ${ds.tier === 3 ? 'You have ticked off the scales for your level, so this cycles the ones you have practised least.' : 'Any of these still count towards your roadmap.'}</p>`,
         actions: [ { text: 'Log it', primary: true, onclick: 'closeDailyDetail(); openWizard();' } ] };
     } else {
       sDesc = 'Practice some scales';
