@@ -3678,6 +3678,35 @@
     .dday-card.is-done .dday-card-ic { color: #2e9e6b; background: color-mix(in srgb, #2e9e6b 15%, transparent); } /* done — green, no leftover type colour */
     .dday-card.is-done .dday-card-cat-txt { color: #2e9e6b; }
     .dday-card.is-done .dday-card-action { visibility: hidden; } /* done — nothing left to tap for */
+    /* "See detail" control: a small in-flow link that opens the guidance modal. Its
+       onclick calls preventDefault + stopPropagation, so the card's own tap (open the
+       log / game / lesson) is completely unaffected — only this control opens the modal. */
+    .dday-detail-btn { margin-top: 5px; align-self: center; font-size: .6rem; font-weight: 700; letter-spacing: .02em;
+      color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; padding: 3px 7px; border-radius: 6px; }
+    .dday-detail-btn:hover { color: var(--text); background: rgba(0,0,0,.03); }
+    /* Guidance modal opened by "See detail". */
+    .dday-detail-overlay { display: none; position: fixed; inset: 0; z-index: 1200; background: rgba(30,20,10,.5);
+      align-items: center; justify-content: center; padding: 18px; }
+    .dday-detail-modal { position: relative; width: 100%; max-width: 420px; max-height: 86vh; overflow-y: auto;
+      background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 22px 22px 20px;
+      box-shadow: 0 24px 60px -18px rgba(0,0,0,.45); }
+    .dday-detail-close { position: absolute; top: 9px; right: 12px; background: none; border: none; font-size: 1.55rem; line-height: 1;
+      color: var(--text-muted); cursor: pointer; padding: 2px 6px; }
+    .dday-detail-close:hover { color: var(--text); }
+    .dday-detail-cat { display: inline-flex; align-items: center; gap: 7px; font-size: .64rem; font-weight: 800; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--ccol, var(--text-muted)); }
+    .dday-detail-cat .dday-detail-ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+      color: var(--ccol, var(--accent)); background: color-mix(in srgb, var(--ccol, var(--accent)) 15%, transparent); }
+    .dday-detail-cat .dday-detail-ic svg { width: 13px; height: 13px; }
+    .dday-detail-title { margin: 10px 0 6px; font-size: 1.2rem; font-weight: 800; color: var(--text); }
+    .dday-detail-text { font-size: .92rem; line-height: 1.5; color: #3a3a3a; }
+    .dday-detail-text p { margin: 0 0 10px; }
+    .dday-detail-text p:last-child { margin-bottom: 0; }
+    .dday-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .dday-detail-btn2 { flex: 1 1 auto; min-width: 120px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border);
+      background: #fff; color: var(--text); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
+    .dday-detail-btn2:hover { border-color: var(--accent); }
+    .dday-detail-btn2.primary { background: var(--accent); border-color: var(--accent); color: #3a2c00; }
     @media (max-width: 1100px) {
       .dash-row-3 { grid-template-columns: 1fr; }
       .dash-community-grid { display: flex; flex-direction: column; }
@@ -13746,10 +13775,57 @@ function _renderJourneyCard(returnParts) {
   let goalsExpanded = false;
   try { goalsExpanded = localStorage.getItem("rm_goals_expanded") === "1"; } catch (_) {}
   const goalsCollapsed = manyGoals && !goalsExpanded;
+  // ── Smart daily SCALES pick (consumed by _renderDailyCard) ──────────────────
+  // Tier 1: unticked scale objectives at the current stage (and earlier ones still
+  // rolling forward). Tier 2: the Extra stretch scales for this stage. Tier 3: once
+  // all are ticked, cycle the least-practised scales across every stage so far.
+  const _SCALE_GRP = new Set(["scales", "arps", "minors", "arpsmin"]);
+  const _isScaleGoal = g => g && g.type === "self" && _SCALE_GRP.has(grpOf(g));
+  const _unitLabel = (grp, k, form) => {
+    const kd = rmKeyDisplay(k, grp === "minors" || grp === "arpsmin");
+    if (grp === "scales") return kd + " major scale";
+    if (grp === "arps")   return kd + " major arpeggio";
+    if (grp === "arpsmin") return kd + " minor arpeggio";
+    return kd + " " + form + " minor scale";
+  };
+  const _untickedUnits = g => {
+    const grp = grpOf(g), keys = rmScaleKeys(g);
+    if (!keys) return [];
+    const out = [];
+    keys.forEach(k => {
+      if (grp === "minors") RM_MINOR_FORMS.forEach(f => { if (!rmMinorFormDone(g, k, f)) out.push(_unitLabel(grp, k, f)); });
+      else if (!rmUnitDone(g, k)) out.push(_unitLabel(grp, k));
+    });
+    return out;
+  };
+  let dailyScales = null;
+  const _tier1 = [...(rolled || []), ...goals].filter(_isScaleGoal);
+  for (const g of _tier1) { const u = _untickedUnits(g); if (u.length) { dailyScales = { tier: 1, units: u, objLabel: g.label }; break; } }
+  if (!dailyScales) {
+    const ex = (window.ROADMAP && window.ROADMAP.extras && T && T.idx >= 0) ? (window.ROADMAP.extras[T.idx] || {}) : {};
+    const exObjs = ["scales", "arps", "minors", "arpsmin"].flatMap(gr => ex[gr] || []).filter(_isScaleGoal);
+    for (const g of exObjs) { const u = _untickedUnits(g); if (u.length) { dailyScales = { tier: 2, units: u, objLabel: g.label }; break; } }
+  }
+  if (!dailyScales && T && T.idx >= 0 && window.ROADMAP && window.ROADMAP.levels) {
+    const all = [];
+    for (let i = 0; i <= T.idx; i++) {
+      ((window.ROADMAP.levels.total[i] || {}).goals || []).filter(_isScaleGoal).forEach(g => {
+        const grp = grpOf(g), keys = rmScaleKeys(g) || [];
+        keys.forEach(k => { if (grp === "minors") RM_MINOR_FORMS.forEach(f => all.push(_unitLabel(grp, k, f))); else all.push(_unitLabel(grp, k)); });
+      });
+    }
+    const uniq = [...new Set(all)];
+    if (uniq.length) {
+      const counts = _scaleLabelCounts();
+      let min = Infinity; uniq.forEach(l => { const c = counts[_normScaleLabel(l)] || 0; if (c < min) min = c; });
+      const least = uniq.filter(l => (counts[_normScaleLabel(l)] || 0) === min);
+      dailyScales = { tier: 3, units: [least[_dayRotationIndex() % least.length]], objLabel: "Least-practised scales across your levels so far" };
+    }
+  }
   // The trail roadmap reuses this same computed level data (objectives, jars, picks)
   // for its current-stage card, so nothing drifts between the dashboard and the trail.
   if (returnParts) return { T, stage, goals, goalRows, rolledRows, rolled, jars, areaBars, recsHtml,
-    doneCount, totalGoals, manyGoals, goalsCollapsed, pct, nextLine, trophy, isNew, baselineBtn, mins, _fsBeginner };
+    doneCount, totalGoals, manyGoals, goalsCollapsed, pct, nextLine, trophy, isNew, baselineBtn, mins, _fsBeginner, dailyScales };
   if (!el) return;
   // The compact "where you are" status headline (stage + progress) renders into a
   // separate top slot (#path-headline) so it can lead as the dashboard headline, with
@@ -14866,6 +14942,139 @@ function _memberDayOf(when) {
   return toDateStr(at);
 }
 
+// Normalise a scale name so enharmonic spellings and ♯/♭ glyphs line up between the
+// roadmap unit labels ("C♯/D♭ major scale") and the free-text log labels ("C# major
+// scale"). Best-effort: lowercase, ♯→#, ♭→b, take the first spelling before any "/".
+function _normScaleLabel(s) {
+  return String(s || "").toLowerCase().replace(/♯/g, "#").replace(/♭/g, "b")
+    .replace(/\s*\/\s*[a-g][#b]?\s*/g, " ").replace(/\s+/g, " ").trim();
+}
+// Count how many times each scale name has been logged (manual technique items only).
+// Returns { normalisedLabel: count }. Used for the "least-practised" scales tier.
+function _scaleLabelCounts() {
+  const out = {};
+  (allSessions || []).forEach(s => {
+    if (s.source !== 'manual') return;
+    (s.practice_items || []).forEach(i => {
+      if (i.item_type !== 'technique' || !i.label) return;
+      i.label.split(',').map(x => x.trim()).filter(Boolean).forEach(nm => {
+        const k = _normScaleLabel(nm); if (k) out[k] = (out[k] || 0) + 1;
+      });
+    });
+  });
+  return out;
+}
+// A stable integer that changes once per day, so "cycle through" picks rotate daily.
+function _dayRotationIndex() {
+  const d = _memberDayOf();
+  return Math.floor(new Date(d + 'T12:00:00').getTime() / 86400000);
+}
+
+// The piece row: pick the piece in ACTIVE ROTATION practised LEAST RECENTLY (the one
+// going stale), never "last practised" (which is random when many pieces are logged in
+// one session). Falls back to reviving a resting piece, or adding a new one. Returns
+// { mode, name, daysAgo, pieceId, userPieceId } or null. Mirrors the repertoire model
+// in renderStats (rotation = learning + practised in the last 30 days).
+function _pickDailyPiece() {
+  const today = new Date(_memberDayOf() + 'T12:00:00');
+  const thirtyAgo = new Date(today.getTime() - 30 * 86400000);
+  const map = {};
+  (allSessions || []).forEach(s => {
+    const isRecent = new Date(s.session_date + 'T12:00:00') >= thirtyAgo;
+    (s.practice_items || []).forEach(i => {
+      if (i.item_type !== 'piece' && i.item_type !== 'book') return;
+      const cp = (i.user_piece_id != null && _customPieceById) ? _customPieceById[i.user_piece_id] : null;
+      const label = (i.piece_label || i.label || '').trim();
+      const key   = cp ? ('up:' + i.user_piece_id) : label;
+      const name  = cp ? (cp.title || label).trim() : label;
+      if (!key || !name) return;
+      if (!map[key]) map[key] = { name, status: cp ? cp.status : undefined, recent: 0, last: null,
+        pieceId: (!cp && i.piece_id != null) ? i.piece_id : null, userPieceId: cp ? i.user_piece_id : null };
+      if (!map[key].last || s.session_date > map[key].last) map[key].last = s.session_date;
+      if (isRecent) map[key].recent += 1;
+    });
+  });
+  const nameToStatus = {};
+  Object.values(myCollection || {}).forEach(p => { if (p && p.title) nameToStatus[p.title.trim().toLowerCase()] = p.status; });
+  Object.entries(_customStatusByName || {}).forEach(([k, v]) => { if (v) nameToStatus[k] = v; });
+  const items = Object.values(map).map(v => {
+    const status = (v.status !== undefined) ? v.status : (nameToStatus[(v.name || '').trim().toLowerCase()] || null);
+    const daysAgo = v.last ? Math.round((today - new Date(v.last + 'T12:00:00')) / 86400000) : null;
+    const state = status === 'completed' ? 'done' : (v.recent > 0 ? 'rotation' : 'resting');
+    return { ...v, status, daysAgo, state };
+  }).filter(r => r.status !== 'removed');
+  const rotation = items.filter(r => r.state === 'rotation');
+  if (rotation.length) {
+    // Least recently practised: largest daysAgo. Ties broken by a daily rotation so the
+    // same piece does not sit there forever when several are equally stale.
+    rotation.sort((a, b) => (b.daysAgo ?? 0) - (a.daysAgo ?? 0));
+    const staleMost = rotation[0].daysAgo ?? 0;
+    const stalest = rotation.filter(r => (r.daysAgo ?? 0) === staleMost);
+    const p = stalest[_dayRotationIndex() % stalest.length];
+    return { mode: 'continue', name: p.name, daysAgo: p.daysAgo, pieceId: p.pieceId, userPieceId: p.userPieceId };
+  }
+  const resting = items.filter(r => r.state === 'resting');
+  if (resting.length) {
+    resting.sort((a, b) => (a.daysAgo ?? 9e9) - (b.daysAgo ?? 9e9));
+    const p = resting[0];
+    return { mode: 'revive', name: p.name, daysAgo: p.daysAgo, pieceId: p.pieceId, userPieceId: p.userPieceId };
+  }
+  return { mode: 'new' };
+}
+
+// ── "See detail" modal for the daily cards ───────────────────────────────────
+// The card itself keeps its original tap (open the log / play the game / open the
+// lesson). This modal is opened only by the small "See detail" control, so nothing
+// about the card tap changes. Per-card guidance is stored in _dailyDetail at render.
+let _dailyDetail = {};
+function _ensureDailyOverlay() {
+  let ov = document.getElementById('dday-detail-overlay');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'dday-detail-overlay';
+  ov.className = 'dday-detail-overlay';
+  ov.addEventListener('click', e => { if (e.target === ov) closeDailyDetail(); });
+  ov.innerHTML = `<div class="dday-detail-modal" role="dialog" aria-modal="true">`
+    + `<button type="button" class="dday-detail-close" aria-label="Close" onclick="closeDailyDetail()">&times;</button>`
+    + `<div id="dday-detail-body"></div></div>`;
+  document.body.appendChild(ov);
+  return ov;
+}
+function openDailyDetail(kind) {
+  const d = _dailyDetail[kind];
+  if (!d) return;
+  const ov = _ensureDailyOverlay();
+  const bd = document.getElementById('dday-detail-body');
+  if (!ov || !bd) return;
+  const actions = (d.actions || []).map(a =>
+    `<button type="button" class="dday-detail-btn2${a.primary ? ' primary' : ''}" onclick="${escHtml(a.onclick)}">${escHtml(a.text)}</button>`).join('');
+  bd.innerHTML = `<div class="dday-detail-cat" style="--ccol:${DDAY_COL[kind] || '#f5c518'}">`
+    + `<span class="dday-detail-ic">${DDAY_IC[kind] || ''}</span>${escHtml(d.cat || '')}</div>`
+    + `<h3 class="dday-detail-title">${escHtml(d.title || '')}</h3>`
+    + `<div class="dday-detail-text">${d.html || ''}</div>`
+    + (actions ? `<div class="dday-detail-actions">${actions}</div>` : '');
+  ov.style.display = 'flex';
+}
+function closeDailyDetail() { const ov = document.getElementById('dday-detail-overlay'); if (ov) ov.style.display = 'none'; }
+window.openDailyDetail = openDailyDetail;
+window.closeDailyDetail = closeDailyDetail;
+
+// Mark the surfaced piece complete from the detail modal, through the SAME flow that
+// credits the roadmap (library → set_collection_status; custom → its own status RPC).
+async function _dailyMarkComplete(pieceId, userPieceId) {
+  closeDailyDetail();
+  if (pieceId != null && typeof colSetStatus === 'function') {
+    await colSetStatus(pieceId, 'completed');            // library piece: catalog difficulty credits the roadmap
+    try { await loadData(); } catch (e) {}
+  } else if (userPieceId != null && typeof askCustomPieceDifficulty === 'function') {
+    // Custom piece: use the proper rating flow so the difficulty credits the roadmap.
+    askCustomPieceDifficulty(userPieceId, (_dailyDetail.piece && _dailyDetail.piece.title) || '');
+  } else {
+    showToast('Open the piece in your collection to mark it complete.');
+  }
+}
+window._dailyMarkComplete = _dailyMarkComplete;
+
 function _renderDailyCard() {
   const el = document.getElementById('dash-daily-card');
   if (!el) return;
@@ -14892,16 +15101,60 @@ function _renderDailyCard() {
   // Absolute beginners follow the Beginner Course, not free practice — so for them
   // the next course lesson replaces the piece/sight-reading/scales cards until they
   // finish the course or move on (dismiss / start playing real repertoire).
-  let beginner = false;
-  try { const p = _renderJourneyCard(true); beginner = !!(p && p._fsBeginner); } catch (e) {}
+  let parts = null;
+  try { parts = _renderJourneyCard(true); } catch (e) {}
+  const beginner = !!(parts && parts._fsBeginner);
   const LOG = 'Tap to open the log', PLAY = 'Tap to play', LESSON = 'Tap to open the lesson';
-  const rows = (beginner && _nextFsLesson) ? [
-    { ic: 'piece', cat: 'Beginner Course', desc: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`, action: LESSON, done: todaySessions.length > 0, href: '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id) },
-  ] : [
-    { ic: 'piece',  cat: 'Pieces',        desc: 'Log a piece in your practice today', action: LOG, done: types.has('piece') || types.has('book'), wizard: true },
-    { ic: 'sight',  cat: 'Sight-reading', desc: 'Log 5 minutes of sight-reading', action: LOG, done: types.has('sightreading'),               wizard: true },
-    { ic: 'scales', cat: 'Scales',        desc: 'Log some scale practice',        action: LOG, done: manualTypes.has('technique'),            wizard: true },
-  ];
+  const _joinList = a => a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : (a[0] || '');
+  const _pidArgs = pk => `${pk.pieceId == null ? 'null' : pk.pieceId}, ${pk.userPieceId == null ? 'null' : JSON.stringify(pk.userPieceId)}`;
+  _dailyDetail = {};
+  let rows;
+  if (beginner && _nextFsLesson) {
+    rows = [{ ic: 'piece', cat: 'Beginner Course', desc: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`, action: LESSON, done: todaySessions.length > 0, href: '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id) }];
+  } else {
+    // PIECES — the active-rotation piece practised least recently (or revive / add new).
+    const pk = _pickDailyPiece();
+    let pDesc;
+    if (pk.mode === 'continue' || pk.mode === 'revive') {
+      const ago = pk.daysAgo == null ? '' : (pk.daysAgo <= 0 ? 'today' : pk.daysAgo === 1 ? '1 day ago' : pk.daysAgo + ' days ago');
+      pDesc = (pk.mode === 'continue' ? 'Come back to ' : 'Revisit ') + escHtml(pk.name);
+      _dailyDetail.piece = { cat: 'Pieces', title: pk.name,
+        html: `<p>Of the pieces you are actively working on, this is the one you have played least recently${ago ? ` (last practised ${ago})` : ''}. A little attention today stops it slipping away.</p><p>If you have actually finished it, mark it complete so it counts towards your roadmap and makes room for something new.</p>`,
+        actions: [ { text: 'Keep working on it', primary: true, onclick: 'closeDailyDetail(); openWizard();' },
+                   { text: 'Mark it complete', onclick: `_dailyMarkComplete(${_pidArgs(pk)})` } ] };
+    } else {
+      pDesc = 'Time for a new piece';
+      _dailyDetail.piece = { cat: 'Pieces', title: 'Add a piece to learn',
+        html: `<p>You have no piece on the go right now. Pick something from the library or add your own, then log a little practice on it today.</p>`,
+        actions: [ { text: 'Open the log', primary: true, onclick: 'closeDailyDetail(); openWizard();' } ] };
+    }
+    // SIGHT-READING — generic guidance (no in-app exercise), makes the point explicit.
+    _dailyDetail.sight = { cat: 'Sight-reading', title: 'Sight-reading',
+      html: `<p>Sight-reading means playing something you have <strong>never seen before</strong>, straight through, without stopping to fix mistakes.</p><p>Keep your eyes ahead of your hands and hold a steady pulse. It does not need to be perfect. Even five minutes a day makes every new piece you learn come together far faster.</p><p>Use your sight-reading book, or any unfamiliar music that is a little easier than what you are learning.</p>`,
+      actions: [ { text: 'Log it', primary: true, onclick: 'closeDailyDetail(); openWizard();' } ] };
+    // SCALES — from the roadmap ticks (unticked stage → Extra → least-practised).
+    const ds = parts && parts.dailyScales;
+    let sDesc;
+    if (ds && ds.units && ds.units.length) {
+      const face = ds.units.slice(0, 2);
+      sDesc = 'Practice ' + escHtml(_joinList(face));
+      const more = ds.units.length - face.length;
+      const listHtml = more > 0 ? `${_joinList(face)} (and ${more} more at this stage)` : _joinList(ds.units);
+      _dailyDetail.scales = { cat: 'Scales', title: 'Scales',
+        html: `<p>From your roadmap: <strong>${escHtml(listHtml)}</strong>.</p><p>Play them hands together, up and down, at a steady even pace. ${ds.tier === 3 ? 'You have ticked off the scales for your level, so this cycles the ones you have practised least.' : 'These are the ones from your roadmap you have not ticked off yet.'}</p>`,
+        actions: [ { text: 'Log it', primary: true, onclick: 'closeDailyDetail(); openWizard();' } ] };
+    } else {
+      sDesc = 'Practice some scales';
+      _dailyDetail.scales = { cat: 'Scales', title: 'Scales',
+        html: `<p>Work through the scales for your current stage, hands together, up and down, at a steady even pace.</p>`,
+        actions: [ { text: 'Log it', primary: true, onclick: 'closeDailyDetail(); openWizard();' } ] };
+    }
+    rows = [
+      { ic: 'piece',  cat: 'Pieces',        desc: pDesc,                     action: LOG, done: types.has('piece') || types.has('book'), wizard: true, detail: 'piece' },
+      { ic: 'sight',  cat: 'Sight-reading', desc: 'Sight-read for 5 minutes', action: LOG, done: types.has('sightreading'),              wizard: true, detail: 'sight' },
+      { ic: 'scales', cat: 'Scales',        desc: sDesc,                     action: LOG, done: manualTypes.has('technique'),            wizard: true, detail: 'scales' },
+    ];
+  }
   const skill = _pickDailySkill();
   if (skill)  rows.push({ ic: 'skill',  cat: skill.title,  desc: skill.blurb,  action: PLAY,   done: skill.done,  href: skill.href });
   const theory = _dailyTheoryObjective(types);
@@ -14924,6 +15177,7 @@ function _renderDailyCard() {
             </span>
             <span class="dday-card-desc">${r.desc}</span>
             <span class="dday-card-action">${r.action}</span>
+            ${r.detail ? `<span class="dday-detail-btn" role="button" tabindex="0" onclick="event.preventDefault();event.stopPropagation();openDailyDetail('${r.detail}');return false;">See detail</span>` : ''}
           </a>`;
         }).join('')}
       </div>
