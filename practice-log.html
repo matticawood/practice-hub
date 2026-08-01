@@ -15109,31 +15109,13 @@ async function _dailyMarkComplete(pieceId, userPieceId) {
 }
 window._dailyMarkComplete = _dailyMarkComplete;
 
-// Build the Key Explorer keyboard (scale notes + fingering) for a scale unit, reusing
-// buildPianoSVG / buildFingerMap and the MAJOR/MINOR fingering tables already in the
-// page. Arpeggios have no scale-fingering table, so they get no keyboard for now.
+// _dailyScaleKeyboardHTML is defined in the practice-tools script block, alongside
+// buildPianoSVG and the NOTE_SEMI / interval / fingering consts it needs (those consts
+// are local to that block). A safe stub here means the daily card still renders if that
+// block has not defined it yet.
 function _dailyScaleKeyboardHTML(unit) {
-  try {
-    if (!unit || !unit.key || typeof buildPianoSVG !== 'function' || typeof NOTE_SEMI === 'undefined') return '';
-    const grp = unit.grp;
-    if (grp === 'arps' || grp === 'arpsmin') return '';
-    const rootSemi = NOTE_SEMI[unit.key];
-    if (rootSemi == null) return '';
-    const isMinor = grp === 'minors';
-    const intervals = isMinor
-      ? (unit.form === 'harmonic' ? HARM_INTERVALS : unit.form === 'melodic' ? MEL_INTERVALS : MINOR_INTERVALS)
-      : MAJOR_INTERVALS;
-    const fingObj = isMinor ? (MINOR_FINGERING[rootSemi] || null) : (MAJOR_FINGERING[rootSemi] || null);
-    const highlight = intervals.map(iv => (rootSemi + iv) % 12);
-    const svg = hand => buildPianoSVG(highlight, false, buildFingerMap(rootSemi, intervals, fingObj, hand));
-    const btn = (hand, lbl) => `<button type="button" class="dsk-hand-btn${hand === 'rh' ? ' on' : ''}" data-hand="${hand}" onclick="_dailyScaleFingerHand('${hand}')">${lbl}</button>`;
-    return `<div class="dsk-piano-wrap">`
-      + (fingObj ? `<div class="dsk-hand-toggle"><span class="dsk-hand-lbl">Fingering</span>${btn('rh', 'Right hand')}${btn('lh', 'Left hand')}</div>` : '')
-      + `<div class="dsk-piano" data-hand="rh">${svg('rh')}</div>`
-      + (fingObj ? `<div class="dsk-piano" data-hand="lh" style="display:none">${svg('lh')}</div>` : '')
-      + (fingObj ? `<div class="dsk-hand-note">Standard fingering. It can vary by edition.</div>` : '')
-      + `</div>`;
-  } catch (e) { return ''; }
+  try { return (typeof keDailyScaleKeyboard === 'function') ? keDailyScaleKeyboard(unit) : ''; }
+  catch (e) { return ''; }
 }
 function _dailyScaleFingerHand(hand) {
   const body = document.getElementById('dday-detail-body'); if (!body) return;
@@ -26016,6 +25998,34 @@ function buildPianoSVG(highlightSemis, isChord, fingerMap = null) {
 
   h += '</svg>';
   return h;
+}
+
+// Keyboard + fingering for the dashboard's daily SCALE card modal. Lives here so it can
+// reach NOTE_SEMI, the interval sets and the MAJOR/MINOR fingering tables (all local to
+// this script block). Arpeggios have no scale-fingering table, so they show the notes
+// on the keyboard without finger numbers. unit = { key, grp, form, label }.
+function keDailyScaleKeyboard(unit) {
+  try {
+    if (!unit || !unit.key || typeof NOTE_SEMI === 'undefined') return '';
+    const rootSemi = NOTE_SEMI[unit.key];
+    if (rootSemi == null) return '';
+    const grp = unit.grp, isMinor = grp === 'minors', isArp = grp === 'arps' || grp === 'arpsmin';
+    let intervals, fingObj;
+    if (isArp) { intervals = grp === 'arps' ? [0,4,7] : [0,3,7]; fingObj = null; }
+    else if (isMinor) {
+      intervals = unit.form === 'harmonic' ? HARM_INTERVALS : unit.form === 'melodic' ? MEL_INTERVALS : MINOR_INTERVALS;
+      fingObj = MINOR_FINGERING[rootSemi] || null;
+    } else { intervals = MAJOR_INTERVALS; fingObj = MAJOR_FINGERING[rootSemi] || null; }
+    const highlight = intervals.map(iv => (rootSemi + iv) % 12);
+    const svg = hand => buildPianoSVG(highlight, false, fingObj ? buildFingerMap(rootSemi, intervals, fingObj, hand) : null);
+    const btn = (hand, lbl) => `<button type="button" class="dsk-hand-btn${hand === 'rh' ? ' on' : ''}" data-hand="${hand}" onclick="_dailyScaleFingerHand('${hand}')">${lbl}</button>`;
+    return `<div class="dsk-piano-wrap">`
+      + (fingObj ? `<div class="dsk-hand-toggle"><span class="dsk-hand-lbl">Fingering</span>${btn('rh', 'Right hand')}${btn('lh', 'Left hand')}</div>` : '')
+      + `<div class="dsk-piano" data-hand="rh">${svg('rh')}</div>`
+      + (fingObj ? `<div class="dsk-piano" data-hand="lh" style="display:none">${svg('lh')}</div>` : '')
+      + (fingObj ? `<div class="dsk-hand-note">Standard fingering. It can vary by edition.</div>` : '')
+      + `</div>`;
+  } catch (e) { return ''; }
 }
 
 function keUpdatePiano(semis, isChord) {
