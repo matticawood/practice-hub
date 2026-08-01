@@ -10292,6 +10292,8 @@ async function loadData() {
       const _fsPub = _fsAll.filter(l => !l.status || l.status === "published").sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
       const _fsNext = _fsPub.find(l => !_fsDone.has(l.id));
       _nextFsLesson = _fsNext ? { id: _fsNext.id, title: _fsNext.title, num: _fsPub.indexOf(_fsNext) + 1 } : null;
+      // A first-steps lesson completed TODAY (member's day) → the daily card shows a done state.
+      _fsDoneToday = (thP.data || []).some(p => p.completed_at && _fsIds.has(p.lesson_id) && _memberDayOf(new Date(p.completed_at)) === _memberDayOf());
       // The daily card + next-move may have rendered before this background load
       // finished (skill/theory rows depend on it) — re-render them now they're ready.
       try { if (typeof _renderDailyCard === 'function') _renderDailyCard(); } catch (_) {}
@@ -14159,6 +14161,7 @@ let _theoryDoneKeys = null;     // Set of "level:sort_order" for completed theor
 let _dormantCustomPieces = null;// custom pieces gone quiet (learning, 14d+ no practice, unacked) for the tidy-up card
 let _fsCourse = null;           // { total, live, done } for The Absolute Beginner Course "Start here" card
 let _nextFsLesson = null;       // { id, title, num } next uncompleted Absolute Beginner Course lesson
+let _fsDoneToday = false;       // a first-steps lesson was completed today (for the daily card's done state)
 
 // A custom collection piece is "dormant" when it is still in Learning, has not been
 // practiced for 14 days, and the member has not acknowledged this dormancy since the
@@ -14816,11 +14819,12 @@ const DDAY_IC = {
   sight:  _DDAY_SVG('<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'),
   skill:  _DDAY_SVG('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>'),
   theory: _DDAY_SVG('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
+  beginner: _DDAY_SVG('<path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/>'),
 };
 // Colour each daily card by its activity type, reusing the Roadmap's per-area
 // palette (Pieces/repertoire, Sight-reading, Scales/technique, Theory/musicianship)
 // so a card visually links to the roadmap area it feeds. Skill/games get the ear-pink.
-const DDAY_COL = { piece: '#f5c518', sight: '#10b981', scales: '#6366f1', theory: '#a855f7', skill: '#ec4899' };
+const DDAY_COL = { piece: '#f5c518', sight: '#10b981', scales: '#6366f1', theory: '#a855f7', skill: '#ec4899', beginner: '#8b5cf6' };
 // Small shuffle glyph for the daily-card "Swap" control (cycle to the next suggestion).
 const DDAY_SWAP_IC = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>`;
 // Translate a roadmap game objective's `match` variant into a deep-link that
@@ -14964,6 +14968,20 @@ function _dailyTheoryObjective(types) {
     blurb: `Lesson ${L.num}: ${L.title}`,
     href:  '/courses.html?lesson=' + encodeURIComponent(L.id),
     done:  doneToday,
+  };
+}
+// Absolute Beginner Course, surfaced on the daily card while the member is working through
+// it (started, not finished), the same way theory is. The absolute-beginner replacement
+// branch already shows the course as the ONLY card, so this is for members who have
+// progressed onto the full card set but still have the course on the go.
+function _dailyBeginnerObjective() {
+  if (!_fsCourse || !_fsCourse.total || !_fsCourse.live) return null;   // no live course
+  if (!(_fsCourse.done > 0) || !_nextFsLesson) return null;             // not started, or finished
+  return {
+    title: 'Beginner Course',
+    blurb: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`,
+    href:  '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id),
+    done:  _fsDoneToday,
   };
 }
 // Learn → Courses card: the member's in-app courses (Music Theory, Absolute Beginner)
@@ -15372,6 +15390,12 @@ function _renderDailyCard() {
     _dailyCardLists.skill = _skillIds;
     const skill = _skillList[_dailySelIdx('skill', _skillIds)];
     rows.push({ ic: 'skill', cat: skill.title, desc: skill.blurb, action: PLAY, done: skill.done, href: skill.href, swap: (_skillList.length > 1) ? { kind: 'skill', count: _skillList.length } : null });
+  }
+  // Absolute Beginner Course card, for members past the beginner-only view but still
+  // working through it (the beginner replacement branch above already shows it otherwise).
+  if (!beginner) {
+    const bc = _dailyBeginnerObjective();
+    if (bc) rows.push({ ic: 'beginner', cat: bc.title, desc: bc.blurb, action: LESSON, done: bc.done, href: bc.href });
   }
   const theory = _dailyTheoryObjective(types);
   if (theory) rows.push({ ic: 'theory', cat: theory.title, desc: theory.blurb, action: LESSON, done: theory.done, href: theory.href });
