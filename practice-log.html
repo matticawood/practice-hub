@@ -14877,7 +14877,9 @@ function _variantBest(type, m, key) {
     return true;
   }).reduce((x, r) => Math.max(x, r.v || 0), 0);
 }
-function _pickDailySkill(offset) {
+// Ordered list of game-practice suggestions, most need first. The card shows [0] and Swap
+// cycles through the rest. Returns null when no game is unlocked / due.
+function _dailySkillList() {
   if (!_insightTrainers) return null;
   const todayStr = _memberDayOf();
   // The current stage's game objectives encode the level-appropriate variant +
@@ -14928,24 +14930,25 @@ function _pickDailySkill(offset) {
   // Absolute beginners start with note reading before anything else.
   if (parts && parts._fsBeginner) { const noteOnly = pool.filter(g => g.type === 'note'); if (noteOnly.length) pool = noteOnly; }
   if (!pool.length) return null;
-  // Ordered by most need first (furthest from completing), tie-break least-recent. The
-  // card shows [0]; Swap cycles to the next game type, wrapping at the end.
+  // Ordered by most need first (furthest from completing), tie-break least-recent.
   const sortedPool = pool.slice().sort((a, b) => (progress(a) - progress(b)) || (lastMs(a.type) - lastMs(b.type)));
-  const gIdx = ((offset || 0) % sortedPool.length + sortedPool.length) % sortedPool.length;
-  const goal = sortedPool[gIdx];
-  const m = goal.match, type = goal.type;
-  // Your weakest key within the objective (lowest best score there).
-  let key = null;
-  if (m.keys && m.keys.length) key = m.keys.slice().sort((a, b) => _variantBest(type, m, a) - _variantBest(type, m, b))[0];
-  const link = _skillDeepLink(type, m, key);
-  if (!link) return null;
-  // Target: a step above your best AT THIS VARIANT, capped at the objective's target;
-  // for one you've never played, a fair starter from your ability in the game.
-  const vBest = _variantBest(type, m, key);
-  let aim;
-  if (vBest > 0) aim = Math.min(vBest + 2, goal.target);
-  else { const ob = bestOverall(type); aim = ob > 0 ? Math.min(goal.target, Math.max(3, Math.round(ob * 0.6))) : Math.max(3, Math.ceil(goal.target / 2)); }
-  return { title: link.game, blurb: `Reach a score of ${aim} ${link.phrase}`, href: link.href, done: playedToday(type), _count: sortedPool.length };
+  const build = goal => {
+    const m = goal.match, type = goal.type;
+    // Your weakest key within the objective (lowest best score there).
+    let key = null;
+    if (m.keys && m.keys.length) key = m.keys.slice().sort((a, b) => _variantBest(type, m, a) - _variantBest(type, m, b))[0];
+    const link = _skillDeepLink(type, m, key);
+    if (!link) return null;
+    // Target: a step above your best AT THIS VARIANT, capped at the objective's target;
+    // for one you've never played, a fair starter from your ability in the game.
+    const vBest = _variantBest(type, m, key);
+    let aim;
+    if (vBest > 0) aim = Math.min(vBest + 2, goal.target);
+    else { const ob = bestOverall(type); aim = ob > 0 ? Math.min(goal.target, Math.max(3, Math.round(ob * 0.6))) : Math.max(3, Math.ceil(goal.target / 2)); }
+    return { id: type + '|' + (goal.group || '') + '|' + goal.target, title: link.game, blurb: `Reach a score of ${aim} ${link.phrase}`, href: link.href, done: playedToday(type) };
+  };
+  const items = sortedPool.map(build).filter(Boolean);
+  return items.length ? items : null;
 }
 function _dailyTheoryObjective(types) {
   // Tick from an ACTUAL completed theory lesson today (_lastTheoryLesson), NOT from any
@@ -15127,14 +15130,6 @@ function _dailyPieceList() {
   return rotation.map(p => ({ mode: 'continue', name: p.name, daysAgo: p.daysAgo, pieceId: p.pieceId, userPieceId: p.userPieceId }))
     .concat(resting.map(p => ({ mode: 'revive', name: p.name, daysAgo: p.daysAgo, pieceId: p.pieceId, userPieceId: p.userPieceId })));
 }
-// Returns the offset-th candidate (wrapping), tagged with _count so the card knows how many
-// alternatives exist (and whether to show Swap). No practised piece → prompt to add a new one.
-function _pickDailyPiece(offset) {
-  const list = _dailyPieceList();
-  if (!list.length) return { mode: 'new', _count: 0 };
-  const idx = ((offset || 0) % list.length + list.length) % list.length;
-  return { ...list[idx], _count: list.length };
-}
 
 // ── "See detail" modal for the daily cards ───────────────────────────────────
 // The card itself keeps its original tap (open the log / play the game / open the
@@ -15211,10 +15206,29 @@ function _dailySwapKey() { return 'prdaily:swap:' + (viewingEmail || '') + ':' +
 function _dailySwap() {
   try { return JSON.parse(localStorage.getItem(_dailySwapKey()) || '{}') || {}; } catch (e) { return {}; }
 }
-window._dailyCardSwap = function(kind, count) {
-  if (!count || count < 2) return;
+// Ordered id-lists for the swappable cards, rebuilt each render so the Swap control can cycle.
+let _dailyCardLists = { piece: [], scales: [], skill: [] };
+// The stored selection is the chosen item's STABLE ID, not a positional index. This matters:
+// logging the swapped item makes it the most recently practised, which reorders the candidate
+// list, so a stored index would then point at a different item. Keying by id keeps the same
+// item selected (and ticked) after they practise it.
+function _dailyPieceKey(p) {
+  return p.userPieceId != null ? ('up:' + p.userPieceId)
+       : p.pieceId != null ? ('pid:' + p.pieceId)
+       : ('nm:' + String(p.name || '').trim().toLowerCase());
+}
+function _dailySelIdx(kind, ids) {
+  const id = _dailySwap()[kind];
+  const i = (id != null) ? ids.indexOf(id) : -1;
+  return i >= 0 ? i : 0;   // stored item gone (e.g. completed) → back to the smart default
+}
+window._dailyCardSwap = function(kind) {
+  const ids = (_dailyCardLists && _dailyCardLists[kind]) || [];
+  if (ids.length < 2) return;
   const s = _dailySwap();
-  s[kind] = ((s[kind] || 0) + 1) % count;
+  let idx = (s[kind] != null) ? ids.indexOf(s[kind]) : -1;
+  if (idx < 0) idx = 0;
+  s[kind] = ids[(idx + 1) % ids.length];   // advance to the next item, wrapping to the top
   try { localStorage.setItem(_dailySwapKey(), JSON.stringify(s)); } catch (e) {}
   _renderDailyCard();
 };
@@ -15265,14 +15279,19 @@ function _renderDailyCard() {
   const _joinList = a => a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : (a[0] || '');
   const _pidArgs = pk => `${pk.pieceId == null ? 'null' : pk.pieceId}, ${pk.userPieceId == null ? 'null' : JSON.stringify(pk.userPieceId)}`;
   _dailyDetail = {};
-  const _sw = _dailySwap();   // per-day Swap offsets, read once for all cards
+  _dailyCardLists = { piece: [], scales: [], skill: [] };   // rebuilt below for the Swap control
   let rows;
   if (beginner && _nextFsLesson) {
     rows = [{ ic: 'piece', cat: 'Beginner Course', desc: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`, action: LESSON, done: todaySessions.length > 0, href: '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id) }];
   } else {
     // PIECES — the active-rotation piece practised least recently (or revive / add new).
-    // Swap lets the member cycle through their own back-catalogue for today.
-    const pk = _pickDailyPiece(_sw.piece || 0);
+    // Swap lets the member cycle through their own back-catalogue for today (id-keyed).
+    const _pieceList = _dailyPieceList();
+    const _pieceIds = _pieceList.map(_dailyPieceKey);
+    _dailyCardLists.piece = _pieceIds;
+    const pk = _pieceList.length
+      ? { ..._pieceList[_dailySelIdx('piece', _pieceIds)], _count: _pieceList.length }
+      : { mode: 'new', _count: 0 };
     let pDesc;
     if (pk.mode === 'continue' || pk.mode === 'revive') {
       const ago = pk.daysAgo == null ? '' : (pk.daysAgo <= 0 ? 'today' : pk.daysAgo === 1 ? '1 day ago' : pk.daysAgo + ' days ago');
@@ -15294,9 +15313,13 @@ function _renderDailyCard() {
     // SCALES — from the roadmap ticks (unticked stage → Extra → least-practised).
     const ds = parts && parts.dailyScales;
     let sDesc;
+    let _shownScaleSig = null;   // signature of the scale actually shown, for a specific tick
     if (ds && ds.units && ds.units.length) {
-      const _soff = ((_sw.scales || 0) % ds.units.length + ds.units.length) % ds.units.length;
+      const _scaleIds = ds.units.map(u => u.label);
+      _dailyCardLists.scales = _scaleIds;
+      const _soff = _dailySelIdx('scales', _scaleIds);
       const u0 = ds.units[_soff];
+      _shownScaleSig = _scaleSigFromUnit(u0);
       sDesc = 'Focus on the ' + escHtml(u0.label);
       const isArp = u0.grp === 'arps' || u0.grp === 'arpsmin';
       const howTo = isArp
@@ -15320,8 +15343,10 @@ function _renderDailyCard() {
       : !!((pk2.userPieceId != null && _todayPieceUpids.has(String(pk2.userPieceId)))
         || (pk2.pieceId != null && _todayPieceIds.has(String(pk2.pieceId)))
         || (pk2.name && _todayPieceNames.has(pk2.name.trim().toLowerCase())));
+    // Tick only when the SPECIFIC scale shown (after any Swap) is the one logged today,
+    // so swapping means they must practise that particular scale for the card to tick.
     const scaleDone = (ds && ds.units && ds.units.length)
-      ? ds.units.some(u => { const sig = _scaleSigFromUnit(u); return sig && _todayScaleSigs.has(sig); })
+      ? !!(_shownScaleSig && _todayScaleSigs.has(_shownScaleSig))
       : manualTypes.has('technique');
     const _scaleCount = (ds && ds.units) ? ds.units.length : 0;
     rows = [
@@ -15330,8 +15355,13 @@ function _renderDailyCard() {
       { ic: 'scales', cat: 'Scales',        desc: sDesc,                     action: LOG, done: scaleDone,                 wizard: true, detail: 'scales', swap: (_scaleCount > 1) ? { kind: 'scales', count: _scaleCount } : null },
     ];
   }
-  const skill = _pickDailySkill(_sw.skill || 0);
-  if (skill)  rows.push({ ic: 'skill',  cat: skill.title,  desc: skill.blurb,  action: PLAY,   done: skill.done,  href: skill.href, swap: (skill._count > 1) ? { kind: 'skill', count: skill._count } : null });
+  const _skillList = _dailySkillList();
+  if (_skillList && _skillList.length) {
+    const _skillIds = _skillList.map(s => s.id);
+    _dailyCardLists.skill = _skillIds;
+    const skill = _skillList[_dailySelIdx('skill', _skillIds)];
+    rows.push({ ic: 'skill', cat: skill.title, desc: skill.blurb, action: PLAY, done: skill.done, href: skill.href, swap: (_skillList.length > 1) ? { kind: 'skill', count: _skillList.length } : null });
+  }
   const theory = _dailyTheoryObjective(types);
   if (theory) rows.push({ ic: 'theory', cat: theory.title, desc: theory.blurb, action: LESSON, done: theory.done, href: theory.href });
 
@@ -15354,7 +15384,7 @@ function _renderDailyCard() {
             <span class="dday-card-action">${r.action}</span>
             ${(r.detail || (r.swap && r.swap.count > 1)) ? `<span class="dday-card-foot">
               ${r.detail ? `<span class="dday-detail-btn" role="button" tabindex="0" onclick="event.preventDefault();event.stopPropagation();openDailyDetail('${r.detail}');return false;">See detail</span>` : ''}
-              ${(r.swap && r.swap.count > 1) ? `<span class="dday-swap" role="button" tabindex="0" title="Show another" onclick="event.preventDefault();event.stopPropagation();_dailyCardSwap('${r.swap.kind}', ${r.swap.count});return false;">${DDAY_SWAP_IC}Swap</span>` : ''}
+              ${(r.swap && r.swap.count > 1) ? `<span class="dday-swap" role="button" tabindex="0" title="Show another" onclick="event.preventDefault();event.stopPropagation();_dailyCardSwap('${r.swap.kind}');return false;">${DDAY_SWAP_IC}Swap</span>` : ''}
             </span>` : ''}
           </a>`;
         }).join('')}
