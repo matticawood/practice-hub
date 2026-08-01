@@ -14979,6 +14979,32 @@ function _normScaleLabel(s) {
   return String(s || "").toLowerCase().replace(/♯/g, "#").replace(/♭/g, "b")
     .replace(/\s*\/\s*[a-g][#b]?\s*/g, " ").replace(/\s+/g, " ").trim();
 }
+// Enharmonic-robust scale identity: a "<pitchClass>|<type>" signature, so a C# major
+// scale and a D flat major scale (same notes, different name in the log dropdown) match.
+const _KEY_SEMI = { c:0, 'b#':0, 'c#':1, db:1, d:2, 'd#':3, eb:3, e:4, fb:4, 'e#':5, f:5, 'f#':6, gb:6, g:7, 'g#':8, ab:8, a:9, 'a#':10, bb:10, b:11, cb:11 };
+function _scaleTypeSig(rest) {
+  rest = String(rest).toLowerCase();
+  if (rest.includes('arpeggio')) return rest.includes('minor') ? 'min-a' : 'maj-a';
+  if (rest.includes('harmonic')) return 'harm-s';
+  if (rest.includes('melodic'))  return 'mel-s';
+  if (rest.includes('minor'))    return 'nat-s';
+  return 'maj-s';
+}
+function _scaleSigFromLabel(label) {
+  const m = _normScaleLabel(label).match(/^([a-g][#b]?)\s+(.*)$/);
+  if (!m) return null;
+  const semi = _KEY_SEMI[m[1]];
+  return semi == null ? null : semi + '|' + _scaleTypeSig(m[2]);
+}
+function _scaleSigFromUnit(u) {
+  if (!u || !u.key) return null;
+  const semi = _KEY_SEMI[String(u.key).toLowerCase().replace('♯', '#').replace('♭', 'b')];
+  if (semi == null) return null;
+  const t = u.grp === 'arps' ? 'maj-a' : u.grp === 'arpsmin' ? 'min-a'
+    : u.grp === 'minors' ? (u.form === 'harmonic' ? 'harm-s' : u.form === 'melodic' ? 'mel-s' : 'nat-s')
+    : 'maj-s';
+  return semi + '|' + t;
+}
 // Count how many times each scale name has been logged (manual technique items only).
 // Returns { normalisedLabel: count }. Used for the "least-practised" scales tier.
 function _scaleLabelCounts() {
@@ -15139,7 +15165,7 @@ function _renderDailyCard() {
   const manualTypes = new Set();    // manual log only → scales
   // The cards now name a SPECIFIC scale and piece, so the tick must match THAT one, not
   // just "any scale" / "any piece". Collect today's logged scale names + piece keys.
-  const _todayScaleLabels = new Set();
+  const _todayScaleSigs = new Set();
   const _todayPieceIds = new Set(), _todayPieceUpids = new Set(), _todayPieceNames = new Set();
   todaySessions.forEach(s => {
     const deliberate = s.source === 'manual';
@@ -15148,7 +15174,7 @@ function _renderDailyCard() {
       if (creditable) types.add(i.item_type);
       if (deliberate) manualTypes.add(i.item_type);
       if (deliberate && i.item_type === 'technique' && i.label) {
-        i.label.split(',').map(x => x.trim()).filter(Boolean).forEach(nm => _todayScaleLabels.add(_normScaleLabel(nm)));
+        i.label.split(',').map(x => x.trim()).filter(Boolean).forEach(nm => { const sig = _scaleSigFromLabel(nm); if (sig) _todayScaleSigs.add(sig); });
       }
       if (creditable && (i.item_type === 'piece' || i.item_type === 'book')) {
         if (i.user_piece_id != null) _todayPieceUpids.add(String(i.user_piece_id));
@@ -15224,7 +15250,7 @@ function _renderDailyCard() {
         || (pk2.pieceId != null && _todayPieceIds.has(String(pk2.pieceId)))
         || (pk2.name && _todayPieceNames.has(pk2.name.trim().toLowerCase())));
     const scaleDone = (ds && ds.units && ds.units.length)
-      ? ds.units.some(u => _todayScaleLabels.has(_normScaleLabel(u.label)))
+      ? ds.units.some(u => { const sig = _scaleSigFromUnit(u); return sig && _todayScaleSigs.has(sig); })
       : manualTypes.has('technique');
     rows = [
       { ic: 'piece',  cat: 'Pieces',        desc: pDesc,                     action: LOG, done: pieceDone,                 wizard: true, detail: 'piece' },
