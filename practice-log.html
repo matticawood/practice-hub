@@ -5499,6 +5499,20 @@
     }
     .pg-meta-right { font-weight: 700; }
     .pg-empty { font-size: 0.82rem; color: var(--text-muted); padding: 4px 0 8px; }
+    /* Completed goals — collapsible record below the active list. */
+    .pg-done-section { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
+    .pg-done-toggle { display: flex; align-items: center; gap: 7px; width: 100%; background: none; border: none;
+      cursor: pointer; padding: 7px 2px; font-family: inherit; font-size: 0.78rem; font-weight: 700;
+      letter-spacing: .01em; color: var(--text-muted); }
+    .pg-done-toggle:hover { color: var(--text); }
+    .pg-done-chev { display: inline-flex; transition: transform .18s ease; }
+    .pg-done-chev svg { width: 14px; height: 14px; }
+    .pg-done-chev.open { transform: rotate(180deg); }
+    .pg-done-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px;
+      border-radius: 9px; background: rgba(34,197,94,.15); color: #15803d; font-size: 0.68rem; font-weight: 800; }
+    .pg-done-list { padding-top: 2px; }
+    .pg-goal-done .pg-goal-name { color: var(--text-muted); }
+    .pg-goal-done .pg-pill-done { white-space: nowrap; }
 
     /* ── Achievements ── */
     .ach-section {
@@ -17366,6 +17380,7 @@ let _pgSelTech     = null;         // string — confirmed technique/scale selec
 let _pgLabelVal    = "";
 let _pgDateVal     = "";           // persists date input across autocomplete re-renders
 let _pgEditingId   = null;         // id of goal currently being edited inline
+let _pgDoneOpen    = false;        // is the Completed goals section expanded
 
 function pgCustomTechKey() { return `pg_custom_tech_${myEmail}`; }
 function pgGetCustomTechs() {
@@ -17463,10 +17478,17 @@ function renderPieceGoals() {
     const PG_CHECK  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
     const PG_PENCIL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
     const PG_X      = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+    const PG_UNDO   = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>`;
+    const PG_CHEV   = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
 
-    // Summary strip counts — derived from active goals (done goals are deleted).
+    // Completed goals (completed_at set) are kept as a record, not deleted; they live in
+    // their own section below and never count toward active / overdue.
+    const _activeGoals = (allGoals || []).filter(g => !g.completed_at);
+    const _doneGoals   = (allGoals || []).filter(g => g.completed_at)
+      .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at));
+    // Summary strip counts — derived from ACTIVE goals only.
     let _nOverdue = 0, _nDueSoon = 0;
-    (allGoals || []).forEach(g => {
+    _activeGoals.forEach(g => {
       const gt = g.goal_type || "deadline";
       if ((gt === "deadline" || gt === "both") && g.target_date) {
         const t = new Date(normDate(g.target_date) + "T00:00:00");
@@ -17475,7 +17497,7 @@ function renderPieceGoals() {
         else if (d <= 7) _nDueSoon++;
       }
     });
-    const _nActive = (allGoals || []).length;
+    const _nActive = _activeGoals.length;
     const summaryHtml = _nActive ? `
       <div class="pg-summary">
         <div class="pg-sum-chip"><span class="pg-sum-num">${_nActive}</span><span class="pg-sum-lab">Active</span></div>
@@ -17498,7 +17520,7 @@ function renderPieceGoals() {
       }
       return 9999;
     }
-    const sortedGoals = [...(allGoals || [])].sort((a, b) => _pgUrgencyScore(a) - _pgUrgencyScore(b));
+    const sortedGoals = [..._activeGoals].sort((a, b) => _pgUrgencyScore(a) - _pgUrgencyScore(b));
 
     const goalsHtml = sortedGoals.map((g, i) => {
       const cat      = GOAL_CAT_MAP[g.category || "piece"] || GOAL_CATS[0];
@@ -17712,7 +17734,41 @@ function renderPieceGoals() {
       </div>` : "";
 
     const emptyHtml = (allGoals || []).length === 0 && !_pgAddOpen
-      ? `<div class="pg-empty">No goals set — add one to track your learning targets.</div>` : "";
+      ? `<div class="pg-empty">No goals set — add one to track your learning targets.</div>`
+      : (_nActive === 0 && _doneGoals.length && !_pgAddOpen
+          ? `<div class="pg-empty">No active goals right now. Add one, or revisit your completed goals below.</div>` : "");
+
+    // Completed goals — a kept record, in a collapsible section. Each shows a green Done
+    // badge with the date, and can be reopened (back to active) or removed for good.
+    const _doneRow = (g) => {
+      const cat = GOAL_CAT_MAP[g.category || "piece"] || GOAL_CATS[0];
+      const sub = g.composer ? g.composer : (g.category && g.category !== "piece" ? cat.label : "");
+      const doneStr = new Date(g.completed_at).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
+      return `<div class="pg-goal-row pg-goal-done" data-goal-id="${g.id}">
+        <div class="pg-goal-header">
+          <div class="pg-goal-left">
+            <span class="pg-cat-icon">${typeIconSVG(cat.type)}</span>
+            <div style="min-width:0">
+              <div class="pg-goal-name">${escHtml(g.piece_label || "")}</div>
+              ${sub ? `<div class="pg-goal-sub">${escHtml(sub)}</div>` : ""}
+            </div>
+          </div>
+          <div class="pg-actions">
+            <span class="pg-pill pg-pill-done">${PG_CHECK} Done ${escHtml(doneStr)}</span>
+            <button class="pg-icon-btn" data-pg-reopen="${g.id}" title="Reopen">${PG_UNDO}</button>
+            <button class="pg-icon-btn pg-remove" data-pg-remove="${g.id}" title="Remove">${PG_X}</button>
+          </div>
+        </div>
+      </div>`;
+    };
+    const doneHtml = _doneGoals.length ? `
+      <div class="pg-done-section">
+        <button type="button" class="pg-done-toggle" id="pg-done-toggle" aria-expanded="${_pgDoneOpen ? "true" : "false"}">
+          <span class="pg-done-chev${_pgDoneOpen ? " open" : ""}">${PG_CHEV}</span>
+          <span>Completed</span><span class="pg-done-count">${_doneGoals.length}</span>
+        </button>
+        ${_pgDoneOpen ? `<div class="pg-done-list">${_doneGoals.map(_doneRow).join("")}</div>` : ""}
+      </div>` : "";
 
     el.innerHTML = `
       <div class="wg-card" style="margin-bottom:28px">
@@ -17720,7 +17776,7 @@ function renderPieceGoals() {
           <span class="wg-title">Goals</span>
           <button class="wg-edit-btn" id="pg-add-btn">+ Add goal</button>
         </div>
-        ${summaryHtml}${emptyHtml}${goalsHtml}
+        ${summaryHtml}${emptyHtml}${goalsHtml}${doneHtml}
       </div>${addFormHtml}`;
 
   } catch(err) {
@@ -17794,6 +17850,10 @@ function renderPieceGoals() {
   el.querySelectorAll("[data-pg-remove]").forEach(btn =>
     btn.addEventListener("click", () => removeGoalById(Number(btn.dataset.pgRemove)))
   );
+  el.querySelectorAll("[data-pg-reopen]").forEach(btn =>
+    btn.addEventListener("click", () => reopenGoal(Number(btn.dataset.pgReopen)))
+  );
+  document.getElementById("pg-done-toggle")?.addEventListener("click", () => { _pgDoneOpen = !_pgDoneOpen; renderPieceGoals(); });
   // Open date picker on click for edit form date fields
   el.querySelectorAll("input.pg-edit-date").forEach(inp =>
     inp.addEventListener("click", () => { try { inp.showPicker(); } catch(e) {} })
@@ -18066,13 +18126,29 @@ async function markGoalDone(id) {
       } catch (e) { /* never blocks completion */ }
     }
   }
-  // Animate the row, then delete
+  if (!await requireAuth()) return;
+  const email = viewingEmail || myEmail;
+  // Mark done (keep it as a record), NOT delete. It moves to the Completed section.
+  const { error } = await db.rpc("set_piece_goal_done", { p_id: id, p_email: email, p_done: true });
+  if (error) { showToast("Could not mark that goal done. Please try again."); return; }
+  // Celebrate the row, then re-render so it slots into Completed.
   const row = document.querySelector(`.pg-goal-row[data-goal-id="${id}"]`);
-  if (row) {
-    row.classList.add("celebrating");
-    await new Promise(r => setTimeout(r, 1100));
-  }
-  await removeGoalById(id);
+  if (row) { row.classList.add("celebrating"); await new Promise(r => setTimeout(r, 1100)); }
+  const g = allGoals.find(x => x.id === id);
+  if (g) g.completed_at = new Date().toISOString();
+  if (_pgEditingId === id) _pgEditingId = null;
+  renderPieceGoals();
+}
+
+// Reopen a completed goal: clear completed_at so it returns to the active list.
+async function reopenGoal(id) {
+  if (!await requireAuth()) return;
+  const email = viewingEmail || myEmail;
+  const { error } = await db.rpc("set_piece_goal_done", { p_id: id, p_email: email, p_done: false });
+  if (error) { showToast("Could not reopen that goal. Please try again."); return; }
+  const g = allGoals.find(x => x.id === id);
+  if (g) g.completed_at = null;
+  renderPieceGoals();
 }
 
 async function updateGoalById(id) {
