@@ -10324,7 +10324,7 @@ async function loadData() {
       _customPieceById = {};
       (cps || []).forEach(r => {
         if (r.title) _customStatusByName[r.title.trim().toLowerCase()] = r.status;
-        if (r.user_piece_id != null) _customPieceById[r.user_piece_id] = { title: r.title, status: r.status };
+        if (r.user_piece_id != null) _customPieceById[r.user_piece_id] = { title: r.title, status: r.status, difficulty: r.difficulty };
       });
     } catch (e) { _customStatusByName = {}; _customPieceById = {}; }
 
@@ -10340,6 +10340,26 @@ async function loadData() {
         if (r.piece_id != null && r.status) _libStatusById[r.piece_id] = r.status;
         if (r.title && r.status) _libStatusByName[r.title.trim().toLowerCase()] = r.status;
       });
+      // Owner-view fix: the up-front _goalPieceTiers/_goalCollectionTiers/_goalCollectionIds
+      // are built from a DIRECT user_collections read, which RLS blocks when the owner views
+      // another member, so every piece objective read 0/N even though the member sees the
+      // right count. Rebuild them from the RLS-safe RPC data (library + custom, both now
+      // carry difficulty) so the owner's view of a member matches what the member sees.
+      if (viewingEmail && myEmail && viewingEmail.toLowerCase() !== myEmail.toLowerCase()) {
+        const _cus = Object.values(_customPieceById || {});
+        const _lib = ucol || [];
+        _goalPieceTiers = [
+          ..._lib.filter(r => r.status === 'completed' && r.difficulty != null).map(r => r.difficulty),
+          ..._cus.filter(r => r.status === 'completed' && r.difficulty != null).map(r => r.difficulty),
+        ];
+        _goalCollectionTiers = [
+          ..._lib.filter(r => r.difficulty != null).map(r => r.difficulty),
+          ..._cus.filter(r => r.status != null && r.difficulty != null).map(r => r.difficulty),
+        ];
+        _goalCollectionIds = new Set(_lib.map(r => r.piece_id).filter(Boolean));
+        // The roadmap may have already painted with the empty (RLS-blocked) tiers — repaint.
+        try { if (typeof _renderJourneyCard === 'function') _renderJourneyCard(); } catch (e) {}
+      }
     } catch (e) { _libStatusById = {}; _libStatusByName = {}; }
 
     // Both the collection statuses (from the Promise.all above) and the custom-piece
