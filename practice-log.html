@@ -17779,25 +17779,21 @@ function renderPieceGoals() {
       renderPieceGoals();
     })
   );
-  // Goal-row actions are DELEGATED on the stable container, bound once. Per-button
-  // listeners are re-attached on every render and can be orphaned if the goals HTML is
-  // rebuilt by another path, which made "Done" appear to do nothing. Delegation survives
-  // every re-render because the listener lives on #piece-goals-section itself.
-  if (!el._pgDelegated) {
-    el._pgDelegated = true;
-    el.addEventListener("click", (e) => {
-      const done = e.target.closest("[data-pg-done]");
-      if (done && el.contains(done)) { markGoalDone(Number(done.dataset.pgDone)); return; }
-      const rem = e.target.closest("[data-pg-remove]");
-      if (rem && el.contains(rem)) { removeGoalById(Number(rem.dataset.pgRemove)); return; }
-      const ed = e.target.closest("[data-pg-edit]");
-      if (ed && el.contains(ed)) { _pgEditingId = Number(ed.dataset.pgEdit); renderPieceGoals(); return; }
-      const cancel = e.target.closest("[data-pg-cancel-edit]");
-      if (cancel && el.contains(cancel)) { _pgEditingId = null; renderPieceGoals(); return; }
-      const save = e.target.closest("[data-pg-save-edit]");
-      if (save && el.contains(save)) { updateGoalById(Number(save.dataset.pgSaveEdit)); return; }
-    });
-  }
+  el.querySelectorAll("[data-pg-done]").forEach(btn =>
+    btn.addEventListener("click", () => markGoalDone(Number(btn.dataset.pgDone)))
+  );
+  el.querySelectorAll("[data-pg-edit]").forEach(btn =>
+    btn.addEventListener("click", () => { _pgEditingId = Number(btn.dataset.pgEdit); renderPieceGoals(); })
+  );
+  el.querySelectorAll("[data-pg-cancel-edit]").forEach(btn =>
+    btn.addEventListener("click", () => { _pgEditingId = null; renderPieceGoals(); })
+  );
+  el.querySelectorAll("[data-pg-save-edit]").forEach(btn =>
+    btn.addEventListener("click", () => updateGoalById(Number(btn.dataset.pgSaveEdit)))
+  );
+  el.querySelectorAll("[data-pg-remove]").forEach(btn =>
+    btn.addEventListener("click", () => removeGoalById(Number(btn.dataset.pgRemove)))
+  );
   // Open date picker on click for edit form date fields
   el.querySelectorAll("input.pg-edit-date").forEach(inp =>
     inp.addEventListener("click", () => { try { inp.showPicker(); } catch(e) {} })
@@ -18037,14 +18033,10 @@ async function savePieceGoal() {
 }
 
 async function removeGoalById(id) {
+  if (!await requireAuth()) return;
   const email = viewingEmail || myEmail;
-  // delete_piece_goal is SECURITY DEFINER and authorises by email, so it works even if the
-  // browser's Supabase token has quietly lapsed. Do NOT hard-gate on requireAuth here: that
-  // silently redirected members with an expired session, so "Done" did nothing. Refresh the
-  // token best-effort, but never block the delete on it.
-  ensureFreshToken().catch(() => {});
   const { error } = await db.rpc("delete_piece_goal", { p_id: id, p_email: email });
-  if (error) { showToast("Could not update that goal. Please refresh and try again."); return; }
+  if (error) { showToast("Error removing goal — please try again."); return; }
   allGoals = allGoals.filter(g => g.id !== id);
   if (_pgEditingId === id) _pgEditingId = null;
   renderPieceGoals();
@@ -18052,18 +18044,26 @@ async function removeGoalById(id) {
 
 async function markGoalDone(id) {
   // Notify owner that a member completed a goal (skip when owner is the user).
+  // FIRE-AND-FORGET: this is a side effect and must NEVER block the member's own goal
+  // completion. The old code was `...insert({...}).catch(() => {})`, but a supabase-js v2
+  // PostgREST builder has NO .catch method (only .then), so that line threw a synchronous
+  // TypeError. Only members run this block (the owner is skipped), so members' markGoalDone
+  // threw before ever reaching the delete below: "Done" did nothing while it worked for the
+  // owner. Use .then(null, ...) (which exists), don't await it, and swallow any throw.
   if (myEmail && myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
     const g = allGoals.find(x => x.id === id);
     if (g) {
       const what = g.piece_label || "their goal";
-      await db.from("notifications").insert({
-        email:    OWNER_EMAIL,
-        type:     "member_milestone",
-        title:    `${myName || "Someone"} completed a goal`,
-        body:     `${what}`,
-        link_url: `/practice-log.html?u=${encodeURIComponent(myEmail)}&goto=goals`,
-        metadata: { goal_id: id, kind: "goal_complete" },
-      }).catch(() => {});
+      try {
+        db.from("notifications").insert({
+          email:    OWNER_EMAIL,
+          type:     "member_milestone",
+          title:    `${myName || "Someone"} completed a goal`,
+          body:     `${what}`,
+          link_url: `/practice-log.html?u=${encodeURIComponent(myEmail)}&goto=goals`,
+          metadata: { goal_id: id, kind: "goal_complete" },
+        }).then(null, () => {});
+      } catch (e) { /* never blocks completion */ }
     }
   }
   // Animate the row, then delete
