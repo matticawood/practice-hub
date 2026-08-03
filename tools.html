@@ -2462,6 +2462,7 @@ function nrShowSetup() {
 function nrStartGame() { nrStartWithCountdown(); }
 
 function nrStartWithCountdown() {
+  try { etLoadPiano(); } catch (e) {}   // warm the piano so the first answer sound is instant
   document.getElementById("nr-screen-setup").style.display    = "none";
   document.getElementById("nr-screen-playing").style.display  = "";
   document.getElementById("nr-screen-results").style.display  = "none";
@@ -3311,6 +3312,9 @@ function nrAnswer(keyEl, noteName) {
   if (nrLocked || !nrCurrent || nrPhase !== "playing") return;
   nrLocked = true;
   nrGameTotal++;
+  // Play the note they just answered (fire-and-forget, on their tap so iOS allows it).
+  // Rings out over the top as the game moves on, so it adds no time and never gates a round.
+  try { const m = _sndNoteMidi(nrCurrent.name, nrCurrent.acc, nrCurrent.y, nrCurrent.clef); if (m != null) etPlayChord([m]); } catch (e) {}
 
   const pianoKey = nrCurrent.key !== undefined ? nrCurrent.key : nrCurrent.name;
   const correct  = noteName === pianoKey;
@@ -4137,6 +4141,7 @@ function crStartWithCountdown() {
 }
 
 function crStartGame() {
+  try { etLoadPiano(); } catch (e) {}   // warm the piano so the first answer sound is instant
   crScore=0; crTotal=0; crTimeLeft=60; crLocked=false;
   const sn=document.getElementById("cr-score-num"); if(sn) sn.textContent="0";
   const fill=document.getElementById("cr-timer-fill");
@@ -4179,6 +4184,11 @@ function crNextChord() {
 function crAnswer(btn) {
   if (crLocked) return;
   crLocked = true; crTotal++;
+  // Play the chord they just answered, exactly as drawn (voicing + inversion), fire-and-forget.
+  try {
+    const ms = (crCurrent.notes || []).map(n => _sndNoteMidi(n.letter, n.acc, n.y, crCurrent.clef)).filter(m => m != null);
+    if (ms.length) etPlayChord(ms);
+  } catch (e) {}
   const correct = btn.dataset.correct==="1";
   if (correct) {
     crScore++;
@@ -4326,6 +4336,20 @@ function etQualityLabel(qk){ return ET_QUALITIES[qk]?.label ?? qk; }
 
 // ── Audio ──
 function etNoteFreq(midi){ return 440 * Math.pow(2,(midi-69)/12); }
+// Stave Y position → MIDI, for playing the note/chord recognition questions on the reveal.
+// Middle line (y 57) is B4 in treble, D3 in bass; 6 Y per diatonic step, 42 per octave.
+// Pitch class comes from the note's own letter+accidental; the octave is derived from y.
+const _SND_LETTER_SEMI = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+const _SND_LETTER_DSN  = { C:0, D:1, E:2, F:3, G:4, A:5, B:6 };
+function _sndNoteMidi(letter, acc, y, clef) {
+  const L = String(letter || "").toUpperCase().charAt(0);
+  if (_SND_LETTER_SEMI[L] == null || y == null) return null;
+  const midLineDSN = clef === "bass" ? 22 : 34;       // D3 (bass) / B4 (treble) at y 57
+  const dsn = midLineDSN + Math.round((57 - y) / 6);
+  const oct = Math.round((dsn - _SND_LETTER_DSN[L]) / 7);
+  const accOff = acc === "#" ? 1 : acc === "b" ? -1 : acc === "x" ? 2 : acc === "bb" ? -2 : 0;
+  return (oct + 1) * 12 + _SND_LETTER_SEMI[L] + accOff;
+}
 function etChordMidi(root, intervals){
   const base = 60 + (root.st <= 5 ? root.st : root.st - 12);   // C-octave base (correct pitch class), roots kept in a tight central register
   return intervals.map(iv => base + iv);
