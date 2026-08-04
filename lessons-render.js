@@ -481,6 +481,11 @@
         return `<div class="lr-callout lr-callout-${esc(b.style || "note")}">
           <div class="lr-callout-label">${esc(b.label || CALLOUT_LABEL[b.style] || "Note")}</div>
           <div class="lr-text">${mdToHtml(b.md)}</div></div>`;
+      case "practicebreak":
+        return `<div class="lr-break">
+          <div class="lr-break-label">Practice break</div>
+          <div class="lr-text">${mdToHtml(b.md)}</div>
+          <a class="lr-break-log" href="/practice-log.html?log=piece">Log your practice</a></div>`;
       case "example":
         return `<div class="lr-example">
           ${b.title ? `<div class="lr-example-title">${esc(b.title)}</div>` : ""}
@@ -866,6 +871,10 @@
     .lr-video-poster{aspect-ratio:16/9;border:1.5px dashed var(--border,#e3e1e6);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--surface-2,#f5f2ee);color:var(--text-muted,#8a7868)}
     .lr-video-badge{font-weight:800;font-size:1.05rem;color:var(--accent-dark,#9a6f12)}
     .lr-video-id{font-size:.8rem}
+    .lr-break{margin:18px 0;background:color-mix(in srgb, #d99e12 8%, var(--surface,#fff));border:1.5px solid color-mix(in srgb, #d99e12 32%, var(--border,#e3e1e6));border-radius:14px;padding:18px 18px 16px}
+    .lr-break-label{font-size:.66rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#b8860b;margin-bottom:8px}
+    .lr-break-log{display:inline-flex;align-items:center;margin-top:12px;background:var(--accent,#f5c518);color:#3a2c00;border-radius:10px;padding:10px 16px;font-weight:800;font-size:.9rem;text-decoration:none}
+    .lr-break-log:hover{filter:brightness(.96)}
     .lr-download{margin:16px 0}
     .lr-download-btn{display:inline-flex;align-items:center;gap:9px;background:var(--surface,#fff);border:1.5px solid var(--accent,#f5c518);border-radius:10px;padding:11px 16px;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);text-decoration:none;cursor:pointer}
     .lr-download-btn:hover{background:linear-gradient(180deg,rgba(245,197,24,.1),transparent)}
