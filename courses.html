@@ -38,6 +38,12 @@
   @media (max-width:900px) { .course-grid { grid-template-columns:1fr; } }
   .lesson-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr)); gap:10px; align-items:start; }
   .lesson-grid .lesson-row { margin-bottom:0; height:100%; }
+  .lesson-grid.linear { grid-template-columns:1fr; gap:0; }
+  .lesson-break { margin:2px 0 10px 30px; padding:12px 16px; border-left:3px solid color-mix(in srgb, #d99e12 55%, var(--border)); background:color-mix(in srgb, #d99e12 7%, transparent); border-radius:0 10px 10px 0; }
+  .lesson-break-body { font-size:.9rem; line-height:1.5; color:var(--text); }
+  .lesson-break-log { display:inline-block; margin-top:9px; font-size:.8rem; font-weight:700; color:#b8860b; text-decoration:none; }
+  .lesson-break-log:hover { text-decoration:underline; }
+  .lesson-grid.linear .lesson-row { margin-bottom:10px; }
   .lesson-reader { max-width:960px; margin:0 auto; }
   /* Let the lesson content fill the wider reader (renderer caps it at 680). */
   .lesson-reader .lr-body { max-width:none; }
@@ -529,6 +535,9 @@ function renderCourse(courseKey, push) {
   _courseHist({ view: "course", course: courseKey }, "/courses.html?course=" + encodeURIComponent(courseKey), push);
   const v = document.getElementById("view");
   const ls = LESSONS.filter(l => l.course === courseKey);
+  // A course with practice breaks reads as a single-column sequence (lesson, break, lesson),
+  // not the multi-column grid used for courses of independent lessons.
+  const _linear = ls.some(l => l.break_after);
   const byLevel = {};
   ls.forEach(l => { (byLevel[l.level] = byLevel[l.level] || []).push(l); });
   const levels = Object.keys(byLevel).map(Number).sort((a, b) => a - b);
@@ -536,13 +545,20 @@ function renderCourse(courseKey, push) {
   const groups = levels.map(lv => {
     const rows = byLevel[lv].slice().sort((a, b) => a.sort_order - b.sort_order).map((l, i) => {
       const done = PROGRESS[l.id] && PROGRESS[l.id].completed;
-      return `<div class="lesson-row" data-id="${l.id}">
+      const row = `<div class="lesson-row" data-id="${l.id}">
         <div class="tick ${done ? "done" : ""}">${done ? '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>' : (i + 1)}</div>
         <div class="lt"><div class="t">${escHtml(l.title)}</div>${l.summary ? `<div class="s">${escHtml(l.summary)}</div>` : ""}</div>
         ${l.est_minutes ? `<div class="mins">${l.est_minutes} min</div>` : ""}
       </div>`;
+      // A practice break sits inline after its lesson, not as a clickable lesson of its own,
+      // so the member sees at a glance that they should go and practise before moving on.
+      const brk = l.break_after ? `<div class="lesson-break">
+        <div class="lesson-break-body">${escHtml(l.break_after)}</div>
+        <a class="lesson-break-log" href="/practice-log.html?log=piece">Log your practice</a>
+      </div>` : "";
+      return row + brk;
     }).join("");
-    return `<div class="level-group"><div class="level-h"><span class="lvl">Level ${lv}</span><span class="ln"></span></div><div class="lesson-grid">${rows}</div></div>`;
+    return `<div class="level-group"><div class="level-h"><span class="lvl">Level ${lv}</span><span class="ln"></span></div><div class="lesson-grid${_linear ? " linear" : ""}">${rows}</div></div>`;
   }).join("");
 
   // For the Absolute Beginner Course, an always-visible "too easy" exit so anyone
@@ -692,7 +708,7 @@ function scrollTop() { window.scrollTo({ top: 0, behavior: "smooth" }); }
   // see published lessons only.
   const _isOwner = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
   const _preview = _isOwner && new URLSearchParams(location.search).get("preview") === "1";
-  let _lessonsQ = db.from("lessons").select("id,course,level,sort_order,title,summary,est_minutes")
+  let _lessonsQ = db.from("lessons").select("id,course,level,sort_order,title,summary,est_minutes,break_after")
     .in("course", COURSES.map(c => c.key));
   if (!_preview) _lessonsQ = _lessonsQ.eq("status", "published");
   _lessonsQ = _lessonsQ.order("course").order("level").order("sort_order");
