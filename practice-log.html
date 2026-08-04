@@ -10310,6 +10310,7 @@ async function loadData() {
       // Next uncompleted Absolute Beginner Course lesson (title + deep-link + number).
       const _fsDone = new Set((thP.data || []).map(p => p.lesson_id));
       const _fsPub = _fsAll.filter(l => !l.status || l.status === "published").sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      _fsPubLessons = _fsPub.map(l => ({ id: l.id, title: l.title }));
       const _fsNext = _fsPub.find(l => !_fsDone.has(l.id));
       _nextFsLesson = _fsNext ? { id: _fsNext.id, title: _fsNext.title, num: _fsPub.indexOf(_fsNext) + 1 } : null;
       // A first-steps lesson completed TODAY (member's day) → the daily card shows a done state.
@@ -10321,6 +10322,7 @@ async function loadData() {
       _lypCourse = { total: _lypAll.length, live: _lypAll.some(l => l.status === "published"),
         done: (thP.data || []).filter(p => _lypIds.has(p.lesson_id)).length };
       const _lypPub = _lypAll.filter(l => !l.status || l.status === "published").sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      _lypPubLessons = _lypPub.map(l => ({ id: l.id, title: l.title }));
       const _lypNext = _lypPub.find(l => !_fsDone.has(l.id));
       _nextLypLesson = _lypNext ? { id: _lypNext.id, title: _lypNext.title, num: _lypPub.indexOf(_lypNext) + 1 } : null;
       _lypDoneToday = (thP.data || []).some(p => p.completed_at && _lypIds.has(p.lesson_id) && _memberDayOf(new Date(p.completed_at)) === _memberDayOf());
@@ -14277,6 +14279,8 @@ let _fsDoneToday = false;       // a first-steps lesson was completed today (for
 let _lypCourse = null;          // { total, live, done } for the Learn Your First Piece course
 let _nextLypLesson = null;      // { id, title, num } next uncompleted Learn Your First Piece lesson
 let _lypDoneToday = false;      // a Learn Your First Piece lesson was completed today (daily card done state)
+let _fsPubLessons = null;       // [{id,title}] published Absolute Beginner lessons, sorted (used by ?abc preview)
+let _lypPubLessons = null;      // [{id,title}] published Learn Your First Piece lessons, sorted (used by ?lyp preview)
 
 // A custom collection piece is "dormant" when it is still in Learning, has not been
 // practiced for 14 days, and the member has not acknowledged this dormancy since the
@@ -15458,12 +15462,29 @@ function _renderDailyCard() {
   const _fsComplete = !!(_fsCourse && _fsCourse.total > 0 && _fsCourse.done >= _fsCourse.total);
   const _lypDevOn = _lypPreviewN() >= 1;
   const _lypDailyActive = !!(_nextLypLesson && _lypCourse && _lypCourse.live && !_lypDismissed && (_lypDevOn || _fsComplete || _abcDismissed));
+  // The LEAD card is the course lesson while on a course (Absolute Beginner, then Learn Your
+  // First Piece), otherwise the member's own piece. Sight-reading and scales always show
+  // alongside — a beginner learning a piece still needs to read and build technique.
+  // Dev ?abc= / ?lyp= previews force the course lead (first, or n+1 th, published lesson) even
+  // on an owner who has finished the course, so the states are reviewable.
+  const _rmHost2 = /(^|\.)dev--/.test(location.hostname);
+  const _abcPrevN = _rmHost2 ? parseInt((location.search.match(/[?&]abc=(\d+)/) || [])[1], 10) : NaN;
+  const _lypPrevN = _rmHost2 ? parseInt((location.search.match(/[?&]lyp=(\d+)/) || [])[1], 10) : NaN;
+  const _pickLesson = (list, n, real) => {
+    if (n > 1 && list && list.length) { const idx = Math.min(n, list.length - 1); return { id: list[idx].id, title: list[idx].title, num: idx + 1 }; }
+    if (real) return real;
+    if (n >= 1 && list && list.length) return { id: list[0].id, title: list[0].title, num: 1 };
+    return null;
+  };
+  const _fsLead  = (beginner || _abcPrevN >= 1)       ? _pickLesson(_fsPubLessons,  _abcPrevN, beginner ? _nextFsLesson : null) : null;
+  const _lypLead = (_lypDailyActive || _lypPrevN >= 1) ? _pickLesson(_lypPubLessons, _lypPrevN, _nextLypLesson) : null;
+  const _courseLead = _fsLead
+    ? { ic: 'piece', cat: 'Beginner Course', desc: `Lesson ${_fsLead.num}: ${_fsLead.title}`, action: LESSON, done: (_fsDoneToday || todaySessions.length > 0), href: '/courses.html?lesson=' + encodeURIComponent(_fsLead.id) }
+    : (_lypLead
+      ? { ic: 'piece', cat: 'Learn Your First Piece', desc: `Lesson ${_lypLead.num}: ${_lypLead.title}`, action: LESSON, done: _lypDoneToday, href: '/courses.html?lesson=' + encodeURIComponent(_lypLead.id) }
+      : null);
   let rows;
-  if (beginner && _nextFsLesson) {
-    rows = [{ ic: 'piece', cat: 'Beginner Course', desc: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`, action: LESSON, done: todaySessions.length > 0, href: '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id) }];
-  } else if (_lypDailyActive) {
-    rows = [{ ic: 'piece', cat: 'Learn Your First Piece', desc: `Lesson ${_nextLypLesson.num}: ${_nextLypLesson.title}`, action: LESSON, done: _lypDoneToday, href: '/courses.html?lesson=' + encodeURIComponent(_nextLypLesson.id) }];
-  } else {
+  {
     // PIECES — the active-rotation piece practised least recently (or revive / add new).
     // Swap lets the member cycle through their own back-catalogue for today (id-keyed).
     const _pieceList = _dailyPieceList();
@@ -15535,6 +15556,9 @@ function _renderDailyCard() {
       { ic: 'scales', cat: 'Scales',        desc: sDesc,                     action: LOG, done: scaleDone,                 wizard: true, detail: 'scales', swap: (_scaleCount > 1) ? { kind: 'scales', count: _scaleCount } : null },
     ];
   }
+  // On a course, the course lesson takes the lead (Pieces) card's place; sight-reading and
+  // scales stay alongside. Off a course, the member's own piece leads as before.
+  if (_courseLead) rows[0] = _courseLead;
   const _skillList = _dailySkillList();
   if (_skillList && _skillList.length) {
     const _skillIds = _skillList.map(s => s.id);
