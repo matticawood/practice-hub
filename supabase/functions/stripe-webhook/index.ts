@@ -53,7 +53,10 @@ Deno.serve(async (req) => {
   // ── New subscription / payment ────────────────────────────────────────────
   if (event.type === "checkout.session.completed") {
     const session    = event.data.object;
-    const email      = session.customer_details?.email ?? session.customer_email;
+    // Lowercase the email: the whole app stores + queries emails lowercased, but Stripe returns whatever
+    // case the customer typed. A capitalised email here got stored verbatim and then never matched the
+    // app's case-sensitive `.eq("email", <lowercased>)` membership gate, locking the member out at login.
+    const email      = (session.customer_details?.email ?? session.customer_email)?.toLowerCase();
     const customerId = typeof session.customer === "string" ? session.customer : null;
     const subId      = typeof session.subscription === "string" ? session.subscription : null;
 

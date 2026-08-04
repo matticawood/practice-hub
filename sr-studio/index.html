@@ -48,7 +48,35 @@
   .bank h3{font-size:14px;margin:0 0 8px}
   .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
   .row a{color:var(--mut);cursor:pointer;text-decoration:none} .muted{color:var(--mut)}
+  /* three states: untouched (blank) | revised, awaiting review (amber) | reviewed (green) */
+  .row.reviewed{background:#f2faf3}
+  .row.pending{background:#fdf6ec}
+  .tick{font-weight:800;margin-right:5px;font-size:13px}
+  .tick.reviewed{color:#1a9a4b}
+  .tick.pending{color:#d98b1a}
+  .tick.blank{color:transparent}
+  .rev{cursor:pointer;font-size:11px;color:var(--mut);text-decoration:none;white-space:nowrap}
+  .rev.on{color:#1a9a4b;font-weight:700}
+  .bankhdr{font-size:11.5px;color:var(--mut);margin:0 0 6px}
+  .bankhdr b{color:#1a9a4b} .bankhdr i{color:#d98b1a;font-style:normal}
   .hint{font-size:11.5px;color:var(--mut);margin-top:4px}
+  /* click-to-edit on the engraved score */
+  #score .ntgt{cursor:pointer}
+  #score .ntgt:hover path,#score .ntgt:hover rect{fill:#2d6cdf}
+  #score .ntgt.selnt path,#score .ntgt.selnt rect{fill:#2d6cdf!important;stroke:#2d6cdf!important}
+  #noteBar{margin-top:12px;border:1px solid var(--line);border-radius:10px;background:#fcfbf9;padding:10px 12px;display:none}
+  #noteBar.show{display:block}
+  #noteBar .nbhead{font-weight:700;font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+  #noteBar .nbhead .pchip{background:#eef3fd;color:#2d6cdf;border-radius:6px;padding:1px 8px;font-size:12px}
+  #noteBar .nbhead .close{margin-left:auto;color:var(--mut);cursor:pointer;font-weight:600;font-size:12px}
+  #noteBar .grp{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:5px 0}
+  #noteBar .grp>span.lbl{font-size:11px;color:var(--mut);width:74px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+  #noteBar .tg{padding:4px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer;font-size:12.5px;font-weight:600;min-width:30px}
+  #noteBar .tg:hover{border-color:#2d6cdf}
+  #noteBar .tg.on{background:var(--sel);color:#fff;border-color:var(--sel)}
+  #noteBar .tg.danger{color:var(--bad)}
+  #noteBar .sep{flex:1}
+  #unlockNote{font-size:11.5px;color:var(--amber);margin-top:6px;display:none}
 </style></head>
 <body>
 <header>
@@ -60,9 +88,17 @@
   <div>
     <div class="card">
       <div id="score" class="muted">Click “New candidate” to begin.</div>
+      <div class="hint" id="editHint" style="display:none">Click any note, rest or dynamic on the score to edit it: pitch, length, rest, articulation, fingering and dynamics. Editing an approved piece un-approves it so the change sticks.</div>
+      <div id="noteBar"></div>
+      <div id="unlockNote">Editing un-approved this piece. Re-mark it green when you’re happy.</div>
       <div class="report" id="report"></div>
       <div class="btns">
         <button id="play">▶ Play</button>
+        <span id="tempoCtl" style="display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--mut);padding:0 4px">
+          <label style="margin:0">Tempo</label>
+          <input id="tempoRange" type="range" min="40" max="184" step="2" value="96" style="width:120px">
+          <span id="tempoVal" style="min-width:52px;font-weight:600">96 bpm</span>
+        </span>
         <button class="primary" id="approve" disabled>✓ Approve &amp; bank</button>
         <button id="regen">↻ New candidate</button>
         <button id="skip">Skip</button>
@@ -89,8 +125,157 @@
 </div>
 <script>
 let grade=2, model=null, sel=null; // sel = {hand,index,member}  (member = which note of a chord, null = whole note)
+let curBank=null;                  // bank slot index currently on screen (null = an unbanked candidate)
+let selNt=null;                    // click-to-edit selection on the ENGRAVED score: {hand,index,member,kind}
 const $=s=>document.querySelector(s);
 const api=(p,o)=>fetch(p,o).then(r=>r.json());
+
+// ===== click-to-edit directly on the engraved score =====
+const NBDUR=[['𝅘𝅥𝅯',0.25],['♪',0.5],['♪.',0.75],['♩',1],['♩.',1.5],['𝅗𝅥',2],['𝅗𝅥.',3],['𝅝',4]];
+const NBNAME=m=>{const pc=((m%12)+12)%12,oct=Math.floor(m/12)-1;return (model&&model.meta.flat?['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B']:['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'])[pc]+oct;};
+function afterScoreRender(){ attachScoreClicks(); $('#editHint').style.display=model?'block':'none'; syncTempoUI(); }
+function attachScoreClicks(){
+  const svg=$('#score').querySelector('svg'); if(!svg) return;
+  svg.querySelectorAll('.ntgt').forEach(g=>{
+    const selectOnly=e=>{ e.preventDefault(); e.stopPropagation();
+      selNt={hand:g.dataset.hand,index:+g.dataset.index,member:g.dataset.member!=null?+g.dataset.member:null,kind:g.dataset.kind};
+      highlightSel(); renderNoteBar(); pluckSel(); };
+    if(g.dataset.kind==='note') g.addEventListener('mousedown',e=>startPitchDrag(e,g,svg,selectOnly));
+    else g.addEventListener('click',selectOnly);
+  });
+  highlightSel();
+}
+// Master output: one gain node (overall volume) feeding a gentle limiter, so we can play generally LOUDER
+// without loud chords hard-clipping. Everything (preview plucks + full playback) routes through this.
+function outNode(){ if(!audioCtx) return null;
+  if(!masterGain){
+    masterGain = audioCtx.createGain(); masterGain.gain.value = 2.2;          // overall loudness (was implicitly ~1.0)
+    const comp = audioCtx.createDynamicsCompressor();                          // soft-limit the boosted peaks
+    comp.threshold.value=-8; comp.knee.value=6; comp.ratio.value=8; comp.attack.value=0.003; comp.release.value=0.15;
+    masterGain.connect(comp); comp.connect(audioCtx.destination);
+  }
+  return masterGain;
+}
+// MuseScore-style: drag a notehead up/down to reset its pitch (snaps to the key), hearing each pitch as you go.
+async function ensurePiano(){
+  audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended') await audioCtx.resume();
+  if(!piano){ try{ piano = await Soundfont.instrument(audioCtx,'acoustic_grand_piano',{destination:outNode()}); }catch(e){ piano=null; } }
+  return piano;
+}
+function pluck(midi){ ensurePiano().then(p=>{ if(p) p.play(midi, audioCtx.currentTime, {duration:0.5, gain:0.9}); }); }
+function pluckSel(){ if(!selNt||!model) return; const n=model[selNt.hand][selNt.index]; if(!n||n.rest) return;
+  if(Array.isArray(n.m)){ if(selNt.member!=null) pluck(n.m[selNt.member]); else n.m.forEach(pluck); } else pluck(n.m); }
+// Measure the true screen-pixel distance of ONE diatonic step, by fitting the rendered noteheads of a hand
+// (y is linear in staff position). This makes the drag snap exactly where the glyph sits, at any zoom/staff-size.
+function pxPerStep(svg, hand){
+  const pts=[];
+  svg.querySelectorAll(`.ntgt[data-kind="note"][data-hand="${hand}"]`).forEach(g=>{
+    const n=model[hand][+g.dataset.index]; if(!n||n.rest) return;
+    const mem=g.dataset.member!=null?+g.dataset.member:null;
+    const midi=mem!=null?n.m[mem]:(Array.isArray(n.m)?n.m[0]:n.m);
+    const b=g.getBoundingClientRect(); pts.push({step:dstepOf(midi), y:b.y+b.height/2});
+  });
+  // MEDIAN of all pairwise (Δy/Δstep). Robust: fingering/articulation glyphs share a note's data-index but sit at a
+  // different height; a plain least-squares fit is skewed by them, but they're a minority so the median stays true.
+  const slopes=[];
+  for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){ const ds=pts[i].step-pts[j].step; if(!ds) continue;
+    const s=Math.abs((pts[i].y-pts[j].y)/ds); if(s>0.2&&s<60) slopes.push(s); }
+  if(!slopes.length) return null; slopes.sort((a,b)=>a-b); return slopes[slopes.length>>1];
+}
+function startPitchDrag(ev, g, svg, selectOnly){
+  ev.preventDefault(); ev.stopPropagation();
+  const hand=g.dataset.hand, index=+g.dataset.index, member=g.dataset.member!=null?+g.dataset.member:null;
+  const n=model[hand][index]; if(!n||n.rest) return;
+  const orig = member!=null? n.m[member] : (Array.isArray(n.m)?n.m[0]:n.m);
+  const vb=svg.viewBox.baseVal, scale=(svg.getBoundingClientRect().height||vb.height)/(vb.height||1);   // screen px per user unit
+  const pps = pxPerStep(svg,hand) || (pxPerStep(svg,hand==='rh'?'lh':'rh')) || 7;   // real px per diatonic step (measured)
+  const startY=ev.clientY; let moved=0, lastSteps=0, curMidi=orig, sounded=false;
+  selNt={hand,index,member,kind:'note'}; highlightSel(); renderNoteBar();          // select immediately
+  const onMove=e=>{ const dy=e.clientY-startY; moved=Math.max(moved,Math.abs(dy));
+    if(moved<4) return;                                                            // a plain select click stays silent
+    const steps=Math.round(-dy/pps);                                              // snap the cursor travel to whole steps
+    g.setAttribute('transform',`translate(0,${(-steps*pps)/(scale||1)})`);        // glyph JUMPS to the snapped staff position
+    if(!sounded){ sounded=true; pluck(orig); }
+    if(steps!==lastSteps){ lastSteps=steps; curMidi=stepToMidi(dstepOf(orig)+steps); pluck(curMidi); } };
+  const onUp=async e=>{ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); g.removeAttribute('transform');
+    if(moved<4){ selectOnly(e); return; }                                          // barely moved -> treat as a select
+    if(curMidi!==orig) await editPatch({op:'setPitch',midi:curMidi,member}); };
+  document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+}
+function highlightSel(){ const svg=$('#score').querySelector('svg'); if(!svg) return;
+  svg.querySelectorAll('.ntgt.selnt').forEach(g=>g.classList.remove('selnt'));
+  if(!selNt) return;
+  svg.querySelectorAll(`.ntgt[data-hand="${selNt.hand}"][data-index="${selNt.index}"]`).forEach(g=>{
+    if(selNt.member==null || g.dataset.member==null || +g.dataset.member===selNt.member) g.classList.add('selnt'); });
+}
+function nbNote(){ return selNt && model ? model[selNt.hand][selNt.index] : null; }
+function renderNoteBar(){
+  const bar=$('#noteBar'), n=nbNote();
+  if(!n){ bar.className=''; bar.innerHTML=''; return; }
+  bar.className='show';
+  const isChord=Array.isArray(n.m), mi=selNt.member!=null?selNt.member:0;
+  const pitchTxt=n.rest?'rest':(isChord? n.m.map(NBNAME).join('+') : NBNAME(n.m));
+  const memTxt=isChord?` · note ${mi+1}/${n.m.length}`:'';
+  // show the finger ACTUALLY on the note (solver-derived or hand-set), from the server-resolved map; fall back to stored
+  const rf = model.ex && model.ex.fingers ? model.ex.fingers[selNt.hand]?.[selNt.index] : undefined;
+  const curFing = rf!==undefined ? (Array.isArray(rf) ? (rf[mi]??null) : rf)
+                                  : (isChord?(Array.isArray(n.fing)?n.fing[mi]:n.fing):n.fing);
+  const A=(a,lbl,on)=>`<button class="tg${on?' on':''}" data-act="${a}">${lbl}</button>`;
+  let html=`<div class="nbhead"><span class="pchip">${selNt.hand.toUpperCase()}</span> ${pitchTxt}${memTxt}
+      <span class="close" onclick="clearNoteSel()">✕ close</span></div>`;
+  if(!n.rest){
+    html+=`<div class="grp"><span class="lbl">Pitch</span>${A('down','↓ step')}${A('up','↑ step')}${A('flat','♭ −½')}${A('sharp','♯ +½')}${A('oct-','−8va')}${A('oct+','+8va')}</div>`;
+    html+=`<div class="grp"><span class="lbl">Finger${isChord?' ('+(mi+1)+')':''}</span>${[1,2,3,4,5].map(k=>A('fing'+k,k,curFing===k)).join('')}${A('fing0','—',curFing==null)}</div>`;
+  }
+  html+=`<div class="grp"><span class="lbl">Length</span>${NBDUR.map(d=>`<button class="tg${n.d===d[1]?' on':''}" data-dur="${d[1]}">${d[0]}</button>`).join('')}</div>`;
+  if(!n.rest){
+    html+=`<div class="grp"><span class="lbl">Artic</span>${A('art-.','staccato',n.art==='-.')}${A('art--','tenuto',n.art==='--')}${A('art->','accent',n.art==='->')}${A('art0','none',!n.art)}</div>`;
+    html+=`<div class="grp"><span class="lbl">Dynamic</span>${['pp','p','mp','mf','f','ff'].map(x=>A('dyn'+x,x,n.dyn===x)).join('')}${A('dyn0','—',!n.dyn)}</div>`;
+    html+=`<div class="grp"><span class="lbl">Hairpin</span>${A('hp<','cresc ⟨',n.hp==='\\\\<')}${A('hp>','dim ⟩',n.hp==='\\\\>')}${A('hp!','end ∣',n.hp==='\\\\!')}${A('hp0','none',!n.hp)}</div>`;
+    html+=`<div class="grp"><span class="lbl">Phrase</span>${A('slur(','slur start ⌒',n.slur==='(')}${A('slur)','slur end ⌣',n.slur===')')}${A('slur0','none',!n.slur)}</div>`;
+  }
+  if(!n.rest) html+=`<div class="grp"><span class="lbl">Chord</span>${A('chordadd','＋ add note (3rd up)')}${isChord?A('chordrm','✕ remove note'):''}<span class="muted" style="font-size:11px;color:var(--mut)">stacks a note on this beat; then drag it to any pitch</span></div>`;
+  const delLbl=(isChord&&selNt.member!=null&&n.m.length>1)?'✕ remove this note':'✕ delete note';
+  html+=`<div class="grp"><span class="lbl">Note</span>${A('rest',n.rest?'↺ un-rest':'make rest')}${A('insert','＋ insert after')}${A('playhere','▶ play from here')}<span class="sep"></span>${A('del',delLbl)}</div>`;
+  bar.innerHTML=html;
+  bar.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>nbAct(b.dataset.act));
+  bar.querySelectorAll('[data-dur]').forEach(b=>b.onclick=()=>editPatch({op:'setDur',d:+b.dataset.dur}));
+  bar.querySelector('.tg.danger')&&0;
+  bar.querySelectorAll('[data-act="del"]').forEach(b=>b.classList.add('danger'));
+}
+function clearNoteSel(){ selNt=null; highlightSel(); renderNoteBar(); }
+function nbAct(a){ const n=nbNote(); if(!n) return; const mi=selNt.member!=null?selNt.member:0;
+  if(a==='down') return editPatch({op:'transpose',semitones:-1,snap:true, member:selNt.member});
+  if(a==='up')   return editPatch({op:'transpose',semitones:1,snap:true, member:selNt.member});
+  if(a==='flat') return editPatch({op:'transpose',semitones:-1,snap:false, member:selNt.member});
+  if(a==='sharp')return editPatch({op:'transpose',semitones:1,snap:false, member:selNt.member});
+  if(a==='oct-') return editPatch({op:'transpose',semitones:-12,snap:false, member:selNt.member});
+  if(a==='oct+') return editPatch({op:'transpose',semitones:12,snap:false, member:selNt.member});
+  if(a[0]==='f'&&a.startsWith('fing')) return editPatch({op:'setFing',member:mi,fing:+a.slice(4)||null});
+  if(a.startsWith('art')) return editPatch({op:'setArtic',art:a==='art0'?null:a.slice(3)});
+  if(a.startsWith('dyn')) return editPatch({op:'setDyn',dyn:a==='dyn0'?null:a.slice(3)});
+  if(a.startsWith('hp'))  return editPatch({op:'setHairpin',hp:a==='hp0'?null:({'hp<':'\\<','hp>':'\\>','hp!':'\\!'})[a]});
+  if(a.startsWith('slur'))return editPatch({op:'setSlur',slur:a==='slur0'?null:a.slice(4)});
+  if(a==='rest')  return editPatch({op:'toggleRest'});
+  if(a==='insert')return editPatch({op:'insertAfter'});
+  if(a==='chordadd') return editPatch({op:'chordAdd'});                    // stack a diatonic third above the top
+  if(a==='chordrm'){ const mi2=selNt.member!=null?selNt.member:(Array.isArray(n.m)?n.m.length-1:0); return editPatch({op:'delete',member:mi2}); }
+  if(a==='playhere') return play();               // play from the selected note's onset
+
+  if(a==='del')   return editPatch({op:'delete',member:selNt.member,_deselect:true});
+}
+async function editPatch(patch){
+  if(!selNt||!model) return;
+  const body={ex:{...model.meta,rh:model.rh,lh:model.lh}, i:curBank, patch:{hand:selNt.hand,index:selNt.index,...patch}};
+  const d=await api('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  if(d.error){ $('#report').innerHTML=`<span class="pill bad">${d.error}</span>`; return; }
+  model.rh=d.ex.rh; model.lh=d.ex.lh; model.ex=d.ex;
+  Object.assign(model.meta,{key:d.ex.key,mode:d.ex.mode,flat:d.ex.flat,time:d.ex.time,tempo:d.ex.tempo,partial:d.ex.partial});
+  if(patch._deselect || selNt.index>=model[selNt.hand].length) selNt=null;
+  $('#score').innerHTML=d.svg; showReport(d.validation); afterScoreRender(); renderNoteBar();
+  if($('#editor')&&$('#editor').style.display!=='none') draw();   // keep the legacy panel in sync if it's open
+  if(d.unlocked){ $('#unlockNote').style.display='block'; refresh(); }
+}
 // ---- undo history ----
 let undoStack=[];
 function snapshot(){ return JSON.stringify({rh:model.rh,lh:model.lh,meta:model.meta}); }
@@ -252,7 +437,7 @@ async function rerender(){
   model.meta.flat = FLATKEYS.has(model.meta.key) || (model.meta.mode==='min' && ['d','g','c','f'].includes(model.meta.key));
   const d=await api('/api/render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({meta:model.meta,rh:model.rh,lh:model.lh})});
   if(d.error){ $('#report').innerHTML=`<span class="pill bad">${d.error}</span>`; $('#approve').disabled=true; return; }
-  $('#score').innerHTML=d.svg; showReport(d.validation); model.ex=d.ex;
+  $('#score').innerHTML=d.svg; showReport(d.validation); model.ex=d.ex; afterScoreRender();
 }
 function setModel(ex){ model={meta:{grade,key:ex.key,mode:ex.mode,flat:ex.flat,time:ex.time,tempo:ex.tempo,partial:ex.partial,rhFinger:ex.rhFinger,lhFinger:ex.lhFinger},rh:ex.rh,lh:ex.lh,ex};
   sel=null; undoStack=[]; $('#m_key').value=ex.key; $('#m_mode').value=ex.mode; $('#m_time').value=ex.time; $('#m_tempo').value=ex.tempo; draw(); }
@@ -269,17 +454,30 @@ function drawGrades(c){ $('#grades').innerHTML='';
   for(const g of [2,3,4]){ const b=document.createElement('div'); b.className='gr'+(g===grade?' on':'');
     b.innerHTML=`Grade ${g} <small>${c[g]||0}/120</small>`; b.onclick=()=>{grade=g;refresh();}; $('#grades').appendChild(b); } }
 async function newCandidate(){ $('#score').innerHTML='<span class="muted">generating…</span>'; const d=await api('/api/generate?grade='+grade);
-  setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); }
+  curBank=null; selNt=null; playBPM=null; $('#unlockNote').style.display='none';
+  setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); afterScoreRender(); renderNoteBar(); }
 async function approve(){ const r=await api('/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ex:{grade,...model.meta,rh:model.rh,lh:model.lh}})});
   if(r.error){ alert(r.error); return; } await refresh(); newCandidate(); }
 async function refresh(){ const c=await api('/api/counts'); drawGrades(c);
   $('#bankGrade').textContent=grade; $('#bankCount').textContent=c[grade]||0;
   const {bank}=await api('/api/bank?grade='+grade);
-  $('#bankList').innerHTML=bank.length?bank.map(e=>`<div class="row"><span>${e.i+1}. ${e.key} ${e.mode} ${e.time} · <span class="muted">${e.tempo}</span></span><span><a onclick="viewBank(${e.i})">view</a> · <a onclick="delBank(${e.i})">✕</a></span></div>`).join(''):'<span class="muted">none yet</span>'; }
-window.viewBank=async i=>{ const d=await api(`/api/view?grade=${grade}&i=${i}`); setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); };
+  const nReviewed=bank.filter(e=>e.reviewed).length;
+  const nPending=bank.filter(e=>e.revised&&!e.reviewed).length;
+  const nUntouched=bank.filter(e=>!e.reviewed&&!e.revised).length;
+  const hdr=bank.length?`<div class="bankhdr"><b>${nReviewed} reviewed</b> · <i>${nPending} awaiting review</i> · ${nUntouched} untouched</div>`:'';
+  $('#bankList').innerHTML=hdr+(bank.length?bank.slice().reverse().map(e=>{
+    const state=e.reviewed?'reviewed':(e.revised?'pending':'blank');
+    const rowcls=e.reviewed?' reviewed':(e.revised?' pending':'');
+    // the green "mark reviewed" toggle is available on EVERY piece, not only revised ones
+    const rev=`<a class="rev${e.reviewed?' on':''}" onclick="markRev(${e.i},${e.reviewed?'false':'true'})">${e.reviewed?'✓ approved':'mark green'}</a>`;
+    return `<div class="row${rowcls}"><span><span class="tick ${state}">${e.reviewed?'✓':(e.revised?'●':'✓')}</span>${e.i+1}. ${e.key} ${e.mode} ${e.time} · <span class="muted">${e.tempo}</span></span><span>${rev} · <a onclick="viewBank(${e.i})">view</a> · <a onclick="delBank(${e.i})">✕</a></span></div>`;
+  }).join(''):'<span class="muted">none yet</span>'); }
+window.markRev=async function(i,val){ await fetch('/api/reviewed',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({grade,i,reviewed:val})}); refresh(); }
+window.viewBank=async i=>{ const d=await api(`/api/view?grade=${grade}&i=${i}`); curBank=i; selNt=null; playBPM=null; $('#unlockNote').style.display='none';
+  setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); afterScoreRender(); renderNoteBar(); };
 window.delBank=async i=>{ if(!confirm('Remove exercise '+(i+1)+'?'))return; await api('/api/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({grade,i})}); refresh(); };
 // ---- audio playback: real sampled piano (soundfont) that respects dynamics, hairpins, slurs, staccato, accents, tenuto ----
-let audioCtx=null, piano=null, activeNodes=[];
+let audioCtx=null, piano=null, masterGain=null, activeNodes=[];
 function tempoBPM(t){ const w=(t||'').split(/[\s,]/)[0];
   const map={Largo:50,Larghetto:60,Adagio:60,Lento:54,Andante:76,Andantino:88,Comodo:100,Moderato:104,Allegretto:120,Allegro:138,Vivace:160,Con:104}; return map[w]||96; }
 const DYN={pp:0.12,p:0.2,mp:0.32,mf:0.46,f:0.66,ff:0.85};
@@ -301,25 +499,45 @@ function artic(n, slurOpen){                      // duration & loudness shaping
   if(n.art==='->') gainMult=1.5;                  // accent: louder
   return {durMult,gainMult};
 }
-function stopPlay(){ activeNodes.forEach(nd=>{try{nd.stop();}catch(e){}}); activeNodes=[]; }
-async function play(){
+let playing=false, endTimer=null;
+function setPlayBtn(state){ const b=$('#play'); if(!b) return; b.textContent = state==='stop'?'■ Stop' : state==='load'?'loading piano…' : '▶ Play'; b.disabled = state==='load'; }
+function stopPlay(){ activeNodes.forEach(nd=>{try{nd.stop();}catch(e){}}); activeNodes=[]; clearTimeout(endTimer); endTimer=null; playing=false; setPlayBtn('play'); }
+function selOnsetBeat(){ if(!selNt||!model) return 0; const h=model[selNt.hand]; let t=0; for(let i=0;i<Math.min(selNt.index,h.length);i++) t+=h[i].d; return t; }
+async function play(fromBeat){
   if(!model) return; stopPlay();
   audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended') await audioCtx.resume();
-  if(!piano){ const btn=$('#play'); btn.textContent='loading piano…'; btn.disabled=true;
-    try{ piano = await Soundfont.instrument(audioCtx,'acoustic_grand_piano'); }catch(e){ alert('Could not load piano sound (needs internet).'); btn.textContent='▶ Play'; btn.disabled=false; return; }
-    btn.textContent='▶ Play'; btn.disabled=false; }
-  const spq=60/tempoBPM(model.meta.tempo), t0=audioCtx.currentTime+0.12;
-  for(const [seq,handGain] of [[model.rh,1.0],[model.lh,0.78]]){
+  if(!piano){ setPlayBtn('load');
+    try{ piano = await Soundfont.instrument(audioCtx,'acoustic_grand_piano',{destination:outNode()}); }catch(e){ alert('Could not load piano sound (needs internet).'); setPlayBtn('play'); return; } }
+  const startBeat = fromBeat!=null ? fromBeat : selOnsetBeat();
+  const spq=60/curBPM(), t0=audioCtx.currentTime+0.12;
+  playing=true; setPlayBtn('stop'); let maxEndSec=0;
+  // The MELODY should sing over the accompaniment. Detect which hand holds it (the accompaniment is the
+  // chordier hand; on a tie, the melody has the wider pitch vocabulary) so SWAP pieces — melody in the left
+  // hand — aren't played with the tune turned down (Matthew's slot-25).
+  const _chords=s=>s.filter(n=>!n.rest&&Array.isArray(n.m)).length;
+  const _distinct=s=>new Set(s.filter(n=>!n.rest).flatMap(n=>Array.isArray(n.m)?n.m:[n.m])).size;
+  const rc=_chords(model.rh), lc=_chords(model.lh);
+  const melodyIsLH = rc!==lc ? rc>lc : _distinct(model.lh)>_distinct(model.rh);
+  const rhGain = melodyIsLH?0.75:1.0, lhGain = melodyIsLH?1.0:0.75;
+  for(const [seq,handGain] of [[model.rh,rhGain],[model.lh,lhGain]]){
     const gv=handGains(seq); let t=0, slurOpen=false;
     seq.forEach((n,i)=>{ if(n.slur==='(') slurOpen=true;
-      if(!n.rest){ const mids=Array.isArray(n.m)?n.m:[n.m]; const a=artic(n,slurOpen);
+      const rel=t-startBeat;
+      if(!n.rest && t>=startBeat-1e-6){ const mids=Array.isArray(n.m)?n.m:[n.m]; const a=artic(n,slurOpen);
         const dur=Math.max(0.08,n.d*spq*a.durMult), gain=Math.min(1,gv[i]*a.gainMult*handGain);
-        mids.forEach(m=> activeNodes.push(piano.play(m, t0+t*spq, {duration:dur, gain}))); }
+        mids.forEach(m=> activeNodes.push(piano.play(m, t0+rel*spq, {duration:dur, gain})));
+        maxEndSec=Math.max(maxEndSec, rel*spq+dur); }
       if(n.slur===')') slurOpen=false; t+=n.d; });
   }
+  endTimer=setTimeout(()=>{ playing=false; setPlayBtn('play'); activeNodes=[]; }, (maxEndSec+0.4)*1000);   // reset the button when the piece finishes
 }
+function togglePlay(){ if(playing) stopPlay(); else play(0); }
+let playBPM=null;                                   // user override; null = derive from the character mark
+function curBPM(){ return playBPM || (model? tempoBPM(model.meta.tempo) : 96); }
+function syncTempoUI(){ const b=Math.round(curBPM()); const r=$('#tempoRange'); if(r){ r.value=b; $('#tempoVal').textContent=b+' bpm'; } }
 $('#editToggle').onclick=()=>{ const e=$('#editor'); const open=e.style.display==='none'; e.style.display=open?'block':'none'; $('#editToggle').textContent=open?'✕ Close editor':'✎ Edit notes'; if(open) e.scrollIntoView({behavior:'smooth',block:'nearest'}); };
-$('#play').onclick=play;
+$('#play').onclick=togglePlay;
+$('#tempoRange').addEventListener('input',e=>{ playBPM=+e.target.value; $('#tempoVal').textContent=playBPM+' bpm'; });
 $('#regen').onclick=()=>{stopPlay();newCandidate();}; $('#skip').onclick=()=>{stopPlay();newCandidate();}; $('#approve').onclick=approve;
 $('#undoBtn').onclick=undo;
 refresh();
