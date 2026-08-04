@@ -13786,6 +13786,8 @@ function _renderJourneyCard(returnParts) {
   const _devHost = /(^|\.)dev--/.test(location.hostname);
   const _abcN = _devHost ? parseInt((location.search.match(/[?&]abc=(\d+)/) || [])[1], 10) : NaN;
   const _abcDev = _abcN >= 1;
+  const _lypN = _lypPreviewN();
+  const _lypDev = _lypN >= 1;
   // Started -> sticky: once a lesson is done, keep offering "Continue" until the
   // course is finished or dismissed, regardless of the fresh-beginner signals
   // (their practice may cross 5h, or a game score arrive, before they finish).
@@ -13803,14 +13805,14 @@ function _renderJourneyCard(returnParts) {
   // dismissing hands the section back to the normal level picks.
   const _fsBeginner = !!_fsCourse && _fsCourse.total > 0 &&
     _fsCourse.done < _fsCourse.total && !selfDone("abc_dismissed") &&
-    (_fsStarted || _fsFresh);
+    (_fsStarted || _fsFresh) && !_lypDev;
   // Learn Your First Piece is the guided next step. It replaces Matt's piece picks once
   // the member has either finished the Absolute Beginner Course or dismissed it, until
   // they finish or dismiss it in turn — then the normal curated picks return.
   const _fsComplete = !!_fsCourse && _fsCourse.total > 0 && _fsCourse.done >= _fsCourse.total;
-  const _lypSuggest = !!_lypCourse && _lypCourse.live && _lypCourse.total > 0 &&
-    _lypCourse.done < _lypCourse.total && !selfDone("lyp_dismissed") && !_fsBeginner &&
-    (selfDone("abc_dismissed") || _fsComplete);
+  const _lypSuggest = !!_lypCourse && _lypCourse.total > 0 && !_fsBeginner && (_lypDev || (
+    _lypCourse.live && _lypCourse.done < _lypCourse.total && !selfDone("lyp_dismissed") &&
+    (selfDone("abc_dismissed") || _fsComplete)));
 
   // ── Matt's piece picks for this level — a few library pieces at the stage's
   // difficulty the member doesn't already have, linking straight into the library.
@@ -13891,7 +13893,9 @@ function _renderJourneyCard(returnParts) {
   // Once the beginner course is done or skipped, Matt's picks becomes ONE item: the Learn
   // Your First Piece course, with a skip that hands the section back to the normal picks.
   if (_lypSuggest) {
-    const _total = _lypCourse.total, _done = _lypCourse.done, _started = _done > 0;
+    const _total = _lypCourse.total;
+    const _done = (_lypDev && _lypN > 1) ? Math.min(_lypN, _total - 1) : _lypCourse.done;
+    const _started = _done > 0;
     const _pct = _total ? Math.round(_done / _total * 100) : 0;
     const _note = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
     const _arrow = `<svg class="abc-pick-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`;
@@ -14412,6 +14416,13 @@ function _lypDismiss(e) {
     _rmSaveSelfChecks().catch(() => {});
   }
   try { _rmAfterLoad(); } catch (_) {}
+}
+// Dev-only preview: ?lyp=<n> on the dev-- host forces the Learn Your First Piece suggestion
+// on (in Matt's picks and the daily card), so the states can be reviewed without first
+// completing or dismissing the Absolute Beginner Course. n>1 fakes n lessons done.
+function _lypPreviewN() {
+  try { return /(^|\.)dev--/.test(location.hostname) ? parseInt((location.search.match(/[?&]lyp=(\d+)/) || [])[1], 10) : NaN; }
+  catch (e) { return NaN; }
 }
 // Scale-family drop-downs: expansion is transient UI state (not persisted).
 window._rmOpenScales = window._rmOpenScales || new Set();
@@ -15091,6 +15102,7 @@ function _dailyTheoryObjective(types) {
 // progressed onto the full card set but still have the course on the go.
 function _dailyBeginnerObjective(stageIdx) {
   if (!_fsCourse || !_fsCourse.total || !_fsCourse.live) return null;   // no live course
+  if (_lypPreviewN() >= 1) return null;                                 // dev ?lyp= preview: show the First Piece state cleanly
   if (_selfChecks && _selfChecks.abc_dismissed) return null;            // member skipped the course
   if (!(_fsCourse.done > 0) || !_nextFsLesson) return null;             // not started, or finished
   if (stageIdx !== 0) return null;   // moved past the First Steps stage → drop it, finished or not
@@ -15432,7 +15444,8 @@ function _renderDailyCard() {
   const _lypDismissed = !!(_selfChecks && _selfChecks.lyp_dismissed);
   const _abcDismissed = !!(_selfChecks && _selfChecks.abc_dismissed);
   const _fsComplete = !!(_fsCourse && _fsCourse.total > 0 && _fsCourse.done >= _fsCourse.total);
-  const _lypDailyActive = !!(_nextLypLesson && _lypCourse && _lypCourse.live && !_lypDismissed && (_fsComplete || _abcDismissed));
+  const _lypDevOn = _lypPreviewN() >= 1;
+  const _lypDailyActive = !!(_nextLypLesson && _lypCourse && _lypCourse.live && !_lypDismissed && (_lypDevOn || _fsComplete || _abcDismissed));
   let rows;
   if (beginner && _nextFsLesson) {
     rows = [{ ic: 'piece', cat: 'Beginner Course', desc: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`, action: LESSON, done: todaySessions.length > 0, href: '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id) }];
