@@ -139,9 +139,12 @@
   //  type 'note'|'chord'|'ear' → best game score >= target
   //  type 'piece' → completed pieces at difficulty tier >= count
   //  type 'theory'→ theory course level: mode 'begin' (>=1 lesson) or 'complete' (all)
+  //  type 'course'→ member course completion by key: mode 'begin' (>=1 lesson) or 'complete' (all)
   //  type 'self'  → member self-checks it (persisted; placeholder localStorage for now)
   const GOALS = [
     [ // 1 First Steps
+      { icon: "piece",  group: "abccourse", label: "Complete the Absolute Beginner Course", type: "course", course: "first-steps", mode: "complete" },
+      { icon: "piece",  group: "lypcourse", label: "Learn your first piece with the Learn Your First Piece course", type: "course", course: "learn-your-first-piece", mode: "complete" },
       { icon: "theory", group: "theory", label: "Begin Theory Level 1", type: "theory", level: 1, mode: "begin" },
       { icon: "piece",  group: "piece",  label: "Learn your first Absolute Beginner piece", type: "piece", tier: 0, count: 1 },
       { icon: "note",   group: "note",   label: "Score 10 in Note Recognition in both C and G major", type: "note", target: 10, match: { keys: ["C", "G"] } },

@@ -10219,7 +10219,7 @@ async function loadData() {
 
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
-      const [nr, cr, pg, er, uc, thL, thP, it, fsL] = await Promise.all([
+      const [nr, cr, pg, er, uc, thL, thP, it, fsL, lypL] = await Promise.all([
         db.from("note_game_scores").select("score, attempts, created_at, clef, accidentals, key_signature, range").eq("email", viewingEmail),
         db.from("chord_game_scores").select("score, attempts, created_at, tier, clef, mode, key_signature").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
@@ -10228,7 +10228,8 @@ async function loadData() {
         db.from("lessons").select("id, level, sort_order, title, status").eq("course", "theory"),
         db.from("lesson_progress").select("lesson_id, completed, completed_at").eq("email", viewingEmail).eq("completed", true),
         db.from("interval_game_scores").select("score, attempts, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase()),
-        db.from("lessons").select("id, status, title, sort_order").eq("course", "first-steps")
+        db.from("lessons").select("id, status, title, sort_order").eq("course", "first-steps"),
+        db.from("lessons").select("id, status, title, sort_order").eq("course", "learn-your-first-piece")
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
@@ -10308,12 +10309,22 @@ async function loadData() {
       _nextFsLesson = _fsNext ? { id: _fsNext.id, title: _fsNext.title, num: _fsPub.indexOf(_fsNext) + 1 } : null;
       // A first-steps lesson completed TODAY (member's day) → the daily card shows a done state.
       _fsDoneToday = (thP.data || []).some(p => p.completed_at && _fsIds.has(p.lesson_id) && _memberDayOf(new Date(p.completed_at)) === _memberDayOf());
+      // Learn Your First Piece course progress — the guided next step after the Absolute
+      // Beginner Course, surfaced in the objectives, Matt's picks and the daily card.
+      const _lypAll = lypL.data || [];
+      const _lypIds = new Set(_lypAll.map(l => l.id));
+      _lypCourse = { total: _lypAll.length, live: _lypAll.some(l => l.status === "published"),
+        done: (thP.data || []).filter(p => _lypIds.has(p.lesson_id)).length };
+      const _lypPub = _lypAll.filter(l => !l.status || l.status === "published").sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      const _lypNext = _lypPub.find(l => !_fsDone.has(l.id));
+      _nextLypLesson = _lypNext ? { id: _lypNext.id, title: _lypNext.title, num: _lypPub.indexOf(_lypNext) + 1 } : null;
+      _lypDoneToday = (thP.data || []).some(p => p.completed_at && _lypIds.has(p.lesson_id) && _memberDayOf(new Date(p.completed_at)) === _memberDayOf());
       // The daily card + next-move may have rendered before this background load
       // finished (skill/theory rows depend on it) — re-render them now they're ready.
       try { if (typeof _renderDailyCard === 'function') _renderDailyCard(); } catch (_) {}
       try { if (typeof _renderCoursesCard === 'function') _renderCoursesCard(); } catch (_) {}
       try { if (typeof _renderNextMoveCard === 'function') _renderNextMoveCard(); } catch (_) {}
-    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _goalCollectionTiers = null; _goalCollectionIds = null; _dormantCustomPieces = null; _fsCourse = null; /* _goalAllPieces kept — loaded separately */ }
+    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _goalCollectionTiers = null; _goalCollectionIds = null; _dormantCustomPieces = null; _fsCourse = null; _lypCourse = null; /* _goalAllPieces kept — loaded separately */ }
 
     // Custom-piece completion status by title (RLS-safe RPC so it also works when
     // the owner views another member — a direct user_collections read would be
@@ -13236,6 +13247,8 @@ function _renderJourneyCard(returnParts) {
     sum + (s.practice_items || []).reduce((a, it) => a + (it.item_type === cat ? (it.duration_minutes || 0) : 0), 0), 0);
   const thBegin = L => !!(_goalTheory && (_goalTheory.done[L] || 0) >= 1);
   const thDone  = L => !!(_goalTheory && (_goalTheory.totals[L] || 0) > 0 && (_goalTheory.done[L] || 0) >= _goalTheory.totals[L]);
+  // Member-course objectives ("Complete the Absolute Beginner Course", "Learn Your First Piece").
+  const courseProg = key => key === "first-steps" ? _fsCourse : key === "learn-your-first-piece" ? _lypCourse : null;
   // DB-backed self-checks are authoritative once loaded; before that (or on load
   // failure) fall back to the localStorage mirror so ticks still paint instantly.
   const selfDone = key => {
@@ -13386,6 +13399,7 @@ function _renderJourneyCard(returnParts) {
         ? (_goalCollectionTiers || []).filter(d => d >= g.tier).length
         : pieces(g.tier)) >= g.count;
       case "theory": return g.mode === "complete" ? thDone(g.level) : thBegin(g.level);
+      case "course": { const c = courseProg(g.course); if (!c || !c.total) return false; return g.mode === "begin" ? c.done >= 1 : c.done >= c.total; }
       case "self": { const mk = rmScaleKeys(g); return mk ? rmScaleTicked(g, mk) >= mk.length : selfDone(g.key); }
       default: return false;
     }
@@ -13470,6 +13484,12 @@ function _renderJourneyCard(returnParts) {
       const tot = (T.totals && T.totals[g.level]) || 0, dn = Math.min(tot, (T.done && T.done[g.level]) || 0);
       if (tot > 0) return { txt: `${dn}/${tot} lessons`, frac: dn / tot };
     }
+    // Course objectives fill lesson-by-lesson, e.g. 6/19 lessons, as the member works through it.
+    if (g.type === "course") {
+      const c = courseProg(g.course);
+      const tot = (c && c.total) || 0, dn = Math.min(tot, (c && c.done) || 0);
+      if (tot > 0) return { txt: `${dn}/${tot} lessons`, frac: dn / tot };
+    }
     return { txt: "", frac: 0 };
   };
   const RING_C = 66.0;  // 2·π·10.5, the ring circumference (fills the 22px tick to match the tick-off circles)
@@ -13493,7 +13513,7 @@ function _renderJourneyCard(returnParts) {
   };
   const goalArea = g => {
     switch (g.type) {
-      case "piece": return "repertoire";
+      case "piece": case "course": return "repertoire";
       case "note":  return "sight_reading";
       case "theory": case "ear": case "chord": case "interval": return "musicianship";
       default:      return "technique";   // scales / arpeggios / minors (self), days, hours
@@ -13531,7 +13551,8 @@ function _renderJourneyCard(returnParts) {
       theory:"/courses.html",
       piece: "/resources.html",
     };
-    const href = GOAL_DEST[g.type] || null;
+    // Course objectives deep-link straight into their own course page.
+    const href = (g.type === "course" && g.course) ? ("/courses.html?course=" + encodeURIComponent(g.course)) : (GOAL_DEST[g.type] || null);
 
     // ── Optional EXTRA tier: coloured card, Extra tag stacked above its indicator ──
     if (tier >= 1) {
@@ -13783,6 +13804,13 @@ function _renderJourneyCard(returnParts) {
   const _fsBeginner = !!_fsCourse && _fsCourse.total > 0 &&
     _fsCourse.done < _fsCourse.total && !selfDone("abc_dismissed") &&
     (_fsStarted || _fsFresh);
+  // Learn Your First Piece is the guided next step. It replaces Matt's piece picks once
+  // the member has either finished the Absolute Beginner Course or dismissed it, until
+  // they finish or dismiss it in turn — then the normal curated picks return.
+  const _fsComplete = !!_fsCourse && _fsCourse.total > 0 && _fsCourse.done >= _fsCourse.total;
+  const _lypSuggest = !!_lypCourse && _lypCourse.live && _lypCourse.total > 0 &&
+    _lypCourse.done < _lypCourse.total && !selfDone("lyp_dismissed") && !_fsBeginner &&
+    (selfDone("abc_dismissed") || _fsComplete);
 
   // ── Matt's piece picks for this level — a few library pieces at the stage's
   // difficulty the member doesn't already have, linking straight into the library.
@@ -13790,7 +13818,7 @@ function _renderJourneyCard(returnParts) {
   // For a flagged absolute beginner this whole section becomes ONE pick: the
   // Absolute Beginner Course (see the _fsBeginner override just below).
   let recsHtml = "";
-  if (!_fsBeginner && _goalAllPieces && _goalAllPieces.length) {
+  if (!_fsBeginner && !_lypSuggest && _goalAllPieces && _goalAllPieces.length) {
     const have = _goalCollectionIds || new Set();
     const byId = new Map(_goalAllPieces.map(p => [p.id, p]));
     // Curated, ordered hierarchy per level (window.ROADMAP.picks); show the first
@@ -13855,6 +13883,36 @@ function _renderJourneyCard(returnParts) {
         <span class="abc-alt-main">
           <span class="abc-alt-t">I already play a little</span>
           <span class="abc-alt-sub">Skip the course and see Matt's piece picks instead</span>
+        </span>
+        ${_arrow}
+      </button>
+    </div>`;
+  }
+  // Once the beginner course is done or skipped, Matt's picks becomes ONE item: the Learn
+  // Your First Piece course, with a skip that hands the section back to the normal picks.
+  if (_lypSuggest) {
+    const _total = _lypCourse.total, _done = _lypCourse.done, _started = _done > 0;
+    const _pct = _total ? Math.round(_done / _total * 100) : 0;
+    const _note = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+    const _arrow = `<svg class="abc-pick-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`;
+    recsHtml = `<div class="rg-recs">
+      <div class="rg-recs-head">
+        <img class="rg-recs-av" src="${MATT_AVATAR}" alt="Matt" draggable="false" onerror="this.style.display='none'">
+        <div class="rg-recs-htext"><div class="rg-recs-title">Matt's picks</div><div class="rg-recs-sub">${_started ? "Pick up where you left off" : "Ready for a real piece?"}</div></div>
+      </div>
+      <a class="abc-pick" href="/courses.html?course=learn-your-first-piece">
+        <span class="abc-pick-ic">${_note}</span>
+        <span class="abc-pick-main">
+          <span class="abc-pick-t">Learn Your First Piece</span>
+          <span class="abc-pick-sub">${_started ? `Continue &middot; lesson ${_done + 1} of ${_total}` : "Learn your first real piece, bar by bar."}</span>
+          ${_started ? `<span class="abc-pick-prog"><i style="width:${_pct}%"></i></span>` : ""}
+        </span>
+        ${_arrow}
+      </a>
+      <button type="button" class="abc-alt" onclick="_lypDismiss(event)">
+        <span class="abc-alt-main">
+          <span class="abc-alt-t">I'll choose my own piece</span>
+          <span class="abc-alt-sub">Skip this course and see Matt's piece picks instead</span>
         </span>
         ${_arrow}
       </button>
@@ -14203,6 +14261,9 @@ let _dormantCustomPieces = null;// custom pieces gone quiet (learning, 14d+ no p
 let _fsCourse = null;           // { total, live, done } for The Absolute Beginner Course "Start here" card
 let _nextFsLesson = null;       // { id, title, num } next uncompleted Absolute Beginner Course lesson
 let _fsDoneToday = false;       // a first-steps lesson was completed today (for the daily card's done state)
+let _lypCourse = null;          // { total, live, done } for the Learn Your First Piece course
+let _nextLypLesson = null;      // { id, title, num } next uncompleted Learn Your First Piece lesson
+let _lypDoneToday = false;      // a Learn Your First Piece lesson was completed today (daily card done state)
 
 // A custom collection piece is "dormant" when it is still in Learning, has not been
 // practiced for 14 days, and the member has not acknowledged this dormancy since the
@@ -14335,6 +14396,19 @@ function _abcDismiss(e) {
   const own = !viewingEmail || viewingEmail === myEmail;
   if (own) {
     try { localStorage.setItem("rm_goal_abc_dismissed", "1"); } catch (_) {}
+    _rmSaveSelfChecks().catch(() => {});
+  }
+  try { _rmAfterLoad(); } catch (_) {}
+}
+// Dismiss the Learn Your First Piece suggestion (Matt's picks + daily card), the same
+// persisted, own-account-only way as the beginner-course dismiss above.
+function _lypDismiss(e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  if (!_selfChecks || typeof _selfChecks !== "object") _selfChecks = {};
+  _selfChecks["lyp_dismissed"] = true;
+  const own = !viewingEmail || viewingEmail === myEmail;
+  if (own) {
+    try { localStorage.setItem("rm_goal_lyp_dismissed", "1"); } catch (_) {}
     _rmSaveSelfChecks().catch(() => {});
   }
   try { _rmAfterLoad(); } catch (_) {}
@@ -15017,6 +15091,7 @@ function _dailyTheoryObjective(types) {
 // progressed onto the full card set but still have the course on the go.
 function _dailyBeginnerObjective(stageIdx) {
   if (!_fsCourse || !_fsCourse.total || !_fsCourse.live) return null;   // no live course
+  if (_selfChecks && _selfChecks.abc_dismissed) return null;            // member skipped the course
   if (!(_fsCourse.done > 0) || !_nextFsLesson) return null;             // not started, or finished
   if (stageIdx !== 0) return null;   // moved past the First Steps stage → drop it, finished or not
   return {
@@ -15351,9 +15426,18 @@ function _renderDailyCard() {
   const _pidArgs = pk => `${pk.pieceId == null ? 'null' : pk.pieceId}, ${pk.userPieceId == null ? 'null' : JSON.stringify(pk.userPieceId)}`;
   _dailyDetail = {};
   _dailyCardLists = { piece: [], scales: [], skill: [] };   // rebuilt below for the Swap control
+  // Once the Absolute Beginner Course is complete (or skipped), the daily lesson becomes the
+  // next Learn Your First Piece lesson, until that course is finished or dismissed too — then
+  // it falls through to the generic pieces / sight-reading / scales rows.
+  const _lypDismissed = !!(_selfChecks && _selfChecks.lyp_dismissed);
+  const _abcDismissed = !!(_selfChecks && _selfChecks.abc_dismissed);
+  const _fsComplete = !!(_fsCourse && _fsCourse.total > 0 && _fsCourse.done >= _fsCourse.total);
+  const _lypDailyActive = !!(_nextLypLesson && _lypCourse && _lypCourse.live && !_lypDismissed && (_fsComplete || _abcDismissed));
   let rows;
   if (beginner && _nextFsLesson) {
     rows = [{ ic: 'piece', cat: 'Beginner Course', desc: `Lesson ${_nextFsLesson.num}: ${_nextFsLesson.title}`, action: LESSON, done: todaySessions.length > 0, href: '/courses.html?lesson=' + encodeURIComponent(_nextFsLesson.id) }];
+  } else if (_lypDailyActive) {
+    rows = [{ ic: 'piece', cat: 'Learn Your First Piece', desc: `Lesson ${_nextLypLesson.num}: ${_nextLypLesson.title}`, action: LESSON, done: _lypDoneToday, href: '/courses.html?lesson=' + encodeURIComponent(_nextLypLesson.id) }];
   } else {
     // PIECES — the active-rotation piece practised least recently (or revive / add new).
     // Swap lets the member cycle through their own back-catalogue for today (id-keyed).
@@ -27389,7 +27473,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
 <script src="/shared-header.js?v=2026071802"></script>
 <script src="/shared-member-modal.js?v=16"></script>
 <script src="/shared-tour.js?v=7"></script>
-<script src="/roadmap-levels.js?v=40"></script>
+<script src="/roadmap-levels.js?v=41"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
