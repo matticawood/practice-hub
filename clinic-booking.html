@@ -205,6 +205,10 @@
     <h2 style="margin-bottom:6px">Your booked lessons</h2>
     <p class="muted" id="mine-sub" style="margin:0 0 18px">Your upcoming one-to-one sessions.</p>
     <div id="mine-list"></div>
+    <div id="mine-past-wrap" style="display:none;margin-top:26px">
+      <div style="font-size:.78rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.55;margin-bottom:10px">Past lessons</div>
+      <div id="mine-past-list"></div>
+    </div>
     <div style="text-align:center;margin-top:22px"><button class="btn" onclick="show('screen-products')">Book a lesson →</button></div>
   </div>
 
@@ -716,7 +720,7 @@ function openMyLessons(){ if(myDb&&myEmailAddr) showMyLessons(myDb,myEmailAddr);
 // (a redeemed package lesson is also "60min"); event_type_id is the fallback.
 const KIND_LABELS={ "20min":"20-minute clinic", "30min":"30-minute clinic", "60min":"1-hour lesson" };
 const EVENT_LABELS={ "5482429":"20-minute clinic", "5482430":"30-minute clinic", [String(EVENT_1HR)]:"1-hour lesson" };
-function lessonLabel(b){ return KIND_LABELS[b.kind] || EVENT_LABELS[String(b.event_type_id||"")] || "1-hour lesson"; }
+function lessonLabel(b){ return KIND_LABELS[b.kind] || EVENT_LABELS[String(b.event_type_id||"")] || b.kind || "1-hour lesson"; }
 async function showMyLessons(db, email){
   show("screen-mine");
   const list=document.getElementById("mine-list");
@@ -741,6 +745,20 @@ async function showMyLessons(db, email){
   }catch(e){}
   document.getElementById("mine-sub").innerHTML=creditLine;
   list.innerHTML = rows || `<div class="mine-empty">No upcoming lessons yet. Book one below.</div>`;
+  // Past lessons — the member's history (Cal.com + imported Acuity), most recent first.
+  try{
+    const nowISO2=new Date().toISOString();
+    const past=await db.from("bookings").select("cal_uid,start_time,kind,status,event_type_id").lt("start_time",nowISO2).order("start_time",{ascending:false}).limit(300);
+    let prows="";
+    (past.data||[]).forEach(b=>{
+      if(!b.start_time || (b.status||"").toLowerCase()==="cancelled") return;
+      const when=new Date(b.start_time).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"});
+      prows+=`<div class="mine-row"><div class="mr-main"><div class="mr-t">${esc(lessonLabel(b))}</div><div class="mr-m">${esc(when)}</div></div></div>`;
+    });
+    const wrap=document.getElementById("mine-past-wrap");
+    if(prows){ document.getElementById("mine-past-list").innerHTML=prows; if(wrap) wrap.style.display=""; }
+    else if(wrap){ wrap.style.display="none"; }
+  }catch(e){}
 }
 function showMineSignedOut(){
   show("screen-mine");
