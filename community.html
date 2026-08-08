@@ -484,6 +484,18 @@
     }
     .post-type-btn:hover:not(.active) { border-color: #3a3a3a; color: var(--text); }
     .composer-type-hint { font-size: .8rem; color: var(--text-muted); margin: 8px 2px 0; line-height: 1.45; }
+    /* When Post is tapped with no type chosen, the hint turns into a directive and the row shakes. */
+    .composer-type-hint.needs-type { color: #a8842a; font-weight: 600; }
+    .composer-type-row.nudge { animation: composerTypeNudge .5s ease; }
+    @keyframes composerTypeNudge {
+      0%, 100% { transform: translateX(0); }
+      18% { transform: translateX(-6px); } 38% { transform: translateX(6px); }
+      58% { transform: translateX(-4px); } 78% { transform: translateX(4px); }
+    }
+    /* Post stays visible but reads as unavailable until a type is picked (still tappable, to fire the nudge). */
+    #composer-submit.is-disabled { opacity: .45; filter: grayscale(.4); }
+    /* Missing title/content shakes the field and focuses it, same language as the type nudge. */
+    .composer-title-input.nudge, .composer-textarea.nudge { animation: composerTypeNudge .5s ease; }
     .post-type-btn.active {
       /* colour set inline per post type in selectType() */
       border-color: var(--accent);
@@ -4186,6 +4198,7 @@ function openComposer() {
     if (btn && !_selectedType) selectType(btn);
   }
   _updateComposerTypeFade();
+  _updateComposerSubmitState();   // disabled unless the tab auto-selected a type
   document.getElementById("composer-title").focus();
 }
 
@@ -4229,6 +4242,9 @@ function _resetComposer() {
     b.style.color = ""; b.style.borderColor = ""; b.style.background = "";
   });
   _selectedType = null;
+  _updateComposerSubmitState();   // back to disabled for the next post
+  const typeHint = document.getElementById("composer-type-hint");
+  if (typeHint) { typeHint.classList.remove("needs-type"); typeHint.textContent = "Pick a type above, then share it with the community."; }
   _composerMedia = [];
   _composerPoll  = null;
   _renderMediaPreview();
@@ -4289,9 +4305,38 @@ function selectType(btn) {
   }
   // Show what this post type is for, and tailor the prompt to match.
   const hintEl = document.getElementById("composer-type-hint");
-  if (hintEl && pt && pt.hint) hintEl.innerHTML = pt.hint;
+  if (hintEl) {
+    hintEl.classList.remove("needs-type");           // clear any "choose a type" nudge
+    if (pt && pt.hint) hintEl.innerHTML = pt.hint;
+  }
   const taEl = document.getElementById("composer-content");
   if (taEl && pt && pt.placeholder) taEl.placeholder = pt.placeholder;
+  _updateComposerSubmitState();                       // a type is chosen: Post becomes available
+}
+
+// Post is greyed until a post type is selected, so it can't silently no-op.
+function _updateComposerSubmitState() {
+  const btn = document.getElementById("composer-submit");
+  if (btn) btn.classList.toggle("is-disabled", !_selectedType);
+}
+
+// Tapped Post with no type: draw the eye to the type row instead of a dismissable alert.
+function _nudgeForType() {
+  const row = document.querySelector(".composer-type-row");
+  if (row) {
+    row.scrollLeft = 0;
+    row.classList.remove("nudge"); void row.offsetWidth; row.classList.add("nudge");
+  }
+  const hint = document.getElementById("composer-type-hint");
+  if (hint) { hint.classList.add("needs-type"); hint.textContent = "Choose a type above first, then tap Post."; }
+}
+
+// Missing title/content: focus the field and shake it, no dismissable alert.
+function _nudgeField(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.focus();
+  el.classList.remove("nudge"); void el.offsetWidth; el.classList.add("nudge");
 }
 
 // ── Helper functions ──────────────────────────────────────────────────────────
@@ -5547,10 +5592,10 @@ async function submitPost() {
   if (_muxUploading) { alert("Please wait for the video upload to finish."); return; }
   const title   = document.getElementById("composer-title").value.trim();
   const content = document.getElementById("composer-content").value.trim();
-  if (!_selectedType) { alert("Please choose a post type."); return; }
+  if (!_selectedType) { _nudgeForType(); return; }
   // Practice logs are about what you worked on — a title is optional there.
-  if (!title && _selectedType !== "practice_log") { alert("Please add a title."); document.getElementById("composer-title").focus(); return; }
-  if (!content) { alert("Please add some content."); document.getElementById("composer-content").focus(); return; }
+  if (!title && _selectedType !== "practice_log") { _nudgeField("composer-title"); return; }
+  if (!content) { _nudgeField("composer-content"); return; }
 
   // Collect poll data if builder open
   let pollData = null;
