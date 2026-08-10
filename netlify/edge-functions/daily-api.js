@@ -831,6 +831,11 @@ export default async (request) => {
           enable_prejoin_ui:     isCohost && !admin,
           start_video_off:       !grantedOwner,    // cohosts + host start with camera on
           start_audio_off:       !grantedOwner,
+          // Hard watch-only lock for anyone who is not the host or an invited guest:
+          // they physically cannot publish camera/mic/screen, even on mobile where
+          // start_video_off/start_audio_off can be toggled back on. This is what keeps
+          // a plain viewer from ever appearing on screen. Mirrors get-room-token.
+          permissions:           grantedOwner ? undefined : { canSend: [], hasPresence: true },
           start_cloud_recording: admin && isOwner  // only the actual host starts recording
         }
       })
