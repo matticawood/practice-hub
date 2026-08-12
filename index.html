@@ -683,15 +683,25 @@ async function attemptSendCode() {
     return;
   }
 
+  // Resolve an alias to the canonical account email, so the session — and therefore all
+  // of this member's data (keyed by email everywhere) — lives under the right account,
+  // even when they log in with a second address (e.g. an Apple "Hide My Email" relay).
+  // Inert for everyone else: resolve_login_email returns the same email unchanged.
+  let authEmail = email;
   try {
-    const { data: _isMem, error } = await db.rpc("is_member", { p_email: email });
+    const { data: _canon } = await db.rpc("resolve_login_email", { p_email: email });
+    if (_canon) authEmail = String(_canon).toLowerCase();
+  } catch (e) { /* fall back to what they typed */ }
+
+  try {
+    const { data: _isMem, error } = await db.rpc("is_member", { p_email: authEmail });
     if (error || !_isMem) {
       btn.textContent = "Send verification code"; btn.disabled = false;
       showLoginError("This email address is not authorised to access this database.");
       return;
     }
     const { error: otpErr } = await db.auth.signInWithOtp({
-      email,
+      email: authEmail,
       options: { shouldCreateUser: true }
     });
     btn.textContent = "Send verification code"; btn.disabled = false;
@@ -699,8 +709,8 @@ async function attemptSendCode() {
       showLoginError("Could not send code: " + otpErr.message);
       return;
     }
-    pendingLoginEmail = email;
-    document.getElementById("login-sent-to").textContent = email;
+    pendingLoginEmail = authEmail;   // verify the code against the canonical address it was sent to
+    document.getElementById("login-sent-to").textContent = email;   // show the member the address they typed (their inbox receives it via forwarding)
     document.getElementById("login-step-email").style.display = "none";
     document.getElementById("login-step-otp").style.display = "block";
     document.getElementById("login-header").style.display = "none";
