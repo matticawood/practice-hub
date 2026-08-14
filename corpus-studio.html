@@ -89,6 +89,7 @@
       <label style="font-size:.8rem;color:var(--text-muted,#8a94a6);display:flex;align-items:center;gap:6px;"><input type="checkbox" id="idea-gen"> include AI-generated reference</label>
     </div>
     <div id="idea-out" style="margin-top:22px;"></div>
+    <div id="idea-history" style="margin-top:30px;"></div>
   </div>
 
   <div id="search-panel" style="display:none;">
@@ -165,6 +166,7 @@ async function enter(){
   $("gate").style.display = "none";
   $("app").style.display = "block";
   loadStats();
+  loadHistory();
 }
 
 // ── Mode toggle (Ideas | Keyword search) ──
@@ -185,19 +187,46 @@ function mdRender(t){
   return h;
 }
 $("idea-q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey||e.ctrlKey)) findThinking(); });
-async function findThinking(){
-  const q = $("idea-q").value.trim();
-  if (!q) return;
-  const out = $("idea-out");
-  out.innerHTML = `<div class="cs-empty">Reading your corpus and thinking… (this takes a few seconds)</div>`;
-  const prov = $("idea-gen").checked ? null : "own";
-  const { data, error } = await db.functions.invoke("corpus-ai", { body: { query: q, provenance: prov } });
-  if (error || (data && data.error)){ out.innerHTML = `<div class="cs-empty">Error: ${esc((error&&error.message)||(data&&data.error)||"failed")}</div>`; return; }
+let _lastQuery = "", _lastSynthesis = "";
+function renderOut(data){
   const src = (data.sources||[]).map(s => s.url
     ? `<a class="cs-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title||SRC[s.source_type]||s.source_type)}</a>`
     : `<span>${esc(s.title||SRC[s.source_type]||s.source_type)}</span>`).join(" · ");
-  out.innerHTML = `<div style="border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:20px 22px;background:rgba(255,255,255,.02);white-space:pre-wrap;line-height:1.65;font-size:.95rem;">${mdRender(data.synthesis||"")}</div>
-    ${src ? `<div style="margin-top:14px;font-size:.8rem;color:var(--text-muted,#8a94a6);"><strong style="color:var(--text,#e8eaed);">Drawn from your:</strong> ${src}</div>`:""}`;
+  const bar = `<div class="cs-actions" style="margin:0 0 12px;flex-wrap:wrap;">
+    <button class="cs-link" onclick="copyOut()">Copy</button>
+    <button class="cs-link" onclick="reformat('video')">Shape into a video plan</button>
+    <button class="cs-link" onclick="reformat('mmt')">Shape into a Monday Music Tips plan</button></div>`;
+  $("idea-out").innerHTML = bar +
+    `<div style="border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:20px 22px;background:rgba(255,255,255,.02);white-space:pre-wrap;line-height:1.65;font-size:.95rem;">${mdRender(data.synthesis||"")}</div>` +
+    (src ? `<div style="margin-top:14px;font-size:.8rem;color:var(--text-muted,#8a94a6);"><strong style="color:var(--text,#e8eaed);">Drawn from your:</strong> ${src}</div>` : "");
+}
+function copyOut(){ navigator.clipboard.writeText(_lastSynthesis); }
+async function callCorpus(q, mode, context){
+  $("idea-out").innerHTML = `<div class="cs-empty">${mode==='synthesis'?'Reading your corpus and thinking':'Reshaping into a '+(mode==='video'?'video plan':'Monday Music Tips plan')}… (a few seconds)</div>`;
+  const prov = $("idea-gen").checked ? null : "own";
+  const { data, error } = await db.functions.invoke("corpus-ai", { body: { query:q, mode, context:context||"", provenance:prov } });
+  if (error || (data && data.error)){ $("idea-out").innerHTML = `<div class="cs-empty">Error: ${esc((error&&error.message)||(data&&data.error)||"failed")}</div>`; return; }
+  _lastQuery = q; _lastSynthesis = data.synthesis||"";
+  renderOut(data); loadHistory();
+}
+async function findThinking(){ const q = $("idea-q").value.trim(); if (q) await callCorpus(q, "synthesis", ""); }
+async function reformat(mode){ if (_lastQuery) await callCorpus(_lastQuery, mode, _lastSynthesis); }
+async function loadHistory(){
+  const { data } = await db.from("corpus_idea_runs").select("id,mode,query,created_at").order("created_at",{ascending:false}).limit(25);
+  if (!data || !data.length){ $("idea-history").innerHTML=""; return; }
+  const label = m => m==='video'?'Video plan':m==='mmt'?'MMT plan':'Ideas';
+  $("idea-history").innerHTML = `<div style="font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.5;margin-bottom:8px;">Saved · ${data.length}</div>` +
+    data.map(r => `<div class="cs-card" style="padding:10px 14px;cursor:pointer;margin-bottom:8px;" onclick="openRun('${r.id}')">
+      <div class="cs-card-head" style="margin:0;"><span class="cs-badge ${r.mode==='synthesis'?'':'gen'}">${label(r.mode)}</span>
+        <span class="cs-title" style="font-weight:600;font-size:.9rem;">${esc((r.query||'').slice(0,90))}</span>
+        <span class="cs-meta">${fmtDate(r.created_at)}</span></div></div>`).join("");
+}
+async function openRun(id){
+  const { data } = await db.from("corpus_idea_runs").select("query,mode,synthesis,sources").eq("id",id).single();
+  if (!data) return;
+  _lastQuery = data.query; _lastSynthesis = data.synthesis||"";
+  renderOut({synthesis:data.synthesis, sources:data.sources||[]});
+  $("idea-out").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
 async function loadStats(){
