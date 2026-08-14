@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corpus Studio &middot; The Practice Room</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { background: var(--bg, #0f1115); color: var(--text, #e8eaed); }
+  .cs-wrap { max-width: 900px; margin: 0 auto; padding: 18px 16px 80px; }
+  .cs-top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+  .cs-top h1 { font-size:1.4rem; margin:0; display:flex; align-items:center; gap:10px; }
+  .cs-stats { font-size:.8rem; color:var(--text-muted,#8a94a6); margin-bottom:16px; }
+  .cs-searchbar { display:flex; gap:8px; margin-bottom:10px; }
+  .cs-searchbar input { flex:1; padding:12px 14px; border-radius:11px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.05); color:inherit; font-size:1rem; }
+  .cs-searchbar input:focus { outline:none; border-color:#F5C518; }
+  .cs-btn { flex:none; background:#F5C518; color:#1a1400; font-weight:800; border:none; border-radius:11px;
+    padding:0 18px; font-size:.9rem; cursor:pointer; }
+  .cs-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:18px; }
+  .cs-seg { display:inline-flex; border:1px solid rgba(255,255,255,.14); border-radius:9px; overflow:hidden; }
+  .cs-seg button { background:none; border:none; color:var(--text-muted,#8a94a6); padding:7px 13px; font-size:.82rem; cursor:pointer; }
+  .cs-seg button.on { background:rgba(245,197,24,.16); color:#F5C518; font-weight:700; }
+  .cs-filters select { background:rgba(255,255,255,.05); color:inherit; border:1px solid rgba(255,255,255,.14);
+    border-radius:9px; padding:7px 10px; font-size:.82rem; }
+  .cs-results { display:flex; flex-direction:column; gap:10px; }
+  .cs-card { border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px 16px; background:rgba(255,255,255,.02); }
+  .cs-card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
+  .cs-badge { font-size:.66rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; padding:3px 8px; border-radius:6px;
+    background:rgba(245,197,24,.14); color:#F5C518; }
+  .cs-badge.gen { background:rgba(255,255,255,.08); color:var(--text-muted,#8a94a6); }
+  .cs-title { font-weight:700; font-size:.98rem; color:var(--text,#e8eaed); flex:1; min-width:0; }
+  .cs-meta { font-size:.72rem; color:var(--text-muted,#8a94a6); }
+  .cs-snip { font-size:.86rem; line-height:1.55; color:var(--text-muted,#b6bdc9); }
+  .cs-snip mark { background:rgba(245,197,24,.28); color:#fff; padding:0 2px; border-radius:3px; }
+  .cs-actions { display:flex; gap:14px; margin-top:9px; }
+  .cs-link { font-size:.78rem; color:#F5C518; text-decoration:none; cursor:pointer; background:none; border:none; padding:0; }
+  .cs-link:hover { text-decoration:underline; }
+  .cs-empty { color:var(--text-muted,#8a94a6); text-align:center; padding:40px 0; }
+  /* detail */
+  .cs-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; z-index:50; }
+  .cs-modal { position:fixed; inset:0; margin:auto; max-width:760px; max-height:86vh; height:max-content; z-index:51;
+    background:var(--surface,#171a20); border:1px solid rgba(255,255,255,.14); border-radius:14px; display:none; flex-direction:column; overflow:hidden; }
+  .cs-modal.open, .cs-modal-bg.open { display:flex; }
+  .cs-modal-h { display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.1); }
+  .cs-modal-h .cs-title { font-size:1.05rem; }
+  .cs-modal-body { padding:18px; overflow:auto; white-space:pre-wrap; line-height:1.65; font-size:.92rem; }
+  .cs-x { background:none; border:none; color:var(--text-muted,#8a94a6); font-size:1.4rem; cursor:pointer; line-height:1; }
+</style>
+</head>
+<body>
+
+<!-- Owner-only gate -->
+<div id="gate" style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
+  <div class="login-card" style="max-width:360px; width:100%;">
+    <h1 class="login-title" style="margin-bottom:6px;">Corpus Studio</h1>
+    <p style="color:var(--text-muted,#8a94a6); font-size:.85rem; margin-top:0;">Owner access only.</p>
+    <div id="step1">
+      <input id="a-email" type="email" placeholder="you@email.com" style="width:100%; padding:11px; border-radius:9px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.05); color:inherit; margin-bottom:8px;">
+      <button class="btn btn-primary" style="width:100%;" onclick="sendOTP()">Send code</button>
+    </div>
+    <div id="step2" style="display:none;">
+      <input id="a-otp" inputmode="numeric" placeholder="6-digit code" style="width:100%; padding:11px; border-radius:9px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.05); color:inherit; margin-bottom:8px;">
+      <button class="btn btn-primary" style="width:100%;" onclick="verifyOTP()">Verify</button>
+    </div>
+    <div id="a-err" style="display:none; color:#ef4444; font-size:.82rem; margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="cs-wrap" style="display:none;">
+  <div class="cs-top">
+    <h1>📚 Corpus Studio</h1>
+    <button id="logout" class="cs-link" onclick="logout()">Sign out</button>
+  </div>
+  <div class="cs-stats" id="cs-stats">Loading…</div>
+
+  <div class="cs-searchbar">
+    <input id="q" placeholder="Search everything you've said… e.g. voice leading, pedal note, when to move on" autocomplete="off">
+    <button class="cs-btn" onclick="runSearch()">Search</button>
+  </div>
+  <div class="cs-filters">
+    <div class="cs-seg" id="prov-seg">
+      <button data-prov="own" class="on">Your words</button>
+      <button data-prov="generated">Generated</button>
+      <button data-prov="">All</button>
+    </div>
+    <select id="src">
+      <option value="">All sources</option>
+      <option value="video">Videos</option>
+      <option value="mmt">Monday Music Tips</option>
+      <option value="reply">Replies</option>
+      <option value="weekly_focus">Weekly focus</option>
+      <option value="post">Posts</option>
+      <option value="theory_sheet">Theory sheets</option>
+      <option value="lesson">Lessons</option>
+    </select>
+  </div>
+
+  <div class="cs-results" id="results"></div>
+</div>
+
+<div class="cs-modal-bg" id="modal-bg" onclick="closeDetail()"></div>
+<div class="cs-modal" id="modal">
+  <div class="cs-modal-h">
+    <span class="cs-badge" id="d-badge"></span>
+    <span class="cs-title" id="d-title"></span>
+    <button class="cs-link" id="d-copy" onclick="copyDetail()">Copy</button>
+    <a class="cs-link" id="d-open" target="_blank" rel="noopener">Open original ↗</a>
+    <button class="cs-x" onclick="closeDetail()">×</button>
+  </div>
+  <div class="cs-modal-body" id="d-body"></div>
+</div>
+
+<script>
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const OWNER_EMAILS  = ["matthew@matthewcawood.com","enquiries@matthewcawood.com"];
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const $ = id => document.getElementById(id);
+
+const SRC = { video:"Video", mmt:"Monday Music Tips", reply:"Reply", post:"Post", weekly_focus:"Weekly focus", theory_sheet:"Theory sheet", lesson:"Lesson" };
+function esc(s){ return String(s||"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function hl(s){ return esc(s).replace(/«/g,"<mark>").replace(/»/g,"</mark>"); }
+function fmtDate(d){ return d ? new Date(d).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}) : ""; }
+
+// ── Auth ──
+let otpEmail = "";
+function showErr(m){ $("a-err").textContent = m; $("a-err").style.display = "block"; }
+async function sendOTP(){
+  const email = $("a-email").value.trim().toLowerCase();
+  $("a-err").style.display = "none";
+  if (!OWNER_EMAILS.includes(email)) return showErr("Owner access only.");
+  const { error } = await db.auth.signInWithOtp({ email, options:{ shouldCreateUser:false } });
+  if (error) return showErr(error.message);
+  otpEmail = email; $("step1").style.display="none"; $("step2").style.display="block"; $("a-otp").focus();
+}
+async function verifyOTP(){
+  $("a-err").style.display = "none";
+  const { error } = await db.auth.verifyOtp({ email:otpEmail, token:$("a-otp").value.trim(), type:"email" });
+  if (error) return showErr("Invalid or expired code.");
+  enter();
+}
+async function logout(){ await db.auth.signOut(); location.reload(); }
+
+async function enter(){
+  $("gate").style.display = "none";
+  $("app").style.display = "block";
+  loadStats();
+  runSearch();
+}
+
+async function loadStats(){
+  try {
+    const own = await db.from("corpus_entries").select("id",{count:"exact",head:true}).eq("provenance","own");
+    const gen = await db.from("corpus_entries").select("id",{count:"exact",head:true}).eq("provenance","generated");
+    $("cs-stats").textContent = `${(own.count||0).toLocaleString()} pieces in your own voice · ${(gen.count||0).toLocaleString()} generated reference`;
+  } catch(e){ $("cs-stats").textContent = ""; }
+}
+
+// ── Search ──
+let _prov = "own";
+document.querySelectorAll("#prov-seg button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#prov-seg button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); _prov = b.dataset.prov; runSearch();
+});
+$("src").onchange = runSearch;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); });
+
+async function runSearch(){
+  const q = $("q").value.trim();
+  const src = $("src").value || null;
+  $("results").innerHTML = `<div class="cs-empty">Searching…</div>`;
+  const { data, error } = await db.rpc("search_corpus", {
+    p_q: q, p_provenance: _prov || null, p_source: src, p_limit: 60
+  });
+  if (error){ $("results").innerHTML = `<div class="cs-empty">Error: ${esc(error.message)}</div>`; return; }
+  if (!data || !data.length){ $("results").innerHTML = `<div class="cs-empty">Nothing found${q?` for “${esc(q)}”`:""}.</div>`; return; }
+  $("results").innerHTML = data.map(r => {
+    const badge = r.provenance === "own"
+      ? `<span class="cs-badge">${esc(SRC[r.source_type]||r.source_type)}</span>`
+      : `<span class="cs-badge gen">${esc(SRC[r.source_type]||r.source_type)}</span>`;
+    const title = r.title || "(untitled " + (SRC[r.source_type]||r.source_type).toLowerCase() + ")";
+    const open = r.url ? `<a class="cs-link" href="${esc(r.url)}" target="_blank" rel="noopener">Open original ↗</a>` : "";
+    return `<div class="cs-card">
+      <div class="cs-card-head">${badge}<span class="cs-title">${esc(title)}</span>
+        <span class="cs-meta">${fmtDate(r.published_at)} · ${(r.word_count||0).toLocaleString()} words</span></div>
+      <div class="cs-snip">${hl(r.snippet)}</div>
+      <div class="cs-actions"><button class="cs-link" onclick="openDetail('${r.id}')">View full</button>${open}</div>
+    </div>`;
+  }).join("");
+}
+
+// ── Detail ──
+let _detailText = "";
+async function openDetail(id){
+  const { data } = await db.from("corpus_entries").select("title,body,url,source_type,provenance").eq("id", id).single();
+  if (!data) return;
+  _detailText = data.body || "";
+  $("d-badge").textContent = SRC[data.source_type] || data.source_type;
+  $("d-badge").className = "cs-badge" + (data.provenance === "own" ? "" : " gen");
+  $("d-title").textContent = data.title || "(untitled)";
+  $("d-body").textContent = data.body || "";
+  const open = $("d-open");
+  if (data.url){ open.href = data.url; open.style.display = ""; } else { open.style.display = "none"; }
+  $("modal").classList.add("open"); $("modal-bg").classList.add("open");
+}
+function closeDetail(){ $("modal").classList.remove("open"); $("modal-bg").classList.remove("open"); }
+function copyDetail(){ navigator.clipboard.writeText(_detailText).then(()=>{ $("d-copy").textContent="Copied"; setTimeout(()=>$("d-copy").textContent="Copy",1200); }); }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(); });
+
+// restore session
+(async () => {
+  const { data:{ session } } = await db.auth.getSession();
+  if (session && OWNER_EMAILS.includes((session.user.email||"").toLowerCase())) enter();
+})();
+</script>
+<script src="/studio-nav.js" defer></script>
+</body>
+</html>
