@@ -77,6 +77,21 @@
   </div>
   <div class="cs-stats" id="cs-stats">Loading…</div>
 
+  <div class="cs-seg" id="mode-seg" style="margin-bottom:16px;">
+    <button data-mode="ideas" class="on">Ideas</button>
+    <button data-mode="search">Keyword search</button>
+  </div>
+
+  <div id="ideas-panel">
+    <textarea id="idea-q" rows="4" placeholder="Describe your idea — a title, a thumbnail line, or a rough concept — and I'll find your relevant past thinking and pull it into angles and frameworks. Or just describe a theme to dig for ideas." style="width:100%;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:inherit;font-size:.98rem;resize:vertical;font-family:inherit;"></textarea>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap;">
+      <button class="cs-btn" style="padding:11px 20px;" onclick="findThinking()">Find my thinking</button>
+      <label style="font-size:.8rem;color:var(--text-muted,#8a94a6);display:flex;align-items:center;gap:6px;"><input type="checkbox" id="idea-gen"> include AI-generated reference</label>
+    </div>
+    <div id="idea-out" style="margin-top:22px;"></div>
+  </div>
+
+  <div id="search-panel" style="display:none;">
   <div class="cs-searchbar">
     <input id="q" placeholder="Search everything you've said… e.g. voice leading, pedal note, when to move on" autocomplete="off">
     <button class="cs-btn" onclick="runSearch()">Search</button>
@@ -100,6 +115,7 @@
   </div>
 
   <div class="cs-results" id="results"></div>
+  </div><!-- /search-panel -->
 </div>
 
 <div class="cs-modal-bg" id="modal-bg" onclick="closeDetail()"></div>
@@ -149,7 +165,39 @@ async function enter(){
   $("gate").style.display = "none";
   $("app").style.display = "block";
   loadStats();
-  runSearch();
+}
+
+// ── Mode toggle (Ideas | Keyword search) ──
+document.querySelectorAll("#mode-seg button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#mode-seg button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  const ideas = b.dataset.mode === "ideas";
+  $("ideas-panel").style.display = ideas ? "" : "none";
+  $("search-panel").style.display = ideas ? "none" : "";
+  if (!ideas && !$("results").innerHTML) runSearch();
+});
+
+// ── Ideas: retrieval + synthesis via corpus-ai ──
+function mdRender(t){
+  let h = esc(t);
+  h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  h = h.replace(/\[Source: ([^\]]+)\]/g, '<span style="color:#F5C518;font-size:.82em;">[$1]</span>');
+  return h;
+}
+$("idea-q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey||e.ctrlKey)) findThinking(); });
+async function findThinking(){
+  const q = $("idea-q").value.trim();
+  if (!q) return;
+  const out = $("idea-out");
+  out.innerHTML = `<div class="cs-empty">Reading your corpus and thinking… (this takes a few seconds)</div>`;
+  const prov = $("idea-gen").checked ? null : "own";
+  const { data, error } = await db.functions.invoke("corpus-ai", { body: { query: q, provenance: prov } });
+  if (error || (data && data.error)){ out.innerHTML = `<div class="cs-empty">Error: ${esc((error&&error.message)||(data&&data.error)||"failed")}</div>`; return; }
+  const src = (data.sources||[]).map(s => s.url
+    ? `<a class="cs-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title||SRC[s.source_type]||s.source_type)}</a>`
+    : `<span>${esc(s.title||SRC[s.source_type]||s.source_type)}</span>`).join(" · ");
+  out.innerHTML = `<div style="border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:20px 22px;background:rgba(255,255,255,.02);white-space:pre-wrap;line-height:1.65;font-size:.95rem;">${mdRender(data.synthesis||"")}</div>
+    ${src ? `<div style="margin-top:14px;font-size:.8rem;color:var(--text-muted,#8a94a6);"><strong style="color:var(--text,#e8eaed);">Drawn from your:</strong> ${src}</div>`:""}`;
 }
 
 async function loadStats(){
