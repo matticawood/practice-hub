@@ -29,25 +29,28 @@ const PLAN_SPEC = `Return ONLY a JSON object (no prose, no markdown, no code fen
 {
   "concept": "a one-line working title / the core concept of the piece",
   "hook": "the opening line he should actually say (or null)",
+  "promise": "the explicit promise the opening makes to the viewer — what they will understand or be able to DO by the end. The Close must pay this exact promise off so they feel they took something real away. (or null)",
   "sections": [
     {
       "label": "short tag, e.g. 'Opening', 'Section A', 'Point 1', 'Close'",
-      "heading": "the topic or framework this section is built on",
-      "points": ["a short beat/bullet to cover", "another beat", "..."],
+      "heading": "the topic / point of this section",
+      "framework": "the NAMED principle or model this section teaches — give it a short, memorable name he can say on camera (e.g. 'Loss vs Access', 'The Consolidation Lag'). Null only for the Opening/Close.",
+      "points": ["a short beat/bullet to cover (the false belief, the mechanism, the reframe, etc.)", "another beat", "..."],
       "example": "one concrete example, analogy or demo-at-the-piano to use here (or null)",
+      "action": "the ACTIONABLE takeaway — one concrete thing the viewer can DO, try, or change at the piano because of this section (not just a reframe). Null only for the Opening.",
       "source": "the passage title this section draws on (or null)",
       "addition": "an optional relevant concept from OUTSIDE his corpus that links to this section — a named psychological phenomenon or music-theory point — shown asterisked as a suggested extra. Use sparingly, only when it genuinely strengthens the idea (or null)"
     }
   ],
   "close": "the closing / payoff line (or null)"
 }
-Keep bullets short and scannable. 3-6 sections is typical. Everything must be grounded in the passages.`;
+Keep bullets short and scannable. 3-6 sections is typical. Every body section MUST name its "framework" and give a concrete "action". Everything must be grounded in the passages.`;
 
 const SYSTEM: Record<string, string> = {
   video: `You turn Matthew's idea into a PLAN for one of his YouTube videos, laid out as fill-in section boxes, in HIS ACTUAL structure (learned from his own transcripts — follow it, not generic YouTube advice):
-- First section, label "Opening": pick the mode that fits — a problem/advice video opens by naming the viewer's private frustration with an "If you…" line then REFRAMING it as a misdiagnosis (the real problem isn't what they think); a concept video opens with a "What if I told you…" paradox. Its "points" should include that opening line, the reframe, and his roadmap sentence ("So in today's video I'm going to…") that NUMBERS what's coming.
-- Then ONE section per body point. Each is built on a BINARY DISTINCTION (his signature device: reading vs sight-reading, success vs reliability, playing vs practising) as the "heading"; "points" = the common false belief, the mechanism, and the fix ("instead of asking X, ask Y"); "example" = an analogy from OUTSIDE music (golf, tennis, the alphabet) or a demo at the piano; "source" = the passage.
-- A final section, label "Close": pay off the opening promise with the concrete takeaway/tool. Mention his app The Practice Room only where it genuinely fits.
+- First section, label "Opening": pick the mode that fits — a problem/advice video opens by naming the viewer's private frustration with an "If you…" line then REFRAMING it as a misdiagnosis (the real problem isn't what they think); a concept video opens with a "What if I told you…" paradox. Its "points" should include that opening line, the reframe, and his roadmap sentence ("So in today's video I'm going to…") that NUMBERS what's coming. State the PROMISE explicitly here and fill the top-level "promise" field: a clear thing they'll understand or be able to do by the end.
+- Then ONE section per body point. Each is built on a BINARY DISTINCTION (his signature device: reading vs sight-reading, success vs reliability, playing vs practising) as the "heading"; name the "framework" it teaches; "points" = the common false belief, the mechanism, and the fix ("instead of asking X, ask Y"); "example" = an analogy from OUTSIDE music (golf, tennis, the alphabet) or a demo at the piano; "action" = the concrete thing to do about it; "source" = the passage.
+- A final section, label "Close": pay off the PROMISE from the opening with the concrete takeaway/tool, so the viewer feels they genuinely took something away. Mention his app The Practice Room only where it genuinely fits.
 ${COMMON}
 ${PLAN_SPEC}`,
 
@@ -85,11 +88,15 @@ function parsePlan(txt: string): any {
 function planToText(p: any): string {
   if (!p) return "";
   let s = p.concept ? `# ${p.concept}\n\n` : "";
-  if (p.hook) s += `HOOK: ${p.hook}\n\n`;
+  if (p.hook) s += `HOOK: ${p.hook}\n`;
+  if (p.promise) s += `PROMISE: ${p.promise}\n`;
+  if (p.hook || p.promise) s += `\n`;
   for (const sec of (p.sections || [])) {
     s += `${sec.label ? sec.label + " — " : ""}${sec.heading || ""}\n`;
+    if (sec.framework) s += `  Framework: ${sec.framework}\n`;
     for (const pt of (sec.points || [])) s += `  • ${pt}\n`;
     if (sec.example) s += `  Example: ${sec.example}\n`;
+    if (sec.action) s += `  Do this: ${sec.action}\n`;
     if (sec.addition) s += `  * Suggested extra (not from your corpus): ${sec.addition}\n`;
     if (sec.source) s += `  [Source: ${sec.source}]\n`;
     s += "\n";
@@ -196,14 +203,24 @@ Deno.serve(async (req) => {
   const sources = hits.filter(h => !seen.has(h.entry_id) && seen.add(h.entry_id))
     .map(h => ({ title: h.title, url: h.url, source_type: h.source_type, similarity: h.similarity }));
 
-  let run_id: string | null = null;
+  // Adjusting an existing outline updates that saved row; a fresh draft inserts a new one.
+  const priorRun = String(body.run_id || "").trim();
+  let run_id: string | null = priorRun || null;
   try {
-    const ins = await fetch(`${SUPABASE_URL}/rest/v1/corpus_idea_runs`, {
-      method: "POST",
-      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "content-type": "application/json", Prefer: "return=representation" },
-      body: JSON.stringify({ email: caller.toLowerCase(), mode, query, synthesis, sources }),
-    });
-    if (ins.ok) run_id = (await ins.json())?.[0]?.id ?? null;
+    if (priorRun) {
+      await fetch(`${SUPABASE_URL}/rest/v1/corpus_idea_runs?id=eq.${priorRun}&email=eq.${encodeURIComponent(caller.toLowerCase())}`, {
+        method: "PATCH",
+        headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "content-type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ synthesis, sources, plan }),
+      });
+    } else {
+      const ins = await fetch(`${SUPABASE_URL}/rest/v1/corpus_idea_runs`, {
+        method: "POST",
+        headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "content-type": "application/json", Prefer: "return=representation" },
+        body: JSON.stringify({ email: caller.toLowerCase(), mode, query, synthesis, sources, plan }),
+      });
+      if (ins.ok) run_id = (await ins.json())?.[0]?.id ?? null;
+    }
   } catch { /* ignore */ }
 
   return json({ plan, synthesis, sources, run_id, mode });
