@@ -4,7 +4,7 @@
 //        "mmt"   = reshape into a 3-section MONDAY MUSIC TIPS PLAN.
 // Every run is saved to corpus_idea_runs. Needs ANTHROPIC_API_KEY + OPEN_AI. Owner-gated.
 
-const MODEL = "claude-opus-4-8";
+const MODEL = "claude-sonnet-5";  // synthesis/reformat/refine — strong + far cheaper than Opus, for cheap back-and-forth
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://gyskfutmncprqxazgatv.supabase.co";
@@ -33,14 +33,19 @@ Produce, in clear markdown:
 3. **Fresh angles** — 3-5 concrete, original angles that BUILD ON his thinking rather than repeat it.
 4. **Interesting connections** — places where two different passages combine into a framework he may not have linked. Skip if none.`,
 
-  video: `You turn Matthew's idea into a PLAN (NOT a script, NOT prose) for one of his YouTube videos.
-His videos progress SECTION BY SECTION, each section REVEALING something new so the viewer stays watching — even non-listicles narrate as a sequence of reveals ("now here's another thing to consider…", "but there's a catch…", "the four things that…").
+  video: `You turn Matthew's idea into a PLAN (NOT a script) for one of his YouTube videos, in HIS ACTUAL structure (learned from his own transcripts — follow it, don't use generic YouTube "hook" advice):
+
+OPENING (pick the mode that fits):
+ • Problem/advice video: open by naming the viewer's private frustration with an "If you…" line, then REFRAME it as a misdiagnosis — the real problem isn't what they think it is.
+ • Concept/history video: open with a "What if I told you…" paradox (often play-something-then-challenge-it).
+Then his ROADMAP sentence — "So in today's video I'm going to…" — stating exactly what's coming and what the viewer will be able to DO by the end, and NUMBER the payload (the three problems / four reasons / seven things). His transition into the body is always: "So let's get into it."
+
+BODY — a NUMBERED sequence. Each item follows his shape: state it → name the common false belief/mistake → draw a BINARY DISTINCTION between two terms (his signature device: reading vs sight-reading, success vs reliability, playing vs practising — "there's a big difference between X and Y") → explain the mechanism → give the fix ("instead of asking X, ask Y"). Weave in an analogy from OUTSIDE music (golf, tennis, the alphabet) and a natural mention of his app The Practice Room where it fits.
+
+CLOSE — pay off the opening promise with the concrete takeaway/tool.
+
 ${COMMON}
-Output in markdown:
-- **Hook** — the opening beat that makes someone stop (tie it to the idea/title).
-- **Sections** — an ordered list. For each: a one-line REVEAL (the new thing this section uncovers) as the heading, then a few bullet beats (content, examples, things to demo at the piano), with [Source: <title>] for material drawn from his corpus.
-- **Close** — the payoff; what the viewer leaves understanding.
-Keep it a tight PLAN in bullets. Do NOT write the script.`,
+Deliver a scannable PLAN in markdown: an OPENING block (the exact reframe line + the numbered roadmap), then the numbered BODY items, each with its binary distinction, mechanism and fix as short bullets [Source: <title>], then a CLOSE line. Name the SPECIFIC binary distinctions, reframes and analogies to use, drawn from his corpus. Not a script.`,
 
   mmt: `You turn Matthew's idea into a PLAN (NOT written prose) for a Monday Music Tips article, in his usual THREE-section shape:
 - **Section 1** — lay out the point / the idea.
@@ -49,6 +54,19 @@ Keep it a tight PLAN in bullets. Do NOT write the script.`,
 (MMT varies, so adapt the three-part split if the content genuinely calls for it, but keep it three sections.)
 ${COMMON}
 For each section: a heading + bullet beats of what it covers, drawing on his passages [Source: <title>]. Keep it a PLAN in bullets, not the finished article.`,
+
+  short: `You turn Matthew's idea into a PLAN for a short-form video (a YouTube Short / Reel), ~30-60 seconds: ONE sharp point, a scroll-stopping hook, tight delivery.
+${COMMON}
+Output in markdown:
+- **Hook** — the first line that stops the scroll.
+- **The one point** — the single idea, stated plainly.
+- **Beats** — 2-4 punchy bullet beats that deliver it (with a thing he can show at the piano), [Source: <title>] where drawn from his corpus.
+- **Button** — the closing line.
+Keep it tight and scannable. Not a script.`,
+
+  refine: `You revise an EXISTING draft (a plan or reference sheet for Matthew's content) according to his instruction, keeping his voice and the scannable reference-sheet format, and staying grounded ONLY in the provided passages from his corpus.
+${COMMON}
+Apply his instruction faithfully — add, cut, restructure, change format, expand or tighten, bring in a new angle, whatever he asks. Return the FULL revised draft in markdown (not just the changed part). Do not lose good material he didn't ask you to remove.`,
 };
 
 async function embedQuery(text: string, key: string): Promise<number[]> {
@@ -86,11 +104,13 @@ Deno.serve(async (req) => {
   if (!query) return jsonError(400, "query is required.");
   const mode = SYSTEM[body.mode] ? body.mode : "synthesis";
   const context = String(body.context || "").trim();
+  const instruction = String(body.instruction || "").trim();
   const provenance = body.provenance === "generated" ? "generated" : (body.provenance === null ? null : "own");
   const matchCount = Math.min(Math.max(Number(body.count) || 28, 6), 40);
 
+  const retrieveText = mode === "refine" && instruction ? `${query} ${instruction}` : query;
   let qvec: number[];
-  try { qvec = await embedQuery(query, openaiKey); } catch (e) { return jsonError(502, String(e)); }
+  try { qvec = await embedQuery(retrieveText, openaiKey); } catch (e) { return jsonError(502, String(e)); }
 
   const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_corpus_chunks`, {
     method: "POST",
@@ -102,7 +122,9 @@ Deno.serve(async (req) => {
   if (!hits.length) return json({ synthesis: "Nothing relevant found in your corpus for that. Try rephrasing.", sources: [], run_id: null });
 
   const passages = hits.map((h, i) => `[${i + 1}] (${h.source_type}${h.title ? " · " + h.title : ""})\n${h.chunk_text}`).join("\n\n");
-  const userMsg = `MY IDEA:\n${query}\n${context ? `\nMY EARLIER SYNTHESIS (build on this):\n${context}\n` : ""}\nPASSAGES FROM MY CORPUS:\n\n${passages}`;
+  const userMsg = mode === "refine"
+    ? `CURRENT DRAFT:\n${context}\n\nMY INSTRUCTION:\n${instruction}\n\nPASSAGES FROM MY CORPUS (for grounding any additions):\n\n${passages}`
+    : `MY IDEA:\n${query}\n${context ? `\nMY EARLIER SYNTHESIS (build on this):\n${context}\n` : ""}\nPASSAGES FROM MY CORPUS:\n\n${passages}`;
 
   let synthesis = "";
   try {
