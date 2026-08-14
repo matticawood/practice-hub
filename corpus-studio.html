@@ -100,8 +100,19 @@
   .a-gold{background:var(--gold);border:none;color:#1a1410;border-radius:9px;padding:8px 14px;font:800 .8rem/1 var(--sans);cursor:pointer;}
 
   /* draft workspace */
-  #dpanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(840px,95vw);max-height:92vh;z-index:60;background:var(--panel);border:1px solid var(--line2);border-radius:20px;box-shadow:0 26px 72px rgba(38,28,10,.34);display:none;flex-direction:column;overflow:hidden;}
-  #dpanel.open{display:flex;}
+  #dpanel,#gpanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(840px,95vw);max-height:92vh;z-index:60;background:var(--panel);border:1px solid var(--line2);border-radius:20px;box-shadow:0 26px 72px rgba(38,28,10,.34);display:none;flex-direction:column;overflow:hidden;}
+  #dpanel.open,#gpanel.open{display:flex;}
+  /* gather list */
+  .gidea label{font:800 .66rem/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:6px;}
+  #g-idea{width:100%;border:1px solid var(--line2);border-radius:11px;padding:11px 13px;font:400 1rem/1.5 var(--serif);color:var(--ink);background:#fff;outline:none;resize:vertical;}
+  #g-idea:focus{border-color:var(--gold);}
+  .gcount{font-size:.82rem;color:var(--muted);margin:15px 0 11px;}
+  .grow{display:flex;gap:11px;align-items:flex-start;padding:11px 13px;border:1px solid var(--line);border-radius:11px;margin-bottom:8px;background:#fff;cursor:pointer;transition:.12s;}
+  .grow:hover{border-color:var(--line2);}
+  .grow input{margin-top:2px;width:16px;height:16px;accent-color:var(--gold);flex:0 0 auto;cursor:pointer;}
+  .grow-t{font:700 .92rem/1.35 var(--sans);color:var(--ink);}
+  .grow-src{font:700 .6rem/1 var(--sans);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:#f1ece1;border-radius:20px;padding:3px 7px;margin-left:5px;}
+  .grow-x{font:400 .86rem/1.5 var(--serif);color:var(--ink2);margin-top:4px;}
   .dhead{display:flex;align-items:center;gap:12px;padding:15px 22px;border-bottom:1px solid var(--line);background:#fbf8f2;}
   .dhead .dt{font:800 1.02rem/1.3 var(--sans);letter-spacing:-.01em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .fswitch{display:inline-flex;gap:3px;background:#efe9dd;border:1px solid var(--line2);border-radius:10px;padding:3px;}
@@ -204,11 +215,9 @@
       <div class="ideabar">
         <div class="ib-head"><span class="ib-ic">✍️</span><div><div class="ib-t">Have an idea already?</div><div class="ib-s">Type it and I'll pull your own thinking into a laid-out, fill-in plan.</div></div></div>
         <div class="ib-row">
-          <input id="idea-in" placeholder="e.g. why students plateau after grade 5, or how to actually practise slowly" onkeydown="if(event.key==='Enter')draftFromIdea('video')">
+          <input id="idea-in" placeholder="e.g. why students plateau after grade 5, or how to actually practise slowly" onkeydown="if(event.key==='Enter')gatherIdea()">
           <div class="ib-btns">
-            <button class="a-gold" onclick="draftFromIdea('video')">Video plan</button>
-            <button class="a-ghost" onclick="draftFromIdea('mmt')">MMT plan</button>
-            <button class="a-ghost" onclick="draftFromIdea('short')">Short</button>
+            <button class="a-gold" onclick="gatherIdea()">Find my material →</button>
           </div>
         </div>
       </div>
@@ -234,6 +243,27 @@
     <button class="a-gold" onclick="draftFromModal('video')">Video plan</button>
     <button class="a-ghost" onclick="draftFromModal('mmt')">MMT plan</button>
     <button class="a-ghost" onclick="draftFromModal('short')">Short</button>
+  </div>
+</div>
+
+<!-- gather: what you've already written on this idea (retrieval only, no AI) -->
+<div class="mbg" id="gbg" onclick="closeGather()"></div>
+<div id="gpanel">
+  <div class="dhead">
+    <div class="dt">What you've written on this</div>
+    <button class="mx" onclick="closeGather()">×</button>
+  </div>
+  <div class="dbody">
+    <div class="gidea"><label>Your idea</label><textarea id="g-idea" rows="2"></textarea></div>
+    <div class="gcount" id="g-count"></div>
+    <div id="g-list"></div>
+  </div>
+  <div class="dfoot" style="flex-wrap:wrap;">
+    <span class="lbl" style="font-size:.8rem;color:var(--muted);">Draft as:</span>
+    <button class="a-gold" onclick="draftFromGather('video')">Video plan</button>
+    <button class="a-ghost" onclick="draftFromGather('mmt')">MMT plan</button>
+    <button class="a-ghost" onclick="draftFromGather('short')">Short</button>
+    <button class="a-ghost" onclick="toggleAllGather()" style="margin-left:auto;">Tick / untick all</button>
   </div>
 </div>
 
@@ -435,15 +465,44 @@ function draftFromModal(mode){
     openDraft(t.label, seed, mode, (t.source_entries||[]).map(s=>({title:s.title,url:s.url,published_at:s.published_at})));
   }
 }
-function draftFromIdea(mode){
+// ── gather step: type an idea, see what you've written on it, tick what to keep ──
+let _gPassages=[],_gIdea="";
+function openGather(){$("gpanel").classList.add("open");$("gbg").classList.add("open");}
+function closeGather(){$("gpanel").classList.remove("open");$("gbg").classList.remove("open");}
+async function gatherIdea(){
   const v=$("idea-in").value.trim(); if(!v)return;
-  openDraft(v.length>54?v.slice(0,54)+"…":v, v, mode, []);
+  _gIdea=v; $("g-idea").value=v; $("g-count").textContent=""; $("g-list").innerHTML=`<div class="empty">Searching your corpus…</div>`;
+  openGather();
+  const{data,error}=await db.functions.invoke("corpus-ai",{body:{query:v,mode:"gather",provenance:"own"}});
+  if(error||(data&&data.error)){ $("g-list").innerHTML=`<div class="empty">Error: ${esc((error&&error.message)||(data&&data.error)||"failed")}</div>`; return; }
+  _gPassages=data.passages||[]; renderGather();
+}
+function renderGather(){
+  if(!_gPassages.length){ $("g-count").textContent=""; $("g-list").innerHTML=`<div class="empty">Nothing in your corpus matched this. You can still draft a plan from just your idea using the buttons below.</div>`; return; }
+  $("g-count").textContent=`${_gPassages.length} passages from your own words. Everything's ticked — untick anything off-topic, or untick all to draft purely from your idea.`;
+  $("g-list").innerHTML=_gPassages.map((p,i)=>`<label class="grow"><input type="checkbox" data-i="${i}" checked>
+    <div><div class="grow-t">${esc(p.title||SRC[p.source_type]||p.source_type||"(untitled)")}<span class="grow-src">${esc(SRC[p.source_type]||p.source_type||"")}</span></div>
+    <div class="grow-x">${esc((p.text||"").slice(0,240))}${(p.text||"").length>240?"…":""}</div></div></label>`).join("");
+}
+function toggleAllGather(){
+  const boxes=[...$("g-list").querySelectorAll("input[type=checkbox]")]; const any=boxes.some(b=>!b.checked);
+  boxes.forEach(b=>b.checked=any);
+}
+function selectedPassages(){
+  return [...$("g-list").querySelectorAll("input[type=checkbox]")].filter(b=>b.checked)
+    .map(b=>_gPassages[+b.dataset.i]).filter(Boolean)
+    .map(p=>({title:p.title,url:p.url,source_type:p.source_type,text:p.text,entry_id:p.entry_id,similarity:p.similarity}));
+}
+function draftFromGather(mode){
+  const idea=$("g-idea").value.trim()||_gIdea; if(!idea)return;
+  const sel=selectedPassages(); closeGather();
+  openDraft(idea.length>54?idea.slice(0,54)+"…":idea, idea, mode, sel.map(s=>({title:s.title,url:s.url})), sel);
 }
 
 // ── DRAFT workspace (the only AI; editable) ──
-let _seed="",_mode="video",_dsrc=[];
-function openDraft(title, seed, mode, srcs){
-  _seed=seed;_mode=mode;_dsrc=srcs||[];
+let _seed="",_mode="video",_dsrc=[],_selPassages=null;
+function openDraft(title, seed, mode, srcs, passages){
+  _seed=seed;_mode=mode;_dsrc=srcs||[]; _selPassages=Array.isArray(passages)?passages:null;
   $("d-title").textContent=title; syncSwitch();
   $("dpanel").classList.add("open");$("dbg").classList.add("open");
   runDraft();
@@ -455,7 +514,8 @@ function switchFormat(mode){ if(mode===_mode)return; _mode=mode; syncSwitch(); r
 async function runDraft(){
   $("d-sheet").innerHTML=`<div class="empty">Drafting your ${MLAB[_mode].toLowerCase()} from your own words… (a few seconds)</div>`;
   $("d-src").innerHTML="";
-  const{data,error}=await db.functions.invoke("corpus-ai",{body:{query:_seed,mode:_mode,provenance:"own"}});
+  const body={query:_seed,mode:_mode,provenance:"own"}; if(_selPassages)body.passages=_selPassages;
+  const{data,error}=await db.functions.invoke("corpus-ai",{body});
   if(error||(data&&data.error)){ $("d-sheet").innerHTML=`<div class="empty">Error: ${esc((error&&error.message)||(data&&data.error)||"failed")}</div>`; return; }
   renderResult(data);
 }
@@ -492,7 +552,8 @@ async function adjustDraft(){
   const inp=$("d-adjust"); const instruction=inp.value.trim(); if(!instruction)return;
   const current=$("d-sheet").innerText.trim(); if(!current)return;
   inp.disabled=true; const ph=inp.placeholder; inp.value=""; inp.placeholder="Adjusting…"; $("d-sheet").style.opacity=".45";
-  const{data,error}=await db.functions.invoke("corpus-ai",{body:{query:_seed,mode:"refine",context:current,instruction,provenance:"own"}});
+  const rbody={query:_seed,mode:"refine",context:current,instruction,provenance:"own"}; if(_selPassages)rbody.passages=_selPassages;
+  const{data,error}=await db.functions.invoke("corpus-ai",{body:rbody});
   $("d-sheet").style.opacity="1"; inp.disabled=false; inp.placeholder=ph;
   if(error||(data&&data.error)){ inp.placeholder="Couldn't adjust — try again."; return; }
   renderResult(data);

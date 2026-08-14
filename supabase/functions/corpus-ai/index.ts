@@ -137,21 +137,42 @@ Deno.serve(async (req) => {
   const provenance = body.provenance === "generated" ? "generated" : (body.provenance === null ? null : "own");
   const matchCount = Math.min(Math.max(Number(body.count) || 28, 6), 40);
   const wantPlan = PLAN_MODES.has(mode);
+  // passages the caller selected (from the gather step). An empty array means "draft from the idea alone".
+  const providedPassages: any[] | null = Array.isArray(body.passages) ? body.passages : null;
 
-  const retrieveText = mode === "refine" && instruction ? `${query} ${instruction}` : query;
-  let qvec: number[];
-  try { qvec = await embedQuery(retrieveText, openaiKey); } catch (e) { return jsonError(502, String(e)); }
+  async function matchChunks(text: string, count: number): Promise<any[]> {
+    const qvec = await embedQuery(text, openaiKey!);
+    const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_corpus_chunks`, {
+      method: "POST",
+      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "content-type": "application/json" },
+      body: JSON.stringify({ query_embedding: "[" + qvec.join(",") + "]", match_count: count, p_provenance: provenance }),
+    });
+    if (!rpc.ok) throw new Error("search failed: " + (await rpc.text()).slice(0, 200));
+    return await rpc.json();
+  }
 
-  const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_corpus_chunks`, {
-    method: "POST",
-    headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "content-type": "application/json" },
-    body: JSON.stringify({ query_embedding: "[" + qvec.join(",") + "]", match_count: matchCount, p_provenance: provenance }),
-  });
-  if (!rpc.ok) return jsonError(502, "search failed: " + (await rpc.text()).slice(0, 200));
-  const hits: any[] = await rpc.json();
-  if (!hits.length) return json({ plan: null, synthesis: "Nothing relevant found in your corpus for that. Try rephrasing.", sources: [], run_id: null, mode });
+  // GATHER: retrieval only (an embedding lookup, no Claude) — returns selectable passages
+  if (mode === "gather") {
+    let g: any[];
+    try { g = await matchChunks(query, Math.min(Math.max(Number(body.count) || 20, 6), 30)); } catch (e) { return jsonError(502, String(e)); }
+    const passages = g.map((h, i) => ({ idx: i, entry_id: h.entry_id, title: h.title, url: h.url, source_type: h.source_type, text: h.chunk_text, similarity: h.similarity }));
+    return json({ passages, mode: "gather" });
+  }
 
-  const passages = hits.map((h, i) => `[${i + 1}] (${h.source_type}${h.title ? " · " + h.title : ""})\n${h.chunk_text}`).join("\n\n");
+  // PLAN / REFINE / SYNTHESIS: use the passages the caller selected, else retrieve
+  let hits: any[] = [];
+  if (providedPassages) {
+    hits = providedPassages.map((p: any, i: number) => ({ chunk_text: String(p.text || ""), title: p.title ?? null, url: p.url ?? null, source_type: p.source_type || "", entry_id: p.entry_id ?? ("prov" + i), similarity: p.similarity ?? null }));
+  } else {
+    const retrieveText = mode === "refine" && instruction ? `${query} ${instruction}` : query;
+    try { hits = await matchChunks(retrieveText, matchCount); } catch (e) { return jsonError(502, String(e)); }
+  }
+  // Only bail when we had no selection to honour. An intentional empty selection drafts from the idea alone.
+  if (!hits.length && !providedPassages) return json({ plan: null, synthesis: "Nothing relevant found in your corpus for that. Try rephrasing.", sources: [], run_id: null, mode });
+
+  const passages = hits.length
+    ? hits.map((h, i) => `[${i + 1}] (${h.source_type}${h.title ? " · " + h.title : ""})\n${h.chunk_text}`).join("\n\n")
+    : "(No corpus passages selected. Build the plan from the idea itself; since nothing here is in his own prior words, put supporting concepts in each section's \"addition\" field so they read as suggested extras, and leave \"source\" null.)";
   const userMsg = mode === "refine"
     ? `CURRENT PLAN:\n${context}\n\nMY INSTRUCTION:\n${instruction}\n\nPASSAGES FROM MY CORPUS (for grounding any additions):\n\n${passages}`
     : `MY IDEA:\n${query}\n\nPASSAGES FROM MY CORPUS:\n\n${passages}`;
