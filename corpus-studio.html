@@ -574,8 +574,36 @@ async function runDraft(){
   renderResult(data);
 }
 const PAL=[["#6b4bb0","#efe6ff"],["#b8860b","#f7edd6"],["#3f7d42","#e2f0e2"],["#4a6a92","#e7eef7"],["#2f8f8a","#dcefee"]];
+// Rebuild a boxed plan from the saved text shape (for outlines saved before the structured plan existed).
+function synthToPlan(text){
+  if(!text) return null;
+  const plan={concept:"",hook:null,promise:null,sections:[],close:null}; let cur=null;
+  for(const raw of text.split(/\r?\n/)){
+    if(!raw.trim()) continue;
+    const indented=/^\s{2,}/.test(raw); const t=raw.trim(); let m;
+    if(!indented){
+      if(m=t.match(/^#\s+(.*)/)){ plan.concept=m[1].trim(); continue; }
+      if(m=t.match(/^HOOK:\s*(.*)/i)){ plan.hook=m[1].trim(); continue; }
+      if(m=t.match(/^PROMISE:\s*(.*)/i)){ plan.promise=m[1].trim(); continue; }
+      if(m=t.match(/^CLOSE:\s*(.*)/i)){ plan.close=m[1].trim(); continue; }
+      let label=null,heading=t; if(m=t.match(/^(.*?)\s+[—-]\s+(.*)$/)){ label=m[1].trim(); heading=m[2].trim(); }
+      cur={label,heading,framework:null,points:[],example:null,action:null,addition:null,source:null}; plan.sections.push(cur); continue;
+    }
+    if(!cur) continue;
+    if(m=t.match(/^Framework:\s*(.*)/i)) cur.framework=m[1].trim();
+    else if(m=t.match(/^Example:\s*(.*)/i)) cur.example=m[1].trim();
+    else if(m=t.match(/^Do this:\s*(.*)/i)) cur.action=m[1].trim();
+    else if(m=t.match(/^\*\s*Suggested extra[^:]*:\s*(.*)/i)) cur.addition=m[1].trim();
+    else if(m=t.match(/^\[Source:\s*(.*?)\]\s*$/i)) cur.source=m[1].trim();
+    else if(m=t.match(/^[•\-*]\s+(.*)/)) cur.points.push(m[1].trim());
+    else cur.points.push(t);
+  }
+  return (plan.sections.length||plan.concept)?plan:null;
+}
 function renderResult(data){
-  if(data.plan&&Array.isArray(data.plan.sections)) renderPlan(data.plan);
+  let plan=data.plan;
+  if((!plan||!Array.isArray(plan.sections)||!plan.sections.length) && data.synthesis){ const p=synthToPlan(data.synthesis); if(p&&p.sections.length) plan=p; }
+  if(plan&&Array.isArray(plan.sections)&&plan.sections.length) renderPlan(plan);
   else $("d-sheet").innerHTML=mdRender(data.synthesis||"");
   const src=(data.sources||_dsrc||[]).map(s=>s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title||SRC[s.source_type]||s.source_type||"source")}</a>`:esc(s.title||"")).filter(Boolean).join(" · ");
   $("d-src").innerHTML=src?`<b style="color:var(--ink2);">Built from your:</b> ${src}`:"";
