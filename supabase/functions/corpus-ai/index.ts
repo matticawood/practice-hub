@@ -74,6 +74,10 @@ ${COMMON}
 ${PLAN_SPEC}`,
 
   synthesis: `You are Matthew Cawood's research partner, mining HIS OWN past teaching to help him. Work ONLY from the PASSAGES. Produce, in clear markdown: what he's already said, his frameworks & language, and 3-5 fresh angles that build on his thinking. Cite inline like [Source: <title>].`,
+
+  discuss: `You are Matthew Cawood's sharp creative partner for developing a video / article idea — like a great producer and editor who knows his piano-teaching worldview inside out. This is a CONVERSATION, not a rewrite. Talk in short, direct lines.
+You have OPINIONS and you use them: say plainly what's strong, push back on what's weak, repetitive or drifting from the core thesis, and help him find the deeper, more scalable idea. Offer concrete titles, thumbnail lines, hooks, and structural moves (e.g. "make this a tighter three-act video"). Challenge him — never sycophantic, never just agree.
+Ground your thinking in HIS OWN prior teaching from the PASSAGES and stay true to how he actually thinks; don't invent claims he'd disagree with. Refer to the WORKING PLAN when relevant. Do NOT output a full rewritten plan or JSON — just talk it through. When he lands on something, reflect it back crisply in a line he could use. Keep replies tight (a few short lines), the way a smart collaborator texts.`,
 };
 
 const PLAN_MODES = new Set(["video", "mmt", "short", "refine"]);
@@ -177,6 +181,33 @@ Deno.serve(async (req) => {
     try { g = await matchChunks(query, Math.min(Math.max(Number(body.count) || 20, 6), 30)); } catch (e) { return jsonError(502, String(e)); }
     const passages = g.map((h, i) => ({ idx: i, entry_id: h.entry_id, title: h.title, url: h.url, source_type: h.source_type, text: h.chunk_text, similarity: h.similarity }));
     return json({ passages, mode: "gather" });
+  }
+
+  // DISCUSS: a conversational thinking partner grounded in his corpus + the working plan (no plan rewrite)
+  if (mode === "discuss") {
+    let dhits: any[] = [];
+    if (providedPassages) dhits = providedPassages;
+    else { try { dhits = await matchChunks(query, 16); } catch (e) { return jsonError(502, String(e)); } }
+    const psg = dhits.length
+      ? dhits.map((h: any, i: number) => `[${i + 1}] (${h.source_type || ""}${h.title ? " · " + h.title : ""})\n${h.chunk_text || h.text || ""}`).join("\n\n")
+      : "(none)";
+    const sys = `${SYSTEM.discuss}\n\nWORKING PLAN SO FAR:\n${context || "(nothing drafted yet — help him shape it)"}\n\nRELEVANT PASSAGES FROM HIS OWN CORPUS:\n${psg}`;
+    const msgs = (Array.isArray(body.messages) ? body.messages : [])
+      .filter((m: any) => m && m.role && m.content)
+      .map((m: any) => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content).slice(0, 6000) }));
+    if (!msgs.length) return json({ reply: "Tell me what you're thinking and I'll dig in.", mode: "discuss" });
+    let reply = "";
+    try {
+      const ar = await fetch(ANTHROPIC_URL, {
+        method: "POST",
+        headers: { "x-api-key": anthropicKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
+        body: JSON.stringify({ model: MODEL, max_tokens: 1200, system: sys, messages: msgs }),
+      });
+      if (!ar.ok) return jsonError(502, "Claude failed: " + (await ar.text()).slice(0, 200));
+      const d = await ar.json();
+      reply = (d.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+    } catch (e) { return jsonError(502, String(e)); }
+    return json({ reply, mode: "discuss" });
   }
 
   // PLAN / REFINE / SYNTHESIS: use the passages the caller selected, else retrieve

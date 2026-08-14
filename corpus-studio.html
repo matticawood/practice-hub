@@ -138,6 +138,13 @@
   .sheet li{font:400 1rem/1.68 var(--serif);color:var(--ink);margin-bottom:7px;}
   .sheet .src{font:600 .78em/1 var(--sans);color:var(--gold-ink);background:var(--gold-soft);border-radius:5px;padding:1px 6px;white-space:nowrap;}
   .dsrc{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);font-size:.79rem;color:var(--muted);}
+  .d-actions{display:flex;gap:9px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--line);}
+  .dd-head{font:800 .7rem/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:20px 0 12px;}
+  .dd-thread{display:flex;flex-direction:column;gap:10px;}
+  .dd-empty{font:400 .92rem/1.6 var(--serif);color:var(--muted);background:#faf7f0;border:1px dashed var(--line2);border-radius:12px;padding:14px 16px;}
+  .msg{max-width:86%;padding:11px 14px;border-radius:14px;font:400 .95rem/1.55 var(--serif);}
+  .msg.user{align-self:flex-end;background:var(--gold-soft);border:1px solid #eeddb0;color:var(--ink);border-bottom-right-radius:5px;}
+  .msg.ai{align-self:flex-start;background:#fff;border:1px solid var(--line);color:var(--ink);border-bottom-left-radius:5px;box-shadow:var(--shadow);}
   .dfoot{display:flex;gap:9px;align-items:center;padding:13px 22px;border-top:1px solid var(--line);background:#fbf8f2;}
   .dfoot input{flex:1;border:1px solid var(--line2);border-radius:10px;padding:10px 13px;font-size:.86rem;background:#fff;outline:none;}
   .dfoot input:focus{border-color:var(--gold);}
@@ -304,13 +311,17 @@
   <div class="dbody">
     <div id="d-sheet" class="sheet sheet-edit" contenteditable="true" spellcheck="false"></div>
     <div id="d-src" class="dsrc"></div>
+    <div class="d-actions">
+      <button class="a-ghost" onclick="copyDraft()">Copy</button>
+      <button class="a-ghost" onclick="downloadPDF()">Download PDF</button>
+      <button class="a-gold" id="d-apply" onclick="applyDiscussion()" style="margin-left:auto;">Fold discussion into plan</button>
+    </div>
+    <div class="dd-head">Discuss it out</div>
+    <div id="d-chat" class="dd-thread"></div>
   </div>
-  <div class="edit-note">This is yours to edit. Click in and type, or ask AI to adjust below.</div>
   <div class="dfoot">
-    <button class="a-gold" onclick="copyDraft()">Copy</button>
-    <button class="a-ghost" onclick="downloadPDF()">Download PDF</button>
-    <input id="d-adjust" placeholder="Ask AI to adjust — 'tighten the opening', 'add an analogy'…" onkeydown="if(event.key==='Enter')adjustDraft()">
-    <button class="a-ghost" onclick="adjustDraft()">Adjust</button>
+    <input id="d-msg" placeholder="Talk it through — push back, ask for sharper titles, rethink the structure…" onkeydown="if(event.key==='Enter')sendChat()">
+    <button class="a-gold" onclick="sendChat()">Send</button>
   </div>
 </div>
 
@@ -526,6 +537,7 @@ function draftFromGather(mode){
 let _seed="",_mode="video",_dsrc=[],_selPassages=null,_runId=null,_savedById={};
 function openDraft(title, seed, mode, srcs, passages){
   _seed=seed;_mode=mode;_dsrc=srcs||[]; _selPassages=Array.isArray(passages)?passages:null; _runId=null;
+  _chat=[]; renderChat();
   $("d-title").textContent=title; syncSwitch();
   $("dpanel").classList.add("open");$("dbg").classList.add("open");
   runDraft();
@@ -552,6 +564,7 @@ async function loadSaved(){
 function openSavedDraft(id){
   const r=_savedById[id]; if(!r)return; closeSaved();
   _seed=r.query||"";_mode=r.mode||"video";_dsrc=r.sources||[];_selPassages=null;_runId=r.id;
+  _chat=[]; renderChat();
   $("d-title").textContent=(r.plan&&r.plan.concept)||r.query||"Saved outline"; syncSwitch();
   $("dpanel").classList.add("open");$("dbg").classList.add("open");
   renderResult({plan:r.plan,synthesis:r.synthesis,sources:r.sources});
@@ -690,16 +703,38 @@ function copyDraft(){
   const txt=$("d-sheet").innerText.trim(); navigator.clipboard.writeText(txt);
   const b=event&&event.target; if(b){const o=b.textContent;b.textContent="Copied";setTimeout(()=>b.textContent=o,1200);}
 }
-async function adjustDraft(){
-  const inp=$("d-adjust"); const instruction=inp.value.trim(); if(!instruction)return;
+// ── discussion: talk it out with a partner that knows your corpus + the plan ──
+let _chat=[];
+function chatMd(t){ return esc(t).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").split(/\n/).map(l=>{const m=l.match(/^\s*[-•*]\s+(.*)/);return m?"• "+m[1]:l;}).join("<br>"); }
+function renderChat(){
+  const el=$("d-chat"); if(!el)return;
+  if(!_chat.length){ el.innerHTML=`<div class="dd-empty">Talk it through with me. I'll push back, suggest titles, and help you find the sharper version — grounded in your own material. Nothing here changes the boxes until you hit "Fold discussion into plan".</div>`; return; }
+  el.innerHTML=_chat.map(m=>`<div class="msg ${m.role==="assistant"?"ai":"user"}">${chatMd(m.content)}</div>`).join("");
+  el.scrollTop=el.scrollHeight;
+}
+async function sendChat(){
+  const inp=$("d-msg"); const text=inp.value.trim(); if(!text)return;
+  _chat.push({role:"user",content:text}); inp.value="";
+  _chat.push({role:"assistant",content:"…"}); renderChat();
+  const body={query:_seed,mode:"discuss",context:$("d-sheet").innerText.trim(),messages:_chat.filter(m=>m.content!=="…"),provenance:"own"};
+  if(_selPassages)body.passages=_selPassages;
+  const{data,error}=await db.functions.invoke("corpus-ai",{body});
+  _chat.pop();
+  if(error||(data&&data.error)){ _chat.push({role:"assistant",content:"(couldn't reply — try again)"}); renderChat(); return; }
+  _chat.push({role:"assistant",content:data.reply||""}); renderChat();
+}
+async function applyDiscussion(){
+  if(!_chat.length)return;
   const current=$("d-sheet").innerText.trim(); if(!current)return;
-  inp.disabled=true; const ph=inp.placeholder; inp.value=""; inp.placeholder="Adjusting…"; $("d-sheet").style.opacity=".45";
-  const rbody={query:_seed,mode:"refine",context:current,instruction,provenance:"own"}; if(_selPassages)rbody.passages=_selPassages; if(_runId)rbody.run_id=_runId;
+  const transcript=_chat.map(m=>(m.role==="assistant"?"PARTNER: ":"ME: ")+m.content).join("\n\n");
+  const btn=$("d-apply"); const ol=btn.textContent; btn.disabled=true; btn.textContent="Folding in…"; $("d-sheet").style.opacity=".45";
+  const rbody={query:_seed,mode:"refine",context:current,instruction:"Revise the plan to reflect this discussion. Keep what we agreed, cut what we rejected, and apply the sharper framings/titles we landed on:\n\n"+transcript,provenance:"own"};
+  if(_selPassages)rbody.passages=_selPassages; if(_runId)rbody.run_id=_runId;
   const{data,error}=await db.functions.invoke("corpus-ai",{body:rbody});
-  $("d-sheet").style.opacity="1"; inp.disabled=false; inp.placeholder=ph;
-  if(error||(data&&data.error)){ inp.placeholder="Couldn't adjust — try again."; return; }
-  _runId=data.run_id||_runId;
-  renderResult(data);
+  $("d-sheet").style.opacity="1"; btn.disabled=false; btn.textContent=ol;
+  if(error||(data&&data.error))return;
+  _runId=data.run_id||_runId; renderResult(data);
+  _chat.push({role:"assistant",content:"Done — I've folded that into the plan above."}); renderChat();
 }
 
 // ── markdown → reference sheet ──
