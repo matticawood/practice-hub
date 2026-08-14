@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return jsonError(400, "Invalid JSON body."); }
   const query = String(body.query || "").trim();
   if (!query) return jsonError(400, "query is required.");
-  const mode = SYSTEM[body.mode] ? body.mode : "video";
+  const mode = (body.mode === "gather" || SYSTEM[body.mode]) ? body.mode : "video";
   const context = String(body.context || "").trim();
   const instruction = String(body.instruction || "").trim();
   const provenance = body.provenance === "generated" ? "generated" : (body.provenance === null ? null : "own");
