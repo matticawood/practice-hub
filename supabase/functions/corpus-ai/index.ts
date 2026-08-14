@@ -201,7 +201,7 @@ Deno.serve(async (req) => {
       const ar = await fetch(ANTHROPIC_URL, {
         method: "POST",
         headers: { "x-api-key": anthropicKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1200, system: sys, messages: msgs }),
+        body: JSON.stringify({ model: MODEL, max_tokens: 1500, thinking: { type: "disabled" }, system: sys, messages: msgs }),
       });
       if (!ar.ok) return jsonError(502, "Claude failed: " + (await ar.text()).slice(0, 200));
       const d = await ar.json();
