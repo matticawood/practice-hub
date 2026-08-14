@@ -569,7 +569,7 @@ function openSaved(){ $("spanel").classList.add("open");$("sbg").classList.add("
 function closeSaved(){ $("spanel").classList.remove("open");$("sbg").classList.remove("open"); }
 async function loadSaved(){
   $("s-list").innerHTML=`<div class="empty">Loading…</div>`;
-  const{data,error}=await db.from("corpus_idea_runs").select("id,mode,query,plan,synthesis,sources,created_at").order("created_at",{ascending:false}).limit(100);
+  const{data,error}=await db.from("corpus_idea_runs").select("id,mode,query,plan,synthesis,sources,discussion,created_at").order("created_at",{ascending:false}).limit(100);
   if(error){ $("s-list").innerHTML=`<div class="empty">Couldn't load.</div>`; return; }
   const runs=(data||[]).filter(r=>["video","mmt","short"].includes(r.mode));
   if(!runs.length){ $("s-list").innerHTML=`<div class="empty">No saved outlines yet. Draft a video, MMT or short and it'll appear here.</div>`; return; }
@@ -586,7 +586,7 @@ async function loadSaved(){
 function openSavedDraft(id){
   const r=_savedById[id]; if(!r)return; closeSaved();
   _seed=r.query||"";_mode=r.mode||"video";_dsrc=r.sources||[];_selPassages=null;_runId=r.id;
-  _chat=[]; renderChat();
+  _chat=Array.isArray(r.discussion)?r.discussion:[]; renderChat();
   _versions=[];_vIdx=-1;
   $("d-title").textContent=(r.plan&&r.plan.concept)||r.query||"Saved outline"; syncSwitch();
   $("dpanel").classList.add("open");$("dbg").classList.add("open");
@@ -728,6 +728,7 @@ function copyDraft(){
 }
 // ── discussion: talk it out with a partner that knows your corpus + the plan ──
 let _chat=[];
+function saveDiscussion(){ if(_runId) db.from("corpus_idea_runs").update({discussion:_chat}).eq("id",_runId).then(null,()=>{}); }
 function chatMd(t){ return esc(t).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").split(/\n/).map(l=>{const m=l.match(/^\s*[-•*]\s+(.*)/);return m?"• "+m[1]:l;}).join("<br>"); }
 function renderChat(){
   const el=$("d-chat"); if(!el)return;
@@ -744,7 +745,7 @@ async function sendChat(){
   const{data,error}=await db.functions.invoke("corpus-ai",{body});
   _chat.pop();
   if(error||(data&&data.error)){ _chat.push({role:"assistant",content:"(couldn't reply — try again)"}); renderChat(); return; }
-  _chat.push({role:"assistant",content:data.reply||""}); renderChat();
+  _chat.push({role:"assistant",content:data.reply||""}); renderChat(); saveDiscussion();
 }
 async function applyDiscussion(){
   if(!_chat.length)return;
@@ -757,7 +758,7 @@ async function applyDiscussion(){
   $("d-sheet").style.opacity="1"; btn.disabled=false; btn.textContent=ol;
   if(error||(data&&data.error))return;
   _runId=data.run_id||_runId; commitVersion(data);
-  _chat.push({role:"assistant",content:"Done — I've folded that into the plan above. If you preferred the previous version, use the ‹ › version arrows to go back."}); renderChat();
+  _chat.push({role:"assistant",content:"Done — I've folded that into the plan above. If you preferred the previous version, use the ‹ › version arrows to go back."}); renderChat(); saveDiscussion();
 }
 
 // ── markdown → reference sheet ──
