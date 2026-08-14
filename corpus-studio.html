@@ -79,8 +79,11 @@
 
   <div class="cs-seg" id="mode-seg" style="margin-bottom:16px;">
     <button data-mode="ideas" class="on">Ideas</button>
+    <button data-mode="map">Map</button>
     <button data-mode="search">Keyword search</button>
   </div>
+
+  <div id="map-panel" style="display:none;"></div>
 
   <div id="ideas-panel">
     <textarea id="idea-q" rows="4" placeholder="Describe your idea — a title, a thumbnail line, or a rough concept — and I'll find your relevant past thinking and pull it into angles and frameworks. Or just describe a theme to dig for ideas." style="width:100%;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:inherit;font-size:.98rem;resize:vertical;font-family:inherit;"></textarea>
@@ -173,11 +176,55 @@ async function enter(){
 document.querySelectorAll("#mode-seg button").forEach(b => b.onclick = () => {
   document.querySelectorAll("#mode-seg button").forEach(x => x.classList.remove("on"));
   b.classList.add("on");
-  const ideas = b.dataset.mode === "ideas";
-  $("ideas-panel").style.display = ideas ? "" : "none";
-  $("search-panel").style.display = ideas ? "none" : "";
-  if (!ideas && !$("results").innerHTML) runSearch();
+  const m = b.dataset.mode;
+  $("ideas-panel").style.display  = m === "ideas"  ? "" : "none";
+  $("map-panel").style.display    = m === "map"    ? "" : "none";
+  $("search-panel").style.display = m === "search" ? "" : "none";
+  if (m === "search" && !$("results").innerHTML) runSearch();
+  if (m === "map" && !$("map-panel").dataset.loaded) loadMap();
 });
+
+// ── Map: the five standing lenses over your concept themes ──
+let _themesById = {};
+async function loadMap(){
+  $("map-panel").innerHTML = `<div class="cs-empty">Building your map…</div>`;
+  const { data: themes, error } = await db.from("corpus_themes").select("*");
+  if (error || !themes){ $("map-panel").innerHTML = `<div class="cs-empty">Couldn't load the map.</div>`; return; }
+  $("map-panel").dataset.loaded = "1";
+  _themesById = Object.fromEntries(themes.map(t => [t.id, t]));
+  const byOldest = themes.filter(t => t.size >= 3 && t.last_mentioned).sort((a,b)=> new Date(a.last_mentioned) - new Date(b.last_mentioned));
+  const sections = [
+    ["Signature themes", "The ideas you return to most — your core, repeated philosophy.", themes.filter(t=>t.size>=4).sort((a,b)=>b.size-a.size).slice(0,15)],
+    ["Scattered across your work", "The same idea spread across many different videos and articles.", themes.filter(t=>t.source_spread>=4).sort((a,b)=>b.source_spread-a.source_spread).slice(0,15)],
+    ["Gone quiet", "Recurring themes you haven't touched in a long time — worth resurfacing.", byOldest.slice(0,12)],
+    ["Underexposed gems", "High-quality takes you've made only a handful of times — better than their airtime.", themes.filter(t=>t.avg_quality>=4.4 && t.size<=6).sort((a,b)=>b.avg_quality-a.avg_quality).slice(0,12)],
+    ["Ripe to expand", "Strong, distinctive ideas that are underdeveloped — seeds for new content.", themes.filter(t=>t.avg_quality>=4.5 && t.size<=3).sort((a,b)=>b.avg_quality-a.avg_quality).slice(0,12)],
+  ];
+  $("map-panel").innerHTML = sections.map(renderSection).join("") || `<div class="cs-empty">No themes yet.</div>`;
+}
+function renderSection([title, desc, items]){
+  if (!items.length) return "";
+  return `<div style="margin-bottom:28px;">
+    <div style="font-size:1.05rem;font-weight:800;color:var(--text,#e8eaed);">${esc(title)}</div>
+    <div style="font-size:.8rem;color:var(--text-muted,#8a94a6);margin:2px 0 12px;">${esc(desc)}</div>
+    <div class="cs-results">${items.map(themeCard).join("")}</div></div>`;
+}
+function themeCard(t){
+  const last = t.last_mentioned ? new Date(t.last_mentioned).toLocaleDateString("en-GB",{month:"short",year:"numeric"}) : "";
+  return `<div class="cs-card">
+    <div class="cs-card-head"><span class="cs-title">${esc(t.label||"")}</span>
+      <span class="cs-meta">×${t.size} · ${t.source_spread} pieces${last?" · last "+last:""}</span></div>
+    <div class="cs-snip">${esc(t.summary||"")}</div>
+    <div class="cs-actions"><button class="cs-link" onclick="exploreTheme(${t.id})">Explore this idea →</button></div>
+  </div>`;
+}
+function exploreTheme(id){
+  const t = _themesById[id]; if (!t) return;
+  document.querySelector('#mode-seg button[data-mode="ideas"]').click();
+  $("idea-q").value = (t.label||"") + (t.summary ? "\n" + t.summary : "");
+  $("idea-q").scrollIntoView({behavior:"smooth", block:"center"});
+  findThinking();
+}
 
 // ── Ideas: retrieval + synthesis via corpus-ai ──
 function mdRender(t){
