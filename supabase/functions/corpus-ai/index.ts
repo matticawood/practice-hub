@@ -80,10 +80,23 @@ const PLAN_MODES = new Set(["video", "mmt", "short", "refine"]);
 
 function parsePlan(txt: string): any {
   if (!txt) return null;
-  let s = txt.trim().replace(/^```(?:json)?/i, "").replace(/```$/,"").trim();
-  const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a < 0 || b < 0) return null;
-  try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
+  let s = txt.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const a = s.indexOf("{");
+  if (a < 0) return null;
+  s = s.slice(a);
+  try { return JSON.parse(s); } catch { /* try to repair truncation */ }
+  // Walk back to the last complete object and close any open arrays/braces.
+  let cut = s.length;
+  while (cut > 0) {
+    cut = s.lastIndexOf("}", cut - 1);
+    if (cut < 0) break;
+    const frag = s.slice(0, cut + 1);
+    const opens = (frag.match(/{/g) || []).length, closes = (frag.match(/}/g) || []).length;
+    const bo = (frag.match(/\[/g) || []).length, bc = (frag.match(/\]/g) || []).length;
+    const cand = frag + "]".repeat(Math.max(0, bo - bc)) + "}".repeat(Math.max(0, opens - closes));
+    try { return JSON.parse(cand); } catch { /* keep walking back */ }
+  }
+  return null;
 }
 function planToText(p: any): string {
   if (!p) return "";
@@ -189,7 +202,7 @@ Deno.serve(async (req) => {
     const ar = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: { "x-api-key": anthropicKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 4000, system: SYSTEM[mode], messages: [{ role: "user", content: userMsg }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: 8000, system: SYSTEM[mode], messages: [{ role: "user", content: userMsg }] }),
     });
     if (!ar.ok) return jsonError(502, "Claude failed: " + (await ar.text()).slice(0, 200));
     const data = await ar.json();
