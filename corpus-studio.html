@@ -48,6 +48,50 @@
   .cs-modal-h .cs-title { font-size:1.05rem; }
   .cs-modal-body { padding:18px; overflow:auto; white-space:pre-wrap; line-height:1.65; font-size:.92rem; }
   .cs-x { background:none; border:none; color:var(--text-muted,#8a94a6); font-size:1.4rem; cursor:pointer; line-height:1; }
+
+  /* ── aesthetic overhaul ── */
+  body { background:
+      radial-gradient(1100px 520px at 50% -8%, rgba(245,197,24,.06), transparent 60%),
+      #0a0c10; }
+  .cs-wrap { max-width: 1000px; }
+  .cs-top h1 { letter-spacing:-.01em; }
+  .cs-seg { border-radius:11px; background:rgba(255,255,255,.03); padding:3px; gap:2px; border:1px solid rgba(255,255,255,.07); }
+  .cs-seg button { border-radius:8px; font-weight:600; transition:.15s; }
+  .cs-seg button.on { box-shadow:0 1px 0 rgba(0,0,0,.3); }
+
+  /* Map dashboard */
+  #map-panel { min-height: 60vh; }
+  .map-layout { display:grid; grid-template-columns: 236px 1fr; gap:26px; align-items:start; }
+  .lens-nav { display:flex; flex-direction:column; gap:7px; position:sticky; top:14px; }
+  .lens-btn { text-align:left; background:none; border:1px solid transparent; border-radius:13px; padding:12px 14px; cursor:pointer; color:var(--text-muted,#8a94a6); transition:.16s; }
+  .lens-btn:hover { background:rgba(255,255,255,.035); color:var(--text,#e9ecf1); }
+  .lens-btn.on { background:linear-gradient(180deg, rgba(245,197,24,.14), rgba(245,197,24,.05)); border-color:rgba(245,197,24,.32); color:#fff; }
+  .lens-btn .ln-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .lens-btn .ln-name { font-weight:700; font-size:.92rem; letter-spacing:-.005em; }
+  .lens-btn .ln-count { font-size:.72rem; font-weight:700; color:var(--text-muted,#8a94a6); background:rgba(255,255,255,.06); border-radius:20px; padding:2px 8px; }
+  .lens-btn.on .ln-count { color:#1a1400; background:#F5C518; }
+  .lens-btn .ln-desc { font-size:.72rem; line-height:1.45; margin-top:4px; opacity:.75; }
+  .lens-main .lm-head { margin-bottom:16px; }
+  .lens-main .lm-title { font-size:1.35rem; font-weight:800; letter-spacing:-.015em; color:#fff; }
+  .lens-main .lm-sub { font-size:.85rem; color:var(--text-muted,#8a94a6); margin-top:3px; line-height:1.5; }
+  .theme-card { position:relative; border:1px solid rgba(255,255,255,.09); border-radius:15px; padding:16px 18px 15px;
+    background:linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.012)); transition:.16s; margin-bottom:11px; }
+  .theme-card:hover { border-color:rgba(245,197,24,.35); transform:translateY(-1px); box-shadow:0 6px 22px rgba(0,0,0,.28); }
+  .tc-label { font-size:1.02rem; font-weight:700; color:#fff; letter-spacing:-.01em; line-height:1.3; padding-right:70px; }
+  .tc-rank { position:absolute; top:14px; right:16px; font-size:.72rem; font-weight:800; color:rgba(245,197,24,.55); font-variant-numeric:tabular-nums; }
+  .tc-sum { font-size:.87rem; line-height:1.55; color:var(--text-muted,#aab2c0); margin:7px 0 11px; }
+  .tc-foot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .tc-badge { font-size:.68rem; font-weight:600; color:var(--text-muted,#8a94a6); background:rgba(255,255,255,.055); border-radius:20px; padding:3px 9px; display:inline-flex; align-items:center; gap:4px; }
+  .tc-badge b { color:#e9ecf1; font-weight:700; }
+  .tc-explore { margin-left:auto; font-size:.78rem; font-weight:700; color:#F5C518; background:rgba(245,197,24,.1); border:1px solid rgba(245,197,24,.25); border-radius:9px; padding:6px 12px; cursor:pointer; transition:.15s; }
+  .tc-explore:hover { background:#F5C518; color:#1a1400; }
+  @media (max-width:720px){
+    .map-layout { grid-template-columns:1fr; gap:14px; }
+    .lens-nav { flex-direction:row; overflow-x:auto; position:static; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
+    .lens-btn { flex:0 0 auto; min-width:150px; }
+    .lens-btn .ln-desc { display:none; }
+    .tc-explore { margin-left:0; }
+  }
 </style>
 </head>
 <body>
@@ -184,8 +228,8 @@ document.querySelectorAll("#mode-seg button").forEach(b => b.onclick = () => {
   if (m === "map" && !$("map-panel").dataset.loaded) loadMap();
 });
 
-// ── Map: the five standing lenses over your concept themes ──
-let _themesById = {};
+// ── Map: a navigable dashboard of five lenses over your concept themes ──
+let _themesById = {}, _lenses = [], _lensIdx = 0, _showAll = false;
 async function loadMap(){
   $("map-panel").innerHTML = `<div class="cs-empty">Building your map…</div>`;
   const { data: themes, error } = await db.from("corpus_themes").select("*");
@@ -193,30 +237,45 @@ async function loadMap(){
   $("map-panel").dataset.loaded = "1";
   _themesById = Object.fromEntries(themes.map(t => [t.id, t]));
   const byOldest = themes.filter(t => t.size >= 3 && t.last_mentioned).sort((a,b)=> new Date(a.last_mentioned) - new Date(b.last_mentioned));
-  const sections = [
-    ["Signature themes", "The ideas you return to most — your core, repeated philosophy.", themes.filter(t=>t.size>=4).sort((a,b)=>b.size-a.size).slice(0,15)],
-    ["Scattered across your work", "The same idea spread across many different videos and articles.", themes.filter(t=>t.source_spread>=4).sort((a,b)=>b.source_spread-a.source_spread).slice(0,15)],
-    ["Gone quiet", "Recurring themes you haven't touched in a long time — worth resurfacing.", byOldest.slice(0,12)],
-    ["Underexposed gems", "High-quality takes you've made only a handful of times — better than their airtime.", themes.filter(t=>t.avg_quality>=4.4 && t.size<=12).sort((a,b)=>b.avg_quality-a.avg_quality).slice(0,12)],
-    ["Ripe to expand", "Your strongest, most distinctive ideas — seeds worth building new content on.", themes.filter(t=>t.avg_quality>=4.5).sort((a,b)=> (b.avg_quality-a.avg_quality) || (a.size-b.size)).slice(0,14)],
+  _lenses = [
+    { name:"Signature themes", desc:"The ideas you return to most — your core, repeated philosophy.", items: themes.filter(t=>t.size>=4).sort((a,b)=>b.size-a.size) },
+    { name:"Scattered", desc:"One idea spread across many different pieces.", items: themes.filter(t=>t.source_spread>=4).sort((a,b)=>b.source_spread-a.source_spread) },
+    { name:"Gone quiet", desc:"Recurring themes you haven't touched in a long time — worth resurfacing.", items: byOldest },
+    { name:"Underexposed gems", desc:"High-quality takes you've made only a handful of times — better than their airtime.", items: themes.filter(t=>t.avg_quality>=4.4 && t.size<=12).sort((a,b)=>b.avg_quality-a.avg_quality) },
+    { name:"Ripe to expand", desc:"Your strongest, most distinctive ideas — seeds for new content.", items: themes.filter(t=>t.avg_quality>=4.5).sort((a,b)=> (b.avg_quality-a.avg_quality) || (a.size-b.size)) },
   ];
-  $("map-panel").innerHTML = sections.map(renderSection).join("") || `<div class="cs-empty">No themes yet.</div>`;
+  $("map-panel").innerHTML = `<div class="map-layout"><nav class="lens-nav" id="lens-nav"></nav><div class="lens-main" id="lens-main"></div></div>`;
+  selectLens(0);
 }
-function renderSection([title, desc, items]){
-  if (!items.length) return "";
-  return `<div style="margin-bottom:28px;">
-    <div style="font-size:1.05rem;font-weight:800;color:var(--text,#e8eaed);">${esc(title)}</div>
-    <div style="font-size:.8rem;color:var(--text-muted,#8a94a6);margin:2px 0 12px;">${esc(desc)}</div>
-    <div class="cs-results">${items.map(themeCard).join("")}</div></div>`;
+function selectLens(i){
+  _lensIdx = i; _showAll = false;
+  $("lens-nav").innerHTML = _lenses.map((l,idx)=>`
+    <button class="lens-btn ${idx===_lensIdx?'on':''}" onclick="selectLens(${idx})">
+      <div class="ln-top"><span class="ln-name">${esc(l.name)}</span><span class="ln-count">${l.items.length}</span></div>
+      <div class="ln-desc">${esc(l.desc)}</div>
+    </button>`).join("");
+  renderLensMain();
 }
-function themeCard(t){
+function renderLensMain(){
+  const l = _lenses[_lensIdx];
+  const shown = _showAll ? l.items : l.items.slice(0,10);
+  const cards = shown.map((t,idx)=>themeCard(t, idx+1)).join("") || `<div class="cs-empty">Nothing here yet.</div>`;
+  const more = (!_showAll && l.items.length>10)
+    ? `<div style="text-align:center;margin-top:6px;"><button class="cs-link" onclick="_showAll=true;renderLensMain();">Show all ${l.items.length}</button></div>` : "";
+  $("lens-main").innerHTML = `<div class="lm-head"><div class="lm-title">${esc(l.name)}</div><div class="lm-sub">${esc(l.desc)}</div></div>${cards}${more}`;
+}
+function themeCard(t, rank){
   const last = t.last_mentioned ? new Date(t.last_mentioned).toLocaleDateString("en-GB",{month:"short",year:"numeric"}) : "";
-  return `<div class="cs-card">
-    <div class="cs-card-head"><span class="cs-title">${esc(t.label||"")}</span>
-      <span class="cs-meta">×${t.size} · ${t.source_spread} pieces${last?" · last "+last:""}</span></div>
-    <div class="cs-snip">${esc(t.summary||"")}</div>
-    <div class="cs-actions"><button class="cs-link" onclick="exploreTheme(${t.id})">Explore this idea →</button></div>
-  </div>`;
+  return `<div class="theme-card">
+    <div class="tc-rank">${rank}</div>
+    <div class="tc-label">${esc(t.label||"")}</div>
+    <div class="tc-sum">${esc(t.summary||"")}</div>
+    <div class="tc-foot">
+      <span class="tc-badge"><b>×${t.size}</b> mentions</span>
+      <span class="tc-badge"><b>${t.source_spread}</b> pieces</span>
+      ${last?`<span class="tc-badge">last <b>${last}</b></span>`:""}
+      <button class="tc-explore" onclick="exploreTheme(${t.id})">Explore →</button>
+    </div></div>`;
 }
 function exploreTheme(id){
   const t = _themesById[id]; if (!t) return;
