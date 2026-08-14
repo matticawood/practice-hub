@@ -139,6 +139,10 @@
   .sheet .src{font:600 .78em/1 var(--sans);color:var(--gold-ink);background:var(--gold-soft);border-radius:5px;padding:1px 6px;white-space:nowrap;}
   .dsrc{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);font-size:.79rem;color:var(--muted);}
   .d-actions{display:flex;gap:9px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--line);}
+  .d-ver{display:inline-flex;align-items:center;gap:3px;background:#f2ede2;border:1px solid var(--line2);border-radius:9px;padding:2px;}
+  .vbtn{background:none;border:none;color:var(--ink2);font:700 1.05rem/1 var(--sans);cursor:pointer;padding:4px 9px;border-radius:6px;}
+  .vbtn:hover:not(:disabled){color:var(--gold-ink);} .vbtn:disabled{opacity:.3;cursor:default;}
+  .vlbl{font:700 .72rem/1 var(--sans);color:var(--muted);min-width:36px;text-align:center;}
   .dd-head{font:800 .7rem/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:20px 0 12px;}
   .dd-thread{display:flex;flex-direction:column;gap:10px;}
   .dd-empty{font:400 .92rem/1.6 var(--serif);color:var(--muted);background:#faf7f0;border:1px dashed var(--line2);border-radius:12px;padding:14px 16px;}
@@ -314,6 +318,7 @@
     <div class="d-actions">
       <button class="a-ghost" onclick="copyDraft()">Copy</button>
       <button class="a-ghost" onclick="downloadPDF()">Download PDF</button>
+      <span class="d-ver" id="d-ver" style="display:none;"><button class="vbtn" id="d-prev" onclick="stepVersion(-1)" title="Previous version">‹</button><span class="vlbl" id="d-verlbl"></span><button class="vbtn" id="d-next" onclick="stepVersion(1)" title="Next version">›</button></span>
       <button class="a-gold" id="d-apply" onclick="applyDiscussion()" style="margin-left:auto;">Fold discussion into plan</button>
     </div>
     <div class="dd-head">Discuss it out</div>
@@ -535,8 +540,25 @@ function draftFromGather(mode){
 
 // ── DRAFT workspace (the only AI; editable) ──
 let _seed="",_mode="video",_dsrc=[],_selPassages=null,_runId=null,_savedById={};
+let _versions=[],_vIdx=-1;
+function updateVerUI(){
+  const w=$("d-ver"); if(!w)return;
+  if(_versions.length<=1){ w.style.display="none"; return; }
+  w.style.display="inline-flex";
+  $("d-verlbl").textContent=`v${_vIdx+1}/${_versions.length}`;
+  $("d-prev").disabled=_vIdx<=0; $("d-next").disabled=_vIdx>=_versions.length-1;
+}
+function commitVersion(data){
+  _versions=_versions.slice(0,_vIdx+1); _versions.push(data); _vIdx=_versions.length-1;
+  renderResult(data); updateVerUI();
+}
+function stepVersion(dir){
+  const n=_vIdx+dir; if(n<0||n>=_versions.length)return;
+  _vIdx=n; renderResult(_versions[_vIdx]); updateVerUI();
+}
 function openDraft(title, seed, mode, srcs, passages){
   _seed=seed;_mode=mode;_dsrc=srcs||[]; _selPassages=Array.isArray(passages)?passages:null; _runId=null;
+  _versions=[];_vIdx=-1; updateVerUI();
   _chat=[]; renderChat();
   $("d-title").textContent=title; syncSwitch();
   $("dpanel").classList.add("open");$("dbg").classList.add("open");
@@ -565,9 +587,10 @@ function openSavedDraft(id){
   const r=_savedById[id]; if(!r)return; closeSaved();
   _seed=r.query||"";_mode=r.mode||"video";_dsrc=r.sources||[];_selPassages=null;_runId=r.id;
   _chat=[]; renderChat();
+  _versions=[];_vIdx=-1;
   $("d-title").textContent=(r.plan&&r.plan.concept)||r.query||"Saved outline"; syncSwitch();
   $("dpanel").classList.add("open");$("dbg").classList.add("open");
-  renderResult({plan:r.plan,synthesis:r.synthesis,sources:r.sources});
+  commitVersion({plan:r.plan,synthesis:r.synthesis,sources:r.sources});
 }
 async function deleteSaved(id){
   await db.from("corpus_idea_runs").delete().eq("id",id);
@@ -584,7 +607,7 @@ async function runDraft(){
   const{data,error}=await db.functions.invoke("corpus-ai",{body});
   if(error||(data&&data.error)){ $("d-sheet").innerHTML=`<div class="empty">Error: ${esc((error&&error.message)||(data&&data.error)||"failed")}</div>`; return; }
   _runId=data.run_id||null;
-  renderResult(data);
+  commitVersion(data);
 }
 const PAL=[["#6b4bb0","#efe6ff"],["#b8860b","#f7edd6"],["#3f7d42","#e2f0e2"],["#4a6a92","#e7eef7"],["#2f8f8a","#dcefee"]];
 // Rebuild a boxed plan from the saved text shape (for outlines saved before the structured plan existed).
@@ -733,8 +756,8 @@ async function applyDiscussion(){
   const{data,error}=await db.functions.invoke("corpus-ai",{body:rbody});
   $("d-sheet").style.opacity="1"; btn.disabled=false; btn.textContent=ol;
   if(error||(data&&data.error))return;
-  _runId=data.run_id||_runId; renderResult(data);
-  _chat.push({role:"assistant",content:"Done — I've folded that into the plan above."}); renderChat();
+  _runId=data.run_id||_runId; commitVersion(data);
+  _chat.push({role:"assistant",content:"Done — I've folded that into the plan above. If you preferred the previous version, use the ‹ › version arrows to go back."}); renderChat();
 }
 
 // ── markdown → reference sheet ──
