@@ -60,6 +60,13 @@
     #ppd-index .ppd-progress-label{font-size:.8rem;color:var(--text-muted);font-weight:600;white-space:nowrap}
     #ppd-index .ppd-progress-label strong{color:var(--text)}
 
+    /* ── Tag filter (pieces library) ── */
+    .pl-tagfilter-row{display:flex;align-items:center;gap:8px;margin:0 0 10px;position:relative}
+    .pl-tagfilter-row input{flex:1;min-width:0;max-width:320px;background:var(--surface,#fff);border:1.5px solid var(--border,#e3e1e6);border-radius:10px;padding:9px 12px;font-size:.86rem;font-family:inherit;color:var(--text,#1a1410);transition:border-color .15s,box-shadow .15s}
+    .pl-tagfilter-row input::placeholder{color:var(--text-muted,#8a7868)}
+    .pl-tagfilter-row input:focus{outline:none;border-color:var(--accent,#f5c518);box-shadow:0 0 0 3px rgba(245,197,24,.18)}
+    #lib-tag-clear{background:none;border:none;color:var(--text-muted,#8a7868);font-size:1.2rem;line-height:1;cursor:pointer;padding:2px 6px;border-radius:6px}
+    #lib-tag-clear:hover{color:var(--text,#1a1410)}
     /* ── Category chips ── */
     #ppd-index .ppd-chips-row{background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;box-shadow:0 1px 2px rgba(60,40,20,.05);padding:12px 14px;margin:0 0 18px}
     #ppd-index .ppd-hero-chips{margin-top:16px;padding-top:15px;border-top:1px solid var(--border)}
@@ -1392,6 +1399,11 @@
       </div>
     </div>
     <div class="pl-chips-card" id="lib-diff-chips">
+      <div class="pl-tagfilter-row">
+        <input id="lib-tag" list="lib-tag-list" placeholder="Filter by tag&hellip;" autocomplete="off">
+        <datalist id="lib-tag-list"></datalist>
+        <button type="button" id="lib-tag-clear" title="Clear tag filter" style="display:none">&times;</button>
+      </div>
       <div class="pl-chips">
         <button type="button" class="pl-dchip active" data-diff="">All levels</button>
         <button type="button" class="pl-dchip" data-diff="0"><span class="pl-dchip-dot" style="background:#3f9aa8"></span>Starter</button>
@@ -1849,9 +1861,14 @@ function _libSortKey(t) { return _deburr((t || "").toLowerCase()).replace(/^[^a-
 function renderLibrary() {
   const query      = _deburr(document.getElementById("lib-search").value.trim().toLowerCase());
   const diffFilter = _libDiff;
+  const tagEl      = document.getElementById("lib-tag");
+  const tagFilter  = _deburr((tagEl ? tagEl.value : "").trim().toLowerCase());
+  const clearBtn   = document.getElementById("lib-tag-clear");
+  if (clearBtn) clearBtn.style.display = tagFilter ? "" : "none";
   const filtered   = libAllPieces.filter(function(p) {
     const text = _deburr([p.title, p.composer, p.background, p.pianist_notes, p.challenges].concat(p.tags || []).join(" ").toLowerCase());
-    return (!query || text.includes(query)) && (!diffFilter || String(p.difficulty) === diffFilter);
+    const tagOk = !tagFilter || (p.tags || []).some(function(t) { return _deburr(String(t).toLowerCase()).includes(tagFilter); });
+    return (!query || text.includes(query)) && (!diffFilter || String(p.difficulty) === diffFilter) && tagOk;
   });
   filtered.sort(function(a, b) { return _libSortKey(a.title).localeCompare(_libSortKey(b.title)); });
   const grid  = document.getElementById("lib-grid");
@@ -1878,10 +1895,34 @@ async function loadLibrary() {
   const all = (data || []).filter(function(p) { return p.status == null || p.status === "published"; });
   libAllPieces = all.filter(function(p) { return !p.kind || p.kind === "piece"; });
   libAllBooks  = all.filter(function(p) { return p.kind === "book"; });
+  _libPopulateTags();
   renderLibrary();
   renderBooksLibrary();
   _plUpdateCount();
   _plRenderLearning();
+}
+
+// Build the tag drop-down from the pieces themselves: dedupe case-insensitively
+// (keeping the most common casing) and order by how many pieces use each tag.
+function _libPopulateTags() {
+  const dl = document.getElementById("lib-tag-list");
+  if (!dl) return;
+  const counts = new Map();
+  libAllPieces.forEach(function(p) {
+    (p.tags || []).forEach(function(t) {
+      const raw = String(t).trim(); if (!raw) return;
+      const k = raw.toLowerCase();
+      const e = counts.get(k) || { disp: {}, n: 0 };
+      e.n++; e.disp[raw] = (e.disp[raw] || 0) + 1; counts.set(k, e);
+    });
+  });
+  const list = Array.from(counts.values()).map(function(e) {
+    const label = Object.keys(e.disp).sort(function(a, b) { return e.disp[b] - e.disp[a]; })[0];
+    return { label: label, n: e.n };
+  }).sort(function(a, b) { return b.n - a.n || a.label.localeCompare(b.label); });
+  dl.innerHTML = list.map(function(o) {
+    return '<option value="' + o.label.replace(/"/g, "&quot;") + '">' + o.n + " piece" + (o.n !== 1 ? "s" : "") + "</option>";
+  }).join("");
 }
 
 // "Continue learning" shelf — pieces in My Collection with status 'learning' (mirrors PPD continue-reading)
@@ -2097,6 +2138,10 @@ window.addEventListener("resize", _plSlideUnderline);
 function _libActiveSub() { const b = document.querySelector(".sub-tab[data-lib-sub].active"); return b ? b.dataset.libSub : "all"; }
 function _libRenderActive() { if (_libActiveSub() === "books") renderBooksLibrary(); else renderLibrary(); }
 document.getElementById("lib-search").addEventListener("input", _libRenderActive);
+document.getElementById("lib-tag").addEventListener("input", _libRenderActive);
+document.getElementById("lib-tag-clear").addEventListener("click", function() {
+  document.getElementById("lib-tag").value = ""; _libRenderActive();
+});
 document.getElementById("lib-diff-chips").addEventListener("click", function(e) {
   const b = e.target.closest(".pl-dchip");
   if (!b) return;
