@@ -114,6 +114,9 @@
         <option value="4">Advanced</option>
         <option value="5">Expert</option>
       </select>
+      <select id="filter-tag">
+        <option value="">All tags</option>
+      </select>
       <button class="btn btn-primary owner-only" id="add-btn" style="display:none">+ Add Piece</button>
       <button class="btn btn-ghost owner-only" id="enrich-btn" style="display:none" onclick="openBulkRegen()">⚡ Enrich library</button>
       <button class="btn btn-ghost" id="request-btn" onclick="openPieceRequestModal()">💡 Request a piece</button>
@@ -896,7 +899,19 @@ async function loadAndRender() {
   const { data, error } = await db.from("pieces").select("*").or("kind.is.null,kind.eq.piece").order("title");
   if (error) { console.error(error); return; }
   allPieces = data || [];
+  populateTagFilter();
   render();
+}
+
+function populateTagFilter() {
+  const sel = document.getElementById("filter-tag");
+  if (!sel) return;
+  const cur = sel.value;
+  const tags = [...new Set(allPieces.flatMap(p => (p.tags||[]).map(t => String(t).trim()).filter(Boolean)))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  sel.innerHTML = '<option value="">All tags</option>' +
+    tags.map(t => `<option value="${t.replace(/"/g, "&quot;")}">${t.replace(/&/g,"&amp;").replace(/</g, "&lt;")}</option>`).join("");
+  if (cur && tags.some(t => t === cur)) sel.value = cur;
 }
 
 async function loadAndRenderBooks() {
@@ -1312,9 +1327,11 @@ function renderCard(piece) {
 function render() {
   const query = document.getElementById("search").value.trim().toLowerCase();
   const diffFilter = document.getElementById("filter-difficulty").value;
+  const tagFilter = (document.getElementById("filter-tag")?.value || "").toLowerCase();
   const filtered = allPieces.filter(p => {
     const text = [p.title, p.composer, p.background, p.pianist_notes, p.challenges, ...(p.tags||[])].join(" ").toLowerCase();
-    return (!query || text.includes(query)) && (!diffFilter || String(p.difficulty) === diffFilter);
+    const tagOk = !tagFilter || (p.tags||[]).some(t => String(t).toLowerCase() === tagFilter);
+    return (!query || text.includes(query)) && (!diffFilter || String(p.difficulty) === diffFilter) && tagOk;
   });
   const grid = document.getElementById("pieces-grid");
   const meta = document.getElementById("results-meta");
@@ -1337,6 +1354,7 @@ function render() {
 
 document.getElementById("search").addEventListener("input", render);
 document.getElementById("filter-difficulty").addEventListener("change", render);
+document.getElementById("filter-tag").addEventListener("change", render);
 
 // ── Collection view ───────────────────────────────────────────
 let currentCollectionStatus = "learning";
