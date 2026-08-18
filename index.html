@@ -114,9 +114,9 @@
         <option value="4">Advanced</option>
         <option value="5">Expert</option>
       </select>
-      <select id="filter-tag">
-        <option value="">All tags</option>
-      </select>
+      <input id="filter-tag" list="tag-list" placeholder="Filter by tag…" autocomplete="off"
+             style="padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-size:0.9rem;outline:none;min-width:160px;">
+      <datalist id="tag-list"></datalist>
       <button class="btn btn-primary owner-only" id="add-btn" style="display:none">+ Add Piece</button>
       <button class="btn btn-ghost owner-only" id="enrich-btn" style="display:none" onclick="openBulkRegen()">⚡ Enrich library</button>
       <button class="btn btn-ghost" id="request-btn" onclick="openPieceRequestModal()">💡 Request a piece</button>
@@ -904,14 +904,20 @@ async function loadAndRender() {
 }
 
 function populateTagFilter() {
-  const sel = document.getElementById("filter-tag");
-  if (!sel) return;
-  const cur = sel.value;
-  const tags = [...new Set(allPieces.flatMap(p => (p.tags||[]).map(t => String(t).trim()).filter(Boolean)))]
-    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  sel.innerHTML = '<option value="">All tags</option>' +
-    tags.map(t => `<option value="${t.replace(/"/g, "&quot;")}">${t.replace(/&/g,"&amp;").replace(/</g, "&lt;")}</option>`).join("");
-  if (cur && tags.some(t => t === cur)) sel.value = cur;
+  const dl = document.getElementById("tag-list");
+  if (!dl) return;
+  const counts = new Map(); // lowercased -> { disp: {casing: n}, n }
+  allPieces.forEach(p => (p.tags || []).forEach(t => {
+    const raw = String(t).trim(); if (!raw) return;
+    const k = raw.toLowerCase();
+    const e = counts.get(k) || { disp: {}, n: 0 };
+    e.n++; e.disp[raw] = (e.disp[raw] || 0) + 1; counts.set(k, e);
+  }));
+  const list = [...counts.values()]
+    .map(e => ({ label: Object.entries(e.disp).sort((a, b) => b[1] - a[1])[0][0], n: e.n }))
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  dl.innerHTML = list.map(o =>
+    `<option value="${o.label.replace(/"/g, "&quot;")}">${o.n} piece${o.n !== 1 ? "s" : ""}</option>`).join("");
 }
 
 async function loadAndRenderBooks() {
@@ -1327,10 +1333,10 @@ function renderCard(piece) {
 function render() {
   const query = document.getElementById("search").value.trim().toLowerCase();
   const diffFilter = document.getElementById("filter-difficulty").value;
-  const tagFilter = (document.getElementById("filter-tag")?.value || "").toLowerCase();
+  const tagFilter = (document.getElementById("filter-tag")?.value || "").trim().toLowerCase();
   const filtered = allPieces.filter(p => {
     const text = [p.title, p.composer, p.background, p.pianist_notes, p.challenges, ...(p.tags||[])].join(" ").toLowerCase();
-    const tagOk = !tagFilter || (p.tags||[]).some(t => String(t).toLowerCase() === tagFilter);
+    const tagOk = !tagFilter || (p.tags||[]).some(t => String(t).toLowerCase().includes(tagFilter));
     return (!query || text.includes(query)) && (!diffFilter || String(p.difficulty) === diffFilter) && tagOk;
   });
   const grid = document.getElementById("pieces-grid");
@@ -1354,7 +1360,7 @@ function render() {
 
 document.getElementById("search").addEventListener("input", render);
 document.getElementById("filter-difficulty").addEventListener("change", render);
-document.getElementById("filter-tag").addEventListener("change", render);
+document.getElementById("filter-tag").addEventListener("input", render);
 
 // ── Collection view ───────────────────────────────────────────
 let currentCollectionStatus = "learning";
