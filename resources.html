@@ -82,6 +82,8 @@
     .pl-tagopt.sel { background:rgba(245,197,24,.16); color:#8a5a00; }
     .pl-tagopt span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .pl-tagopt-n { flex-shrink:0; font-size:.73rem; font-weight:700; color:var(--pl-muted,#a09585); }
+    .pl-taggroup { padding:9px 9px 5px; font-size:.66rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--pl-muted,#a09585); }
+    .pl-taggroup:first-child { padding-top:3px; }
     .pl-tagempty { padding:10px 9px; font-size:.8rem; color:var(--pl-muted,#a09585); }
     @media (max-width:640px){ .pl-tagpanel { right:8px; width:238px; } .pl-tagbtn { max-width:132px; } }
     /* ── Category chips ── */
@@ -1917,6 +1919,7 @@ async function loadLibrary() {
   const all = (data || []).filter(function(p) { return p.status == null || p.status === "published"; });
   libAllPieces = all.filter(function(p) { return !p.kind || p.kind === "piece"; });
   libAllBooks  = all.filter(function(p) { return p.kind === "book"; });
+  await _libLoadTagCategories();
   _libPopulateTags();
   renderLibrary();
   renderBooksLibrary();
@@ -1929,6 +1932,14 @@ async function loadLibrary() {
 // common casing) and ordered by how many pieces carry each tag.
 var _libTag = "";      // currently selected tag ("" = all)
 var _libTagList = [];  // [{ label, n }]
+
+var _libTagCat = {};   // tag -> "challenge" | "style"
+async function _libLoadTagCategories() {
+  try {
+    const { data } = await db.from("tag_categories").select("tag,category");
+    (data || []).forEach(function(r) { _libTagCat[r.tag] = r.category; });
+  } catch (e) { /* non-fatal: falls back to a single ungrouped list */ }
+}
 
 function _libPopulateTags() {
   const counts = new Map();
@@ -1954,11 +1965,22 @@ function _libRenderTagOptions() {
   const q = _deburr((qEl ? qEl.value : "").trim().toLowerCase());
   const shown = q ? _libTagList.filter(function(t) { return _deburr(t.label.toLowerCase()).includes(q); }) : _libTagList;
   let h = '<button type="button" class="pl-tagopt' + (_libTag ? '' : ' sel') + '" data-tag=""><span>All tags</span></button>';
-  h += shown.slice(0, 300).map(function(t) {
+  const opt = function(t) {
     return '<button type="button" class="pl-tagopt' + (t.label === _libTag ? ' sel' : '') + '" data-tag="' +
       t.label.replace(/"/g, "&quot;") + '"><span>' + escHtml(t.label) + '</span><span class="pl-tagopt-n">' + t.n + '</span></button>';
-  }).join("");
-  if (!shown.length) h += '<div class="pl-tagempty">No tags match.</div>';
+  };
+  const groups = [
+    { key: "challenge", label: "Techniques &amp; challenges" },
+    { key: "style",     label: "Genre &amp; style" }
+  ];
+  let placed = 0;
+  groups.forEach(function(g) {
+    const items = shown.filter(function(t) { return (_libTagCat[t.label] || "challenge") === g.key; });
+    if (!items.length) return;
+    placed += items.length;
+    h += '<div class="pl-taggroup">' + g.label + '</div>' + items.slice(0, 300).map(opt).join("");
+  });
+  if (!placed) h += '<div class="pl-tagempty">No tags match.</div>';
   list.innerHTML = h;
 }
 
