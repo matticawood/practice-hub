@@ -9222,7 +9222,7 @@
   + Log Practice
 </button>
 <!-- Live session in progress: reopens the log wizard. Hidden unless one is running. -->
-<button id="live-fab" style="display:none" onclick="openWizard()" title="Live session running">
+<button id="live-fab" style="display:none" onclick="liveReopen()" title="Live session running">
   <span class="wiz-live-dot"></span><span id="live-fab-time">0:00</span>
 </button>
 <!-- Dev-only floating toggle between the trail roadmap and the scenic map. Sits just
@@ -22237,6 +22237,9 @@ function _shRestoreAfterWizard() {
 
 // Close for real — clear the live state (used after Save Session / Save Draft).
 function _wizFinalize() {
+  // This path clears formItems, so a live session cannot outlive it — otherwise
+  // the flag stays set with nothing to return to.
+  if (typeof _liveEnd === "function" && _liveOn) _liveEnd();
   _wizReturnSlotToStore();
   document.getElementById("log-wizard-backdrop").classList.remove("open");
   // Clear the quick-practice leaf so it never lingers 'active' over the date
@@ -22739,16 +22742,16 @@ function _livePersist() {
     }));
   } catch (e) {}
 }
+// A live session's activities live in the wizard's in-memory formItems, which do
+// NOT survive a page load. Restoring only the timer would leave a session that
+// says it is running but has nothing to return to, and no way to start a new one.
+// So on load we always clear it: a reload ends the live session, predictably.
 function _liveRestore() {
-  try {
-    const st = JSON.parse(localStorage.getItem(LIVE_LS_KEY) || "null");
-    if (!st || !st.on) return;
-    if (Date.now() - (st.stamp || 0) > 12 * 3600 * 1000) { localStorage.removeItem(LIVE_LS_KEY); return; }
-    _liveOn = true; _liveItemStart = st.itemStart || null;
-    _livePausedAt = st.pausedAt || null; _livePausedMs = st.pausedMs || 0;
-    _liveBankedMs = st.bankedMs || 0;
-    _liveRenderBar(); _liveStartTick();
-  } catch (e) {}
+  try { localStorage.removeItem(LIVE_LS_KEY); } catch (e) {}
+  _liveOn = false; _liveItemStart = null; _livePausedAt = null;
+  _livePausedMs = 0; _liveBankedMs = 0;
+  _liveItemStopped = false; _liveLastItemMs = 0;
+  _liveRenderBar();
 }
 function _liveRenderBar() {
   const bar = document.getElementById("wiz-live-bar");
@@ -22871,10 +22874,13 @@ function wizStartLive() {
   if (viewingEmail !== myEmail) return;
   // Already running? Go back to it rather than starting a second session on top.
   if (_liveOn) {
-    _liveRenderBar();
-    if (_wizScreen !== "item" && formItems.length) _wizGoTo("item", formItems.length - 1, "forward");
-    showToast("You already have a live session running.", 3000);
-    return;
+    if (formItems.length) {                       // take them back to it
+      _liveRenderBar();
+      if (_wizScreen !== "item") _wizGoTo("item", formItems.length - 1, "forward");
+      showToast("You already have a live session running.", 3000);
+      return;
+    }
+    _liveEnd();                                   // nothing to return to — start clean
   }
   _liveOn = true; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
   _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
@@ -22933,6 +22939,15 @@ function _livePruneEmptyItems() {
     if (!named && !picked && typeof removeItem === "function") removeItem(fi.id);
   }
 }
+// Reopen a minimised live session exactly where it was left, rather than
+// openWizard()'s default of the date screen.
+function liveReopen() {
+  if (!_liveOn) { openWizard(); return; }
+  if (typeof _wizReopen === "function" && formItems.length) _wizReopen();
+  else openWizard();
+  _liveRenderBar();
+}
+window.liveReopen = liveReopen;
 window.liveBackToTypes = liveBackToTypes;
 window.wizStartLive = wizStartLive;
 window.livePauseToggle = livePauseToggle;
