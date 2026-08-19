@@ -23144,6 +23144,51 @@ function _liveAskBack(mins, inp) {
   wrap.querySelector("#live-ask-cancel").onclick = close;
   wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
 }
+// Take a removed activity's time back off the live session total, and stop its
+// clock if it happened to be the one running.
+function _liveForgetItem(id) {
+  if (!_liveOn) return;
+  const block = document.getElementById(`item-block-${id}`);
+  const inp = block && block.querySelector(".item-duration-input");
+  const mins = parseInt(inp && inp.value) || 0;
+  if (mins > 0) _liveBankedMs = Math.max(0, _liveBankedMs - mins * 60000);
+  const cur = formItems[_wizItemIdx];
+  if (cur && cur.id === id) {
+    _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
+    _liveItemStopped = false; _liveLastItemMs = 0;
+  }
+  _livePersist();
+  setTimeout(_liveRenderBar, 0);
+}
+
+// Drop any activity that was never actually filled in or timed, so a live
+// session can't leave empty rows in the review (e.g. one added then abandoned).
+function _livePruneEmptyItems() {
+  for (const fi of formItems.slice()) {
+    const block = document.getElementById(`item-block-${fi.id}`);
+    if (!block) continue;
+    const dur = parseInt(block.querySelector(".item-duration-input")?.value) || 0;
+    if (dur > 0) continue;                       // timed — keep it
+    // Generic: ANY filled field (piece search, label, notes) counts as content.
+    // Checking real inputs rather than named selectors avoids ever deleting an
+    // activity the member actually typed something into.
+    const named = Array.from(block.querySelectorAll("input, textarea"))
+      .filter(el => !el.classList.contains("item-duration-input"))
+      .some(el => (el.value || "").trim());
+    const picked = !!(fi.selectedPiece && fi.selectedPiece.title);
+    if (!named && !picked && typeof removeItem === "function") removeItem(fi.id);
+  }
+}
+
+// Reopen a minimised live session exactly where it was left, rather than
+// openWizard()'s default of the date screen.
+function liveReopen() {
+  if (!_liveOn) { openWizard(); return; }
+  if (typeof _wizReopen === "function" && formItems.length) _wizReopen();
+  else openWizard();
+  _liveRenderBar();
+}
+
 window.liveReopen = liveReopen;
 window.liveBackToTypes = liveBackToTypes;
 window.wizStartLive = wizStartLive;
