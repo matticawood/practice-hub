@@ -1471,6 +1471,8 @@
     .live-x:hover { color: #fff; }
     /* Live session, choosing an activity: the eight type squares are the only
        thing on screen. Everything else appears once one is picked. */
+    /* Live mode is linear, so the dots (which jump between activities) are hidden. */
+    #log-wizard-backdrop.live-mode #wiz-dots { display: none; }
     /* Step 1: nothing is chosen yet, so neutralise the pre-selected square.
        The active chip carries inline styles, hence !important here. */
     #log-wizard-backdrop.live-choosing #wiz-type-picker .wiz-type-chip.active {
@@ -22917,6 +22919,7 @@ function liveEndSession() {
 // Step 2 -> step 1: pick a different activity type for this item.
 function liveBackToTypes() {
   if (!_liveOn) return;
+  if (_liveItemStart != null) { showToast("Stop this activity first, then change it.", 3000, true); return; }
   _liveNeedsType = true;
   _liveRenderBar();
   _wizRenderTypePicker();
@@ -22957,13 +22960,19 @@ window.liveNextActivity = liveNextActivity;
 window.liveEndSession = liveEndSession;
 
 function _wizGoTo(newScreen, newItemIdx, dir) {
-  // Live session: leaving an activity banks its time; the next waits for Start.
+  // A live session is strictly linear: Start -> Stop -> Next activity, or End
+  // session. Nothing may navigate away from an activity while its clock is
+  // running — that is what let time land on the wrong activity, or left a clock
+  // running on an activity you had already moved away from.
   if (_liveOn) {
     const leavingItem = _wizScreen === 'item';
     const sameItem = leavingItem && newScreen === 'item' && newItemIdx === _wizItemIdx;
-    if (leavingItem && !sameItem) _liveCommitItem(_wizItemIdx);
-    // A fresh activity starts back on the type squares.
-    if (newScreen === 'item' && !sameItem) _liveNeedsType = true;
+    if (leavingItem && !sameItem && _liveItemStart != null) {
+      showToast("Stop this activity first, then move on.", 3000, true);
+      return;
+    }
+    // Moving to a NEW activity starts it back on the type squares.
+    if (newScreen === 'item' && !sameItem) { _liveNeedsType = true; _liveItemStopped = false; _liveLastItemMs = 0; }
     setTimeout(_liveRenderBar, 0);
   }
   const getEl = s => document.getElementById(
