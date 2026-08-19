@@ -18,6 +18,43 @@
 (function () {
   "use strict";
 
+  // Normalise a typed theory answer so a correct answer is not marked wrong over
+  // spelling-out, punctuation, articles, or British/American note names. Must still
+  // keep genuinely different answers apart (B vs Bb, half note vs half rest).
+  function lrNormAnswer(s) {
+    var t = String(s == null ? "" : s).toLowerCase();
+    t = t.replace(/[‘’]/g, "'").replace(/[–—]/g, "-");
+    t = t.replace(/½/g, " 1/2").replace(/¼/g, " 1/4").replace(/¾/g, " 3/4");
+    // accidental WORDS become symbols first, so a bare letter "b" is never read as a flat
+    t = t.replace(/\bdouble\s*sharps?\b/g, "♯♯").replace(/\bdouble\s*flats?\b/g, "♭♭");
+    t = t.replace(/\bsharps?\b/g, "♯").replace(/\bflats?\b/g, "♭");
+    t = t.replace(/\bnaturals?\b/g, "♮");
+    t = t.replace(/(\d)\s*\/\s*(\d)/g, "$1/$2");
+    t = t.replace(/[.\s]+$/g, "");                  // trailing full stop ("2." == "2")
+    t = t.replace(/(^|\D)\.(\D|$)/g, "$1 $2");     // but keep the point inside 1.5
+    t = t.replace(/\s*\+\s*/g, "+");               // "3 + 2 + 2" == "3+2+2"
+    t = t.replace(/[,;:!?"'()\[\]{}]/g, " ");
+    t = t.replace(/[-_]+/g, " ");
+    t = t.replace(/\b(?:a|an|the|is|are|it|its|of|to|be|you|your|and|plus|then|also|would|use|write|play)\b/g, " ");
+    t = t.replace(/\bnotes?\b/g, " ");
+    t = t.replace(/\bbeats?\b/g, " ");
+    t = t.replace(/\bdegrees?\b/g, " ");
+    var N = { one:"1",two:"2",three:"3",four:"4",five:"5",six:"6",seven:"7",eight:"8",nine:"9",ten:"10",eleven:"11",twelve:"12",
+              first:"1",second:"2",third:"3",fourth:"4",fifth:"5",sixth:"6",seventh:"7",eighth:"8",ninth:"9" };
+    t = t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/g, function (m) { return N[m]; });
+    t = t.replace(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth)\b/g, function (m) { return N[m]; });
+    t = t.replace(/\b(\d+)(?:st|nd|rd|th)\b/g, "$1");
+    var V = { semibreve:"whole", minim:"half", crotchet:"quarter", quaver:"8", semiquaver:"16", demisemiquaver:"32" };
+    t = t.replace(/\b(semibreve|minim|crotchet|quaver|semiquaver|demisemiquaver)\b/g, function (m) { return V[m]; });
+    t = t.replace(/\beighth\b/g, "8").replace(/\bsixteenth\b/g, "16").replace(/\bthirty\s*second\b/g, "32");
+    t = t.replace(/\s+/g, " ").trim();
+    t = t.replace(/([a-g])\s*♯♯/g, "$1##").replace(/([a-g])\s*♭♭/g, "$1DBLFLAT");
+    t = t.replace(/([a-g])\s*♯/g, "$1#").replace(/([a-g])\s*♭/g, "$1b");
+    t = t.replace(/♯/g, "#").replace(/♭/g, "b").replace(/♮/g, "");
+    t = t.replace(/DBLFLAT/g, "bb");
+    return t.replace(/\s+/g, " ").trim();
+  }
+
   function esc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -623,8 +660,7 @@
       const inp = qEl.querySelector(".lr-input");
       let accept = [];
       try { accept = JSON.parse(inp.dataset.accept || "[]"); } catch (e) {}
-      const norm = s => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
-      correct = accept.map(norm).includes(norm(inp.value));
+      correct = accept.map(lrNormAnswer).includes(lrNormAnswer(inp.value));
       inp.classList.add(correct ? "lr-correct" : "lr-wrong");
       inp.disabled = true;
     } else { correct = null; } // reflect
