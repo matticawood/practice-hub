@@ -1449,6 +1449,23 @@
       padding: 5px 11px; font: inherit; font-size: .76rem; font-weight: 700; cursor: pointer;
     }
     .wiz-live-pause:hover { border-color: var(--accent, #f5c518); color: var(--accent, #f5c518); }
+    /* A live session is visibly a different mode: black header + black end button. */
+    #log-wizard-backdrop.live-mode #wiz-header {
+      background: #1a1a1a; border-bottom-color: #2e2a24;
+    }
+    #log-wizard-backdrop.live-mode #wiz-title,
+    #log-wizard-backdrop.live-mode #wiz-subtitle { color: #fff; }
+    #log-wizard-backdrop.live-mode #wiz-subtitle { color: #9a9284; }
+    #log-wizard-backdrop.live-mode .wiz-header-icon-btn { color: #cfc7ba; }
+    #log-wizard-backdrop.live-mode .wiz-header-icon-btn:hover { background: #2a2620; }
+    #log-wizard-backdrop.live-mode .wiz-header-text-btn { color: #cfc7ba; border-color: #3a3630; }
+    #wiz-live-end-btn {
+      background: #1a1a1a; color: #fff; border: none; border-radius: 12px;
+      padding: 13px 20px; font-family: inherit; font-size: .9rem; font-weight: 800;
+      cursor: pointer; transition: opacity .15s, transform .1s;
+    }
+    #wiz-live-end-btn:hover { opacity: .9; }
+    #wiz-live-end-btn:active { transform: scale(.985); }
     /* Dashboard timer chip — only while a live session is actually running. */
     #live-fab {
       position: fixed; bottom: 28px; right: 200px; z-index: 110;
@@ -9373,9 +9390,10 @@
     <div id="wiz-live-bar" style="display:none">
       <span class="wiz-live-dot"></span>
       <span class="wiz-live-cur" id="wiz-live-cur">0:00</span>
-      <span class="wiz-live-sep">on this activity</span>
+      <span class="wiz-live-sep" id="wiz-live-sep">on this activity</span>
       <span class="wiz-live-total" id="wiz-live-total">0:00 total</span>
-      <button type="button" class="wiz-live-pause" id="wiz-live-pause" onclick="livePauseToggle()">Pause</button>
+      <button type="button" class="wiz-live-pause" id="wiz-live-start" onclick="liveStartActivity()">Start</button>
+      <button type="button" class="wiz-live-pause" id="wiz-live-pause" onclick="livePauseToggle()" style="display:none">Pause</button>
     </div>
 
     <!-- Unified bottom bar: dots + context actions -->
@@ -9385,6 +9403,7 @@
       <div id="wiz-item-actions" style="display:none">
         <button id="wiz-add-another-btn">+ Add Another Item</button>
         <button id="wiz-goto-review-btn">Review session →</button>
+        <button id="wiz-live-end-btn" type="button" onclick="liveEndSession()" style="display:none">End session</button>
         <button id="wiz-remove-item-btn">Remove this item</button>
       </div>
       <!-- Overview save action -->
@@ -22171,6 +22190,7 @@ function closeWizard() {
   document.getElementById("log-wizard-backdrop").classList.remove("open");
   document.body.style.overflow = "";
   _shRestoreAfterWizard();
+  _liveRenderBar();   // minimised while live -> show the dashboard chip
 }
 // Restore the presence view after the log wizard closes (minimize or finalize).
 function _shRestoreAfterWizard() {
@@ -22641,16 +22661,17 @@ function _wizRenderFooter() {
 
 // ── Wizard: screen transitions ─────────────────────────────────
 // ── Live session ──────────────────────────────────────────────────────────────
-// The log wizard, with a clock. Each item is timed while it is on screen, so the
-// duration is filled in for you instead of being remembered afterwards. Everything
-// else — the item screen, piece search, validation, saving — is the normal wizard.
-// Elapsed time comes from wall-clock stamps (never a tick counter), so a
-// backgrounded or throttled tab still reports the real time.
+// The log wizard with a clock. Each activity is timed while you work on it, so the
+// duration is filled in for you. Everything else — the item screen, the piece
+// search, validation, saving — is the normal wizard, visibly marked as live mode.
+// Times come from wall-clock stamps (never a tick counter), so a backgrounded or
+// throttled tab still reports the real elapsed time. Nothing starts on its own:
+// the clock runs only when you press Start.
 let _liveOn = false;
-let _liveSessionStart = null;   // ms
-let _liveItemStart = null;      // ms, for the item currently on screen
-let _livePausedAt = null;       // ms, while paused
-let _livePausedMs = 0;          // accumulated pause time for the current item
+let _liveItemStart = null;    // ms — null means the clock is not running
+let _livePausedAt = null;     // ms — set while paused
+let _livePausedMs = 0;        // pause time to exclude from the current activity
+let _liveBankedMs = 0;        // exact time already banked into finished activities
 let _liveTick = null;
 const LIVE_LS_KEY = "rm_live_session";
 
@@ -22664,16 +22685,17 @@ function _liveItemMs() {
   const end = _livePausedAt || Date.now();
   return Math.max(0, end - _liveItemStart - _livePausedMs);
 }
-function _liveSessionMs() {
-  if (!_liveOn || _liveSessionStart == null) return 0;
-  return Math.max(0, Date.now() - _liveSessionStart);
-}
+// Session total = banked time + the running activity. Deliberately NOT wall-clock
+// since the session began, so pausing pauses the total and time between activities
+// (or on the review screen) is never counted as practice.
+function _liveSessionMs() { return _liveBankedMs + _liveItemMs(); }
+
 function _livePersist() {
   try {
     if (!_liveOn) localStorage.removeItem(LIVE_LS_KEY);
     else localStorage.setItem(LIVE_LS_KEY, JSON.stringify({
-      on: true, sessionStart: _liveSessionStart, itemStart: _liveItemStart,
-      pausedAt: _livePausedAt, pausedMs: _livePausedMs
+      on: true, itemStart: _liveItemStart, pausedAt: _livePausedAt,
+      pausedMs: _livePausedMs, bankedMs: _liveBankedMs, stamp: Date.now()
     }));
   } catch (e) {}
 }
@@ -22681,41 +22703,46 @@ function _liveRestore() {
   try {
     const st = JSON.parse(localStorage.getItem(LIVE_LS_KEY) || "null");
     if (!st || !st.on) return;
-    // Left running overnight? That is a forgotten timer, not a practice session.
-    if (Date.now() - st.sessionStart > 12 * 3600 * 1000) { localStorage.removeItem(LIVE_LS_KEY); return; }
-    _liveOn = true; _liveSessionStart = st.sessionStart; _liveItemStart = st.itemStart;
+    if (Date.now() - (st.stamp || 0) > 12 * 3600 * 1000) { localStorage.removeItem(LIVE_LS_KEY); return; }
+    _liveOn = true; _liveItemStart = st.itemStart || null;
     _livePausedAt = st.pausedAt || null; _livePausedMs = st.pausedMs || 0;
+    _liveBankedMs = st.bankedMs || 0;
     _liveRenderBar(); _liveStartTick();
   } catch (e) {}
 }
 function _liveRenderBar() {
   const bar = document.getElementById("wiz-live-bar");
-  const fab = document.getElementById("live-fab");
+  const backdrop = document.getElementById("log-wizard-backdrop");
+  if (backdrop) backdrop.classList.toggle("live-mode", _liveOn);
+  const running = _liveOn && _liveItemStart != null;
   if (bar) {
     bar.style.display = _liveOn ? "flex" : "none";
     bar.classList.toggle("paused", !!_livePausedAt);
     if (_liveOn) {
       document.getElementById("wiz-live-cur").textContent = _liveFmt(_liveItemMs());
+      document.getElementById("wiz-live-sep").textContent = running ? "on this activity" : "not started";
       document.getElementById("wiz-live-total").textContent = _liveFmt(_liveSessionMs()) + " total";
+      document.getElementById("wiz-live-start").style.display = running ? "none" : "";
       const pb = document.getElementById("wiz-live-pause");
-      if (pb) pb.textContent = _livePausedAt ? "Resume" : "Pause";
+      pb.style.display = running ? "" : "none";
+      pb.textContent = _livePausedAt ? "Resume" : "Pause";
     }
   }
-  // The dashboard chip only exists while a session is running, and only for your own log.
+  const endBtn = document.getElementById("wiz-live-end-btn");
+  if (endBtn) endBtn.style.display = _liveOn ? "" : "none";
+  const fab = document.getElementById("live-fab");
   if (fab) {
-    const show = _liveOn && viewingEmail === myEmail &&
-                 !document.getElementById("log-wizard-backdrop").classList.contains("open");
+    const show = _liveOn && viewingEmail === myEmail && backdrop && !backdrop.classList.contains("open");
     fab.style.display = show ? "flex" : "none";
     if (show) document.getElementById("live-fab-time").textContent = _liveFmt(_liveSessionMs());
   }
   _liveSyncButtons();
 }
-// In live mode the item actions read as a running session rather than a form.
 function _liveSyncButtons() {
   const add = document.getElementById("wiz-add-another-btn");
   const rev = document.getElementById("wiz-goto-review-btn");
   if (add) add.textContent = _liveOn ? "Next activity" : "+ Add Another Item";
-  if (rev) rev.textContent = _liveOn ? "End & review →" : "Review session →";
+  if (rev) rev.style.display = _liveOn ? "none" : "";   // "End session" replaces it while live
 }
 function _liveStartTick() {
   if (_liveTick) clearInterval(_liveTick);
@@ -22723,51 +22750,82 @@ function _liveStartTick() {
 }
 function _liveStopTick() { if (_liveTick) { clearInterval(_liveTick); _liveTick = null; } }
 
-// Write the time spent on an item into its duration field, exactly as if it had
-// been typed — so validation, totals and saving all behave normally.
+// Bank the current activity's time into its duration field, as if typed, then stop
+// its clock so the same time can never be counted twice.
 function _liveCommitItem(idx) {
   if (!_liveOn || _liveItemStart == null) return;
+  const ms = _liveItemMs();
   const fi = formItems[idx];
-  if (!fi) return;
-  const block = document.getElementById(`item-block-${fi.id}`);
-  const inp = block && block.querySelector(".item-duration-input");
-  if (inp) {
-    const mins = Math.max(1, Math.round(_liveItemMs() / 60000));   // never log a 0-minute item
-    inp.value = String(mins);
-    inp.dispatchEvent(new Event("input", { bubbles: true }));
-    inp.dispatchEvent(new Event("change", { bubbles: true }));
+  if (fi) {
+    const block = document.getElementById(`item-block-${fi.id}`);
+    const inp = block && block.querySelector(".item-duration-input");
+    if (inp) {
+      inp.value = String(Math.max(1, Math.round(ms / 60000)));
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+    }
   }
+  _liveBankedMs += ms;
+  _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
   if (typeof updatePerItemTotal === "function") updatePerItemTotal();
   if (typeof _durSyncFooter === "function") _durSyncFooter();
+  _livePersist();
 }
-function _liveResetItemClock() {
+function liveStartActivity() {
+  if (!_liveOn) return;
   _liveItemStart = Date.now(); _livePausedAt = null; _livePausedMs = 0;
-  _livePersist(); _liveRenderBar();
+  _livePersist(); _liveRenderBar(); _liveStartTick();
 }
 function livePauseToggle() {
-  if (!_liveOn) return;
+  if (!_liveOn || _liveItemStart == null) return;
   if (_livePausedAt) { _livePausedMs += Date.now() - _livePausedAt; _livePausedAt = null; }
   else { _livePausedAt = Date.now(); }
   _livePersist(); _liveRenderBar();
 }
 function wizStartLive() {
   if (viewingEmail !== myEmail) return;
-  _liveOn = true;
-  _liveSessionStart = Date.now();
-  wizAddFirstItem();          // straight into the normal item screen
-  _liveResetItemClock();
-  _liveStartTick();
-  showToast("Live session started — the clock is running on this activity.", 3800);
+  _liveOn = true; _liveBankedMs = 0;
+  _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
+  wizAddFirstItem();
+  _livePersist(); _liveRenderBar(); _liveStartTick();
+  showToast("Live session — set up what you're playing, then press Start.", 4200);
 }
 function _liveEnd() {
-  _liveOn = false; _liveSessionStart = null; _liveItemStart = null;
-  _livePausedAt = null; _livePausedMs = 0;
+  _liveOn = false; _liveItemStart = null; _livePausedAt = null;
+  _livePausedMs = 0; _liveBankedMs = 0;
   _liveStopTick(); _livePersist(); _liveRenderBar();
+}
+// End session, from anywhere and at any time — including one started by accident
+// with nothing timed, which must always be escapable.
+function liveEndSession() {
+  if (!_liveOn) return;
+  if (_wizScreen === "item") _liveCommitItem(_wizItemIdx);
+  const timed = formItems.some(fi => {
+    const b = document.getElementById(`item-block-${fi.id}`);
+    const inp = b && b.querySelector(".item-duration-input");
+    return (parseInt(inp && inp.value) || 0) > 0;
+  });
+  if (!timed) {
+    if (!confirm("End the live session? Nothing was timed, so nothing will be logged.")) return;
+    _liveEnd(); _wizFinalize();
+    return;
+  }
+  _liveEnd();
+  _wizGoTo("overview", 0, "forward");
 }
 window.wizStartLive = wizStartLive;
 window.livePauseToggle = livePauseToggle;
+window.liveStartActivity = liveStartActivity;
+window.liveEndSession = liveEndSession;
 
 function _wizGoTo(newScreen, newItemIdx, dir) {
+  // Live session: leaving an activity banks its time; the next waits for Start.
+  if (_liveOn) {
+    const leavingItem = _wizScreen === 'item';
+    const sameItem = leavingItem && newScreen === 'item' && newItemIdx === _wizItemIdx;
+    if (leavingItem && !sameItem) _liveCommitItem(_wizItemIdx);
+    setTimeout(_liveRenderBar, 0);
+  }
   const getEl = s => document.getElementById(
     s === 'date' ? "wiz-screen-date" : s === 'item' ? "wiz-screen-item"
     : s === 'quick' ? "wiz-screen-quick" : "wiz-screen-overview"
@@ -24600,6 +24658,7 @@ async function saveSession() {
         .eq("email", myEmail);
     }
 
+    _liveEnd();       // the timed session has been saved
     _wizFinalize();   // session saved — clear the live entry (not a minimize)
     openShareModal(shareText, savedSessionId, { date: dateVal, durationMins, items: itemDataList, notes, streak: _saveStreak });
 
