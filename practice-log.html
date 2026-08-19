@@ -23066,13 +23066,56 @@ function liveEndSession() {
   _wizGoTo("overview", 0, "forward");
 }
 // Step 2 -> step 1: pick a different activity type for this item.
+// Step 2 -> step 1. If this activity has already been timed, going back has to be
+// an explicit choice: keep those minutes and just relabel what they were, or throw
+// them away. Silently carrying the time onto a different activity was wrong.
 function liveBackToTypes() {
   if (!_liveOn) return;
   if (_liveItemStart != null) { showToast("Stop this activity first, then change it.", 3000, true); return; }
+  const fi = formItems[_wizItemIdx];
+  const block = fi && document.getElementById(`item-block-${fi.id}`);
+  const inp = block && block.querySelector(".item-duration-input");
+  const mins = parseInt(inp && inp.value) || 0;
+  if (mins > 0) {
+    const keep = confirm(
+      "This activity already has " + mins + " minute" + (mins === 1 ? "" : "s") + " on the clock.\n\n" +
+      "OK — keep the " + mins + " minute" + (mins === 1 ? "" : "s") + " and just change what it was.\n" +
+      "Cancel — throw those minutes away and start this activity again."
+    );
+    if (!keep) {
+      // Discard: clear the duration AND take the time back off the session total.
+      if (inp) {
+        inp.value = "";
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      _liveBankedMs = Math.max(0, _liveBankedMs - (_liveLastItemMs || mins * 60000));
+      if (typeof updatePerItemTotal === "function") updatePerItemTotal();
+    }
+  }
+  _liveItemStopped = false; _liveLastItemMs = 0;
   _liveNeedsType = true;
+  _livePersist();
   _liveRenderBar();
   _wizRenderTypePicker();
 }
+// Take a removed activity's time back off the live session total, and stop its
+// clock if it happened to be the one running.
+function _liveForgetItem(id) {
+  if (!_liveOn) return;
+  const block = document.getElementById(`item-block-${id}`);
+  const inp = block && block.querySelector(".item-duration-input");
+  const mins = parseInt(inp && inp.value) || 0;
+  if (mins > 0) _liveBankedMs = Math.max(0, _liveBankedMs - mins * 60000);
+  const cur = formItems[_wizItemIdx];
+  if (cur && cur.id === id) {
+    _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
+    _liveItemStopped = false; _liveLastItemMs = 0;
+  }
+  _livePersist();
+  setTimeout(_liveRenderBar, 0);
+}
+
 // Drop any activity that was never actually filled in or timed, so a live
 // session can't leave empty rows in the review (e.g. one added then abandoned).
 function _livePruneEmptyItems() {
@@ -24620,6 +24663,10 @@ window.toggleTheoryRequestMode = toggleTheoryRequestMode;
 
 // ── Remove item ───────────────────────────────────────────────────
 function removeItem(id) {
+  // A live session tracks the total itself, so deleting an activity must take its
+  // minutes back off that total — otherwise the timer keeps counting time for
+  // something that no longer exists. Covers every removal route.
+  if (typeof _liveForgetItem === "function") _liveForgetItem(id);
   // If this item is currently in the wizard slot, move it back first
   if (_wizSlotId === id) {
     const block = document.getElementById(`item-block-${id}`);
