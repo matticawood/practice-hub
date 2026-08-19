@@ -2232,6 +2232,18 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // so the bell/search/nav are present to reveal (fixes intermittent missing
   // header that previously needed a refresh).
   try { _shBuildChrome(); } catch (e) {}
+  // _shBuildChrome bails WITHOUT building if #app-header has not been parsed yet
+  // (auth can resolve from cache before DOMContentLoaded). If that happened, the
+  // reveal code below would find no chat button, bell or avatar to unhide, and
+  // nothing would re-run it once the chrome finally built — leaving a header with
+  // only Search until a manual refresh. Defer the whole init until the DOM is ready.
+  if (!window.__shChromeBuilt) {
+    var _shPendingArgs = arguments[0];
+    document.addEventListener("DOMContentLoaded", function () {
+      try { window.initSharedHeader(_shPendingArgs); } catch (e) {}
+    }, { once: true });
+    return;
+  }
   window._shIsAdmin = isAdmin;
   // Wire the shared @mention engine (autocomplete + notifications) on every page.
   try { window.Mentions && window.Mentions._init(db, myEmail); } catch (e) {}
