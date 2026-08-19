@@ -1480,6 +1480,7 @@
        Done by re-pointing the theme variables INSIDE the live wizard only: the
        item screen, piece search, dropdowns and chips all read them, so they go
        dark without touching a single shared component or normal logging. */
+    #log-wizard-backdrop.live-mode { position: fixed; }
     #log-wizard-backdrop.live-mode {
       --surface: #242220;
       --surface-2: #2c2924;
@@ -1583,6 +1584,33 @@
       box-shadow: 0 6px 14px -6px rgba(0,0,0,.75);
       filter: brightness(1.12);
     }
+    /* The keep-or-discard choice when going back from a timed activity. Sits
+       inside the live window and matches it, rather than a browser confirm box. */
+    #live-ask-backdrop {
+      position: absolute; inset: 0; z-index: 40; display: flex;
+      align-items: center; justify-content: center; padding: 22px;
+      background: rgba(8,8,8,.72); backdrop-filter: blur(2px);
+      animation: liveAskIn .16s ease-out;
+    }
+    @keyframes liveAskIn { from { opacity: 0; } to { opacity: 1; } }
+    .live-ask {
+      width: 100%; max-width: 290px; background: #232120; border: 1px solid #3a3630;
+      border-radius: 16px; padding: 20px 18px 16px; text-align: center;
+      box-shadow: 0 20px 50px -14px rgba(0,0,0,.75);
+    }
+    .live-ask-time {
+      font-size: 2rem; font-weight: 800; letter-spacing: -.02em; line-height: 1;
+      color: var(--accent, #f5c518); font-variant-numeric: tabular-nums;
+    }
+    .live-ask-time span { font-size: .9rem; font-weight: 700; color: #a8a196; letter-spacing: 0; }
+    .live-ask-title { font-size: .88rem; font-weight: 700; color: #f2eee6; margin-top: 5px; }
+    .live-ask-body { font-size: .82rem; line-height: 1.5; color: #a8a196; margin: 9px 0 16px; }
+    .live-ask button { display: block; width: 100%; font: inherit; cursor: pointer; border-radius: 11px; }
+    .live-ask-keep { background: var(--accent, #f5c518); color: #1a1410; border: none; font-size: .88rem; font-weight: 800; padding: 12px; }
+    .live-ask-drop { background: none; border: 1px solid #4a3330; color: #e8837c; font-size: .84rem; font-weight: 700; padding: 11px; margin-top: 8px; }
+    .live-ask-drop:hover { background: rgba(192,70,63,.14); border-color: #6b3d38; }
+    .live-ask-cancel { background: none; border: none; color: #8a8378; font-size: .8rem; font-weight: 600; padding: 10px 0 2px; }
+    .live-ask-cancel:hover { color: #f2eee6; }
     /* COLOUR IDENTIFIES, WHITE INFORMS.
        Labels, headings and borders take the activity's colour so you can see at
        a glance what you are logging. Anything that is your actual content - what
@@ -23076,71 +23104,45 @@ function liveBackToTypes() {
   const block = fi && document.getElementById(`item-block-${fi.id}`);
   const inp = block && block.querySelector(".item-duration-input");
   const mins = parseInt(inp && inp.value) || 0;
-  if (mins > 0) {
-    const keep = confirm(
-      "This activity already has " + mins + " minute" + (mins === 1 ? "" : "s") + " on the clock.\n\n" +
-      "OK — keep the " + mins + " minute" + (mins === 1 ? "" : "s") + " and just change what it was.\n" +
-      "Cancel — throw those minutes away and start this activity again."
-    );
-    if (!keep) {
-      // Discard: clear the duration AND take the time back off the session total.
-      if (inp) {
-        inp.value = "";
-        inp.dispatchEvent(new Event("input", { bubbles: true }));
-        inp.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      _liveBankedMs = Math.max(0, _liveBankedMs - (_liveLastItemMs || mins * 60000));
-      if (typeof updatePerItemTotal === "function") updatePerItemTotal();
-    }
-  }
+  if (mins > 0) { _liveAskBack(mins, inp); return; }   // timed: ask first
+  _liveGoToTypes();
+}
+function _liveGoToTypes() {
   _liveItemStopped = false; _liveLastItemMs = 0;
   _liveNeedsType = true;
-  _livePersist();
-  _liveRenderBar();
-  _wizRenderTypePicker();
+  _livePersist(); _liveRenderBar(); _wizRenderTypePicker();
 }
-// Take a removed activity's time back off the live session total, and stop its
-// clock if it happened to be the one running.
-function _liveForgetItem(id) {
-  if (!_liveOn) return;
-  const block = document.getElementById(`item-block-${id}`);
-  const inp = block && block.querySelector(".item-duration-input");
-  const mins = parseInt(inp && inp.value) || 0;
-  if (mins > 0) _liveBankedMs = Math.max(0, _liveBankedMs - mins * 60000);
-  const cur = formItems[_wizItemIdx];
-  if (cur && cur.id === id) {
-    _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
-    _liveItemStopped = false; _liveLastItemMs = 0;
-  }
-  _livePersist();
-  setTimeout(_liveRenderBar, 0);
-}
-
-// Drop any activity that was never actually filled in or timed, so a live
-// session can't leave empty rows in the review (e.g. one added then abandoned).
-function _livePruneEmptyItems() {
-  for (const fi of formItems.slice()) {
-    const block = document.getElementById(`item-block-${fi.id}`);
-    if (!block) continue;
-    const dur = parseInt(block.querySelector(".item-duration-input")?.value) || 0;
-    if (dur > 0) continue;                       // timed — keep it
-    // Generic: ANY filled field (piece search, label, notes) counts as content.
-    // Checking real inputs rather than named selectors avoids ever deleting an
-    // activity the member actually typed something into.
-    const named = Array.from(block.querySelectorAll("input, textarea"))
-      .filter(el => !el.classList.contains("item-duration-input"))
-      .some(el => (el.value || "").trim());
-    const picked = !!(fi.selectedPiece && fi.selectedPiece.title);
-    if (!named && !picked && typeof removeItem === "function") removeItem(fi.id);
-  }
-}
-// Reopen a minimised live session exactly where it was left, rather than
-// openWizard()'s default of the date screen.
-function liveReopen() {
-  if (!_liveOn) { openWizard(); return; }
-  if (typeof _wizReopen === "function" && formItems.length) _wizReopen();
-  else openWizard();
-  _liveRenderBar();
+// In-window choice, styled for the live session — not a browser confirm box.
+function _liveAskBack(mins, inp) {
+  document.getElementById("live-ask-backdrop")?.remove();
+  const unit = mins === 1 ? "minute" : "minutes";
+  const wrap = document.createElement("div");
+  wrap.id = "live-ask-backdrop";
+  wrap.innerHTML =
+    `<div class="live-ask">
+      <div class="live-ask-time">${mins} <span>${unit}</span></div>
+      <div class="live-ask-title">already timed on this activity</div>
+      <p class="live-ask-body">Going back lets you change what this was. Do you want to keep the time you have already clocked?</p>
+      <button type="button" class="live-ask-keep" id="live-ask-keep">Keep the ${mins} ${unit}</button>
+      <button type="button" class="live-ask-drop" id="live-ask-drop">Discard and time it again</button>
+      <button type="button" class="live-ask-cancel" id="live-ask-cancel">Stay on this activity</button>
+    </div>`;
+  document.getElementById("log-wizard-backdrop").appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector("#live-ask-keep").onclick = () => { close(); _liveGoToTypes(); };
+  wrap.querySelector("#live-ask-drop").onclick = () => {
+    close();
+    if (inp) {
+      inp.value = "";
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    _liveBankedMs = Math.max(0, _liveBankedMs - (_liveLastItemMs || mins * 60000));
+    if (typeof updatePerItemTotal === "function") updatePerItemTotal();
+    _liveGoToTypes();
+  };
+  wrap.querySelector("#live-ask-cancel").onclick = close;
+  wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
 }
 window.liveReopen = liveReopen;
 window.liveBackToTypes = liveBackToTypes;
