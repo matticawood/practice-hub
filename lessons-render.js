@@ -501,7 +501,7 @@
       body = `<div class="lr-reflect"><textarea class="lr-input" rows="2" placeholder="Jot your thoughts (optional)"></textarea>
         <button type="button" class="lr-done">Mark done</button></div>`;
     }
-    return `<div class="lr-q" id="${id}" data-kind="${esc(q.kind)}">
+    return `<div class="lr-q" id="${id}" data-kind="${esc(q.kind)}" data-prompt="${esc(q.prompt || "")}" data-explain="${esc(q.explain || "")}">
       <div class="lr-q-prompt">${inline(q.prompt || "")}</div>
       ${body}
       ${q.explain ? `<div class="lr-q-explain" hidden>${inline(q.explain)}</div>` : ""}
@@ -660,15 +660,38 @@
       const inp = qEl.querySelector(".lr-input");
       let accept = [];
       try { accept = JSON.parse(inp.dataset.accept || "[]"); } catch (e) {}
-      correct = accept.map(lrNormAnswer).includes(lrNormAnswer(inp.value));
-      inp.classList.add(correct ? "lr-correct" : "lr-wrong");
+      const typed = inp.value;
+      correct = accept.map(lrNormAnswer).includes(lrNormAnswer(typed));
       inp.disabled = true;
+      // A list can never cover every correct phrasing, so when the local match
+      // fails we ask the grader before telling the student they are wrong.
+      if (!correct && typed.trim() && typeof lrGrader === "function") {
+        inp.classList.add("lr-checking");
+        return Promise.resolve(
+          lrGrader({ prompt: qEl.dataset.prompt || "", accept: accept,
+                     explain: qEl.dataset.explain || "", answer: typed })
+        ).catch(function () { return false; }).then(function (ok) {
+          inp.classList.remove("lr-checking");
+          inp.classList.add(ok ? "lr-correct" : "lr-wrong");
+          finishMark(qEl, ok);
+          return ok;
+        });
+      }
+      inp.classList.add(correct ? "lr-correct" : "lr-wrong");
     } else { correct = null; } // reflect
-    const ex = qEl.querySelector(".lr-q-explain");
-    if (ex) ex.hidden = false;
-    if (correct !== null) qEl.classList.add(correct ? "lr-q-correct" : "lr-q-wrong");
+    finishMark(qEl, correct);
     return correct;
   }
+
+  function finishMark(qEl, correct) {
+    const ex = qEl.querySelector(".lr-q-explain");
+    if (ex) ex.hidden = false;
+    if (correct !== null && correct !== undefined) qEl.classList.add(correct ? "lr-q-correct" : "lr-q-wrong");
+  }
+
+  // Optional semantic grader, supplied by the page (see LessonRender.setGrader).
+  // Given { prompt, accept, explain, answer } it resolves true/false.
+  var lrGrader = null;
 
   function init(root, opts) {
     opts = opts || {};
@@ -700,12 +723,14 @@
       if (start) start.addEventListener("click", () => { card.hidden = true; body.hidden = false; });
       if (submit) submit.addEventListener("click", () => {
         const qs = [...body.querySelectorAll(".lr-q")];
-        let score = 0, gradable = 0;
-        qs.forEach(q => { const r = markQuestion(q); if (r !== null) { gradable++; if (r) score++; } });
-        result.hidden = false;
-        result.innerHTML = `You scored <strong>${score} / ${gradable}</strong>.`;
         submit.disabled = true;
-        if (opts.onQuizScore) opts.onQuizScore(score, gradable);
+        Promise.all(qs.map(q => Promise.resolve(markQuestion(q)))).then(rs => {
+          let score = 0, gradable = 0;
+          rs.forEach(r => { if (r !== null && r !== undefined) { gradable++; if (r) score++; } });
+          result.hidden = false;
+          result.innerHTML = `You scored <strong>${score} / ${gradable}</strong>.`;
+          if (opts.onQuizScore) opts.onQuizScore(score, gradable);
+        });
       });
     });
     // task share hook (page supplies behaviour)
@@ -920,6 +945,7 @@
     .lr-input.lr-correct{border-color:#5fbf7e}.lr-input.lr-wrong{border-color:#d9534f}
     .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:.85rem;cursor:pointer}
     .lr-reflect{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+    .lr-input.lr-checking{border-color:var(--accent,#f5c518);background:rgba(245,197,24,.08);opacity:.75}
     .lr-q-explain{margin-top:10px;font-size:.86rem;color:var(--text-muted,#8a7868);border-top:1px dashed var(--border,#e3e1e6);padding-top:10px}
     .lr-quiz-card{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:18px;text-align:center;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
     .lr-quiz-sub{font-size:.82rem;color:var(--text-muted,#8a7868);margin:4px 0 12px}
@@ -932,6 +958,7 @@
   }
 
   window.LessonRender = {
+    setGrader: function (fn) { lrGrader = fn; },
     html(blocks) { injectStyles(); return `<div class="lr-body">${(blocks || []).map(renderBlock).join("")}</div>`; },
     init,
     injectStyles,
