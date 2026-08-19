@@ -1458,6 +1458,13 @@
     .live-total { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
     .live-x { background: none; border: none; color: #9a9284; font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 0 2px; }
     .live-x:hover { color: #fff; }
+    /* Live session, choosing an activity: the eight type squares are the only
+       thing on screen. Everything else appears once one is picked. */
+    #log-wizard-backdrop.live-choosing #wiz-recent-wrap,
+    #log-wizard-backdrop.live-choosing #wiz-item-slot,
+    #log-wizard-backdrop.live-choosing #wiz-dur-footer,
+    #log-wizard-backdrop.live-choosing #wiz-live-bar { display: none; }
+    #log-wizard-backdrop.live-choosing #wiz-type-picker { margin-top: 4px; }
     /* A live session is visibly a different mode: black header + black end button. */
     #wiz-live-end-btn {
       background: #1a1a1a; color: #fff; border: none; border-radius: 12px;
@@ -22679,6 +22686,7 @@ let _liveItemStart = null;    // ms — null means the clock is not running
 let _livePausedAt = null;     // ms — set while paused
 let _livePausedMs = 0;        // pause time to exclude from the current activity
 let _liveBankedMs = 0;        // exact time already banked into finished activities
+let _liveNeedsType = false;   // true until this activity's type square is picked
 let _liveTick = null;
 const LIVE_LS_KEY = "rm_live_session";
 
@@ -22720,7 +22728,11 @@ function _liveRestore() {
 function _liveRenderBar() {
   const bar = document.getElementById("wiz-live-bar");
   const backdrop = document.getElementById("log-wizard-backdrop");
-  if (backdrop) backdrop.classList.toggle("live-mode", _liveOn);
+  if (backdrop) {
+    backdrop.classList.toggle("live-mode", _liveOn);
+    // Until a type square is picked, it is the only thing on the screen.
+    backdrop.classList.toggle("live-choosing", _liveOn && _liveNeedsType);
+  }
   const running = _liveOn && _liveItemStart != null;
   if (bar) {
     bar.style.display = _liveOn ? "flex" : "none";
@@ -22795,6 +22807,7 @@ function wizStartLive() {
   if (viewingEmail !== myEmail) return;
   _liveOn = true; _liveBankedMs = 0;
   _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
+  _liveNeedsType = true;
   wizAddFirstItem();
   _livePersist(); _liveRenderBar(); _liveStartTick();
   showToast("Live session — set up what you're playing, then press Start.", 4200);
@@ -22833,6 +22846,8 @@ function _wizGoTo(newScreen, newItemIdx, dir) {
     const leavingItem = _wizScreen === 'item';
     const sameItem = leavingItem && newScreen === 'item' && newItemIdx === _wizItemIdx;
     if (leavingItem && !sameItem) _liveCommitItem(_wizItemIdx);
+    // A fresh activity starts back on the type squares.
+    if (newScreen === 'item' && !sameItem) _liveNeedsType = true;
     setTimeout(_liveRenderBar, 0);
   }
   const getEl = s => document.getElementById(
@@ -23147,7 +23162,10 @@ document.getElementById("wiz-structures-list").addEventListener("click", e => {
 // Type picker click
 document.getElementById("wiz-type-picker").addEventListener("click", e => {
   const chip = e.target.closest("[data-wiz-type]");
-  if (chip) _wizChangeType(chip.dataset.wizType);
+  if (!chip) return;
+  _wizChangeType(chip.dataset.wizType);
+  // Live session: the squares are the whole screen until one is picked.
+  if (_liveOn && _liveNeedsType) { _liveNeedsType = false; _liveRenderBar(); }
 });
 
 // Remove item button
