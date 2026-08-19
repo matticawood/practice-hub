@@ -22869,6 +22869,13 @@ function livePauseToggle() {
 }
 function wizStartLive() {
   if (viewingEmail !== myEmail) return;
+  // Already running? Go back to it rather than starting a second session on top.
+  if (_liveOn) {
+    _liveRenderBar();
+    if (_wizScreen !== "item" && formItems.length) _wizGoTo("item", formItems.length - 1, "forward");
+    showToast("You already have a live session running.", 3000);
+    return;
+  }
   _liveOn = true; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
   _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
   _liveNeedsType = true;
@@ -22886,6 +22893,7 @@ function _liveEnd() {
 function liveEndSession() {
   if (!_liveOn) return;
   if (_wizScreen === "item") _liveCommitItem(_wizItemIdx);
+  _livePruneEmptyItems();
   const timed = formItems.some(fi => {
     const b = document.getElementById(`item-block-${fi.id}`);
     const inp = b && b.querySelector(".item-duration-input");
@@ -22896,6 +22904,7 @@ function liveEndSession() {
     _liveEnd(); _wizFinalize();
     return;
   }
+  _livePruneEmptyItems();
   _liveEnd();
   _wizGoTo("overview", 0, "forward");
 }
@@ -22905,6 +22914,24 @@ function liveBackToTypes() {
   _liveNeedsType = true;
   _liveRenderBar();
   _wizRenderTypePicker();
+}
+// Drop any activity that was never actually filled in or timed, so a live
+// session can't leave empty rows in the review (e.g. one added then abandoned).
+function _livePruneEmptyItems() {
+  for (const fi of formItems.slice()) {
+    const block = document.getElementById(`item-block-${fi.id}`);
+    if (!block) continue;
+    const dur = parseInt(block.querySelector(".item-duration-input")?.value) || 0;
+    if (dur > 0) continue;                       // timed — keep it
+    // Generic: ANY filled field (piece search, label, notes) counts as content.
+    // Checking real inputs rather than named selectors avoids ever deleting an
+    // activity the member actually typed something into.
+    const named = Array.from(block.querySelectorAll("input, textarea"))
+      .filter(el => !el.classList.contains("item-duration-input"))
+      .some(el => (el.value || "").trim());
+    const picked = !!(fi.selectedPiece && fi.selectedPiece.title);
+    if (!named && !picked && typeof removeItem === "function") removeItem(fi.id);
+  }
 }
 window.liveBackToTypes = liveBackToTypes;
 window.wizStartLive = wizStartLive;
