@@ -23016,10 +23016,15 @@ function _wizItemIsBlank(fi) {
   if (fi.selectedPiece && fi.selectedPiece.title) return false;
   if (fi.selectedTechniques && fi.selectedTechniques.length) return false;
   if (fi.selectedTheorySheets && fi.selectedTheorySheets.length) return false;
-  // Any typed field at all counts as started.
-  return !Array.from(block.querySelectorAll("input, textarea"))
-    .filter(el => !el.classList.contains("item-duration-input"))
-    .some(el => (el.value || "").trim());
+  // Any field the member actually filled in. Value alone cannot judge this: a
+  // checkbox reports "on" whether or not it is ticked (which made every theory
+  // activity look started), and hidden inputs carry machinery like piece ids.
+  return !Array.from(block.querySelectorAll("input, textarea")).some(el => {
+    if (el.classList.contains("item-duration-input")) return false;
+    if (el.type === "checkbox" || el.type === "radio") return el.checked;
+    if (el.type === "hidden") return false;
+    return !!(el.value || "").trim();
+  });
 }
 
 function _wizSyncChoosing() {
@@ -23552,19 +23557,11 @@ function _liveForgetItem(id) {
 // Drop any activity that was never actually filled in or timed, so a live
 // session can't leave empty rows in the review (e.g. one added then abandoned).
 function _livePruneEmptyItems() {
+  // Same test the normal wizard uses to decide whether an activity has been
+  // started, so the two can never disagree about what counts as untouched.
   for (const fi of formItems.slice()) {
-    const block = document.getElementById(`item-block-${fi.id}`);
-    if (!block) continue;
-    const dur = parseInt(block.querySelector(".item-duration-input")?.value) || 0;
-    if (dur > 0) continue;                       // timed — keep it
-    // Generic: ANY filled field (piece search, label, notes) counts as content.
-    // Checking real inputs rather than named selectors avoids ever deleting an
-    // activity the member actually typed something into.
-    const named = Array.from(block.querySelectorAll("input, textarea"))
-      .filter(el => !el.classList.contains("item-duration-input"))
-      .some(el => (el.value || "").trim());
-    const picked = !!(fi.selectedPiece && fi.selectedPiece.title);
-    if (!named && !picked && typeof removeItem === "function") removeItem(fi.id);
+    if (!document.getElementById(`item-block-${fi.id}`)) continue;
+    if (_wizItemIsBlank(fi) && typeof removeItem === "function") removeItem(fi.id);
   }
 }
 
