@@ -482,6 +482,42 @@ await scenario("Saving: what reaches the database is what was entered", async ({
   eq("and nothing went wrong", dialogs.filter(d => /error/i.test(d.msg)).map(d => d.msg), []);
 });
 
+await scenario("Drafts: an activity you never started is not saved", async ({ win, t, writes }) => {
+  await openWizard(win);
+  click(win, "#wiz-add-first-btn"); await tick(win, 40);
+  await pickType(win, "improvisation");
+  setField(win, `#item-block-${t.formItems[0].id} textarea`, "Blues in F, left hand only");
+  await setDuration(win, t, 20);
+  click(win, "#wiz-add-another-btn"); await tick(win, 40);
+  eq("on a second activity", t.formItems.length, 2);
+  ok("still choosing what it was", t.needsType);
+  click(win, "#wiz-header-savedraft-btn"); await tick(win, 250);
+
+  const draft = writes.filter(w => w.table === "practice_session_drafts"
+    && (w.op === "insert" || w.op === "update")).pop();
+  ok("a draft was saved", !!draft);
+  eq("holding only the activity that was started", draft?.payload.items.length, 1);
+  eq("the right one", draft?.payload.items[0].item_type, "improvisation");
+  eq("with its time", draft?.payload.items[0].duration_minutes, 20);
+  ok("and no blank piece alongside it",
+     !(draft?.payload.items || []).some(i => i.item_type === "piece" && !i.duration_minutes));
+});
+
+await scenario("Drafts: autosave does not stash a blank one either", async ({ win, t, writes }) => {
+  await openWizard(win);
+  click(win, "#wiz-add-first-btn"); await tick(win, 40);
+  await pickType(win, "theory");
+  await setDuration(win, t, 30);
+  click(win, "#wiz-add-another-btn"); await tick(win, 60);
+  await tick(win, 1500);   // let the debounced autosave run from the squares
+  const draft = writes.filter(w => w.table === "practice_session_drafts"
+    && (w.op === "insert" || w.op === "update")).pop();
+  if (draft) {
+    eq("the autosaved draft holds one activity", draft.payload.items.length, 1);
+    eq("the started one", draft.payload.items[0].item_type, "theory");
+  } else ok("nothing was autosaved yet, which is also fine", true);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("failed: " + failures.join(" | "));
 process.exit(fail ? 1 : 0);
