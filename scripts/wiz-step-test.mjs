@@ -183,12 +183,16 @@ console.log("\n--- a live session is always logged to today ---");
 console.log("\n--- the one button on the squares ---");
 {
   const count = grab("_wizRealItemCount");
-  const runCount = (items, idx, blankIdx) => new Function("formItems", "_wizItemIdx", "_wizItemIsBlank",
-    count + "; return _wizRealItemCount();")(items, idx, fi => items.indexOf(fi) === blankIdx);
+  const runCount = (items, idx, blankIdx, screen = "item") =>
+    new Function("formItems", "_wizItemIdx", "_wizScreen", "_wizItemIsBlank",
+      count + "; return _wizRealItemCount();")(items, idx, screen, fi => items.indexOf(fi) === blankIdx);
   const three = [{ id: 1 }, { id: 2 }, { id: 3 }];
   eq("the untouched one is not counted", runCount(three, 2, 2), 2);
   eq("a filled current one is counted", runCount(three, 2, -1), 3);
   eq("first and only, untouched", runCount([{ id: 1 }], 0, 0), 0);
+  eq("a stale index on the date screen counts nothing out",
+     runCount(three, 2, 2, "date"), 3);
+  eq("nor on the review screen", runCount(three, 2, 2, "overview"), 3);
 
   const exit = grab("_wizChooseExit");
   eq("validates a filled activity before leaving", /_wizValidateCurrentItem\s*\(/.test(exit), true);
@@ -212,6 +216,39 @@ console.log("\n--- the sheet is readable in the light window too ---");
     const light = css.includes("#log-wizard-backdrop:not(.live-mode) " + sel);
     eq("light override for " + sel.replace(/[{,]/g, "").trim(), light, true);
   }
+}
+
+console.log("\n--- the dots only offer a review when there is one ---");
+{
+  const dots = grab("_wizRenderDots");
+  const run = (items, screen, idx, realCount) => {
+    let out = "";
+    new Function("document", "formItems", "_wizScreen", "_wizItemIdx", "_wizRealItemCount",
+      dots + "; _wizRenderDots();")
+      ({ getElementById: () => ({ set innerHTML(v) { out = v; } }) },
+       items, screen, idx, () => realCount);
+    // data-wiz-dot contains the same substring, so count the buttons themselves.
+    return (out.match(/class="wiz-dot/g) || []).length;
+  };
+  eq("first item, nothing chosen yet: date + that item", run([{ id: 1 }], "item", 0, 0), 2);
+  eq("first item, filled in: and a review", run([{ id: 1 }], "item", 0, 1), 3);
+  eq("second item being chosen: date, two items, review",
+     run([{ id: 1 }, { id: 2 }], "item", 1, 1), 4);
+  eq("date screen with nothing at all: one dot", run([], "date", 0, 0), 1);
+
+  const handler = html.slice(html.indexOf('document.getElementById("wiz-dots").addEventListener'));
+  eq("the review dot is guarded by the real count",
+     /_wizRealItemCount\(\) <= 0\) return;/.test(handler.slice(0, handler.indexOf("\n});"))), true);
+}
+
+console.log("\n--- black belongs to the live session alone ---");
+{
+  const css = html.slice(html.indexOf("<style"), html.lastIndexOf("</style>"));
+  const blackRule = css.split("\n").find(l => /#wiz-live-end-btn\s*[,{]/.test(l));
+  eq("End session is still the black one", /#wiz-live-end-btn/.test(blackRule || ""), true);
+  eq("the squares button is not", !/#wiz-choose-exit-btn/.test(blackRule || ""), true);
+  const yellow = css.split("\n").find(l => /#wiz-add-another-btn, #wiz-choose-exit-btn/.test(l));
+  eq("it shares the yellow primary instead", !!yellow, true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

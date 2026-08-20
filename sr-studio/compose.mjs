@@ -476,7 +476,13 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
   const barCell = b => {
     if (cadEndBars.has(b)) return (b === nbars - 1) ? [barU] : (nbeats >= 4 ? [barU / 2, barU / 2] : [barU]);   // a phrase end broadens (a breath) — bar-filling long note(s) in QUARTER units (barU), correct in compound too (6/8: one dotted minim, not a 2-beat minim). The FINAL bar is one held tonic — held-vs-buttoned decided below from momentum
     const pos = b - phraseStart(b), toCad = phraseEnd(b) - b;        // position after the phrase opening / distance to its cadence
-    const w = pos === 0 ? { germ: 8, variant: 2 }                    // STATE the basic idea
+    // A ONE-BEAT-bar metre (3/8, felt in one) has no within-bar structure for a repeated germ to articulate, so unity cannot
+    //   come from restating it — the phrase's rhythm must VARY bar to bar (the germ opens the idea, then the beat is varied).
+    //   Multi-beat metres keep sentence form's germ-repetition (each bar has shape). [P — the sentence-form logic under a one-beat bar]
+    const w = nbeats === 1
+      ? (pos === 0 ? { germ: 5, variant: 3, fresh: 1 }               // one-beat: state the idea, but already open to variation
+         : { variant: 5, fresh: 3, germ: 2 })                        //   then the interest is bar-to-bar variation of the single beat
+      : pos === 0 ? { germ: 8, variant: 2 }                          // STATE the basic idea
       : pos === 1 ? { germ: 6, variant: 4 }                          // REPEAT / sequence it — the rhythm rides along (unity)
       : toCad <= 1 ? { variant: 7, germ: 2 }                         // drive to the cadence: a developed (fragmented) unit
       : { germ: 3, variant: 6, fresh: 1 };                           // continuation: mostly develop, a rare contrasting idea

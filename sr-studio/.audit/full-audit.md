@@ -1,26 +1,30 @@
-# Audit loop — Cycle 25 (audit 3/8 AND 6/8 after all the compound changes — Matthew's check)
+# Audit loop — Cycle 26 (3/8 ENABLED and made good — it is required grade-4 content)
 
 ## RENDERED
-- 3/8 dance: scratchpad/c25_38_2.cropped.png — E minor, 3/8, Allegretto, dance, block.
-- 3/8 lively: scratchpad/c25_38_1.cropped.png — G minor, 3/8, Allegro, lively, block.
-- (6/8 already audited cycles 22-24: jig c24jig, barcarolle c24barc.)
+- 3/8 scherzo: scratchpad/c27_2.cropped.png — A minor, 3/8, Scherzando, block (post monotony-fix).
+- Also c27_1 (C major dance broken), c27_3 (Eb scherzo rootfifth); pre-fix c26_1..4 (all monotone).
 
 ## AUDIT
-Matthew asked whether pieces in BOTH 3/8 and 6/8 were audited after the compound changes (accompaniment three-quaver ripple,
-breath carve, anacrusis pickup). 6/8: YES (cycles 22-24, both hands, jig + barcarolle — clean/idiomatic). 3/8: I had NOT
-(my earlier 3/8 look predated those fixes, and 3/8 is filtered out of normal generation). Now audited:
+Matthew's correction: 3/8 is NOT low value — it is required grade-4 syllabus content ("in grade four these have to show
+up"). I had made the same checkbox lapse as 6/8 (declaring required content optional because the current output was thin).
+The thinness is a QUALITY problem to fix, not a reason to skip. So: enable 3/8 AND make it good.
 
-3/8 is still FILTERED from normal generation (0/3000 grade-4 pieces — correct, it was declined). Forcing it:
-  - VALID: 300/300. Durations RH {0.5, 0.25, 1, 1.5}, LH {0.5, 1.5} — NO 0.75 dotted-quavers. So the compound fixes
-    GENERALIZED to 3/8 (they are gated on beatLen>1, not 6/8-specific) — a good sign they were principled, not patches.
-  - c25_38_2 (dance, Allegretto): a passable fast one-in-a-bar dance — an active melody (quavers/semis, staccato) over a
-    block chord per bar. Cleaner than my earlier "thin" dismissal; reads acceptably.
-  - c25_38_1 (lively, Allegro): a MECHANICAL rising-scalar SEQUENCE — the same [crotchet + two semis] rhythm every bar, the
-    pitch marching up G-A-Bb-C-D-E-F#-G. Coherent (a sequence) but monotone — the one-beat-per-bar structure predisposes to
-    it. And LH is one chord per bar (sparse).
+STEP 1 — ENABLED: un-filtered 3/8, and added it to the fast characters whose feel it is (scherzo, dance, lively — a quick
+one-in-a-bar). Now 100% valid, drawn ~19% of grade 4, across those three characters (no more all-singing fallback).
+
+STEP 2 — the MONOTONY diagnosed and fixed. Measured: 86% of 3/8 pieces had <= 2 distinct bar-rhythms across the whole piece
+(rendered examples: the same crotchet-quaver or [1,0.25,0.25] every bar, a bare rising scale). CAUSE: a 3/8 bar is ONE
+dotted-crotchet beat, so sentence-form's "repeat the germ" makes IDENTICAL bars — in a one-beat metre a repeated germ has no
+within-bar structure to read as unity. FIX (compose.mjs barCell): for nbeats == 1, lean the bars to VARYING the beat
+(variant/fresh) rather than restating the germ, the germ still opening the idea; multi-beat metres keep their germ-repetition.
+VERIFIED: monotone 86% -> 27%, avg distinct bar-rhythms 3.2, 4/4 unaffected (0% monotone, 6.0 distinct), 100% valid.
+
+IN NOTATION (c27_2, scherzo 3/8): now VARIED bar-rhythms — held dotted crotchets, crotchet-quaver, three-quaver runs — with
+a G# leading tone, a playful scherzo character over block chords. Reads as a real, varied one-in-a-bar scherzo, not a
+mechanical scale. RIGHT. (LH is one chord/note per bar — structural to a one-beat bar, appropriate for a light fast metre.)
 
 ## VERDICT
-Cycle 25: 6/8 audited clean (prior). 3/8 NOW audited post-fixes: the compound fixes generalised to it (valid, no dotted-
-quaver artefacts), it stays FILTERED, and its quality is MIXED (a dance 3/8 is acceptable; a lively 3/8 is prone to
-mechanical one-beat-bar monotony). So 3/8 correctly remains DEFERRED — clean but low-value/niche. If Matthew wants it, the
-step is character coverage (fast characters) + judging the monotony; otherwise leave it filtered. No change made.
+Cycle 26: 3/8 is now ENABLED (required content, showing up with the right characters) and MADE GOOD (monotony 86% -> 27%,
+reads idiomatically). The right outcome: make required content appear AND be good, not decline it. NOTE: compound is now
+~40% of grade 4 (6/8 + 3/8) — both required, but watch whether it wants weighting toward simple. Remaining optional polish:
+richer compound accompaniment; the residual 27% 3/8 monotony could be pushed lower.

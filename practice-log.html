@@ -1695,14 +1695,16 @@
       border-radius: 13px; min-height: 0; min-width: 0; overflow: hidden;
     }
     #log-wizard-backdrop.choosing .wiz-type-chip svg { width: 20px; height: 20px; flex: 0 0 auto; }
-    /* A live session is visibly a different mode: black header + black end button. */
-    #wiz-live-end-btn, #wiz-choose-exit-btn {
+    /* Black is the live session's chrome — its header and its dashboard chip.
+       The End button starts black for a light body, but the .live-mode rule
+       above turns it yellow, because black would vanish against the dark one. */
+    #wiz-live-end-btn {
       background: #1a1a1a; color: #fff; border: none; border-radius: 12px;
       padding: 13px 20px; font-family: inherit; font-size: .9rem; font-weight: 800;
       cursor: pointer; transition: opacity .15s, transform .1s;
     }
-    #wiz-live-end-btn:hover, #wiz-choose-exit-btn:hover { opacity: .9; }
-    #wiz-live-end-btn:active, #wiz-choose-exit-btn:active { transform: scale(.985); }
+    #wiz-live-end-btn:hover { opacity: .9; }
+    #wiz-live-end-btn:active { transform: scale(.985); }
     /* Dashboard timer chip — only while a live session is actually running. */
     #live-fab {
       position: fixed; bottom: 28px; right: 28px; z-index: 110;
@@ -2017,7 +2019,9 @@
     #wiz-item-slot [data-field="notes"]:focus { outline: none; }
 
     /* Item action buttons */
-    #wiz-add-another-btn {
+    /* The squares button is a primary action like Add Another Item, and wears
+       the same yellow. Black is the live session's alone. */
+    #wiz-add-another-btn, #wiz-choose-exit-btn {
       background: linear-gradient(135deg, #f7cb33, #f0a500);
       color: #3a2a00;
       border: none;
@@ -2029,9 +2033,10 @@
       width: 100%;
       transition: opacity .15s, transform .1s, box-shadow .15s;
     }
-    body.hub-mode #wiz-add-another-btn { box-shadow: 0 4px 13px -6px rgba(240,165,0,.45); }
-    #wiz-add-another-btn:hover { opacity: .92; }
-    #wiz-add-another-btn:active { transform: scale(.985); }
+    body.hub-mode #wiz-add-another-btn,
+    body.hub-mode #wiz-choose-exit-btn { box-shadow: 0 4px 13px -6px rgba(240,165,0,.45); }
+    #wiz-add-another-btn:hover, #wiz-choose-exit-btn:hover { opacity: .92; }
+    #wiz-add-another-btn:active, #wiz-choose-exit-btn:active { transform: scale(.985); }
     #wiz-goto-review-btn {
       background: none;
       border: 1.5px solid var(--border,#333);
@@ -22941,9 +22946,13 @@ function _wizRenderDots() {
   const el = document.getElementById("wiz-dots");
   if (!el) return;
   if (_wizScreen === 'quick') { el.innerHTML = ""; return; } // quick is a side leaf, no step dots
-  // date + items + overview — but with no items there is nothing to review, so
-  // the second dot would jump to an empty review screen. Show just the one.
-  const total  = formItems.length ? 1 + formItems.length + 1 : 1;
+  // date + items + overview. The review dot only earns its place once something
+  // has really been added: an activity you are still choosing is not one yet, so
+  // sitting on the first empty item must not offer a third dot to an empty
+  // review screen.
+  const total  = formItems.length
+    ? 1 + formItems.length + (_wizRealItemCount() > 0 ? 1 : 0)
+    : 1;
   const active = _wizScreen === 'date' ? 0
                : _wizScreen === 'item' ? 1 + _wizItemIdx
                : total - 1;
@@ -22982,7 +22991,10 @@ function _wizSyncChoosing() {
 
 // How many activities actually exist, ignoring one that is still untouched.
 function _wizRealItemCount() {
-  return formItems.length - (_wizItemIsBlank(formItems[_wizItemIdx]) ? 1 : 0);
+  // Only the activity being looked at can still be untouched — leaving one
+  // discards it — and _wizItemIdx means nothing on the other screens.
+  const curBlank = _wizScreen === 'item' && _wizItemIsBlank(formItems[_wizItemIdx]);
+  return formItems.length - (curBlank ? 1 : 0);
 }
 
 // The single button on the squares. Reviewing what you already added, or
@@ -23962,7 +23974,7 @@ document.getElementById("wiz-dots").addEventListener("click", e => {
     const curDot = _wizScreen === 'date' ? 0 : _wizScreen === 'overview' ? formItems.length + 1 : _wizItemIdx + 1;
     _wizGoTo('item', idx, idx >= curDot ? 'forward' : 'backward');
   } else {
-    if (!formItems.length) return;                     // nothing to review yet
+    if (_wizRealItemCount() <= 0) return;              // nothing to review yet
     if (_wizDotBlocked()) return;
     if (_wizScreen !== 'overview') _wizGoTo('overview', 0, 'forward');
   }
