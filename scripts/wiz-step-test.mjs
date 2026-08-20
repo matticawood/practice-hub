@@ -298,11 +298,18 @@ console.log("\n--- the wizard header cannot squash its own buttons ---");
   const css = html.slice(html.indexOf("<style"), html.lastIndexOf("</style>"));
   const header = css.slice(css.indexOf("#wiz-header {"), css.indexOf("#wiz-header {") + 700);
   const cols = (header.match(/grid-template-columns:\s*([^;]+);/) || [])[1] || "";
-  eq("the sides are sized to their content", /^auto\s+minmax\(0,\s*1fr\)\s+auto$/.test(cols.trim()), true);
+  // Equal sides keep the title centred. That only works while both sides hold
+  // one icon button, which is why Save draft lives in the footer now.
+  eq("the sides are equal so the title sits centred",
+     /^1fr\s+minmax\(0,\s*auto\)\s+1fr$/.test(cols.trim()), true);
+  eq("nothing but icon buttons is left in the header",
+     !/id="wiz-header-savedraft-btn"[\s\S]{0,200}<\/div>\s*<div id="wiz-header-center"/.test(html), true);
   eq("and the title truncates rather than overlapping",
      /#wiz-title[^}]*text-overflow:\s*ellipsis/.test(css), true);
-  eq("with a narrow-screen trim so it rarely has to",
-     /@media \(max-width: 430px\)[\s\S]{0,220}wiz-header-text-btn/.test(css), true);
+  eq("Save draft sits with Review session instead",
+     /<div id="wiz-item-secondary">[\s\S]{0,220}wiz-header-savedraft-btn/.test(html), true);
+  eq("and follows what has been typed, not just screen changes",
+     /function _scheduleDraftSave\(\)[\s\S]{0,320}_updateDraftControls\(\)/.test(html), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
