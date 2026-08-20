@@ -3,7 +3,8 @@
 ## RENDERED
 - 6/8: scratchpad/aud68.cropped.png — A minor, 6/8, Moderato, gentle, alberti. (barU=3 quarters = two dotted-crotchet beats.)
 
-## AUDIT (bar by bar, both hands)
+## AUDIT
+Bar by bar, both hands.
 RH:
   b1: B3(dotted crotchet, finger 2, p, cresc-hairpin) C4(dotted crotchet). Two beats, one note each. ^2 -> ^3 of A minor. RIGHT.
   b2: A3(dc) B3(dc). ^1 -> ^2. Gentle stepwise. RIGHT.

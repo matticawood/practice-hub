@@ -1636,17 +1636,21 @@
        the same colours used for it everywhere else (stats bars, category
        breakdowns) - as a light tint, not a saturated block. Nothing is selected
        here, so the default type must not look any different from the rest. */
-    #log-wizard-backdrop.live-choosing #wiz-type-picker .wiz-type-chip.active {
+    #log-wizard-backdrop.choosing #wiz-type-picker .wiz-type-chip.active {
       border-width: 1.5px !important; box-shadow: none !important;
     }
     /* Step 2 (filling in the detail): the type squares are gone; use Back to change type. */
-    #log-wizard-backdrop.live-mode:not(.live-choosing) #wiz-type-picker { display: none; }
-    #log-wizard-backdrop.live-choosing #wiz-recent-wrap,
-    #log-wizard-backdrop.live-choosing #wiz-item-slot,
+    #log-wizard-backdrop:not(.choosing) #wiz-type-picker { display: none; }
+    #log-wizard-backdrop.choosing #wiz-recent-wrap,
+    #log-wizard-backdrop.choosing #wiz-item-slot,
+    #log-wizard-backdrop.choosing #wiz-dur-footer,
+    #log-wizard-backdrop.choosing #wiz-item-actions,
     #log-wizard-backdrop.live-mode #wiz-dur-footer { display: none; }
     /* Step 1 is the only thing on screen, so give the eight activities room:
-       two columns, four rows, filling the window rather than bunching at the top. */
-    #log-wizard-backdrop.live-choosing #wiz-item-scroll {
+       two columns, four rows, filling the window rather than bunching at the top.
+       Shared by normal logging and the live session — picking WHAT you did is
+       the same act either way; only what follows it differs. */
+    #log-wizard-backdrop.choosing #wiz-item-scroll {
       display: flex; flex-direction: column; padding: 14px;
       overflow: hidden; min-height: 0;
     }
@@ -1654,17 +1658,17 @@
        4 down, sized to fill the emptier live window. */
     /* Two columns by four rows, all sharing the available space exactly - the
        eight tiles always fit the window's width AND height, never scroll. */
-    #log-wizard-backdrop.live-choosing #wiz-type-picker {
+    #log-wizard-backdrop.choosing #wiz-type-picker {
       flex: 1; min-height: 0;
       grid-template-columns: repeat(2, 1fr);
       grid-template-rows: repeat(4, 1fr);
       gap: 10px; margin: 0; width: 100%; max-width: none;
     }
-    #log-wizard-backdrop.live-choosing .wiz-type-chip {
+    #log-wizard-backdrop.choosing .wiz-type-chip {
       justify-content: center; gap: 6px; padding: 6px; font-size: .78rem;
       border-radius: 13px; min-height: 0; min-width: 0; overflow: hidden;
     }
-    #log-wizard-backdrop.live-choosing .wiz-type-chip svg { width: 20px; height: 20px; flex: 0 0 auto; }
+    #log-wizard-backdrop.choosing .wiz-type-chip svg { width: 20px; height: 20px; flex: 0 0 auto; }
     /* A live session is visibly a different mode: black header + black end button. */
     #wiz-live-end-btn {
       background: #1a1a1a; color: #fff; border: none; border-radius: 12px;
@@ -22326,6 +22330,11 @@ function qaSaveCurrentAsTemplate() {
 
 // ── Log Practice Wizard ────────────────────────────────────────
 let _wizScreen       = 'date'; // 'date' | 'item' | 'overview'
+// Normal logging is a two-step item too: pick WHAT you practised, then fill in
+// the detail. True while the eight squares are the whole screen. The live
+// session keeps its own flag because its rules for leaving the squares differ
+// (a running clock has to be stopped first).
+let _wizNeedsType    = false;
 let _wizItemIdx      = 0;      // which item is shown when screen==='item'
 let _wizSlotId       = null;   // id of item currently moved into #wiz-item-slot
 let _wizSaving       = false;
@@ -22875,8 +22884,11 @@ function _wizUpdateHeader() {
     subEl.textContent   = "";
     backBtn.disabled    = true;
   } else if (_wizScreen === 'item') {
+    // On the squares the type is the question, not the answer, so naming it in
+    // the title would be wrong — nothing has been chosen yet.
+    const choosing = !_liveOn && _wizNeedsType;
     const typeLabel = TYPE_MAP[formItems[_wizItemIdx]?.type]?.label || "Practice Item";
-    titleEl.textContent = typeLabel;
+    titleEl.textContent = choosing ? "What did you practice?" : typeLabel;
     subEl.textContent   = `Item ${_wizItemIdx + 1} of ${formItems.length}`;
     backBtn.disabled    = false;
   } else if (_wizScreen === 'quick') {
@@ -22905,7 +22917,20 @@ function _wizRenderDots() {
   ).join("");
 }
 
+// Step 1 or step 2 of an item. Both modes share the look and differ only in
+// which flag says so; the live session additionally hides the duration footer
+// in both steps, because it is timing rather than typing.
+function _wizSyncChoosing() {
+  const bd = document.getElementById("log-wizard-backdrop");
+  if (!bd) return;
+  bd.classList.toggle("choosing",
+    _wizScreen === 'item' && (_liveOn ? _liveNeedsType : _wizNeedsType));
+}
+
 function _wizRenderFooter() {
+  // Every navigation path ends here, and which step we are on decides whether
+  // the item actions are shown at all.
+  _wizSyncChoosing();
   const itemActions = document.getElementById("wiz-item-actions");
   const saveActions = document.getElementById("wiz-save-actions");
   itemActions.style.display = _wizScreen === 'item'     ? "" : "none";
@@ -23510,6 +23535,7 @@ function _wizGoTo(newScreen, newItemIdx, dir) {
 
   _wizScreen = newScreen;
   if (newScreen === 'item') {
+    if (!_liveOn) _wizNeedsType = !formItems[newItemIdx]?.typeChosen;
     _wizShowItemInSlot(newItemIdx);
     _wizRenderRecentChips();
     // Same-screen item→item (e.g. "Add Another Item") gets no slide above, so
@@ -23699,6 +23725,13 @@ function wizDeleteStructure(index) {
 
 function wizHandleBack() {
   if (_wizScreen === 'item') {
+    // Step 2 -> step 1. The squares are part of this item, so Back changes what
+    // it was before it leaves the item altogether.
+    if (!_liveOn && !_wizNeedsType) {
+      _wizNeedsType = true;
+      _wizSyncChoosing(); _wizUpdateHeader(); _wizRenderFooter(); _wizRenderTypePicker();
+      return;
+    }
     if (_wizItemIdx > 0) _wizGoTo('item', _wizItemIdx - 1, 'backward');
     else _wizGoTo('date', 0, 'backward');
   } else if (_wizScreen === 'overview') {
@@ -23798,8 +23831,16 @@ document.getElementById("wiz-type-picker").addEventListener("click", e => {
   const chip = e.target.closest("[data-wiz-type]");
   if (!chip) return;
   _wizChangeType(chip.dataset.wizType);
-  // Live session: the squares are the whole screen until one is picked.
-  if (_liveOn && _liveNeedsType) { _liveNeedsType = false; _liveRenderBar(); _wizRenderTypePicker(); }
+  // The squares are the whole screen until one is picked; picking one is what
+  // moves you on to filling in the detail.
+  if (_liveOn) {
+    if (_liveNeedsType) { _liveNeedsType = false; _liveRenderBar(); _wizRenderTypePicker(); }
+  } else if (_wizNeedsType) {
+    const fi = formItems[_wizItemIdx];
+    if (fi) fi.typeChosen = true;
+    _wizNeedsType = false;
+    _wizSyncChoosing(); _wizUpdateHeader(); _wizRenderFooter(); _wizRenderTypePicker();
+  }
 });
 
 // Remove item button
@@ -23940,6 +23981,9 @@ function addItem(prefill = null) {
   const itemState = {
     id,
     type: defaultType,
+    // A prefill (draft, edit, quick-add) already knows what it was, so it goes
+    // straight to the detail. Anything else starts on the squares.
+    typeChosen: !!(prefill && prefill.item_type),
     selectedPiece: null,
     selectedTheorySheets: [],
     selectedTechniques: [],
