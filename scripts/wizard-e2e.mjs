@@ -518,6 +518,85 @@ await scenario("Drafts: autosave does not stash a blank one either", async ({ wi
   } else ok("nothing was autosaved yet, which is also fine", true);
 });
 
+// ===========================================================================
+// Switching between the two ways of logging, in both directions.
+await scenario("Switching: a live session started on top of activities entered by hand",
+  async ({ win, t }) => {
+    installClock(win);
+    await openWizard(win);
+    click(win, "#wiz-add-first-btn"); await tick(win, 40);
+    await pickType(win, "improvisation");
+    await setDuration(win, t, 40);
+    win.eval("wizHandleBack()"); await tick(win, 40);
+    win.eval("wizHandleBack()"); await tick(win, 40);
+    eq("back on the date screen", t.screen, "date");
+    eq("the hand-entered activity is still there", t.formItems.length, 1);
+
+    click(win, "#wiz-live-btn"); await tick(win, 80);
+    ok("the live session starts", t.liveOn);
+    eq("alongside what was already entered", t.formItems.length, 2);
+    await pickType(win, "theory");
+    click(win, "#wiz-live-start"); await tick(win, 20);
+    advance(win, 12 * MIN);
+    click(win, "#wiz-live-end-btn"); await tick(win, 80);
+    eq("ending goes to the review", t.screen, "overview");
+    eq("with both activities", t.formItems.length, 2);
+    const mins = t.formItems.map(fi =>
+      parseInt($(win, `#item-block-${fi.id}`).querySelector(".item-duration-input").value) || 0);
+    ok("the hand-entered forty minutes survived", mins.includes(40));
+    ok("and the timed twelve are there too", mins.includes(12));
+  });
+
+await scenario("Switching: a started activity is never thrown away by ending a live session",
+  async ({ win, t }) => {
+    installClock(win);
+    await openWizard(win);
+    click(win, "#wiz-add-first-btn"); await tick(win, 40);
+    await pickType(win, "piece");
+    setField(win, `#item-block-${t.formItems[0].id} input[id^="piece-search-"]`, "Chopin Nocturne");
+    win.eval("wizHandleBack()"); await tick(win, 40);
+    win.eval("wizHandleBack()"); await tick(win, 40);
+    click(win, "#wiz-live-btn"); await tick(win, 80);      // started by accident
+    click(win, "#wiz-live-end-btn"); await tick(win, 80);
+    ok("no 'nothing to log' claim, because there is something",
+       !$(win, "#live-ask-backdrop"));
+    eq("it goes to the review instead", t.screen, "overview");
+    ok("the typed piece is still there", t.formItems.length === 1);
+    ok("with its name", /Chopin/.test($(win, `#item-block-${t.formItems[0].id}`)?.textContent
+      + [...$(win, `#item-block-${t.formItems[0].id}`).querySelectorAll("input")].map(e => e.value).join(" ")));
+    ok("the live session is over", !t.liveOn);
+  });
+
+await scenario("Switching: genuinely empty still asks before closing", async ({ win, t }) => {
+  installClock(win);
+  await openWizard(win);
+  click(win, "#wiz-live-btn"); await tick(win, 80);
+  click(win, "#wiz-live-end-btn"); await tick(win, 60);
+  ok("the sheet appears when there really is nothing", !!$(win, "#live-ask-backdrop"));
+  click(win, "#live-ask-end"); await tick(win, 80);
+  ok("and closing leaves nothing", t.formItems.length === 0);
+});
+
+await scenario("Switching: carrying on by hand after a live session", async ({ win, t }) => {
+  installClock(win);
+  await openWizard(win);
+  click(win, "#wiz-live-btn"); await tick(win, 80);
+  await pickType(win, "theory");
+  click(win, "#wiz-live-start"); await tick(win, 20);
+  advance(win, 18 * MIN);
+  click(win, "#wiz-live-end-btn"); await tick(win, 80);
+  eq("at the review", t.screen, "overview");
+  click(win, "#wiz-overview-add-btn"); await tick(win, 80);
+  eq("adding another opens a normal activity", t.screen, "item");
+  ok("on the squares", t.needsType);
+  ok("the live buttons are gone", !visible(win, "#wiz-live-end-btn"));
+  ok("the timer bar is gone", !visible(win, "#wiz-live-bar"));
+  await pickType(win, "piece");
+  ok("and the duration footer is back", visible(win, "#wiz-dur-footer"));
+  await setDuration(win, t, 9);
+  eq("both activities in the session", t.formItems.length, 2);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("failed: " + failures.join(" | "));
 process.exit(fail ? 1 : 0);
