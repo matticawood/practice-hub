@@ -1165,7 +1165,10 @@ export function composeBass({ plan, tonic, mode, barU, nbars, range, melody = nu
     const td = a.t + beatLen / 2, up2 = upFrom(note, a.pcs)[0];   // thicken: climb one more chord tone within the beat
     const dec = (up2 != null && up2 !== note && !parallelsMel(note, up2, a.t, td) && !crossRelMel(up2, td)) ? up2 : null;
     if (dec == null) { out.push({ m: note, d: beatLen }); prevBass = note; continue; }
-    out.push({ m: note, d: beatLen / 2 }, { m: dec, d: beatLen / 2 }); prevBass = dec;
+    if (beatLen > 1 + 1e-9) {                                     // COMPOUND: ripple the beat in THREE quavers (ascending chord tones), not a dotted-quaver pair — the beat's own division
+      const ups = upFrom(note, a.pcs); const u1 = ups[0] ?? dec, u2 = ups[1] ?? u1;
+      out.push({ m: note, d: beatLen / 3 }, { m: u1, d: beatLen / 3 }, { m: u2, d: beatLen / 3 }); prevBass = u2;
+    } else { out.push({ m: note, d: beatLen / 2 }, { m: dec, d: beatLen / 2 }); prevBass = dec; }
   }
   if (out.length && skel.length) out[out.length - 1] = { ...out[out.length - 1], m: skel[skel.length - 1].m };   // the final note resolves to the structural close (a passing tone shouldn't end the piece)
   return out;
@@ -1494,12 +1497,17 @@ export function realizeLH({ plan, tonic, mode, barU, beatLen = 1, nbars, range, 
     // anchor the figure on the LOWEST chord tone in range (the bass foundation), then build upward — never on the skeleton
     //   note, which can sit high and leave no room above (that is what collapsed the murmur to a single repeated note).
     const chordLo = pcs => { for (let p = lo; p <= hi; p++) if (isChordTone(p, pcs)) return p; return null; };
-    const per = beatLen / 2;
+    const compound = beatLen > 1 + 1e-9;                             // a dotted-crotchet beat divides into THREE quavers, not two
+    const per = compound ? beatLen / 3 : beatLen / 2;               // the beat's OWN division: 2 quavers a crotchet beat, 3 a compound beat
     for (const a of skel) {
       const base = chordLo(a.pcs) ?? a.m;
       const tones = []; for (let p = base; p <= hi && tones.length < 3; p++) if (isChordTone(p, a.pcs)) tones.push(p);
       const beatIdx = Math.round((((a.t % barU) + barU) % barU) / beatLen);
-      if (tones.length >= 3) {                                       // classic Alberti: the low note alternates root / third under a steady top (root-top-third-top across a beat pair = C-G-E-G)
+      if (compound) {                                                // COMPOUND: a three-quaver ripple per beat (the 6/8 broken-chord murmur), low-mid-high
+        if (tones.length >= 3) out.push({ m: tones[0], d: per }, { m: tones[1], d: per }, { m: tones[2], d: per });
+        else if (tones.length === 2) out.push({ m: tones[0], d: per }, { m: tones[1], d: per }, { m: tones[0], d: per });   // only two tones: low-high-low ripple
+        else out.push({ m: base, d: beatLen });                      // one chord tone fits (rare): a held beat, not a fake murmur
+      } else if (tones.length >= 3) {                                // classic Alberti: the low note alternates root / third under a steady top (root-top-third-top across a beat pair = C-G-E-G)
         out.push({ m: beatIdx % 2 === 0 ? tones[0] : tones[1], d: per }, { m: tones[2], d: per });
       } else if (tones.length === 2) {                               // a narrow chord only gives two tones — still a low-high murmur, never a drone
         out.push({ m: tones[0], d: per }, { m: tones[1], d: per });

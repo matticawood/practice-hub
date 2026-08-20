@@ -22931,6 +22931,24 @@ function _wizRenderDots() {
 // Step 1 or step 2 of an item. Both modes share the look and differ only in
 // which flag says so; the live session additionally hides the duration footer
 // in both steps, because it is timing rather than typing.
+// An item needs the activity squares only while it is still empty. Deriving
+// that from the item's own content rather than a stored flag means coming back
+// to something you filled in always returns you to what you typed — a flag can
+// silently fall out of step with reality; the content cannot.
+function _wizItemIsBlank(fi) {
+  if (!fi) return true;
+  const block = document.getElementById(`item-block-${fi.id}`);
+  if (!block) return true;
+  if ((parseInt(block.querySelector(".item-duration-input")?.value) || 0) > 0) return false;
+  if (fi.selectedPiece && fi.selectedPiece.title) return false;
+  if (fi.selectedTechniques && fi.selectedTechniques.length) return false;
+  if (fi.selectedTheorySheets && fi.selectedTheorySheets.length) return false;
+  // Any typed field at all counts as started.
+  return !Array.from(block.querySelectorAll("input, textarea"))
+    .filter(el => !el.classList.contains("item-duration-input"))
+    .some(el => (el.value || "").trim());
+}
+
 function _wizSyncChoosing() {
   const bd = document.getElementById("log-wizard-backdrop");
   if (!bd) return;
@@ -23550,7 +23568,7 @@ function _wizGoTo(newScreen, newItemIdx, dir) {
 
   _wizScreen = newScreen;
   if (newScreen === 'item') {
-    if (!_liveOn) _wizNeedsType = !formItems[newItemIdx]?.typeChosen;
+    if (!_liveOn) _wizNeedsType = _wizItemIsBlank(formItems[newItemIdx]);
     _wizShowItemInSlot(newItemIdx);
     _wizRenderRecentChips();
     // Same-screen item→item (e.g. "Add Another Item") gets no slide above, so
@@ -23815,6 +23833,18 @@ document.getElementById("log-wizard-backdrop").addEventListener("click", e => {
   if (e.target === document.getElementById("log-wizard-backdrop")) closeWizard();
 });
 
+// The dots were the one way out of an item that skipped validation, so an
+// activity could be left with no duration on it and still reach the review.
+// They now hold you to the same standard as the buttons do. An item you have
+// not started yet is not held to anything — there is nothing to be wrong.
+function _wizDotBlocked() {
+  if (_wizScreen !== 'item') return false;
+  if (_wizItemIsBlank(formItems[_wizItemIdx])) return false;
+  const err = _wizValidateCurrentItem();
+  if (err) { showToast(err, 3500, true); return true; }
+  return false;
+}
+
 // Wizard dots click
 document.getElementById("wiz-dots").addEventListener("click", e => {
   const btn = e.target.closest("[data-wiz-dot]");
@@ -23825,10 +23855,12 @@ document.getElementById("wiz-dots").addEventListener("click", e => {
     if (_wizScreen !== 'date') _wizGoTo('date', 0, 'backward');
   } else if (dot <= formItems.length) {
     const idx = dot - 1;
+    if (idx !== _wizItemIdx && _wizDotBlocked()) return;
     const curDot = _wizScreen === 'date' ? 0 : _wizScreen === 'overview' ? formItems.length + 1 : _wizItemIdx + 1;
     _wizGoTo('item', idx, idx >= curDot ? 'forward' : 'backward');
   } else {
     if (!formItems.length) return;                     // nothing to review yet
+    if (_wizDotBlocked()) return;
     if (_wizScreen !== 'overview') _wizGoTo('overview', 0, 'forward');
   }
 });
@@ -23851,8 +23883,6 @@ document.getElementById("wiz-type-picker").addEventListener("click", e => {
   if (_liveOn) {
     if (_liveNeedsType) { _liveNeedsType = false; _liveRenderBar(); _wizRenderTypePicker(); }
   } else if (_wizNeedsType) {
-    const fi = formItems[_wizItemIdx];
-    if (fi) fi.typeChosen = true;
     _wizNeedsType = false;
     _wizSyncChoosing(); _wizUpdateHeader(); _wizRenderFooter(); _wizRenderTypePicker();
   }
@@ -23996,9 +24026,6 @@ function addItem(prefill = null) {
   const itemState = {
     id,
     type: defaultType,
-    // A prefill (draft, edit, quick-add) already knows what it was, so it goes
-    // straight to the detail. Anything else starts on the squares.
-    typeChosen: !!(prefill && prefill.item_type),
     selectedPiece: null,
     selectedTheorySheets: [],
     selectedTechniques: [],
