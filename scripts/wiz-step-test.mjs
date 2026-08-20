@@ -160,10 +160,11 @@ console.log("\n--- a live session is always logged to today ---");
     new Function("document", "sessionTodayStr", "showToast", "viewingEmail", "myEmail",
       "formItems", "_liveOn", "_wizScreen", "_wizItemIdx", "_liveRenderBar", "_liveStartTick",
       "_livePersist", "wizAddFirstItem", "_wizRenderDateDisplay", "_wizGoTo", "_liveEnd",
+      "editingSessionId",
       grab("wizStartLive") + "; wizStartLive();")
       ({ getElementById: () => dateEl }, () => "2026-08-20", (m) => toasts.push(m),
        "a@b.com", "a@b.com", [], false, "date", 0,
-       () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+       () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, null);
     return { date: dateEl.value, toasts };
   };
   let r = run("2026-08-11");             // they had picked a day last week
