@@ -696,6 +696,35 @@ await scenario("Blocked: an activity whose requirement cannot be met can still b
   });
 
 // ===========================================================================
+await scenario("A draft can hold notes with no activities, and resuming it is safe",
+  async ({ win, t, writes }) => {
+    // This is how an empty draft gets made: notes typed on the review, then the
+    // only activity removed. _draftHasContent counts notes, so it is saved.
+    await openWizard(win);
+    click(win, "#wiz-add-first-btn"); await tick(win, 40);
+    await pickType(win, "improvisation");
+    await setDuration(win, t, 20);
+    click(win, "#wiz-goto-review-btn"); await tick(win, 80);
+    setField(win, "#session-notes", "Felt scattered today, kept losing the pulse.");
+    await tick(win, 80);
+    click(win, ".wiz-overview-item-card"); await tick(win, 80);
+    eq("back on the activity", t.screen, "item");
+    click(win, "#wiz-remove-item-btn"); await tick(win, 100);
+    eq("removing the last one leaves the date screen", t.screen, "date");
+    await tick(win, 1600);
+    const d = writes.filter(w => w.table === "practice_session_drafts").pop();
+    ok("a draft was still saved, because the notes are real", !!d);
+    eq("with no activities in it", d?.payload.items.length, 0);
+
+    // Resuming it must not land on a review of nothing.
+    win.eval(`_draftsCache = [{ id: 77, email: myEmail, session_date: "2026-08-20",
+      notes: "Felt scattered today, kept losing the pulse.", items: [] }];`);
+    win.eval("_loadDraftFromId(77)"); await tick(win, 120);
+    eq("it opens on the date screen", t.screen, "date");
+    ok("the notes are still there", /scattered/.test($(win, "#session-notes").value));
+    ok("and an activity can be added", visible(win, "#wiz-add-first-btn"));
+  });
+
 await scenario("The review is never reached with nothing in it", async ({ win, t }) => {
   // Resuming a draft was the route that never checked. A draft can hold notes
   // and no activities, or ones that no longer rebuild.
