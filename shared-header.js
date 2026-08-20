@@ -363,7 +363,7 @@ const SH_SUBNAV = {
     }
     .notif-close-btn:hover { color: #fff; }
     .notif-list { overflow-y: auto; max-height: 360px; }
-    .notif-empty { padding: 32px 18px; text-align: center; color: #444; font-size: 0.82rem; line-height: 1.6; }
+    .notif-empty { padding: 32px 18px; text-align: center; color: #8a8378; font-size: 0.82rem; line-height: 1.6; }
     .notif-item {
       display: flex; align-items: flex-start; gap: 10px;
       padding: 11px 14px; border-bottom: 1px solid #1a1a1a;
@@ -388,8 +388,12 @@ const SH_SUBNAV = {
     @keyframes notifAchSheen { 0% { left: -60%; } 18% { left: 130%; } 100% { left: 130%; } }
     @media (prefers-reduced-motion: reduce) { .notif-ach-medal::after { display: none; } }
     .notif-item-title { font-size: 0.82rem; font-weight: 600; color: #e0e0e0; margin-bottom: 2px; line-height: 1.35; }
-    .notif-item-desc { font-size: 0.75rem; color: #5a5a5a; line-height: 1.4; }
-    .notif-item-time { font-size: 0.68rem; color: #3a3a3a; margin-top: 4px; }
+    /* The body and timestamp were #5a5a5a and #3a3a3a on a near-black panel,
+       about 2.6:1 and 1.5:1 against it, so the actual message was the hardest
+       thing in the panel to read. These are warm greys from the same family the
+       app uses elsewhere on dark, at roughly 7.7:1 and 5:1. */
+    .notif-item-desc { font-size: 0.75rem; color: #a8a196; line-height: 1.4; }
+    .notif-item-time { font-size: 0.68rem; color: #8a8378; margin-top: 4px; }
     .notif-admin-wrap { border-top: 1px solid #1e1e1e; padding: 12px 14px; flex-shrink: 0; background: #0d0d0d; }
     .notif-admin-wrap h4 { font-size: 0.7rem; color: var(--accent, #f5c518); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .08em; }
     .notif-admin-wrap input, .notif-admin-wrap textarea {
