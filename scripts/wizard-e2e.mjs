@@ -845,6 +845,52 @@ await scenario("The same drag does not dismiss the in-window sheets", async ({ w
   eq("with the time untouched", Math.round(t.sessionMs / MIN), 9);
 });
 
+// ===========================================================================
+await scenario("Live: a session started by accident can simply be backed out of",
+  async ({ win, t }) => {
+    installClock(win);
+    await openWizard(win);
+    eq("starting from the date screen", t.screen, "date");
+    click(win, "#wiz-live-btn"); await tick(win, 80);
+    ok("on the activity squares", t.liveNeedsType);
+    ok("with a way back", visible(win, "#wiz-live-back"));
+    eq("labelled as Back, not as changing type", $(win, "#wiz-live-back").title, "Back");
+    click(win, "#wiz-live-back"); await tick(win, 120);
+    eq("it returns to where the session began", t.screen, "date");
+    ok("the session is over", !t.liveOn);
+    eq("leaving nothing behind", t.formItems.length, 0);
+    ok("and no chip", !visible(win, "#live-fab"));
+    ok("the date screen still offers its routes", visible(win, "#wiz-live-btn"));
+  });
+
+await scenario("Live: once something is timed, Back is not the way out", async ({ win, t }) => {
+  installClock(win);
+  await openWizard(win);
+  click(win, "#wiz-live-btn"); await tick(win, 80);
+  await pickType(win, "theory");
+  click(win, "#wiz-live-start"); await tick(win, 20);
+  advance(win, 12 * MIN);
+  click(win, "#wiz-live-stop"); await tick(win, 40);
+  click(win, "#wiz-live-next"); await tick(win, 120);
+  ok("back on the squares for the next activity", t.liveNeedsType);
+  ok("Back is not offered now", !visible(win, "#wiz-live-back"));
+  ok("End session is", visible(win, "#wiz-live-end-btn"));
+  eq("and the twelve minutes are safe", Math.round(t.liveBankedMs / MIN), 12);
+});
+
+await scenario("Live: Back on the detail step still changes the activity type",
+  async ({ win, t }) => {
+    installClock(win);
+    await openWizard(win);
+    click(win, "#wiz-live-btn"); await tick(win, 80);
+    await pickType(win, "theory");
+    ok("Back is offered on the detail step", visible(win, "#wiz-live-back"));
+    eq("labelled for what it does there", $(win, "#wiz-live-back").title, "Change activity type");
+    click(win, "#wiz-live-back"); await tick(win, 80);
+    ok("it returns to the squares", t.liveNeedsType);
+    ok("with the session still running", t.liveOn);
+  });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("failed: " + failures.join(" | "));
 process.exit(fail ? 1 : 0);
