@@ -251,5 +251,43 @@ console.log("\n--- black belongs to the live session alone ---");
   eq("it shares the yellow primary instead", !!yellow, true);
 }
 
+console.log("\n--- hiding a wizard with nothing in it closes it instead ---");
+{
+  const body = grab("closeWizard");
+  const run = ({ live = false, sessionMs = 0, realCount = 0, blank = true }) => {
+    const calls = [];
+    const cls = { add: () => {}, remove: () => {} };
+    new Function("editingSessionId", "formItems", "_liveOn", "_liveSessionMs",
+      "_wizRealItemCount", "_wizItemIdx", "_wizItemIsBlank", "_wizDiscardItem",
+      "_wizFinalize", "_liveAutoPause", "document", "_shRestoreAfterWizard",
+      "_liveRenderBar",
+      body + "; closeWizard();")
+      (null, [{ id: 1 }], live, () => sessionMs, () => realCount, 0,
+       () => blank, id => calls.push("discard" + id), () => calls.push("finalize"),
+       () => calls.push("autopause"),
+       { getElementById: () => ({ classList: cls, style: {} }), body: { style: {} } },
+       () => calls.push("restore"), () => calls.push("renderbar"));
+    return calls;
+  };
+  let c = run({ live: true });
+  eq("live, nothing timed or entered: closed", c.includes("finalize"), true);
+  eq("and the empty activity dropped", c.includes("discard1"), true);
+  eq("not merely paused", c.includes("autopause"), false);
+
+  c = run({ live: true, sessionMs: 90000 });
+  eq("live with time on it: hidden, not closed", c.includes("finalize"), false);
+  eq("and the clock stops", c.includes("autopause"), true);
+
+  c = run({ live: true, realCount: 1, blank: false });
+  eq("live with an activity entered: hidden", c.includes("finalize"), false);
+
+  c = run({ live: false });
+  eq("normal, only an untouched activity: closed", c.includes("finalize"), true);
+  eq("no stray activity left behind", c.includes("discard1"), true);
+
+  c = run({ live: false, realCount: 1, blank: false });
+  eq("normal with something entered: hidden", c.includes("finalize"), false);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
