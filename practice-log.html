@@ -23151,7 +23151,10 @@ function _liveEnd() {
 function liveEndSession() {
   if (!_liveOn) return;
   if (_wizScreen === "item") _liveCommitItem(_wizItemIdx);
-  _livePruneEmptyItems();
+  // Do NOT prune before the check. Pruning drops the untimed activity, and the
+  // list emptying sends the wizard back to the date screen — so the "nothing
+  // timed" sheet would open over a blank window and carrying on would strand
+  // them there. Prune only once the session is genuinely ending.
   const timed = formItems.some(fi => {
     const b = document.getElementById(`item-block-${fi.id}`);
     const inp = b && b.querySelector(".item-duration-input");
@@ -23162,6 +23165,16 @@ function liveEndSession() {
   _liveEnd();
   _wizGoTo("overview", 0, "forward");
 }
+// Put a carrying-on session back on a screen it can actually be used from.
+// "End session" is reachable from the overview too, so backing out of it must
+// land on the activity, not on whatever screen the button happened to sit on.
+function _liveResumeScreen() {
+  if (!_liveOn) return;
+  if (!formItems.length) { _liveNeedsType = true; wizAddFirstItem(); _liveRenderBar(); return; }
+  if (_wizScreen !== "item") _wizGoTo("item", formItems.length - 1, "forward");
+  _liveRenderBar();
+}
+
 // Ending with nothing timed: same in-window sheet as the other choices, rather
 // than a browser alert.
 function _liveAskEndEmpty() {
@@ -23177,7 +23190,7 @@ function _liveAskEndEmpty() {
     </div>`;
   document.getElementById("log-wizard-backdrop").appendChild(wrap);
   const close = () => wrap.remove();
-  wrap.querySelector("#live-ask-stay").onclick = close;
+  wrap.querySelector("#live-ask-stay").onclick = () => { close(); _liveResumeScreen(); };
   wrap.querySelector("#live-ask-end").onclick = () => { close(); _liveEnd(); _wizFinalize(); };
   wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
 }
