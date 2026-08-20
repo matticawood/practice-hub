@@ -792,6 +792,59 @@ await scenario("Copy in the logging flow carries no em dashes", async ({ win }) 
   eq("none in the wizard's own copy", offenders, []);
 });
 
+// ===========================================================================
+await scenario("Selecting text and releasing outside does not close the window",
+  async ({ win, t }) => {
+    // A click fires on the nearest common ancestor of where the press began and
+    // where it ended, so dragging from a field out past the panel targets the
+    // backdrop. That used to dismiss the whole thing and lose what was typed.
+    await openWizard(win);
+    click(win, "#wiz-add-first-btn"); await tick(win, 40);
+    await pickType(win, "improvisation");
+    setField(win, "#wiz-item-slot textarea", "Blues in F, worked on the turnaround");
+    await setDuration(win, t, 25);
+    const backdrop = $(win, "#log-wizard-backdrop");
+    const field = $(win, "#wiz-item-slot textarea");
+
+    field.dispatchEvent(new win.MouseEvent("mousedown", { bubbles: true }));
+    backdrop.dispatchEvent(new win.MouseEvent("mouseup", { bubbles: true }));
+    backdrop.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    await tick(win, 80);
+    ok("the window stays open", backdrop.classList.contains("open"));
+    ok("and the notes survive",
+       /turnaround/.test($(win, "#wiz-item-slot textarea")?.value || ""));
+    eq("as does the duration", $(win, "#wiz-item-slot .item-duration-input").value, "25");
+
+    // Tapping the backdrop itself must still dismiss.
+    backdrop.dispatchEvent(new win.MouseEvent("mousedown", { bubbles: true }));
+    backdrop.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    await tick(win, 80);
+    ok("a click that starts outside still closes it", !backdrop.classList.contains("open"));
+  });
+
+await scenario("The same drag does not dismiss the in-window sheets", async ({ win, t }) => {
+  installClock(win);
+  win.eval("openWizard()"); await tick(win, 50);
+  click(win, "#wiz-live-btn"); await tick(win, 80);
+  await pickType(win, "piece");
+  click(win, "#wiz-live-start"); await tick(win, 20);
+  advance(win, 9 * MIN);
+  click(win, "#wiz-live-stop"); await tick(win, 40);
+  click(win, "#wiz-live-back"); await tick(win, 40);
+  const sheet = $(win, "#live-ask-backdrop");
+  ok("the sheet is up", !!sheet);
+  const body = sheet.querySelector(".live-ask-body");
+  body.dispatchEvent(new win.MouseEvent("mousedown", { bubbles: true }));
+  sheet.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+  await tick(win, 60);
+  ok("dragging off its text leaves it up", !!$(win, "#live-ask-backdrop"));
+  sheet.dispatchEvent(new win.MouseEvent("mousedown", { bubbles: true }));
+  sheet.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+  await tick(win, 60);
+  ok("a real tap outside still dismisses it", !$(win, "#live-ask-backdrop"));
+  eq("with the time untouched", Math.round(t.sessionMs / MIN), 9);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("failed: " + failures.join(" | "));
 process.exit(fail ? 1 : 0);
