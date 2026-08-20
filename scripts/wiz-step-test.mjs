@@ -133,5 +133,22 @@ console.log("\n--- the discard does not navigate ---");
   eq("frees the slot first", /_wizReturnSlotToStore/.test(body), true);
 }
 
+console.log("\n--- adding an item always opens the one you just added ---");
+{
+  // wizAddFirstItem appended at the end but navigated to index 0, so adding
+  // from the date screen with items already there dropped you on the first one.
+  const open = grab("wizAddItemAndOpen");
+  eq("the shared one opens the last item", /_wizGoTo\('item', formItems\.length - 1, 'forward'\)/.test(open), true);
+  for (const fn of ["wizAddFirstItem", "wizAddItemFromOverview"]) {
+    const body = grab(fn);
+    eq(fn + " delegates", /wizAddItemAndOpen\s*\(/.test(body), true);
+    eq(fn + " navigates nowhere itself", /_wizGoTo\s*\(/.test(body), false);
+  }
+  const another = grab("wizAddAnotherItem");
+  eq("wizAddAnotherItem delegates too", /wizAddItemAndOpen/.test(another), true);
+  eq("nothing still hardcodes item 0 when adding",
+     !/addItem\(\);\s*\n?\s*_wizGoTo\('item', 0/.test(html), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
