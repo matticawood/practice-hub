@@ -70,8 +70,47 @@ export const readStorage = win => {
   return out;
 };
 
-export async function boot({ quiet = true, storage = null, failWrites = false } = {}) {
-  let html = fs.readFileSync(path.join(ROOT, "practice-log.html"), "utf8");
+// Two tabs on one origin share a single localStorage, and a write in one fires a
+// storage event in the OTHER (never in the writer). Passing the same TabGroup to
+// two boots reproduces that, which is the only way to test what one tab does to
+// a live session running in another.
+export function createTabGroup() {
+  const store = new Map();
+  const windows = [];
+  const notify = (from, key, oldValue, newValue) => {
+    for (const w of windows) {
+      if (w === from) continue;
+      try {
+        // No storageArea: the shared object is not a real Storage instance and
+        // jsdom's constructor rejects it. Nothing reads it; listeners use key.
+        w.dispatchEvent(new w.StorageEvent("storage", { key, oldValue, newValue,
+          url: w.location.href }));
+      } catch (e) {}
+    }
+  };
+  const install = win => {
+    const api = {
+      getItem: k => (store.has(String(k)) ? store.get(String(k)) : null),
+      setItem: (k, v) => { const key = String(k), old = store.has(key) ? store.get(key) : null;
+        store.set(key, String(v)); notify(win, key, old, String(v)); },
+      removeItem: k => { const key = String(k), old = store.has(key) ? store.get(key) : null;
+        store.delete(key); notify(win, key, old, null); },
+      clear: () => { const keys = [...store.keys()]; store.clear(); keys.forEach(k => notify(win, k, null, null)); },
+      key: i => [...store.keys()][i] ?? null,
+    };
+    Object.defineProperty(api, "length", { get: () => store.size });
+    Object.defineProperty(win, "localStorage", { configurable: true, get: () => api });
+    windows.push(win);
+  };
+  return { store, install, windows };
+}
+
+export async function boot({ quiet = true, storage = null, failWrites = false, tabs = null,
+                             url = "https://app.example.com/practice-log.html",
+                             page = "practice-log.html", clockOffset: bootOffset = 0 } = {}) {
+  // A second tab has to be a REAL other page, or it is the log page in disguise
+  // writing its own state back over the session it is supposed to be observing.
+  let html = fs.readFileSync(path.join(ROOT, page), "utf8");
 
   // Inline the scripts that are part of this feature; drop the rest.
   const inline = f => `<script>${fs.readFileSync(path.join(ROOT, f), "utf8")}</script>`;
@@ -90,11 +129,20 @@ export async function boot({ quiet = true, storage = null, failWrites = false } 
   const dom = new JSDOM(html, {
     runScripts: "dangerously",
     pretendToBeVisual: true,
-    url: "https://app.example.com/practice-log.html",
+    url,
     virtualConsole: vc,
     beforeParse(win) {
       writes.length = 0;
       FAIL_WRITES = !!failWrites;
+      if (tabs) tabs.install(win);     // this window joins the shared storage
+      // Tabs share a wall clock. A second tab's scripts run during construction,
+      // so a fake clock installed afterwards is already too late — its pause
+      // timestamp lands before the first tab's start and the time reads as zero.
+      if (bootOffset) {
+        const realNow = win.Date.now.bind(win.Date);
+        win.__clock = { offset: bootOffset };
+        win.Date.now = () => realNow() + win.__clock.offset;
+      }
       win.supabase = { createClient: () => stubDb };
       // Stubs for the shared scripts that were dropped.
       win.initSharedHeader = () => {};
@@ -235,7 +283,7 @@ export const tick = (win, ms = 0) => new Promise(r => win.setTimeout(r, ms));
 // A controllable clock, so a timed session can be tested without waiting out
 // real minutes. The page reads Date.now() at call time, so shifting it here
 // moves every clock in the page and in live-session.js together.
-export const installClock = (win, offset = 0) => win.eval(`
+export const installClock = (win, offset = 0) => win.__clock ? win.__clock : win.eval(`
   window.__clock = { offset: ${Number(offset) || 0} };
   const _now = Date.now;
   Date.now = () => _now() + window.__clock.offset;

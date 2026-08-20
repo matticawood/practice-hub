@@ -36,6 +36,7 @@ done
 if [ -d scripts/node_modules/jsdom ]; then
   run_suite scripts/wizard-e2e.mjs
   run_suite scripts/wizard-refresh.mjs
+  run_suite scripts/wizard-tabs.mjs
 else
   echo "wizard-e2e.mjs                     SKIPPED — run: cd scripts && npm install"
   exit 1
