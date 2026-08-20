@@ -644,6 +644,36 @@ async function failingScenario(name, fn) {
   finally { b?.shutdown(); }
 }
 
+async function halfFailScenario(name, fn) {
+  let b;
+  try { b = await boot({ failTable: "practice_items" }); section(name); await fn(b); }
+  catch (e) { fail++; failures.push(name + " threw"); console.log(`  FAIL threw: ${e.message}`); }
+  finally { b?.shutdown(); }
+}
+
+await halfFailScenario("Blocked: a half-done save is undone rather than left behind",
+  async ({ win, t, writes, dialogs }) => {
+    // The session row goes in before the activities and there is no transaction
+    // across the two, so a failure between them used to strand a session in the
+    // log with nothing on it, its minutes counting toward totals and the streak.
+    win.eval("openWizard()"); await tick(win, 50);
+    click(win, "#wiz-add-first-btn"); await tick(win, 50);
+    await pickType(win, "improvisation");
+    await setDuration(win, t, 30);
+    win.eval("_wizGoTo('overview', 0, 'forward')"); await tick(win, 80);
+    click(win, "#wiz-next-btn"); await tick(win, 600);
+
+    const ops = writes.filter(w => w.table).map(w => `${w.table}.${w.op}`);
+    ok("the session was written", ops.includes("practice_sessions.insert"));
+    ok("the activities were attempted", ops.includes("practice_items.insert"));
+    ok("and the orphaned session was removed", ops.includes("practice_sessions.delete"));
+    ok("the member is told", dialogs.some(d => /error saving/i.test(d.msg)));
+    ok("the window stays open", $(win, "#log-wizard-backdrop").classList.contains("open"));
+    eq("with the work intact for another go", t.formItems.length, 1);
+    eq("and its minutes", $(win, `#item-block-${t.formItems[0].id}`)
+      .querySelector(".item-duration-input").value, "30");
+  });
+
 await failingScenario("Blocked: a refused save keeps the work and allows another go",
   async ({ win, t, dialogs }) => {
     win.eval("openWizard()"); await tick(win, 50);

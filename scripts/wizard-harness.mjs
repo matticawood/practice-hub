@@ -16,20 +16,22 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // recorded so a test can assert what would actually have been saved.
 let nextId = 1000;
 let FAIL_WRITES = false;
+let FAIL_TABLE = null;     // fail only this table, to test a half-done save
 export const setFailWrites = v => { FAIL_WRITES = !!v; };
+const shouldFail = table => FAIL_TABLE ? table === FAIL_TABLE : FAIL_WRITES;
 function stubQuery(table, log, rows = []) {
   const res = { data: rows, error: null, count: rows.length };
   const oops = { message: "network error", code: "PGRST000" };
   const b = new Proxy(function () {}, {
     get(_t, prop) {
       if (prop === "then") return (ok, err) => Promise.resolve(
-        FAIL_WRITES && log.some(w => w.table === table) ? { data: null, error: oops } : res
+        shouldFail(table) && log.some(w => w.table === table) ? { data: null, error: oops } : res
       ).then(ok, err);
       if (prop === "catch") return () => b;
       if (prop === "finally") return () => b;
       // Inserts use .single(); existence checks use .maybeSingle(). Giving the
       // first a row and the second null matches how the page uses them.
-      if (prop === "single") return () => FAIL_WRITES
+      if (prop === "single") return () => shouldFail(table)
         ? Promise.resolve({ data: null, error: oops })
         : Promise.resolve({ data: { id: nextId++ }, error: null });
       if (prop === "maybeSingle") return () => Promise.resolve({ data: rows[0] ?? null, error: null });
@@ -107,7 +109,8 @@ export function createTabGroup() {
 
 export async function boot({ quiet = true, storage = null, failWrites = false, tabs = null,
                              url = "https://app.example.com/practice-log.html",
-                             page = "practice-log.html", clockOffset: bootOffset = 0 } = {}) {
+                             page = "practice-log.html", clockOffset: bootOffset = 0,
+                             failTable = null } = {}) {
   // A second tab has to be a REAL other page, or it is the log page in disguise
   // writing its own state back over the session it is supposed to be observing.
   let html = fs.readFileSync(path.join(ROOT, page), "utf8");
@@ -134,6 +137,7 @@ export async function boot({ quiet = true, storage = null, failWrites = false, t
     beforeParse(win) {
       writes.length = 0;
       FAIL_WRITES = !!failWrites;
+      FAIL_TABLE = failTable || null;
       if (tabs) tabs.install(win);     // this window joins the shared storage
       // Tabs share a wall clock. A second tab's scripts run during construction,
       // so a fake clock installed afterwards is already too late — its pause

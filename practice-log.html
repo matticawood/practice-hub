@@ -25580,7 +25580,16 @@ async function saveSession() {
       if (itemDataList.length > 0) {
         const { error: itemErr } = await db.from("practice_items")
           .insert(itemDataList.map(item => ({ ...item, session_id: newSession.id })));
-        if (itemErr) throw itemErr;
+        if (itemErr) {
+          // The session row is already in, and there is no transaction spanning
+          // the two inserts. Left alone it would sit in the log as a session
+          // with no activities, its minutes counting toward totals and the
+          // streak with nothing to show for them. Undo it by hand, then report
+          // the failure so the member can try again with their work intact.
+          try { await db.from("practice_sessions").delete().eq("id", newSession.id); } catch (_) {}
+          savedSessionId = null;
+          throw itemErr;
+        }
       }
     }
 
