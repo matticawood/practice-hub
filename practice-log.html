@@ -1680,7 +1680,10 @@
       padding: 13px 19px; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer;
       box-shadow: 0 4px 20px rgba(0,0,0,.3); display: none; align-items: center; gap: 9px;
     }
-    #live-fab .wiz-live-dot { animation: wizLivePulse 1.6s ease-in-out infinite; }
+    /* This chip is only ever on screen while the session window is closed, and
+       the clock does not run then — so it reads as paused rather than pulsing. */
+    #live-fab .wiz-live-dot { background: #7a736a; animation: none; }
+    #live-fab #live-fab-lbl { color: #a49a8c; font-weight: 600; font-size: .78rem; }
     #live-fab:hover { opacity: .92; }
     body.rm-immersive #live-fab { display: none !important; }
     /* It stands in for Log Practice, so it has to sit exactly where that button
@@ -9410,8 +9413,8 @@
   + Log Practice
 </button>
 <!-- Live session in progress: reopens the log wizard. Hidden unless one is running. -->
-<button id="live-fab" style="display:none" onclick="liveReopen()" title="Live session running">
-  <span class="wiz-live-dot"></span><span id="live-fab-time">0:00</span>
+<button id="live-fab" style="display:none" onclick="liveReopen()" title="Back to your practice session">
+  <span class="wiz-live-dot"></span><span id="live-fab-time">0:00</span><span id="live-fab-lbl">paused</span>
 </button>
 <!-- Dev-only floating toggle between the trail roadmap and the scenic map. Sits just
      above the Log Practice FAB; shown only on the roadmap views via body classes. -->
@@ -22437,6 +22440,7 @@ function openWizard(startOverview = false) {
 // empty form, just closes for real.
 function closeWizard() {
   if (editingSessionId || formItems.length === 0) { _wizFinalize(); return; }
+  _liveAutoPause();   // out of the session window -> the clock stops
   document.getElementById("log-wizard-backdrop").classList.remove("open");
   document.body.style.overflow = "";
   _shRestoreAfterWizard();
@@ -22469,6 +22473,7 @@ function _wizFinalize() {
 function _wizReopen() {
   document.getElementById("log-wizard-backdrop").classList.add("open");
   document.body.style.overflow = "hidden";
+  if (typeof _liveAutoResume === "function") _liveAutoResume();   // back in the window
   if (typeof _liveRenderBar === "function") _liveRenderBar();
   const screen = _wizScreen || "date";
   document.getElementById("wiz-screen-date").className     = "wiz-screen" + (screen === "date"     ? " active" : "");
@@ -22935,6 +22940,7 @@ let _liveLastItemMs = 0;      // what the finished activity clocked, for the bar
 let _liveTick = null;
 let _liveRestorePending = false;  // session restored, activities not yet rebuilt
 let _liveOverrunAsked = false;    // the forgotten-clock question is asked once per visit
+let _liveAutoPaused = false;      // paused by closing the window, not by the member
 // Storage now lives in live-session.js (window.RMLive), which every member page
 // loads — that is what lets a session outlive this page.
 
@@ -22968,9 +22974,7 @@ function _livePersist() {
     msById: _liveMsById,
     needsType: _liveNeedsType, itemStopped: _liveItemStopped, lastItemMs: _liveLastItemMs,
     itemIdx: _wizItemIdx, draftId: draftId,
-    // While this page is open the clock is either running or the member paused
-    // it deliberately; navigation is the only thing that pauses automatically.
-    autoPaused: false
+    autoPaused: _liveAutoPaused
   });
 }
 // A live session's activities live in the wizard's in-memory formItems, which do
@@ -22989,13 +22993,13 @@ function _liveRestore() {
     _liveOn = false; _liveItemStart = null; _livePausedAt = null;
     _livePausedMs = 0; _liveBankedMs = 0; _liveMsById = {};
     _liveItemStopped = false; _liveLastItemMs = 0; _liveRestorePending = false;
+    _liveAutoPaused = false;
     _liveRenderBar();
     return;
   }
-  // Navigation pauses the clock; arriving back here lifts that pause. A pause
-  // the member chose themselves is left exactly as they left it.
-  RMLive.autoResume();
-  const r = RMLive.read() || s;
+  // The pause is NOT lifted here. Landing on the practice log is not the same
+  // as opening the session window, and the clock only runs while that is open.
+  const r = s;
   _liveOn = true;
   _liveItemStart   = r.itemStart;
   _livePausedAt    = r.pausedAt;
@@ -23005,6 +23009,7 @@ function _liveRestore() {
   _liveNeedsType   = !!r.needsType;
   _liveItemStopped = !!r.itemStopped;
   _liveLastItemMs  = r.lastItemMs || 0;
+  _liveAutoPaused  = !!r.autoPaused;
   _liveRestorePending = true;          // the activities are not in the DOM yet
   _liveStartTick();
   _liveRenderBar();                    // chip shows the right total immediately
@@ -23159,13 +23164,14 @@ function liveNextActivity() {
 function liveStartActivity() {
   if (!_liveOn) return;
   _liveItemStart = Date.now(); _livePausedAt = null; _livePausedMs = 0;
-  _liveItemStopped = false;
+  _liveItemStopped = false; _liveAutoPaused = false;
   _livePersist(); _liveRenderBar(); _liveStartTick();
 }
 function livePauseToggle() {
   if (!_liveOn || _liveItemStart == null) return;
   if (_livePausedAt) { _livePausedMs += Date.now() - _livePausedAt; _livePausedAt = null; }
   else { _livePausedAt = Date.now(); }
+  _liveAutoPaused = false;   // touching Pause makes the state theirs either way
   _livePersist(); _liveRenderBar();
 }
 function wizStartLive() {
@@ -23181,16 +23187,33 @@ function wizStartLive() {
     _liveEnd();                                   // nothing to return to — start clean
   }
   _liveOn = true; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
-  _liveMsById = {}; _liveRestorePending = false; _liveOverrunAsked = false;
+  _liveMsById = {}; _liveRestorePending = false; _liveOverrunAsked = false; _liveAutoPaused = false;
   _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
   _liveNeedsType = true;
   wizAddFirstItem();
   _livePersist(); _liveRenderBar(); _liveStartTick();
 }
+// The clock runs while the live session WINDOW is open, and nowhere else.
+// Minimising it is the same act as navigating to another page: the member has
+// gone to do something else, and everything else in the app logs its own time.
+// Kept separate from a pause the member chose, which only they may undo.
+function _liveAutoPause() {
+  if (!_liveOn || _liveItemStart == null || _livePausedAt) return;
+  _livePausedAt = Date.now();
+  _liveAutoPaused = true;
+  _livePersist(); _liveRenderBar();
+}
+function _liveAutoResume() {
+  if (!_liveOn || !_livePausedAt || !_liveAutoPaused) return;
+  _livePausedMs += Date.now() - _livePausedAt;
+  _livePausedAt = null; _liveAutoPaused = false;
+  _livePersist(); _liveRenderBar();
+}
+
 function _liveEnd() {
   _liveOn = false; _liveItemStart = null; _livePausedAt = null;
   _livePausedMs = 0; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
-  _liveMsById = {}; _liveRestorePending = false; _liveOverrunAsked = false;
+  _liveMsById = {}; _liveRestorePending = false; _liveOverrunAsked = false; _liveAutoPaused = false;
   _liveStopTick(); _livePersist(); _liveRestoreButtons(); _liveRenderBar();
 }
 // End session, from anywhere and at any time — including one started by accident
@@ -23399,6 +23422,7 @@ async function liveReopen() {
   if (_liveRestorePending && !(await _liveHydrate())) { openWizard(); return; }
   if (typeof _wizReopen === "function" && formItems.length) _wizReopen();
   else openWizard();
+  _liveAutoResume();
   _liveRenderBar();
   _liveCheckOverrun();
 }

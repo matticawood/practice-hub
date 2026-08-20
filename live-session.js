@@ -4,16 +4,22 @@
 
    Losing a timed session because someone tapped through to the community page
    is unacceptable, so the session lives in localStorage and is still there when
-   they come back. But the clock stops the moment they leave the practice log,
-   because everywhere else in the app already logs its own time: course lessons,
-   articles and practice tools each write their own practice entry through
-   shared-practice-autolog.js. A clock that kept running across those pages
-   would count the same practice twice.
+   they come back. But the clock only runs while the live session WINDOW is
+   open. Closing that window is the same act whether they minimise it and stay
+   on the practice log or navigate away entirely — either way they have gone to
+   do something else.
 
-   That makes double counting impossible by construction rather than by
-   arithmetic — the pages that auto-log are exactly the pages where this clock
-   is stopped — and it leaves the timer doing the job only it can do: measuring
-   time at the piano, which the app cannot see.
+   That matters because everywhere else in the app already logs its own time:
+   course lessons, articles and practice tools each write their own practice
+   entry through shared-practice-autolog.js. A clock that kept running across
+   those pages would count the same practice twice. Stopping it makes double
+   counting impossible by construction rather than by arithmetic, and leaves
+   the timer doing the job only it can do: measuring time at the piano, which
+   the app cannot see.
+
+   The practice log owns the session while it is loaded and decides when the
+   clock runs, so this module does nothing on that page beyond lending it the
+   storage and the maths. Elsewhere it stops the clock and shows the way back.
 
    Three rules make it work:
 
@@ -22,9 +28,11 @@
       and reopened — all come back with the right number, because nothing was
       relying on a timer having kept ticking. This is what lets the clock run
       through a dark screen at the piano while still stopping dead on navigation.
-   2. Leaving is detected on ARRIVAL, not on exit. Unload events are unreliable
-      on iOS, so instead this script pauses the session when it loads on any
-      page that is not the practice log. The second or two of lag is noise.
+   2. Leaving the app's other pages is detected on ARRIVAL, not on exit. Unload
+      events are unreliable on iOS, so instead this script pauses the session
+      when it loads on any page that is not the practice log. The second or two
+      of lag is noise. (Within the practice log, closing the window is the
+      signal and needs no such trick.)
    3. An automatic pause is marked as such, so returning to the log resumes it
       while a pause the member chose themselves is left alone.
 */
@@ -235,9 +243,10 @@
   }
 
   function start() {
-    // The log page takes it from here — but never lift the pause on a session
-    // belonging to someone else who used this device.
-    if (L.isLogPage()) { if (!L.isForeign(L.read())) L.autoResume(); return; }
+    // The log page owns the session and decides for itself when the clock runs
+    // — which is only while the session WINDOW is open, not merely while that
+    // page is loaded. So nothing is resumed here.
+    if (L.isLogPage()) return;
     L.autoPause();                                    // arriving here means they left
     paint();
     // Another tab ending or changing the session must show up here too.
