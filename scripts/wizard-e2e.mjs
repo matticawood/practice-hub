@@ -597,6 +597,42 @@ await scenario("Switching: carrying on by hand after a live session", async ({ w
   eq("both activities in the session", t.formItems.length, 2);
 });
 
+// ===========================================================================
+await scenario("Traps: editing a saved session offers no way to start new practice",
+  async ({ win, t }) => {
+    installClock(win);
+    win.eval("editingSessionId = 4242;");
+    win.eval("openWizard()"); await tick(win, 60);
+    win.eval("_wizGoTo('date', 0, 'backward')"); await tick(win, 60);
+    ok("Start a live session is not offered", !visible(win, "#wiz-live-btn"));
+    ok("nor is quick practice", !visible(win, "#wiz-quick-btn"));
+    // And the functions refuse even if something else reaches them.
+    win.eval("wizStartLive()"); await tick(win, 60);
+    ok("calling it directly does nothing", !t.liveOn);
+    eq("the edit is untouched", t.editingId, 4242);
+    win.eval("wizStartQuick()"); await tick(win, 60);
+    eq("quick practice refuses too", t.screen, "date");
+    eq("and the date is left alone", $(win, "#session-date").value, $(win, "#session-date").value);
+  });
+
+await scenario("Traps: the buttons come back once the edit is finished", async ({ win }) => {
+  win.eval("openWizard()"); await tick(win, 60);
+  ok("a normal entry offers a live session", visible(win, "#wiz-live-btn"));
+  ok("and quick practice", visible(win, "#wiz-quick-btn"));
+});
+
+await scenario("Traps: a duration longer than a day is refused", async ({ win, t }) => {
+  await openWizard(win);
+  click(win, "#wiz-add-first-btn"); await tick(win, 40);
+  await pickType(win, "improvisation");
+  for (const [value, expected] of [["-30", true], ["0", true], ["abc", true],
+                                   ["99999", true], ["1441", true], ["1440", false], ["45", false]]) {
+    await setDuration(win, t, value);
+    const err = win.eval("_wizValidateCurrentItem()");
+    eq(`${value} minutes ${expected ? "refused" : "accepted"}`, !!err, expected);
+  }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("failed: " + failures.join(" | "));
 process.exit(fail ? 1 : 0);

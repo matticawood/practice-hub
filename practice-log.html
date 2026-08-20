@@ -23085,10 +23085,24 @@ function _wizAskNothingAdded() {
   wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
 }
 
+// Starting a live session or a quick log while EDITING a saved session makes no
+// sense: both are new practice, not a change to the record you opened. Worse,
+// starting a live session moved that record's date to today and then discarded
+// everything on minimise, because closeWizard() finalises an edit outright and
+// the draft mirror is skipped while editing — so there was no safety net.
+function _wizSyncNewPracticeButtons() {
+  const editing = !!editingSessionId;
+  for (const id of ["wiz-live-btn", "wiz-quick-btn"]) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = editing ? "none" : "";
+  }
+}
+
 function _wizRenderFooter() {
   // Every navigation path ends here, and which step we are on decides whether
   // the item actions are shown at all.
   _wizSyncChoosing();
+  _wizSyncNewPracticeButtons();
   // The squares button says which of its two jobs it is doing.
   const exitBtn = document.getElementById("wiz-choose-exit-btn");
   if (exitBtn) exitBtn.textContent = _wizRealItemCount() > 0 ? "Review session \u2192" : "Finish";
@@ -23367,6 +23381,10 @@ function livePauseToggle() {
 }
 function wizStartLive() {
   if (viewingEmail !== myEmail) return;
+  if (editingSessionId) {
+    showToast("Finish editing this session first — a live session logs new practice.", 4000, true);
+    return;
+  }
   // Already running? Go back to it rather than starting a second session on top.
   if (_liveOn) {
     if (formItems.length) {                       // take them back to it
@@ -23772,7 +23790,13 @@ function wizAddFirstItem() { wizAddItemAndOpen(); }
 
 // Quick practice: a single in-wizard screen for "just the minutes". Uses the same
 // preset + adjust controls as the log's duration footer.
-function wizStartQuick() { _wizGoTo('quick', 0, 'forward'); _qlSizeMins(); }
+function wizStartQuick() {
+  if (editingSessionId) {
+    showToast("Finish editing this session first — quick practice logs a new one.", 4000, true);
+    return;
+  }
+  _wizGoTo('quick', 0, 'forward'); _qlSizeMins();
+}
 // Size the minutes input to its content so "20 min" stays visually centred (a fixed-width
 // box right-aligned the number, leaving dead space that pushed it off-centre). Grows for 3 digits.
 function _qlSizeMins() {
@@ -23860,7 +23884,11 @@ function _wizValidateCurrentItem() {
 
   // Duration required for all types
   const durInput = block.querySelector(".item-duration-input");
-  if (!durInput || !(parseInt(durInput.value) > 0)) return "Please set a duration for this item.";
+  const durVal = parseInt(durInput && durInput.value);
+  if (!durInput || !(durVal > 0)) return "Please set a duration for this item.";
+  // 99999 sailed through. A single activity cannot outlast the day it happened
+  // in, so this catches a slipped keystroke without second-guessing a long one.
+  if (durVal > 1440) return "That is longer than a day — check the minutes.";
 
   // Type-specific name requirements
   if (type === "piece") {
