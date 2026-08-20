@@ -1,6 +1,7 @@
 // End-to-end stress test of practice logging: boots the real page in a DOM and
 // clicks the real buttons, in both normal and live modes. Every assertion here
 // is about what a member would see or lose, not about how the code is written.
+import fs from "fs";
 import { boot, $, visible, click, setField, tick, installClock, advance } from "./wizard-harness.mjs";
 
 let pass = 0, fail = 0;
@@ -693,6 +694,44 @@ await scenario("Blocked: an activity whose requirement cannot be met can still b
     win.eval("_wizGoTo('overview', 0, 'forward')"); await tick(win, 80);
     eq("and the review is reachable", t.screen, "overview");
   });
+
+// ===========================================================================
+await scenario("The review is never reached with nothing in it", async ({ win, t }) => {
+  // Resuming a draft was the route that never checked. A draft can hold notes
+  // and no activities, or ones that no longer rebuild.
+  win.eval(`
+    formItems = []; itemCounter = 0;
+    document.getElementById("items-container").innerHTML = "";
+    openWizard();
+  `); await tick(win, 60);
+  win.eval("_wizGoOverview()"); await tick(win, 80);
+  eq("an empty draft lands on the date screen, not the review", t.screen, "date");
+
+  // And with something in it, the review is still reachable as before.
+  click(win, "#wiz-add-first-btn"); await tick(win, 40);
+  await pickType(win, "improvisation");
+  await setDuration(win, t, 15);
+  win.eval("_wizGoOverview()"); await tick(win, 80);
+  eq("a draft with an activity opens on the review", t.screen, "overview");
+});
+
+await scenario("Copy in the logging flow carries no em dashes", async ({ win }) => {
+  // A standing rule, and the empty-review message broke it.
+  // Scan the wizard's code line by line, the way the offender was actually
+  // found. Extracting "strings" misses it: the empty-review message lives
+  // inside an HTML template literal, so any filter that skips markup skips it.
+  const src = fs.readFileSync("practice-log.html", "utf8").split("\n");
+  const from = src.findIndex(l => l.includes("function _wizRenderOverview"));
+  const to = src.findIndex(l => l.includes("function _liveEnd("));
+  const offenders = [];
+  for (let i = from; i < to; i++) {
+    const line = src[i];
+    const code = line.replace(/\/\/.*$/, "");        // drop trailing comments
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;  // skip comment lines
+    if (code.includes("\u2014")) offenders.push(`${i + 1}: ${code.trim().slice(0, 70)}`);
+  }
+  eq("none in the wizard's own copy", offenders, []);
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("failed: " + failures.join(" | "));
