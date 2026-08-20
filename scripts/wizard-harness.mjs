@@ -15,16 +15,23 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // chainable in any order, so page code can call it however it likes. Writes are
 // recorded so a test can assert what would actually have been saved.
 let nextId = 1000;
+let FAIL_WRITES = false;
+export const setFailWrites = v => { FAIL_WRITES = !!v; };
 function stubQuery(table, log, rows = []) {
   const res = { data: rows, error: null, count: rows.length };
+  const oops = { message: "network error", code: "PGRST000" };
   const b = new Proxy(function () {}, {
     get(_t, prop) {
-      if (prop === "then") return (ok, err) => Promise.resolve(res).then(ok, err);
+      if (prop === "then") return (ok, err) => Promise.resolve(
+        FAIL_WRITES && log.some(w => w.table === table) ? { data: null, error: oops } : res
+      ).then(ok, err);
       if (prop === "catch") return () => b;
       if (prop === "finally") return () => b;
       // Inserts use .single(); existence checks use .maybeSingle(). Giving the
       // first a row and the second null matches how the page uses them.
-      if (prop === "single") return () => Promise.resolve({ data: { id: nextId++ }, error: null });
+      if (prop === "single") return () => FAIL_WRITES
+        ? Promise.resolve({ data: null, error: oops })
+        : Promise.resolve({ data: { id: nextId++ }, error: null });
       if (prop === "maybeSingle") return () => Promise.resolve({ data: rows[0] ?? null, error: null });
       if (prop === "insert" || prop === "update" || prop === "upsert" || prop === "delete")
         return (payload) => { log.push({ table, op: prop, payload }); return b; };
@@ -63,7 +70,7 @@ export const readStorage = win => {
   return out;
 };
 
-export async function boot({ quiet = true, storage = null } = {}) {
+export async function boot({ quiet = true, storage = null, failWrites = false } = {}) {
   let html = fs.readFileSync(path.join(ROOT, "practice-log.html"), "utf8");
 
   // Inline the scripts that are part of this feature; drop the rest.
@@ -87,6 +94,7 @@ export async function boot({ quiet = true, storage = null } = {}) {
     virtualConsole: vc,
     beforeParse(win) {
       writes.length = 0;
+      FAIL_WRITES = !!failWrites;
       win.supabase = { createClient: () => stubDb };
       // Stubs for the shared scripts that were dropped.
       win.initSharedHeader = () => {};

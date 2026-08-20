@@ -633,6 +633,67 @@ await scenario("Traps: a duration longer than a day is refused", async ({ win, t
   }
 });
 
+// ===========================================================================
+// The ways a member could be stopped from logging at all, rather than losing
+// something. A refused save is the likeliest: it must not swallow the work.
+async function failingScenario(name, fn) {
+  let b;
+  try { b = await boot({ failWrites: true }); section(name); await fn(b); }
+  catch (e) { fail++; failures.push(name + " threw"); console.log(`  FAIL threw: ${e.message}`); }
+  finally { b?.shutdown(); }
+}
+
+await failingScenario("Blocked: a refused save keeps the work and allows another go",
+  async ({ win, t, dialogs }) => {
+    win.eval("openWizard()"); await tick(win, 50);
+    click(win, "#wiz-add-first-btn"); await tick(win, 50);
+    await pickType(win, "improvisation");
+    await setDuration(win, t, 35);
+    win.eval("_wizGoTo('overview', 0, 'forward')"); await tick(win, 80);
+    click(win, "#wiz-next-btn"); await tick(win, 500);
+    ok("the member is told", dialogs.some(d => /error saving/i.test(d.msg)));
+    ok("the window stays open", $(win, "#log-wizard-backdrop").classList.contains("open"));
+    eq("the activity is still there", t.formItems.length, 1);
+    eq("with its minutes", $(win, `#item-block-${t.formItems[0].id}`)
+      .querySelector(".item-duration-input").value, "35");
+    ok("a copy is on the device", !!win.localStorage.getItem("tc_practice_draft_v1"));
+    ok("and Save can be pressed again", !$(win, "#wiz-next-btn").disabled);
+  });
+
+await failingScenario("Blocked: a refused save after a live session loses nothing either",
+  async ({ win, t, dialogs }) => {
+    installClock(win);
+    win.eval("openWizard()"); await tick(win, 50);
+    click(win, "#wiz-live-btn"); await tick(win, 80);
+    await pickType(win, "theory");
+    click(win, "#wiz-live-start"); await tick(win, 20);
+    advance(win, 28 * MIN);
+    click(win, "#wiz-live-end-btn"); await tick(win, 100);
+    click(win, "#wiz-next-btn"); await tick(win, 500);
+    ok("told about it", dialogs.some(d => /error saving/i.test(d.msg)));
+    eq("the twenty-eight minutes survive", $(win, `#item-block-${t.formItems[0].id}`)
+      .querySelector(".item-duration-input").value, "28");
+    ok("and are recoverable", !!win.localStorage.getItem("tc_practice_draft_v1"));
+  });
+
+await scenario("Blocked: an activity whose requirement cannot be met can still be escaped",
+  async ({ win, t }) => {
+    await openWizard(win);
+    click(win, "#wiz-add-first-btn"); await tick(win, 40);
+    await pickType(win, "improvisation");
+    await setDuration(win, t, 20);
+    click(win, "#wiz-add-another-btn"); await tick(win, 40);
+    await pickType(win, "technique");
+    await setDuration(win, t, 15);
+    ok("it cannot be completed without a technique",
+       /technique/i.test(win.eval("_wizValidateCurrentItem()") || ""));
+    ok("but Remove this item is there", visible(win, "#wiz-remove-item-btn"));
+    click(win, "#wiz-remove-item-btn"); await tick(win, 80);
+    eq("removing it leaves the good one", t.formItems.length, 1);
+    win.eval("_wizGoTo('overview', 0, 'forward')"); await tick(win, 80);
+    eq("and the review is reachable", t.screen, "overview");
+  });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("failed: " + failures.join(" | "));
 process.exit(fail ? 1 : 0);
