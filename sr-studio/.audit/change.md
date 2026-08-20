@@ -1,45 +1,45 @@
 ## PREMISE-CHALLENGE
-- What is a composer actually doing with a tenuto ('--')? Leaning gently on a note — a sustained stress, WEIGHT WITHOUT
-  ATTACK. It is the lyrical counterpart to the sharp accent: where a march STABS a strong beat, a cantabile LEANS on an
-  expressive note (its phrase peak, a suspension) and lets it sing full value. Placed sparingly, on a note that wants
-  emphasis-by-duration rather than by attack.
-- Should this even be ADDED, or is its absence fine (the "removal" question inverted — should I leave it out)? Strongest
-  case for NOT adding it: the generator is ALREADY expressively rich (dynamics, hairpins, staccato, accents, fermata,
-  slurs); tenuto is subtle and easy to MISPLACE, and a misplaced tenuto is worse than none; an unused optional device is not
-  a defect, and bolting features on in an audit loop is exactly the manufacturing to avoid. That case is real and I hold it.
-  What outweighs it: tenuto is a device ABRSM SPECIFICALLY INTRODUCES at grade 4, and the engine already renders it — yet
-  the generator produces it 0% of the time, so a grade-4 student never meets it: a genuine grade-canvas GAP, not a random
-  feature. And there is a concrete expressive hole it fills: the smooth/legato characters carry NO stress articulation at
-  all (accents are gated to accent >= 0.25, which excludes singing/lyricalslow/flowing/gentle), so their expressive peak is
-  never marked. A gentle tenuto on that peak is precisely what a composer writes there.
-- Why adding WINS over leaving it absent: it completes the grade-4 canvas the exam defines and gives lyrical characters the
-  lean they lack, placed EMERGENTLY on the melody's own peak (not scattered), one per piece, and verified in notation
-  (reverted if it reads misplaced). What it MISSES, honestly: (1) other idiomatic tenuto sites (a suspension/appoggiatura,
-  a note leaning into a breath) are not covered — only the phrase peak, the clearest case; (2) it marks the peak of every
-  qualifying legato g4 piece, so placement is consistent rather than rare — apt (a composer does lean the peak) but not
-  varied; if that reads as too much in notation I will make it a lean or drop it.
-- Verdict: EMERGENT — the tenuto lands on the melody's own expressive PEAK (its highest sustained note), read from the
-  material, for exactly the characters whose legato lyricism calls for a lean rather than an accent. It is derived, not
-  stamped: a piece with no sustained peak note gets none.
+- What is a composer doing when they write in 6/8? Choosing a compound-time GENRE: a barcarolle or pastoral (a slow, lilting
+  6/8 — a singing/gentle line), or a jig/gigue (a fast, bouncing 6/8 — a lively/dance line). The metre is not neutral; it
+  belongs to characters whose feel is a compound lilt.
+- Should this be built, or is there a case against / a different approach? The compound rhythm now works, but every 6/8
+  piece comes out "singing" because NO character declares 6/8, so the selector silently falls back to the first character
+  (CHARACTERS[0] = singing). Case for a different approach: maybe leave it as one character — but that fails "every piece
+  different" outright (all 6/8 identical in character) and is just the silent-fallback bug, not a choice. So the fix is to
+  give 6/8 to the characters whose feel it actually is: the lilting-smooth ones (a barcarolle / pastoral) and the lilting-
+  crisp ones (a jig). NOT the duple march, nor the waltz/minuet (those ARE 3/4 ternary, a different lilt from compound), nor
+  the stately grand.
+- Why this wins: it makes the metre carry its real genres and gives 6/8 the same character spread simple metres have, so a
+  6/8 piece can be a gentle barcarolle OR a lively jig, not always one thing. What it MISSES, honestly: (1) it does not add
+  compound-specific melodic FIGURES (a jig's dotted bounce vs a barcarolle's rocking) beyond what the shared rhythm/pace/dot
+  leans already give — a later refinement; (2) 3/8 (one compound beat a bar) is left to a later pass; (3) the FREQUENCY of
+  compound vs simple at grade 4 is not yet tuned (measured next) — if compound is over-represented that is a separate weight.
+- Verdict: EMERGENT — a character declares the metres its feel inhabits; 6/8 is added exactly to the characters whose nature
+  is a compound lilt (barcarolle/pastoral/jig), read from what each character IS, not stamped on arbitrarily.
 
 ## COMPOSER-CHECK
-- The decision: whether (and where) a grade-4 legato line receives a tenuto lean.
-- How a composer actually reasons it: a legato cantabile has an expressive high point; you lean on it — hold it, give it
-  weight — without stabbing it. That is a tenuto, and its home is the phrase's sustained peak. A crisp line would accent
-  instead; a lyrical one tenutos.
-- Refute it: is "tenuto the peak" a stamp? No — the peak is read from the actual melody (the highest note that is at least a
-  beat long and not already articulated); a piece whose high point is a short note, or already slurred-staccato-accented,
-  gets none. It fires only for legato, non-accenting characters at grade 4. What it does NOT do: a suspension/appoggiatura
-  tenuto, or a lean-into-the-breath — real sites given up for the single clearest one (the peak).
-- Verdict: EMERGENT — the mark's location is the melody's own peak sustained note; nothing about it is a fixed pitch or a
-  probability. It simply is not placed where the material offers no sustained peak.
+- The decision: which characters may be written in 6/8.
+- How a composer actually reasons it: 6/8 is a lilting compound metre — its genres are the barcarolle/pastoral (a slow
+  singing lilt) and the jig/gigue (a quick bouncing one). So the singing/gentle/flowing characters and the lively/dance
+  characters can inhabit it; the march (duple), the waltz/minuet (3/4 ternary), and the stately grand do not.
+- Refute it: is this an arbitrary assignment? No — each character's `metres` already lists the metres its feel fits (a waltz
+  is 3/4-only because it IS a waltz); adding 6/8 to the lilting characters is the same principle, matching the metre to the
+  characters whose nature is compound. What it drops: a 6/8 MARCH (a real quickstep) and a 6/8 scherzo are plausible and
+  not added here — a deliberate narrowing to the clearest compound genres for now.
+  On the CODE construct (the `metres` array reads as a list of labels): it is NOT a template menu / discrete archetype a
+  value is stamped from — it is the character's declared metre-FIT, the same enumeration every character already carries.
+  The metre is DRAWN from the grade's own spec, and the character is then FILTERED by whether its metres list includes that
+  drawn metre; the array is a fit-predicate on the character's nature, not a value picked from a menu.
+- Verdict: EMERGENT — the metre is placed with the characters whose feel it is, the same way every other metre already sits
+  with its characters.
 
 ## EMERGENCE
-The tenuto is placed on the highest note of the RH line that is sustained (at least a beat) and carries no other mark —
-the melody's expressive peak, read directly from its pitches and durations. It appears only for legato characters that do
-not accent (accent < 0.25), at grade 4, and only when such a peak note exists; otherwise none is placed.
+Each character's metre list expresses the metres its feel inhabits. 6/8 is added to the characters whose nature is a
+compound lilt — the barcarolle/pastoral (singing, flowing, gentle) and the jig (lively, dance) — and withheld from the ones
+it is not (march, waltz, minuet, grand). The selector then matches a drawn 6/8 to one of these by the same character-fit
+logic it already uses for every metre.
 
 ## PREFERENCE
-Bounded: at most ONE tenuto per piece, grade 4 only, legato non-accenting characters only, and only on a genuinely sustained
-peak note. It is not sprinkled across notes and never overrides an existing articulation. Where the line has no sustained
-high point, no tenuto appears — so it is the material, not a quota, that decides.
+6/8 is added only to the compound-lilt characters, a spread (slow barcarolles AND fast jigs) so no single character owns it.
+The character is still drawn by the existing metre-fit + under-use lean. March/waltz/minuet/grand keep their metres; nothing
+forces a compound piece where the character is not one of these.

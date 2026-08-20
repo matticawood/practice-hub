@@ -22,17 +22,17 @@ const CHARACTERS = [
   //   switch): `stac` = melodic staccato tendency (scherzo high, cantabile 0); `accent` = accent frequency (march/grand
   //   high); `ferm` = expressive-repose/fermata tendency (lyrical/grand higher, crisp dance rare); `hair` = how readily a
   //   phrase-arc earns a hairpin (lyrical high → shaped; march low → terraced). `move`/`breath`/`figure` as before.
-  { id: 'singing',     feel: 'smooth', artic: 'legato',   figure: 'conjunct',    move: 0.48, breath: 0.9,  stac: 0.0,  accent: 0.0,  ferm: 0.15, hair: 0.85, tex: ['sustained', 'broken', 'alberti'],       metres: ['4/4', '3/4', '2/4'], dyn: ['pp', 'p', 'mp'], pace: 0.35, dot: 0.15, tempo: 'Andante cantabile' },
+  { id: 'singing',     feel: 'smooth', artic: 'legato',   figure: 'conjunct',    move: 0.48, breath: 0.9,  stac: 0.0,  accent: 0.0,  ferm: 0.15, hair: 0.85, tex: ['sustained', 'broken', 'alberti'],       metres: ['4/4', '3/4', '2/4', '6/8'], dyn: ['pp', 'p', 'mp'], pace: 0.35, dot: 0.15, tempo: 'Andante cantabile' },
   { id: 'lyricalslow', feel: 'smooth', artic: 'legato',   figure: 'conjunct',    move: 0.4,  breath: 0.92, stac: 0.0,  accent: 0.05, ferm: 0.35, hair: 0.8,  tex: ['sustained', 'broken', 'sustained'],     metres: ['4/4', '3/4'],        dyn: ['pp', 'p'],       pace: 0.18, dot: 0.15, tempo: 'Adagio espressivo' },
-  { id: 'flowing',     feel: 'smooth', artic: 'mixed',    figure: 'mixed',       move: 0.6,  breath: 0.75, stac: 0.2,  accent: 0.1,  ferm: 0.1,  hair: 0.6,  tex: ['broken', 'alberti', 'sustained'],       metres: ['4/4', '3/4', '2/4'], dyn: ['p', 'mp', 'mf'], pace: 0.48, dot: 0.2, tempo: 'Andante' },
+  { id: 'flowing',     feel: 'smooth', artic: 'mixed',    figure: 'mixed',       move: 0.6,  breath: 0.75, stac: 0.2,  accent: 0.1,  ferm: 0.1,  hair: 0.6,  tex: ['broken', 'alberti', 'sustained'],       metres: ['4/4', '3/4', '2/4', '6/8'], dyn: ['p', 'mp', 'mf'], pace: 0.48, dot: 0.2, tempo: 'Andante' },
   { id: 'waltz',       feel: 'lilt',   artic: 'legato',   figure: 'conjunct',    move: 0.55, breath: 0.7,  stac: 0.3,  accent: 0.1,  ferm: 0.05, hair: 0.6,  tex: ['rootfifth'],                            metres: ['3/4'],               dyn: ['p', 'mp', 'mf'], pace: 0.42, dot: 0.45, tempo: 'Tempo di Valse' },
   { id: 'minuet',      feel: 'lilt',   artic: 'mixed',    figure: 'playful',     move: 0.5,  breath: 0.72, stac: 0.6,  accent: 0.15, ferm: 0.05, hair: 0.5,  tex: ['rootfifth', 'bassline', 'rootfifth'],   metres: ['3/4'],               dyn: ['mp', 'mf'],      pace: 0.46, dot: 0.55, tempo: 'Tempo di minuetto' },
   { id: 'march',       feel: 'crisp',  artic: 'detached', figure: 'arpeggiated', move: 0.72, breath: 0.5,  stac: 0.6,  accent: 0.6,  ferm: 0.1,  hair: 0.4,  tex: ['block', 'rootfifth', 'block'],          metres: ['4/4', '2/4'],        dyn: ['mf', 'f', 'ff'], pace: 0.5, dot: 0.7, tempo: 'Alla marcia' },
-  { id: 'dance',       feel: 'crisp',  artic: 'mixed',    figure: 'playful',     move: 0.68, breath: 0.65, stac: 0.6,  accent: 0.2,  ferm: 0.05, hair: 0.4,  tex: ['rootfifth', 'block', 'broken'],         metres: ['2/4', '4/4'],        dyn: ['mp', 'mf'],      pace: 0.62, dot: 0.4, tempo: 'Allegretto' },
+  { id: 'dance',       feel: 'crisp',  artic: 'mixed',    figure: 'playful',     move: 0.68, breath: 0.65, stac: 0.6,  accent: 0.2,  ferm: 0.05, hair: 0.4,  tex: ['rootfifth', 'block', 'broken'],         metres: ['2/4', '4/4', '6/8'],        dyn: ['mp', 'mf'],      pace: 0.62, dot: 0.4, tempo: 'Allegretto' },
   { id: 'scherzo',     feel: 'crisp',  artic: 'detached', figure: 'playful',     move: 0.7,  breath: 0.6,  stac: 0.85, accent: 0.3,  ferm: 0.05, hair: 0.4,  tex: ['bassline', 'rootfifth', 'block'],       metres: ['2/4', '3/4'],        dyn: ['mp', 'mf', 'f'], pace: 0.82, dot: 0.3, tempo: 'Scherzando' },
-  { id: 'gentle',      feel: 'smooth', artic: 'mixed',    figure: 'mixed',       move: 0.52, breath: 0.85, stac: 0.1,  accent: 0.05, ferm: 0.15, hair: 0.6,  tex: ['alberti', 'broken', 'sustained'],       metres: ['4/4', '3/4', '2/4'], dyn: ['p', 'mp'],       pace: 0.42, dot: 0.2, tempo: 'Moderato' },
+  { id: 'gentle',      feel: 'smooth', artic: 'mixed',    figure: 'mixed',       move: 0.52, breath: 0.85, stac: 0.1,  accent: 0.05, ferm: 0.15, hair: 0.6,  tex: ['alberti', 'broken', 'sustained'],       metres: ['4/4', '3/4', '2/4', '6/8'], dyn: ['p', 'mp'],       pace: 0.42, dot: 0.2, tempo: 'Moderato' },
   { id: 'grand',       feel: 'smooth', artic: 'mixed',    figure: 'arpeggiated', move: 0.55, breath: 0.62, stac: 0.25, accent: 0.7,  ferm: 0.35, hair: 0.5,  tex: ['block', 'rootfifth', 'block'],          metres: ['4/4', '3/4'],        dyn: ['mf', 'f', 'ff'], pace: 0.3, dot: 0.6, tempo: 'Maestoso' },
-  { id: 'lively',      feel: 'crisp',  artic: 'mixed',    figure: 'mixed',       move: 0.6,  breath: 0.6,  stac: 0.5,  accent: 0.25, ferm: 0.1,  hair: 0.5,  tex: ['bassline', 'rootfifth', 'broken', 'block'], metres: ['2/4', '4/4', '3/4'], dyn: ['mp', 'mf', 'f'], pace: 0.75, dot: 0.3, tempo: 'Allegro' },
+  { id: 'lively',      feel: 'crisp',  artic: 'mixed',    figure: 'mixed',       move: 0.6,  breath: 0.6,  stac: 0.5,  accent: 0.25, ferm: 0.1,  hair: 0.5,  tex: ['bassline', 'rootfifth', 'broken', 'block'], metres: ['2/4', '4/4', '3/4', '6/8'], dyn: ['mp', 'mf', 'f'], pace: 0.75, dot: 0.3, tempo: 'Allegro' },
 ];
 
 const LETTER = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
@@ -102,15 +102,14 @@ export function generateCompose(grade, opts = {}) {
   const mode = opts.mode || leanAway((gp.keys.minor || []).length ? ['maj', 'maj', 'min'] : ['maj'], cMode);   // maj slightly favoured at an empty bank (2:1), then the bank counts spread it
   const keyName = opts.key || leanAway(gp.keys[mode === 'maj' ? 'major' : 'minor'] || ['C'], cKey);
   const { pc, keyStr, flat } = keyInfo(keyName, mode);
-  const SIMPLE = ['4/4', '2/4', '3/4'];
-  let times = gp.timeSignatures.filter(t => SIMPLE.includes(t));
+  let times = gp.timeSignatures.filter(t => t !== '3/8');   // admit the grade's metres incl. compound 6/8 (grade 4 requires it); 3/8 (one-beat compound bars) deferred pending its own character coverage + rhythm check
   // a PINNED character fixes the metre family — a waltz / minuet is ternary by definition, so it must not be paired with a
   //   duple bar just because the metre was drawn first. (Unpinned generation already picks the character to fit the metre
   //   below, so this only guards a caller that pins the character.) A definitional constraint, not a tuned lean.
   if (opts.character) { const pinned = CHARACTERS.find(c => c.id === opts.character); if (pinned) { const t2 = times.filter(t => pinned.metres.includes(t)); if (t2.length) times = t2; } }
   const time = opts.time || leanAway(times.length ? times : ['4/4'], cTime);
   const [top, bottom] = time.split('/').map(Number);
-  const barU = (top / bottom) * 4, beatLen = 1;
+  const barU = (top / bottom) * 4, beatLen = (bottom === 8 && top % 3 === 0) ? 1.5 : 1;   // compound signature (6/8, 3/8): the beat is a DOTTED crotchet (1.5), as the engine computes it
   const nbars = G.bars[time];
   const fixed = G.fixedPosition;
 

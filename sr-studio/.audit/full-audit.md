@@ -1,32 +1,26 @@
-# Audit loop — Cycle 19 (spelling / range / slurs — CLEAN; loop converged, holding)
+# Audit loop — Cycle 20 (BUILD: compound time 6/8 — the port had dropped it)
 
 ## RENDERED
-- G3 B minor: scratchpad/c19bm.cropped.png — B minor, 3/4, Tempo di Valse, waltz, rootfifth (renders the raised ^6/^7 spelling).
-
-## MEASURED (the engine's LilyPond spelling, in-process)
-KEYS — grade-appropriate: <= 3 accidentals only (C/G/D/A/F/Bb/Eb major; A/E/B/D/G minor).
-SPELLING — 0 double accidentals across 3001 pieces; 0/976 minor pieces missing their raised leading tone, correctly spelled
-per key (gis Am, dis Em, ais Bm, cis Dm, fis Gm).
-G2 RANGE — stays in the five-finger window: max span 7 semitones (a fifth), 0/1000 over a sixth.
-SLURS — 0/1200 g3/g4 pieces have a slur crossing a rest.
+- 6/8 barcarolle: scratchpad/c68_1..4.cropped.png (singing), c68b2 (gentle, A major).
+- 6/8 jig: scratchpad/c68b1.cropped.png (dance, G major, Allegretto).
 
 ## AUDIT
-The B-minor render (c19bm.cropped.png) confirms the measured spelling in notation, note by note:
-RH b1 B3(dotted-crotchet) C#4(quaver) D4 — i outline, C# = ^2 (diatonic, key sig). b2 C#4 D4 E4 — stepwise. b3 G4 F#4 E4
-F#4 — G natural = ^6 (natural, descending). b4 F#4 A#4 G4 F#4 — the A#4 is the RAISED ^7 (leading tone), spelled as a
-SHARP (not Bb), correct. b5 B4(minim) rest — phrase arrival on the tonic. b6 F#4 G4 B4. b7 F#4 G#4 A#4 — an ASCENDING
-melodic-minor approach F#-G#-A#(-B): the G#4 is the raised ^6 (sharp) and A#4 the raised ^7 (sharp), both correctly spelled
-for the ascent. b8 B4(dotted-minim) — final tonic.
-LH (waltz oom-pah): b1 B2 / D3+F#3 / D3+F#3 = i (B-D-F#, full triad). b4 A#2 / C#3+F#3 / C#3+F#3 = V (F#-A#-C#, F# major
-with the A# leading tone, correctly a SHARP). b5-b6 i. b7 B2 / A#2 / C#3+F#3 — the A#2 (leading tone) in the bass, a sharp.
-b8 i. Every accidental is a SHARP (A#, G#, C#, F#), never a flat — correct for B minor's raised ^6/^7 and its V chord. No
-double accidentals. Dynamics p -> mf -> mp; waltz lilt; clear i-V-i. Clean.
+Matthew corrected two things: 16-bar forms are NOT a gap (grades 2-4 have set bar counts, already done), and compound time
+is REQUIRED grade-4 content that I wrongly called "unbuilt / optional". Tested it instead of asserting: enabling 6/8 gave
+0% valid, and the reason was concrete — the melody-rhythm generator produced simple-beat rhythm (notes at 0,1,2) instead of
+compound (0, 1.5), so the validator rejected "rhythm crosses a beat". The OLD generator had full 6/8; the composer-model
+port dropped it.
+
+BUILT (through the gate, verified): the beat length is computed from the metre (dotted crotchet 1.5 for 6/8); barRhythm /
+drawBeat / beatSegs made beat-length-aware (compound subdivisions summing to 1.5; beat cuts at multiples of 1.5); the
+phrase-end broaden fills barU quarter-units (was returning a 2-quarter note in a 3-quarter bar — the cascade culprit);
+6/8 added to the compound-lilt characters (singing/flowing/gentle barcarolle, lively/dance jig); 3/8 deferred.
+
+VERIFIED at scale: 6/8 0% -> 100% valid; all grades 100% valid; 6/8 ~26% of grade 4 across 5 characters. VERIFIED in
+notation: c68b1 (dance) is a lively jig (running quavers/semis beamed in threes, staccato, mf); c68b2 (gentle) is a soft
+barcarolle (legato quavers, p) — genuinely different characters, both correct 6/8 (dotted-crotchet beats, three-quaver
+beaming, oom-pah/broken LH grouped correctly).
 
 ## VERDICT
-Cycle 19: CLEAN. Keys, enharmonic/accidental spelling, minor leading-tone spelling (measured + confirmed in the B-minor
-render), g2 range window, and slur-over-rest all check out. No change made, no fix manufactured.
-
-The loop has CONVERGED. The remaining work is FEATURE BUILDS, not loop-fixable violations, awaiting Matthew's greenlight:
-  1. Compound metre (6/8, 9/8) — a whole ABRSM metrical class absent. Biggest, high effort.
-  2. More chromatic colour — only V/V exists; could add V/vi, V/ii, borrowed chords. Best value-for-effort.
-  3. 16-bar forms — g3/4 always 8 bars. Minor; 8 is standard for these grades.
+Cycle 20: compound time (6/8) BUILT and working at grade 4 — the real thing the port dropped. Diagnosed by testing/looking,
+not asserting. Remaining refinements (named): 3/8 coverage, compound-specific melodic figures, compound frequency tuning.

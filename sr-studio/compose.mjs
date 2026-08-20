@@ -350,54 +350,60 @@ function reharmoniseBar(plan, b, newChord, barU) {
 //   quaver, g3/4 = semiquaver. [P + grade gate]
 const _pickW = (opts, rnd) => { let tot = 0; for (const o of opts) tot += o.w; let r = rnd() * tot;
   for (const o of opts) { r -= o.w; if (r <= 0) return o.dur; } return opts[opts.length - 1].dur; };
-function barRhythm(nbeats, rnd, pace = 0.45, dot = 0.25, grade = 3) {
+function barRhythm(nbeats, rnd, pace = 0.45, dot = 0.25, grade = 3, beatLen = 1) {
   const gmin = grade <= 2 ? 0.5 : 0.25;
-  const SUB = [[1], [0.5, 0.5], [0.75, 0.25], [0.25, 0.75], [0.5, 0.25, 0.25], [0.25, 0.25, 0.5], [0.25, 0.25, 0.25, 0.25]]
-    .filter(c => Math.min(...c) >= gmin - 1e-9);                    // in-beat subdivisions (sum to 1, never cross the beat)
+  const compound = beatLen > 1 + 1e-9;                              // a DOTTED-crotchet beat (1.5): 6/8, 3/8
+  // in-beat subdivisions that SUM TO THE BEAT and never cross it. Simple beat (1) -> the crotchet family; compound beat
+  //   (1.5) -> the dotted-crotchet family (the whole dotted crotchet; crotchet-quaver lilt and its reverse; three quavers;
+  //   the semiquaver fills). Same idea, expressed for the beat's real length. [P]
+  const SUB = (compound
+    ? [[1.5], [1, 0.5], [0.5, 1], [0.5, 0.5, 0.5], [1, 0.25, 0.25], [0.25, 0.25, 1], [0.5, 0.5, 0.25, 0.25], [0.25, 0.25, 0.5, 0.5], [0.5, 0.25, 0.25, 0.5]]
+    : [[1], [0.5, 0.5], [0.75, 0.25], [0.25, 0.75], [0.5, 0.25, 0.25], [0.25, 0.25, 0.5], [0.25, 0.25, 0.25, 0.25]])
+    .filter(c => Math.min(...c) >= gmin - 1e-9);
   const cell = [];
-  for (let b = 0; b < nbeats;) {
+  for (let b = 0; b < nbeats - 1e-9;) {
     const left = nbeats - b, opts = [];
-    for (let k = 2; k <= Math.min(left, 4); k++)                    // a LONG note (minim / dotted-minim) — broad characters lean here
-      opts.push({ dur: [k], w: (1 - pace) * (k === 2 ? 1.6 : k === 3 ? 0.5 : 0.3) });
-    if (left >= 2 && gmin <= 0.5 + 1e-9)                            // a DOTTED tread (dotted crotchet + quaver) — dot-leaning, wants some motion
+    for (let k = 2; k <= Math.min(left, 4); k++)                    // a LONG note spanning k whole beats (minim / dotted-minim; in compound a k-beat = k dotted crotchets)
+      opts.push({ dur: [k * beatLen], w: (1 - pace) * (k === 2 ? 1.6 : k === 3 ? 0.5 : 0.3) });
+    if (!compound && left >= 2 && gmin <= 0.5 + 1e-9)              // a simple-metre DOTTED tread (dotted crotchet + quaver spanning two crotchet beats)
       opts.push({ dur: [1.5, 0.5], w: (0.15 + 1.5 * dot) * (0.5 + 0.6 * pace) });
-    for (const s of SUB) {                                          // fill this one beat
-      if (s.length === 1) { opts.push({ dur: [1], w: 0.55 + 0.5 * (1 - pace) }); continue; }   // a plain crotchet
+    for (const s of SUB) {                                          // fill this ONE beat
+      if (s.length === 1) { opts.push({ dur: s.slice(), w: 0.55 + 0.5 * (1 - pace) }); continue; }   // the plain beat (crotchet, or a held dotted crotchet)
       // a busier subdivision — each SEMIQUAVER it packs COMPOUNDS the pace demand (pace^(1+#16ths)), so a plain quaver
-      //   pair is cheap but 16ths need a genuinely quick character (a broad line stays in crotchets/quavers even where
-      //   the grade allows 16ths). A dotted sub (dotted-quaver-semiquaver) additionally follows the DOT lean — the snap
-      //   a march/minuet wants. [P]
+      //   run is cheap but 16ths need a genuinely quick character. [P]
       const n16 = s.filter(v => v < 0.5 - 1e-9).length;
       let w = 1.6 * Math.pow(pace, 1 + n16);
       if (s.some(v => Math.abs(v - 0.75) < 1e-9)) w *= 0.4 + 1.6 * dot;
-      // GRADE difficulty dial: the grade caps how much of a character's liveliness becomes fast notes. g2 bars semiquavers
-      //   outright (gmin); at g3 they are ALLOWED but a real rarity (an occasional run, not continuous) — a lively grade-3
-      //   sight-read is mostly quavers with the odd semiquaver; g4 lets them flow. So a semiquaver-bearing beat is damped
-      //   at g3, keeping the progression g2 < g3 < g4 in rhythmic density (was: g3 == g4, too hard for the grade). [C+P]
-      if (n16 > 0 && grade < 4) w *= 0.3;
+      if (compound && s.length === 2) w *= 0.5 + 1.4 * dot;         // the compound long-short (crotchet-quaver) lilt — the 6/8 signature — follows the DOT lean
+      if (n16 > 0 && grade < 4) w *= 0.3;                           // GRADE dial: semiquavers damped below g4 (g2<g3<g4 in density)
       opts.push({ dur: s, w });
     }
-    const d = _pickW(opts, rnd); cell.push(...d); b += d.reduce((a, x) => a + x, 0);
+    const d = _pickW(opts, rnd); cell.push(...d); b += d.reduce((a, x) => a + x, 0) / beatLen;   // advance by the number of BEATS this cell consumed
   }
   return cell;
 }
 // draw ONE beat's subdivision (the SUB axis of barRhythm), optionally leaning AWAY from `avoid` — the unit of rhythmic
 //   DEVELOPMENT: re-voicing a single beat varies the motif while keeping its frame (works on dense/dotted cells too,
 //   which the old whole-note-only variant could not touch). [P]
-function drawBeat(rnd, pace, dot, gmin, avoid = null) {
-  const SUB = [[1], [0.5, 0.5], [0.75, 0.25], [0.25, 0.75], [0.5, 0.25, 0.25], [0.25, 0.25, 0.5], [0.25, 0.25, 0.25, 0.25]].filter(c => Math.min(...c) >= gmin - 1e-9);
+function drawBeat(rnd, pace, dot, gmin, avoid = null, beatLen = 1) {
+  const compound = beatLen > 1 + 1e-9;
+  const SUB = (compound
+    ? [[1.5], [1, 0.5], [0.5, 1], [0.5, 0.5, 0.5], [1, 0.25, 0.25], [0.25, 0.25, 1], [0.5, 0.5, 0.25, 0.25], [0.25, 0.25, 0.5, 0.5], [0.5, 0.25, 0.25, 0.5]]
+    : [[1], [0.5, 0.5], [0.75, 0.25], [0.25, 0.75], [0.5, 0.25, 0.25], [0.25, 0.25, 0.5], [0.25, 0.25, 0.25, 0.25]]).filter(c => Math.min(...c) >= gmin - 1e-9);
   const opts = [];
   for (const s of SUB) {
-    if (s.length === 1) { opts.push({ dur: [1], w: 0.55 + 0.5 * (1 - pace) }); continue; }
+    if (s.length === 1) { opts.push({ dur: s.slice(), w: 0.55 + 0.5 * (1 - pace) }); continue; }
     const n16 = s.filter(v => v < 0.5 - 1e-9).length; let w = 1.6 * Math.pow(pace, 1 + n16);
     if (s.some(v => Math.abs(v - 0.75) < 1e-9)) w *= 0.4 + 1.6 * dot;
+    if (compound && s.length === 2) w *= 0.5 + 1.4 * dot;          // the compound long-short lilt follows the DOT lean
     if (avoid && s.join(',') === avoid) w *= 0.12;                  // lean away from repeating this exact beat (variety, not a ban)
     opts.push({ dur: s, w });
   }
   return _pickW(opts, rnd);
 }
-// split a flat cell into per-beat segments (a note >=1 beat is its own segment) — so development can target ONE beat.
-const beatSegs = cell => { const segs = []; let cur = [], acc = 0; for (const d of cell) { cur.push(d); acc += d; if (Math.abs(acc - Math.round(acc)) < 1e-9) { segs.push(cur); cur = []; acc = 0; } } if (cur.length) segs.push(cur); return segs; };
+// split a flat cell into per-beat segments (a note >=1 beat is its own segment) — so development can target ONE beat. Beats
+//   fall at multiples of the beat length (1 in simple metre, 1.5 in compound), so segment on THAT grid, not integers.
+const beatSegs = (cell, beatLen = 1) => { const segs = []; let cur = [], acc = 0; for (const d of cell) { cur.push(d); acc += d; if (Math.abs(acc / beatLen - Math.round(acc / beatLen)) < 1e-9) { segs.push(cur); cur = []; acc = 0; } } if (cur.length) segs.push(cur); return segs; };
 
 // compose the melody over a harmonic plan. Returns [{ m, d }] (pitch, duration in quarter-beats).
 // FIGURATION FROM CHARACTER [ported generator.mjs CHAR_FIGS]: a composer's tune moves the way its character sings — a
@@ -433,28 +439,28 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
   const gmin = grade <= 2 ? 0.5 : 0.25;
   // the germ is the piece's BASIC IDEA, so it must be an IDEA — a rhythmic SHAPE (>=2 events). A single undifferentiated
   //   whole-bar note is a drone, not a motif; redraw until the germ has profile, and fall back to a plain per-beat tread. [composer: a motif has a shape]
-  let germCell = barRhythm(nbeats, rnd, pace, dot, grade);
-  for (let t = 0; t < 8 && germCell.length < 2; t++) germCell = barRhythm(nbeats, rnd, pace, dot, grade);
+  let germCell = barRhythm(nbeats, rnd, pace, dot, grade, beatLen);
+  for (let t = 0; t < 8 && germCell.length < 2; t++) germCell = barRhythm(nbeats, rnd, pace, dot, grade, beatLen);
   // a motif also wants rhythmic PROFILE — a shape, not a FLAT RUN of identical durations (four even quavers restated every
   //   bar reads as a note-spinner, not a composed idea; the same principle as ">=2 events, not a drone", one level finer).
   //   Seek a germ with some duration contrast, BOUNDED — if the character's rhythm space is genuinely flat (a fast moto-
   //   perpetuo), a flat germ still surfaces. A lean toward a characterful motif, never a wall. [composer: a motif has profile]
   const flatRun = c => c.length >= 3 && new Set(c).size === 1;
-  for (let t = 0; t < 3 && flatRun(germCell); t++) { const g2 = barRhythm(nbeats, rnd, pace, dot, grade); if (g2.length >= 2 && !flatRun(g2)) { germCell = g2; break; } }
+  for (let t = 0; t < 3 && flatRun(germCell); t++) { const g2 = barRhythm(nbeats, rnd, pace, dot, grade, beatLen); if (g2.length >= 2 && !flatRun(g2)) { germCell = g2; break; } }
   if (germCell.length < 2) germCell = Array(Math.max(2, nbeats)).fill(1);
   // DEVELOP the germ [P — motivic variation]: split a long note (diminution), OR re-voice ONE beat to a DIFFERENT
   //   subdivision (works on a dense/dotted cell, which the old whole-note-only variant returned unchanged — the root of
   //   the "same cell every bar" monotony). The frame stays; one beat moves — a real variation, not a fresh cell.
   const variant = cell => {
-    const segs = beatSegs(cell);
+    const segs = beatSegs(cell, beatLen);
     const longs = [], beats = [];
     segs.forEach((s, i) => { const sum = s.reduce((a, x) => a + x, 0); if (sum >= 2) longs.push(i); else if (Math.abs(sum - 1) < 1e-9) beats.push(i); });
     if (longs.length && (rnd() < 0.5 || !beats.length)) { const i = longs[Math.floor(rnd() * longs.length)]; const k = segs[i].reduce((a, x) => a + x, 0);   // diminish a long note into k beats of motion (KEEP the beat count); always take it when there is no beat to re-voice (development must MOVE)
       const rep = []; for (let j = 0; j < k; j++) rep.push(1);                          // k plain crotchets...
-      if (rnd() < 0.6) { const j = Math.floor(rnd() * k); rep.splice(j, 1, ...drawBeat(rnd, pace, dot, gmin)); }   // ...one subdivided for motion
+      if (rnd() < 0.6) { const j = Math.floor(rnd() * k); rep.splice(j, 1, ...drawBeat(rnd, pace, dot, gmin, null, beatLen)); }   // ...one subdivided for motion
       segs[i] = rep; return segs.flat(); }
     if (beats.length) { const i = beats[Math.floor(rnd() * beats.length)], avoid = segs[i].join(',');   // re-voice one beat, biased to change
-      let nd = segs[i]; for (let t = 0; t < 5; t++) { const d = drawBeat(rnd, pace, dot, gmin, avoid); if (d.join(',') !== avoid) { nd = d; break; } }
+      let nd = segs[i]; for (let t = 0; t < 5; t++) { const d = drawBeat(rnd, pace, dot, gmin, avoid, beatLen); if (d.join(',') !== avoid) { nd = d; break; } }
       segs[i] = nd; return segs.flat(); }
     return cell.slice();
   };
@@ -468,14 +474,14 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
   const phraseStart = b => { let s = 0; for (const c of cadArr) { if (c < b) s = c + 1; else break; } return s; };
   const phraseEnd = b => { for (const c of cadArr) if (c >= b) return c; return nbars - 1; };
   const barCell = b => {
-    if (cadEndBars.has(b)) return (b === nbars - 1) ? [barU] : (nbeats >= 4 ? [2, 2] : [nbeats]);   // a phrase end broadens (a breath); the FINAL bar is one held tonic — whether it stays held or is stamped short (a button) is decided below, from the final phrase's momentum
+    if (cadEndBars.has(b)) return (b === nbars - 1) ? [barU] : (nbeats >= 4 ? [barU / 2, barU / 2] : [barU]);   // a phrase end broadens (a breath) — bar-filling long note(s) in QUARTER units (barU), correct in compound too (6/8: one dotted minim, not a 2-beat minim). The FINAL bar is one held tonic — held-vs-buttoned decided below from momentum
     const pos = b - phraseStart(b), toCad = phraseEnd(b) - b;        // position after the phrase opening / distance to its cadence
     const w = pos === 0 ? { germ: 8, variant: 2 }                    // STATE the basic idea
       : pos === 1 ? { germ: 6, variant: 4 }                          // REPEAT / sequence it — the rhythm rides along (unity)
       : toCad <= 1 ? { variant: 7, germ: 2 }                         // drive to the cadence: a developed (fragmented) unit
       : { germ: 3, variant: 6, fresh: 1 };                           // continuation: mostly develop, a rare contrasting idea
     const kind = pick(w, rnd);
-    return kind === 'germ' ? germCell.slice() : kind === 'variant' ? variant(germCell) : barRhythm(nbeats, rnd, pace, dot, grade);
+    return kind === 'germ' ? germCell.slice() : kind === 'variant' ? variant(germCell) : barRhythm(nbeats, rnd, pace, dot, grade, beatLen);
   };
   const notes = [];
   for (let b = 0; b < nbars; b++) {

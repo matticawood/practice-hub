@@ -1683,9 +1683,12 @@
     #live-fab .wiz-live-dot { animation: wizLivePulse 1.6s ease-in-out infinite; }
     #live-fab:hover { opacity: .92; }
     body.rm-immersive #live-fab { display: none !important; }
+    /* It stands in for Log Practice, so it has to sit exactly where that button
+       sits at every breakpoint — including the tighter right margin on phones. */
     @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #live-fab { bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important; }
     }
+    @media (max-width: 640px) { #live-fab { right: 16px; } }
     /* "Today so far": what is already counted today (auto-logged lessons and
        games plus anything logged), so nothing gets re-logged. Neutral card like
        the date card; each row's icon carries its own item-type accent colour. */
@@ -9779,6 +9782,7 @@
      top bar with only Search and a sidebar with no sub-items until a
      refresh. Every other page already loads it first. ── -->
 <script src="/shared-header.js?v=2026071802"></script>
+<script src="/live-session.js?v=1"></script>
 <script src="/shared-member-modal.js?v=16"></script>
 <script src="/shared-tour.js?v=7"></script>
 <script src="/roadmap-levels.js?v=41"></script>
@@ -22929,7 +22933,10 @@ let _liveMsById = {};         // exact ms clocked per activity (the saved durati
 let _liveItemStopped = false; // activity finished and banked, waiting for "Next activity"
 let _liveLastItemMs = 0;      // what the finished activity clocked, for the bar
 let _liveTick = null;
-const LIVE_LS_KEY = "rm_live_session";
+let _liveRestorePending = false;  // session restored, activities not yet rebuilt
+let _liveOverrunAsked = false;    // the forgotten-clock question is asked once per visit
+// Storage now lives in live-session.js (window.RMLive), which every member page
+// loads — that is what lets a session outlive this page.
 
 function _liveFmt(ms) {
   const t = Math.max(0, Math.round(ms / 1000));
@@ -22947,24 +22954,60 @@ function _liveItemMs() {
 function _liveSessionMs() { return _liveBankedMs + _liveItemMs(); }
 
 function _livePersist() {
-  try {
-    if (!_liveOn) localStorage.removeItem(LIVE_LS_KEY);
-    else localStorage.setItem(LIVE_LS_KEY, JSON.stringify({
-      on: true, itemStart: _liveItemStart, pausedAt: _livePausedAt,
-      pausedMs: _livePausedMs, bankedMs: _liveBankedMs, stamp: Date.now()
-    }));
-  } catch (e) {}
+  if (!window.RMLive) return;
+  if (!_liveOn) { RMLive.clear(); return; }
+  let draftId = null;
+  try { draftId = _currentDraftId || null; } catch (e) {}   // declared in a later block
+  RMLive.write({
+    on: true,
+    email: (myEmail || "").toLowerCase() || null,
+    itemStart: _liveItemStart, pausedAt: _livePausedAt, pausedMs: _livePausedMs,
+    bankedMs: _liveBankedMs,
+    // Exact per-activity milliseconds, so a restored session still rounds only
+    // once rather than compounding a rounding error on every spell.
+    msById: _liveMsById,
+    needsType: _liveNeedsType, itemStopped: _liveItemStopped, lastItemMs: _liveLastItemMs,
+    itemIdx: _wizItemIdx, draftId: draftId,
+    // While this page is open the clock is either running or the member paused
+    // it deliberately; navigation is the only thing that pauses automatically.
+    autoPaused: false
+  });
 }
 // A live session's activities live in the wizard's in-memory formItems, which do
 // NOT survive a page load. Restoring only the timer would leave a session that
 // says it is running but has nothing to return to, and no way to start a new one.
 // So on load we always clear it: a reload ends the live session, predictably.
+// A live session outlives this page, so coming back restores it rather than
+// wiping it. Two phases: the clock comes back NOW so the chip is correct on the
+// first frame, and the activities are rebuilt after the page's data has loaded
+// (_liveHydrate), because rebuilding an item block needs the piece list.
 function _liveRestore() {
-  try { localStorage.removeItem(LIVE_LS_KEY); } catch (e) {}
-  _liveOn = false; _liveItemStart = null; _livePausedAt = null;
-  _livePausedMs = 0; _liveBankedMs = 0;
-  _liveItemStopped = false; _liveLastItemMs = 0;
-  _liveRenderBar();
+  const s = window.RMLive ? RMLive.read() : null;
+  const mine = s && (!s.email || !myEmail || s.email === myEmail.toLowerCase());
+  if (!s || !mine) {
+    if (window.RMLive && s) RMLive.clear();     // someone else's, on a shared device
+    _liveOn = false; _liveItemStart = null; _livePausedAt = null;
+    _livePausedMs = 0; _liveBankedMs = 0; _liveMsById = {};
+    _liveItemStopped = false; _liveLastItemMs = 0; _liveRestorePending = false;
+    _liveRenderBar();
+    return;
+  }
+  // Navigation pauses the clock; arriving back here lifts that pause. A pause
+  // the member chose themselves is left exactly as they left it.
+  RMLive.autoResume();
+  const r = RMLive.read() || s;
+  _liveOn = true;
+  _liveItemStart   = r.itemStart;
+  _livePausedAt    = r.pausedAt;
+  _livePausedMs    = r.pausedMs || 0;
+  _liveBankedMs    = r.bankedMs || 0;
+  _liveMsById      = r.msById || {};
+  _liveNeedsType   = !!r.needsType;
+  _liveItemStopped = !!r.itemStopped;
+  _liveLastItemMs  = r.lastItemMs || 0;
+  _liveRestorePending = true;          // the activities are not in the DOM yet
+  _liveStartTick();
+  _liveRenderBar();                    // chip shows the right total immediately
 }
 function _liveRenderBar() {
   const bar = document.getElementById("wiz-live-bar");
@@ -23138,7 +23181,7 @@ function wizStartLive() {
     _liveEnd();                                   // nothing to return to — start clean
   }
   _liveOn = true; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
-  _liveMsById = {};
+  _liveMsById = {}; _liveRestorePending = false; _liveOverrunAsked = false;
   _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
   _liveNeedsType = true;
   wizAddFirstItem();
@@ -23147,7 +23190,7 @@ function wizStartLive() {
 function _liveEnd() {
   _liveOn = false; _liveItemStart = null; _livePausedAt = null;
   _livePausedMs = 0; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
-  _liveMsById = {};
+  _liveMsById = {}; _liveRestorePending = false; _liveOverrunAsked = false;
   _liveStopTick(); _livePersist(); _liveRestoreButtons(); _liveRenderBar();
 }
 // End session, from anywhere and at any time — including one started by accident
@@ -23305,13 +23348,90 @@ function _livePruneEmptyItems() {
   }
 }
 
+// Phase two of restoring a session: rebuild its activities. The wizard's item
+// blocks are the same shape a draft stores, so the draft the session was
+// auto-saving IS the restore point — the device mirror first (instant, no
+// network) and the saved draft as the fallback.
+async function _liveHydrate() {
+  if (!_liveOn || !_liveRestorePending) return _liveOn;
+  _liveRestorePending = false;
+  const s = window.RMLive ? RMLive.read() : null;
+  if (!s) return false;
+
+  let src = null;
+  try {
+    const raw = localStorage.getItem("tc_practice_draft_v1");
+    const m = raw ? JSON.parse(raw) : null;
+    if (m && (m.email || "").toLowerCase() === (myEmail || "").toLowerCase()
+          && Array.isArray(m.items) && m.items.length) src = m;
+  } catch (e) {}
+  if (!src && s.draftId) {
+    try {
+      const { data } = await db.from("practice_session_drafts")
+        .select("*").eq("id", s.draftId).maybeSingle();
+      if (data && Array.isArray(data.items) && data.items.length) src = data;
+    } catch (e) {}
+  }
+  // No activities anywhere means there is nothing to carry on with. Ending the
+  // session is the honest outcome — better than a clock attached to nothing,
+  // which is what the old "wipe it on load" behaviour was guarding against.
+  if (!src) { _liveEnd(); return false; }
+
+  try { _loadDraftIntoForm(src); if (src.draftId || src.id) _currentDraftId = src.draftId || src.id; }
+  catch (e) { console.warn("Live restore failed:", e); _liveEnd(); return false; }
+  if (!formItems.length) { _liveEnd(); return false; }
+
+  const idx = Math.min(Math.max(0, s.itemIdx || 0), formItems.length - 1);
+  const needsType = !!s.needsType;
+  _wizGoTo("item", idx, "forward");
+  _liveNeedsType   = needsType;              // _wizGoTo assumes a NEW activity
+  _liveItemStopped = !!s.itemStopped;
+  _liveLastItemMs  = s.lastItemMs || 0;
+  _livePersist();
+  _liveRenderBar();
+  return true;
+}
+
 // Reopen a minimised live session exactly where it was left, rather than
 // openWizard()'s default of the date screen.
-function liveReopen() {
+async function liveReopen() {
   if (!_liveOn) { openWizard(); return; }
+  if (_liveRestorePending && !(await _liveHydrate())) { openWizard(); return; }
   if (typeof _wizReopen === "function" && formItems.length) _wizReopen();
   else openWizard();
   _liveRenderBar();
+  _liveCheckOverrun();
+}
+
+// A clock that has run for hours without a break is almost always one somebody
+// forgot, not practice. It is never trimmed silently — they are asked, and
+// keeping it is the default answer.
+function _liveCheckOverrun() {
+  if (!_liveOn || !window.RMLive) return;
+  const s = RMLive.read();
+  if (!s || !RMLive.isOverrun(s) || _liveOverrunAsked) return;
+  _liveOverrunAsked = true;
+  const wrap = document.createElement("div");
+  wrap.id = "live-ask-backdrop";
+  wrap.innerHTML =
+    `<div class="live-ask">
+      <div class="live-ask-time">${RMLive.fmt(RMLive.itemMs(s))}</div>
+      <div class="live-ask-title">on this one activity, without a break</div>
+      <p class="live-ask-body">That is a long stretch for a single activity, so it is worth checking before it goes in your log. Was the clock left running?</p>
+      <button type="button" class="live-ask-keep" id="live-ask-keepall">No, that was all practice</button>
+      <button type="button" class="live-ask-drop" id="live-ask-reset">Yes, drop the time on this activity</button>
+    </div>`;
+  document.getElementById("log-wizard-backdrop").appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector("#live-ask-keepall").onclick = close;
+  wrap.querySelector("#live-ask-reset").onclick = () => {
+    close();
+    // Everything already banked into finished activities is untouched; only the
+    // stretch still on the clock goes.
+    _liveItemStart = Date.now(); _livePausedAt = null; _livePausedMs = 0;
+    _livePersist(); _liveRenderBar();
+  };
+  wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
 }
 
 window.liveReopen = liveReopen;
@@ -26149,6 +26269,16 @@ async function bootApp() {
 
   // Recover any device-mirrored practice entry (e.g. work done while the session
   // had silently expired) into the drafts list now that we're authenticated.
+  // Rebuild a restored live session's activities now the piece list is loaded,
+  // so it is ready whether they tap the chip or not. Before _recoverLocalDraft,
+  // which would otherwise file the same activities away as a draft.
+  if (_liveOn && _liveRestorePending) {
+    try {
+      await _liveHydrate();
+      if (_liveOn && new URLSearchParams(location.search).get("live") === "1") liveReopen();
+    } catch (e) { console.warn("Live session restore failed:", e); }
+  }
+
   if (typeof _recoverLocalDraft === "function") _recoverLocalDraft();
 
   // Deep-link routing: support both #tab and ?goto=sub-section from shared nav
@@ -28346,6 +28476,10 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   // On load, push any device-mirrored entry to the server (de-duped against the
   // existing draft; newer local edits win) so it shows up under "Open drafts".
   async function _recoverLocalDraft() {
+    // A running live session IS the mirror's owner — it restores its activities
+    // from it. Pushing it to the drafts list and clearing it here would delete
+    // the session's activities out from under it.
+    try { if (window.RMLive && RMLive.read()) return; } catch (e) {}
     let raw; try { raw = localStorage.getItem(_DRAFT_LS_KEY); } catch (e) { return; }
     if (!raw) return;
     let m; try { m = JSON.parse(raw); } catch (e) { _clearLocalMirror(); return; }
