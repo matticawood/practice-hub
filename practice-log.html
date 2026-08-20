@@ -9783,6 +9783,24 @@
 <script src="/shared-tour.js?v=7"></script>
 <script src="/roadmap-levels.js?v=41"></script>
 <script>
+// The Log Practice button and the live timer chip share one corner, and three
+// different places decide whether Log Practice should show (tab switch, viewing
+// another member, first paint). They record their intent here; a minimised live
+// session borrows the slot and hands it straight back, so neither side has to
+// know about the other.
+function _logFabSet(visible) {
+  const el = document.getElementById("log-fab");
+  if (!el) return;
+  el.dataset.want = visible ? "flex" : "none";
+  _logFabApply();
+}
+function _logFabApply() {
+  const el = document.getElementById("log-fab");
+  if (!el) return;
+  const chip = document.getElementById("live-fab");
+  const borrowed = !!chip && chip.style.display === "flex";
+  el.style.display = (!borrowed && el.dataset.want !== "none") ? "flex" : "none";
+}
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  CONFIGURATION                                                   ║
 // ╚══════════════════════════════════════════════════════════════════╝
@@ -10832,7 +10850,7 @@ document.getElementById("main-tab-bar").addEventListener("click", e => {
   document.getElementById("panel-theory").style.display      = tab === "theory"      ? "" : "none";
   document.getElementById("panel-tools").style.display       = tab === "tools"       ? "" : "none";
   document.getElementById("panel-feedback").style.display    = tab === "feedback"    ? "" : "none";
-  document.getElementById("log-fab").style.display = (tab === "log" && viewingEmail === myEmail) ? "flex" : "none";
+  _logFabSet(tab === "log" && viewingEmail === myEmail);
   const _rmP = document.getElementById("lb-panel-roadmap");
   document.body.classList.toggle("rm-immersive", tab === "log" && _rmP && getComputedStyle(_rmP).display !== "none");
   document.body.classList.remove("hub-mode", "library-mode", "theory-mode", "tools-mode");
@@ -23006,23 +23024,9 @@ function _liveRenderBar() {
     const show = _liveOn && viewingEmail === myEmail && backdrop && !backdrop.classList.contains("open");
     fab.style.display = show ? "flex" : "none";
     if (show) document.getElementById("live-fab-time").textContent = _liveFmt(_liveSessionMs());
-    // It REPLACES Log Practice rather than sitting next to it — two buttons in the
-    // same corner is clutter, and you are already logging. Remembers what Log
-    // Practice was set to so the page's own visibility rules survive.
-    const logFab = document.getElementById("log-fab");
-    if (logFab) {
-      if (show) {
-        if (logFab.dataset.liveHidden !== "1") {
-          logFab.dataset.livePrev = logFab.style.display || "flex";
-          logFab.dataset.liveHidden = "1";
-        }
-        logFab.style.display = "none";
-      } else if (logFab.dataset.liveHidden === "1") {
-        logFab.style.display = logFab.dataset.livePrev || "flex";
-        delete logFab.dataset.liveHidden;
-        delete logFab.dataset.livePrev;
-      }
-    }
+    // It REPLACES Log Practice rather than sitting next to it — two buttons in
+    // the same corner is clutter, and you are already logging.
+    _logFabApply();
   }
   _liveSyncButtons();
 }
@@ -23190,9 +23194,12 @@ function _liveAskEndEmpty() {
     </div>`;
   document.getElementById("log-wizard-backdrop").appendChild(wrap);
   const close = () => wrap.remove();
-  wrap.querySelector("#live-ask-stay").onclick = () => { close(); _liveResumeScreen(); };
+  const carryOn = () => { close(); _liveResumeScreen(); };
+  wrap.querySelector("#live-ask-stay").onclick = carryOn;
   wrap.querySelector("#live-ask-end").onclick = () => { close(); _liveEnd(); _wizFinalize(); };
-  wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
+  // Tapping outside is a change of mind, so it has to land in the same place as
+  // "Carry on" rather than just uncovering whatever was underneath.
+  wrap.addEventListener("click", e => { if (e.target === wrap) carryOn(); });
 }
 
 // Step 2 -> step 1: pick a different activity type for this item.
@@ -25536,7 +25543,7 @@ async function switchViewingEmail(email) {
   document.getElementById("viewing-select-mobile").value = email;
 
   // Show/hide FAB
-  document.getElementById("log-fab").style.display = email === myEmail ? "flex" : "none";
+  _logFabSet(email === myEmail);
 
   // My Collection sub-tab is always visible (only owner can switch users, so it always applies)
   const colSubBtn = document.getElementById("lib-collection-sub-btn");
@@ -25921,7 +25928,7 @@ async function bootApp() {
   }
 
   // Show the FAB immediately — it must never depend on later async operations.
-  document.getElementById("log-fab").style.display = "flex";
+  _logFabSet(true);
   _liveRestore();   // a live session that survived a reload keeps running
 
   // Clean teardown for a bad/ended session: sign out and show the login screen
