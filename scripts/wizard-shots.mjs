@@ -79,6 +79,16 @@ console.log("normal logging:");
   b.shutdown();
 }
 
+{
+  const b = await boot(); const { win, t } = b;
+  win.eval("openWizard()"); await tick(win, 60);
+  click(win, "#wiz-add-first-btn"); await tick(win, 60);
+  await pick(win, "book");
+  await tick(win, 40);
+  await snap(win, "detail book for the shadow check");
+  b.shutdown();
+}
+
 console.log("live session:");
 {
   const b = await boot(); const { win, t } = b;
