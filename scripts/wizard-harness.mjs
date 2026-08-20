@@ -7,6 +7,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { JSDOM, VirtualConsole } from "jsdom";
 
+const EMAIL = "test@example.com";
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // A Supabase query builder that answers everything with an empty result and is
@@ -43,14 +45,25 @@ const stubDb = {
   storage: { from: () => ({ upload: async () => ({ data: null, error: null }),
                             getPublicUrl: () => ({ data: { publicUrl: "" } }) }) },
   auth: {
-    getSession: async () => ({ data: { session: { user: { email: "test@example.com", created_at: "2020-01-01" } } }, error: null }),
-    getUser:    async () => ({ data: { user: { email: "test@example.com" } }, error: null }),
+    getSession: async () => ({ data: { session: { user: { email: EMAIL, created_at: "2020-01-01" } } }, error: null }),
+    getUser:    async () => ({ data: { user: { email: EMAIL } }, error: null }),
     signOut:    async () => ({ error: null }),
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
   },
 };
 
-export async function boot({ quiet = true } = {}) {
+// Everything the browser would still be holding after a refresh. Pass it to
+// boot() to simulate one faithfully: same device, same storage, fresh page.
+export const readStorage = win => {
+  const out = {};
+  for (let i = 0; i < win.localStorage.length; i++) {
+    const k = win.localStorage.key(i);
+    out[k] = win.localStorage.getItem(k);
+  }
+  return out;
+};
+
+export async function boot({ quiet = true, storage = null } = {}) {
   let html = fs.readFileSync(path.join(ROOT, "practice-log.html"), "utf8");
 
   // Inline the scripts that are part of this feature; drop the rest.
@@ -121,12 +134,27 @@ export async function boot({ quiet = true } = {}) {
     if (win.document.readyState === "complete") return r();
     win.addEventListener("load", r);
   });
-  await new Promise(r => win.setTimeout(r, 60));   // let boot's promises settle
+  await new Promise(r => win.setTimeout(r, 60));
+
+  // The page's first bootApp() finds no session and bails to redirectToRoot().
+  // Seed the storage a signed-in browser would have — plus anything carried over
+  // from a previous page, which is what makes a refresh test a refresh — and run
+  // the real boot. This is the path that restores drafts and live sessions, so a
+  // test that skipped it would prove nothing about either.
+  try {
+    win.localStorage.setItem("practiceRoom_session", JSON.stringify({ email: EMAIL }));
+    win.localStorage.setItem("sb-gyskfutmncprqxazgatv-auth-token",
+      JSON.stringify({ user: { email: EMAIL } }));
+    if (storage) for (const [k, v] of Object.entries(storage)) win.localStorage.setItem(k, v);
+  } catch (e) {}
+  try { await win.eval("bootApp()"); } catch (e) {}
+  await new Promise(r => win.setTimeout(r, 250));   // let boot's promises settle
 
   // Sign in, in the page's own lexical scope (top-level `let` is not on window).
   const s = win.document.createElement("script");
   s.textContent = `
-    myEmail = "test@example.com"; viewingEmail = "test@example.com";
+    if (!myEmail) { myEmail = "" + EMAIL + ""; }
+    if (!viewingEmail) viewingEmail = myEmail;
     window.__t = {
       get formItems() { return formItems; },
       get screen() { return _wizScreen; },
@@ -199,9 +227,10 @@ export const tick = (win, ms = 0) => new Promise(r => win.setTimeout(r, ms));
 // A controllable clock, so a timed session can be tested without waiting out
 // real minutes. The page reads Date.now() at call time, so shifting it here
 // moves every clock in the page and in live-session.js together.
-export const installClock = win => win.eval(`
-  window.__clock = { offset: 0 };
+export const installClock = (win, offset = 0) => win.eval(`
+  window.__clock = { offset: ${Number(offset) || 0} };
   const _now = Date.now;
   Date.now = () => _now() + window.__clock.offset;
 `);
 export const advance = (win, ms) => { win.__clock.offset += ms; };
+export const clockOffset = win => (win.__clock ? win.__clock.offset : 0);

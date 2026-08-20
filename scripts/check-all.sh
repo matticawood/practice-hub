@@ -24,6 +24,8 @@ done
 if [ -d scripts/node_modules/jsdom ]; then
   printf '%-34s ' "wizard-e2e.mjs"
   node scripts/wizard-e2e.mjs | tail -1
+  printf '%-34s ' "wizard-refresh.mjs"
+  node scripts/wizard-refresh.mjs | tail -1
 else
   echo "wizard-e2e.mjs                     SKIPPED — run: cd scripts && npm install"
   exit 1
