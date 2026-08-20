@@ -125,5 +125,17 @@ console.log("\n--- every live path that changes step must sync the shared class 
   eq("picking a square re-renders in normal mode", /_wizSyncChoosing\s*\(/.test(handler), true);
 }
 
+console.log("\n--- a live session must always have a way out ---");
+{
+  // Its header only offers Hide, which leaves the clock running, so End session
+  // has to stay reachable on the activity squares as well as the detail step.
+  const css = html.slice(html.indexOf("<style"), html.lastIndexOf("</style>"));
+  const rule = css.split("\n").find(l => /#wiz-item-actions/.test(l) && /choosing/.test(l));
+  eq("step-1 hides the item actions", !!rule, true);
+  eq("but not during a live session", /:not\(\.live-mode\)/.test(rule || ""), true);
+  const bar = grab("_liveRenderBar");
+  eq("End session shown whenever live", /endBtn\.style\.display\s*=\s*_liveOn/.test(bar), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
