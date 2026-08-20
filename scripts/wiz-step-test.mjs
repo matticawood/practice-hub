@@ -150,5 +150,35 @@ console.log("\n--- adding an item always opens the one you just added ---");
      !/addItem\(\);\s*\n?\s*_wizGoTo\('item', 0/.test(html), true);
 }
 
+console.log("\n--- a live session is always logged to today ---");
+{
+  // Start sits on the date screen, so a date chosen on the way in would follow
+  // the session in. Nothing in the live window shows a date to reveal it.
+  const run = picked => {
+    const dateEl = { value: picked };
+    const toasts = [];
+    new Function("document", "sessionTodayStr", "showToast", "viewingEmail", "myEmail",
+      "formItems", "_liveOn", "_wizScreen", "_wizItemIdx", "_liveRenderBar", "_liveStartTick",
+      "_livePersist", "wizAddFirstItem", "_wizRenderDateDisplay", "_wizGoTo", "_liveEnd",
+      grab("wizStartLive") + "; wizStartLive();")
+      ({ getElementById: () => dateEl }, () => "2026-08-20", (m) => toasts.push(m),
+       "a@b.com", "a@b.com", [], false, "date", 0,
+       () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+    return { date: dateEl.value, toasts };
+  };
+  let r = run("2026-08-11");             // they had picked a day last week
+  eq("a past date is moved to today", r.date, "2026-08-20");
+  eq("and they are told", r.toasts.length, 1);
+  eq("the message says so", /logged to today/.test(r.toasts[0] || ""), true);
+
+  r = run("2026-08-20");                 // already today
+  eq("today stays today", r.date, "2026-08-20");
+  eq("with no needless message", r.toasts.length, 0);
+
+  r = run("");                           // nothing set yet
+  eq("an empty date is filled in", r.date, "2026-08-20");
+  eq("silently, since nothing was overridden", r.toasts.length, 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
