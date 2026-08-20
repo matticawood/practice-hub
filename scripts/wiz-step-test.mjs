@@ -67,5 +67,71 @@ console.log("\n--- the routing reads the item, not a stored flag ---");
 eq("no typeChosen flag survives", !/typeChosen/.test(html), true);
 eq("_wizGoTo derives it", /_wizNeedsType = _wizItemIsBlank\(formItems\[newItemIdx\]\)/.test(html), true);
 
+console.log("\n--- backing out of an activity you never started leaves nothing behind ---");
+{
+  // The real block lifted out of _wizGoTo, so the index maths is tested as
+  // written. Items are {id, blank}; the stub reports blankness from the item.
+  const src = html.slice(html.indexOf("  // An item is created up front"), html.indexOf("  const getEl = s =>"));
+  const run = (items, screen, curIdx, toScreen, toIdx) => {
+    let formItems = items.map(i => ({ ...i }));
+    const discarded = [];
+    const fn = new Function("state", `
+      let formItems = state.formItems, _wizScreen = state.screen, _wizItemIdx = state.curIdx;
+      let newScreen = state.toScreen, newItemIdx = state.toIdx;
+      const _wizItemIsBlank = fi => !!(fi && fi.blank);
+      const _wizDiscardItem = id => { state.discarded.push(id);
+        formItems = formItems.filter(i => i.id !== id); };
+      ${src}
+      return { newScreen, newItemIdx, ids: formItems.map(i => i.id) };`);
+    return fn({ formItems, screen, curIdx, toScreen, toIdx, discarded });
+  };
+  const A = { id: 10, blank: false }, B = { id: 11, blank: false };
+  const blank = id => ({ id, blank: true });
+
+  let r = run([A, blank(11)], "item", 1, "date", 0);
+  eq("back to the date screen drops it", JSON.stringify(r.ids), JSON.stringify([10]));
+
+  r = run([A, blank(11)], "item", 1, "item", 0);
+  eq("back to the previous activity drops it", JSON.stringify(r.ids), JSON.stringify([10]));
+  eq("and lands on that activity", r.newItemIdx, 0);
+
+  r = run([blank(9), A, B], "item", 0, "item", 2);
+  eq("jumping forward past it drops it", JSON.stringify(r.ids), JSON.stringify([10, 11]));
+  // Four items, so the answer is not the same as simply clamping to the end.
+  r = run([blank(9), A, B, { id: 12 }], "item", 0, "item", 2);
+  eq("target index follows the shift", r.newItemIdx, 1);
+  eq("landing on the activity you asked for", r.ids[r.newItemIdx], 11);
+
+  r = run([blank(10)], "item", 0, "item", 0);
+  eq("staying on the same activity keeps it", JSON.stringify(r.ids), JSON.stringify([10]));
+
+  r = run([blank(10)], "item", 0, "date", 0);
+  eq("the only activity, dropped", JSON.stringify(r.ids), JSON.stringify([]));
+
+  r = run([blank(10)], "item", 0, "item", 0 + 0);
+  eq("same-item navigation is not a departure", r.newScreen, "item");
+
+  r = run([A, blank(11)], "item", 1, "overview", 0);
+  eq("going to review drops it", JSON.stringify(r.ids), JSON.stringify([10]));
+
+  r = run([A, B], "item", 1, "date", 0);
+  eq("a started activity is never dropped", JSON.stringify(r.ids), JSON.stringify([10, 11]));
+
+  r = run([blank(10), blank(11)], "item", 0, "item", 1);
+  eq("only the one you are leaving is dropped", JSON.stringify(r.ids), JSON.stringify([11]));
+  eq("and it becomes the only index", r.newItemIdx, 0);
+
+  r = run([blank(10)], "date", 0, "item", 0);
+  eq("arriving from elsewhere drops nothing", JSON.stringify(r.ids), JSON.stringify([10]));
+}
+
+console.log("\n--- the discard does not navigate ---");
+{
+  const body = grab("_wizDiscardItem");
+  eq("no _wizGoTo inside it", /_wizGoTo\s*\(/.test(body), false);
+  eq("takes live minutes back off the total", /_liveForgetItem/.test(body), true);
+  eq("frees the slot first", /_wizReturnSlotToStore/.test(body), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

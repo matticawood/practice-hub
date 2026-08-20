@@ -370,7 +370,11 @@ function addAnacrusis(ex, { tonic, mode, beatLen, grade, range, chrId, rnd = Mat
   const s1 = stepBelow(m0); if (s1 == null || s1 < lo) return;                 // no room below in the register / five-finger box → state the beat
   const p = beatLen;                                                          // a one-beat pickup
   let pickup;
-  if (rnd() < 0.5) { const s2 = stepBelow(s1); pickup = (s2 != null && s2 >= lo) ? [{ m: s2, d: p / 2 }, { m: s1, d: p / 2 }] : [{ m: s1, d: p }]; }   // two quavers stepping up, or one crotchet
+  if (rnd() < 0.5) { const s2 = stepBelow(s1); pickup = beatLen > 1 + 1e-9
+      ? ((s2 != null && s2 >= lo && stepBelow(s2) != null && stepBelow(s2) >= lo) ? [{ m: stepBelow(s2), d: 0.5 }, { m: s2, d: 0.5 }, { m: s1, d: 0.5 }]   // COMPOUND: a rising three-quaver run into the downbeat (the beat divides in three, not two)
+         : (s2 != null && s2 >= lo) ? [{ m: s2, d: 1 }, { m: s1, d: 0.5 }]                                                                                 // fewer tones below: a crotchet + quaver rise
+         : [{ m: s1, d: p }])
+      : ((s2 != null && s2 >= lo) ? [{ m: s2, d: p / 2 }, { m: s1, d: p / 2 }] : [{ m: s1, d: p }]); }   // simple: two quavers stepping up, or one crotchet
   else pickup = [{ m: s1, d: p }];
   if (first.dyn) { pickup[0].dyn = first.dyn; delete first.dyn; }             // the opening dynamic / hairpin / phrase-slur belongs ON the upbeat (the first sounding note)
   if (first.hp) { pickup[0].hp = first.hp; delete first.hp; }

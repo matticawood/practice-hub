@@ -831,11 +831,16 @@ const tp = nearestPC([(((tonic % 12) + 12) % 12)], approachFrom, lo, hi); if (tp
     const last = inBar[inBar.length - 1];
     if (last._breathRest) continue;                                            // the motivic-air pass already gave this note its rest — don't carve twice
     if (Math.abs((last.t + last.d) % beatLen) > 1e-9) continue;                 // only breathe where the note ends on a beat (rest stays aligned)
-    const want = legato ? (last.d >= 2 ? 1 : last.d >= 1 ? 0.5 : 0) : (last.d >= 1.5 ? 0.5 : 0);   // legato lifts a full beat; detached clips
+    // the breath carves a rest measured in the metre's own BEAT: a crotchet in simple, a DOTTED crotchet (beatLen=1.5) in
+    //   compound — so the shortened note still ends ON a beat and the rest is beat-aligned (carving a quarter in 6/8 left the
+    //   note hanging mid-beat-2). Simple metre keeps its character-dependent crotchet/quaver lift. [P]
+    const want = beatLen > 1 + 1e-9
+      ? (last.d >= 2 * beatLen - 1e-9 ? beatLen : 0)                                              // compound: lift a full dotted-crotchet beat, only if a beat still remains
+      : (legato ? (last.d >= 2 ? 1 : last.d >= 1 ? 0.5 : 0) : (last.d >= 1.5 ? 0.5 : 0));         // simple (unchanged): legato lifts a full beat, detached clips
     // keep BOTH the shortened note and the rest notatable; if the wanted carve wouldn't, fall back to a clean full-beat lift.
     let restD = 0;
     if (want > 0 && READ.has(last.d - want) && READ.has(want)) restD = want;
-    else if (last.d - 1 >= 0.5 && READ.has(last.d - 1)) restD = 1;
+    else if (beatLen <= 1 + 1e-9 && last.d - 1 >= 0.5 && READ.has(last.d - 1)) restD = 1;         // simple-metre fallback only (a compound quarter-carve would mis-align the beat)
     if (restD > 0 && pick({ breathe: lean, hold: 100 - lean }, rnd) === 'breathe') { last.d -= restD; last._breathRest = restD; }
   }
   // 4b. THE ENDING follows the final phrase's own MOMENTUM [P], read from the APPROACH itself — NOT from the character's

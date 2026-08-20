@@ -23541,6 +23541,24 @@ function _wizGoTo(newScreen, newItemIdx, dir) {
     if (newScreen === 'item' && !sameItem) { _liveNeedsType = true; _liveItemStopped = false; _liveLastItemMs = 0; }
     setTimeout(_liveRenderBar, 0);
   }
+  // An item is created up front so the screen has something to render, but until
+  // a square is picked or something is typed it is not really an item. Walking
+  // away from it should leave nothing behind, rather than a stray "Piece" that
+  // was never chosen.
+  if (_wizScreen === 'item' && !(newScreen === 'item' && newItemIdx === _wizItemIdx)) {
+    const cur = formItems[_wizItemIdx];
+    if (cur && _wizItemIsBlank(cur)) {
+      const goneIdx = _wizItemIdx;
+      _wizDiscardItem(cur.id);
+      // Indices after the removed one shift down; the target has to follow.
+      if (newScreen === 'item') {
+        if (newItemIdx > goneIdx) newItemIdx -= 1;
+        if (!formItems.length) { newScreen = 'date'; newItemIdx = 0; }
+        else newItemIdx = Math.min(Math.max(0, newItemIdx), formItems.length - 1);
+      }
+    }
+  }
+
   const getEl = s => document.getElementById(
     s === 'date' ? "wiz-screen-date" : s === 'item' ? "wiz-screen-item"
     : s === 'quick' ? "wiz-screen-quick" : "wiz-screen-overview"
@@ -25065,6 +25083,18 @@ function toggleTheoryRequestMode(id) {
 window.toggleTheoryRequestMode = toggleTheoryRequestMode;
 
 // ── Remove item ───────────────────────────────────────────────────
+// Drop an activity without navigating. removeItem() decides where to go next,
+// which is wrong when the caller is already on its way somewhere.
+function _wizDiscardItem(id) {
+  if (typeof _liveForgetItem === "function") _liveForgetItem(id);
+  if (_wizSlotId === id) _wizReturnSlotToStore();
+  const block = document.getElementById(`item-block-${id}`);
+  if (block) block.remove();
+  formItems = formItems.filter(i => i.id !== id);
+  if (typeof updatePerItemTotal === "function") updatePerItemTotal();
+  if (typeof renderQuickAdd === "function") renderQuickAdd();
+}
+
 function removeItem(id) {
   // A live session tracks the total itself, so deleting an activity must take its
   // minutes back off that total — otherwise the timer keeps counting time for
