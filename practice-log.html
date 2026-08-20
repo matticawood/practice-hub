@@ -1456,6 +1456,12 @@
       padding: 5px 11px; font: inherit; font-size: .76rem; font-weight: 700; cursor: pointer;
     }
     .wiz-live-pause:hover { border-color: var(--accent, #f5c518); color: var(--accent, #f5c518); }
+    .wiz-live-sep.nudging { color: var(--accent, #f5c518); font-weight: 700; }
+    #wiz-live-stop.nudge { animation: liveNudge .45s ease-in-out 2; }
+    @keyframes liveNudge {
+      0%,100% { transform: none; border-color: #3a3630; }
+      50% { transform: scale(1.09); border-color: var(--accent, #f5c518); color: var(--accent, #f5c518); }
+    }
     /* Live session header — the black head from the standalone panel, on the log window. */
     #wiz-live-header { display: none; grid-template-columns: 34px 1fr 34px; align-items: center; gap: 10px; padding: 18px 18px 14px; background: #1a1a1a; color: #fff; flex-shrink: 0; }
     #log-wizard-backdrop.live-mode #wiz-live-header { display: grid; }
@@ -22893,6 +22899,7 @@ let _livePausedAt = null;     // ms — set while paused
 let _livePausedMs = 0;        // pause time to exclude from the current activity
 let _liveBankedMs = 0;        // exact time already banked into finished activities
 let _liveNeedsType = false;   // true until this activity's type square is picked
+let _liveNudgeUntil = 0;      // while set, the bar shows "stop it first" instead of the label
 let _liveItemStopped = false; // activity finished and banked, waiting for "Next activity"
 let _liveLastItemMs = 0;      // what the finished activity clocked, for the bar
 let _liveTick = null;
@@ -22948,7 +22955,10 @@ function _liveRenderBar() {
     bar.classList.toggle("paused", !!_livePausedAt);
     if (_liveOn) {
       document.getElementById("wiz-live-cur").textContent = _liveFmt(_liveItemMs());
-      document.getElementById("wiz-live-sep").textContent = running ? "on this activity" : "not started";
+      const nudging = Date.now() < _liveNudgeUntil;
+      const sep = document.getElementById("wiz-live-sep");
+      sep.textContent = nudging ? "stop it first" : (running ? "on this activity" : "not started");
+      sep.classList.toggle("nudging", nudging);
       document.getElementById("wiz-live-total").textContent = _liveFmt(_liveSessionMs()) + " total";
       const ht = document.getElementById("wiz-live-headtime");
       if (ht) ht.textContent = _liveFmt(_liveSessionMs());
@@ -22998,6 +23008,15 @@ function _liveRestoreButtons() {
   if (add) { add.style.display = ""; add.textContent = "+ Add Another Item"; }
   if (rev) { rev.style.display = ""; rev.textContent = "Review session →"; }
   if (rem) rem.style.display = "";
+}
+// Tell them to stop WITHOUT covering the Stop button: the hint replaces the
+// label inside the timer bar and the Stop button pulses.
+function _liveNudgeStop() {
+  _liveNudgeUntil = Date.now() + 2600;
+  const btn = document.getElementById("wiz-live-stop");
+  if (btn) { btn.classList.remove("nudge"); void btn.offsetWidth; btn.classList.add("nudge"); }
+  _liveRenderBar();
+  setTimeout(_liveRenderBar, 2650);
 }
 function _liveStartTick() {
   if (_liveTick) clearInterval(_liveTick);
@@ -23106,7 +23125,7 @@ function liveEndSession() {
 // them away. Silently carrying the time onto a different activity was wrong.
 function liveBackToTypes() {
   if (!_liveOn) return;
-  if (_liveItemStart != null) { showToast("Stop this activity first, then change it.", 3000, true); return; }
+  if (_liveItemStart != null) { _liveNudgeStop(); return; }
   const fi = formItems[_wizItemIdx];
   const block = fi && document.getElementById(`item-block-${fi.id}`);
   const inp = block && block.querySelector(".item-duration-input");
@@ -23222,10 +23241,7 @@ function _wizGoTo(newScreen, newItemIdx, dir) {
   if (_liveOn) {
     const leavingItem = _wizScreen === 'item';
     const sameItem = leavingItem && newScreen === 'item' && newItemIdx === _wizItemIdx;
-    if (leavingItem && !sameItem && _liveItemStart != null) {
-      showToast("Stop this activity first, then move on.", 3000, true);
-      return;
-    }
+    if (leavingItem && !sameItem && _liveItemStart != null) { _liveNudgeStop(); return; }
     // Moving to a NEW activity starts it back on the type squares.
     if (newScreen === 'item' && !sameItem) { _liveNeedsType = true; _liveItemStopped = false; _liveLastItemMs = 0; }
     setTimeout(_liveRenderBar, 0);
