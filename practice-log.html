@@ -1601,6 +1601,22 @@
       animation: liveAskIn .16s ease-out;
     }
     @keyframes liveAskIn { from { opacity: 0; } to { opacity: 1; } }
+    /* Normal logging uses the same sheet. Left dark it would read as a foreign
+       element dropped into a light window rather than part of the log. */
+    #log-wizard-backdrop:not(.live-mode) #live-ask-backdrop { background: rgba(26,20,16,.45); }
+    #log-wizard-backdrop:not(.live-mode) .live-ask {
+      background: var(--surface, #fff); border-color: var(--border, #e3e1e6);
+      box-shadow: 0 20px 50px -14px rgba(26,20,16,.3);
+    }
+    #log-wizard-backdrop:not(.live-mode) .live-ask-title { color: var(--text, #1a1410); }
+    #log-wizard-backdrop:not(.live-mode) .live-ask-body,
+    #log-wizard-backdrop:not(.live-mode) .live-ask-time span { color: var(--text-muted, #8a7868); }
+    #log-wizard-backdrop:not(.live-mode) .live-ask-move {
+      border-color: var(--border, #e3e1e6); color: var(--text, #1a1410);
+    }
+    #log-wizard-backdrop:not(.live-mode) .live-ask-move:hover { background: rgba(26,20,16,.05); }
+    #log-wizard-backdrop:not(.live-mode) .live-ask-drop { color: #c0392b; }
+    #log-wizard-backdrop:not(.live-mode) .live-ask-drop:hover { color: #a93226; }
     .live-ask {
       width: 100%; max-width: 290px; background: #232120; border: 1px solid #3a3630;
       border-radius: 16px; padding: 20px 18px 16px; text-align: center;
@@ -1647,8 +1663,15 @@
     /* Normal logging has a header Back and Close, so step 1 needs no footer.
        A live session's header only offers Hide, which leaves the clock running
        — End session is its only real way out, so it stays on both steps. */
-    #log-wizard-backdrop.choosing:not(.live-mode) #wiz-item-actions,
     #log-wizard-backdrop.live-mode #wiz-dur-footer { display: none; }
+    /* On the squares the only sensible actions are "go and review what I have
+       already added" or "I am done" — the rest act on an item that has not been
+       chosen yet. One button covers both, and says which it is. */
+    #wiz-choose-exit-btn { display: none; }
+    #log-wizard-backdrop.choosing:not(.live-mode) #wiz-add-another-btn,
+    #log-wizard-backdrop.choosing:not(.live-mode) #wiz-goto-review-btn,
+    #log-wizard-backdrop.choosing:not(.live-mode) #wiz-remove-item-btn { display: none; }
+    #log-wizard-backdrop.choosing:not(.live-mode) #wiz-choose-exit-btn { display: block; }
     /* Step 1 is the only thing on screen, so give the eight activities room:
        two columns, four rows, filling the window rather than bunching at the top.
        Shared by normal logging and the live session — picking WHAT you did is
@@ -1673,13 +1696,13 @@
     }
     #log-wizard-backdrop.choosing .wiz-type-chip svg { width: 20px; height: 20px; flex: 0 0 auto; }
     /* A live session is visibly a different mode: black header + black end button. */
-    #wiz-live-end-btn {
+    #wiz-live-end-btn, #wiz-choose-exit-btn {
       background: #1a1a1a; color: #fff; border: none; border-radius: 12px;
       padding: 13px 20px; font-family: inherit; font-size: .9rem; font-weight: 800;
       cursor: pointer; transition: opacity .15s, transform .1s;
     }
-    #wiz-live-end-btn:hover { opacity: .9; }
-    #wiz-live-end-btn:active { transform: scale(.985); }
+    #wiz-live-end-btn:hover, #wiz-choose-exit-btn:hover { opacity: .9; }
+    #wiz-live-end-btn:active, #wiz-choose-exit-btn:active { transform: scale(.985); }
     /* Dashboard timer chip — only while a live session is actually running. */
     #live-fab {
       position: fixed; bottom: 28px; right: 28px; z-index: 110;
@@ -9638,6 +9661,7 @@
         <button id="wiz-add-another-btn">+ Add Another Item</button>
         <button id="wiz-goto-review-btn">Review session →</button>
         <button id="wiz-live-end-btn" type="button" onclick="liveEndSession()" style="display:none">End session</button>
+        <button id="wiz-choose-exit-btn" type="button" onclick="_wizChooseExit()">Review session &rarr;</button>
         <button id="wiz-remove-item-btn">Remove this item</button>
       </div>
       <!-- Overview save action -->
@@ -22956,10 +22980,58 @@ function _wizSyncChoosing() {
     _wizScreen === 'item' && (_liveOn ? _liveNeedsType : _wizNeedsType));
 }
 
+// How many activities actually exist, ignoring one that is still untouched.
+function _wizRealItemCount() {
+  return formItems.length - (_wizItemIsBlank(formItems[_wizItemIdx]) ? 1 : 0);
+}
+
+// The single button on the squares. Reviewing what you already added, or
+// finishing when you have not added anything at all.
+function _wizChooseExit() {
+  const cur = formItems[_wizItemIdx];
+  // Reached the squares by pressing Back on an activity that IS filled in, so
+  // hold it to the same standard before leaving it behind.
+  if (!_wizItemIsBlank(cur)) {
+    const err = _wizValidateCurrentItem();
+    if (err) { showToast(err, 3500, true); return; }
+  }
+  // _wizGoTo drops the untouched activity on the way out, so the review shows
+  // only what was really added.
+  if (_wizRealItemCount() > 0) { _wizGoTo('overview', 0, 'forward'); return; }
+  _wizAskNothingAdded();
+}
+
+// Closing with an empty log should say so rather than just vanishing.
+function _wizAskNothingAdded() {
+  document.getElementById("live-ask-backdrop")?.remove();
+  const wrap = document.createElement("div");
+  wrap.id = "live-ask-backdrop";
+  wrap.innerHTML =
+    `<div class="live-ask">
+      <div class="live-ask-title live-ask-title-lead">Nothing added yet</div>
+      <p class="live-ask-body">You have not added any practice, so there is nothing to log. Choose what you practised, or close and nothing will be saved.</p>
+      <button type="button" class="live-ask-keep" id="wiz-ask-stay">Choose an activity</button>
+      <button type="button" class="live-ask-drop" id="wiz-ask-close">Close without logging anything</button>
+    </div>`;
+  document.getElementById("log-wizard-backdrop").appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector("#wiz-ask-stay").onclick = close;
+  wrap.querySelector("#wiz-ask-close").onclick = () => {
+    close();
+    const cur = formItems[_wizItemIdx];
+    if (cur && _wizItemIsBlank(cur)) _wizDiscardItem(cur.id);
+    _wizFinalize();
+  };
+  wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
+}
+
 function _wizRenderFooter() {
   // Every navigation path ends here, and which step we are on decides whether
   // the item actions are shown at all.
   _wizSyncChoosing();
+  // The squares button says which of its two jobs it is doing.
+  const exitBtn = document.getElementById("wiz-choose-exit-btn");
+  if (exitBtn) exitBtn.textContent = _wizRealItemCount() > 0 ? "Review session \u2192" : "Finish";
   const itemActions = document.getElementById("wiz-item-actions");
   const saveActions = document.getElementById("wiz-save-actions");
   itemActions.style.display = _wizScreen === 'item'     ? "" : "none";

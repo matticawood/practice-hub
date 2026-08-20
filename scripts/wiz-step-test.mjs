@@ -180,5 +180,39 @@ console.log("\n--- a live session is always logged to today ---");
   eq("silently, since nothing was overridden", r.toasts.length, 0);
 }
 
+console.log("\n--- the one button on the squares ---");
+{
+  const count = grab("_wizRealItemCount");
+  const runCount = (items, idx, blankIdx) => new Function("formItems", "_wizItemIdx", "_wizItemIsBlank",
+    count + "; return _wizRealItemCount();")(items, idx, fi => items.indexOf(fi) === blankIdx);
+  const three = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  eq("the untouched one is not counted", runCount(three, 2, 2), 2);
+  eq("a filled current one is counted", runCount(three, 2, -1), 3);
+  eq("first and only, untouched", runCount([{ id: 1 }], 0, 0), 0);
+
+  const exit = grab("_wizChooseExit");
+  eq("validates a filled activity before leaving", /_wizValidateCurrentItem\s*\(/.test(exit), true);
+  eq("reviews when something real exists", /_wizGoTo\('overview'/.test(exit), true);
+  eq("warns when nothing was added", /_wizAskNothingAdded\s*\(/.test(exit), true);
+
+  const ask = grab("_wizAskNothingAdded");
+  eq("closing drops the untouched activity", /_wizDiscardItem/.test(ask), true);
+  eq("and finishes without saving", /_wizFinalize\s*\(/.test(ask), true);
+  eq("offers a way back", /wiz-ask-stay/.test(ask), true);
+
+  const footer = grab("_wizRenderFooter");
+  eq("label follows the real count", /_wizRealItemCount\(\) > 0 \? "Review session/.test(footer), true);
+  eq("otherwise it reads Finish", /: "Finish"/.test(footer), true);
+}
+
+console.log("\n--- the sheet is readable in the light window too ---");
+{
+  const css = html.slice(html.indexOf("<style"), html.lastIndexOf("</style>"));
+  for (const sel of [".live-ask {", ".live-ask-title {", ".live-ask-body,"]) {
+    const light = css.includes("#log-wizard-backdrop:not(.live-mode) " + sel);
+    eq("light override for " + sel.replace(/[{,]/g, "").trim(), light, true);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
