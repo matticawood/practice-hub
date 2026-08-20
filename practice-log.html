@@ -22906,6 +22906,7 @@ let _livePausedMs = 0;        // pause time to exclude from the current activity
 let _liveBankedMs = 0;        // exact time already banked into finished activities
 let _liveNeedsType = false;   // true until this activity's type square is picked
 let _liveNudgeUntil = 0;      // while set, the bar shows "stop it first" instead of the label
+let _liveMsById = {};         // exact ms clocked per activity (the saved duration is rounded)
 let _liveItemStopped = false; // activity finished and banked, waiting for "Next activity"
 let _liveLastItemMs = 0;      // what the finished activity clocked, for the bar
 let _liveTick = null;
@@ -22967,7 +22968,9 @@ function _liveRenderBar() {
       const _fi = formItems[_wizItemIdx];
       const _blk = _fi && document.getElementById(`item-block-${_fi.id}`);
       const _inp = _blk && _blk.querySelector(".item-duration-input");
-      const carried = (parseInt(_inp && _inp.value) || 0) * 60000;
+      const carried = (_fi && _liveMsById[_fi.id] != null)
+        ? _liveMsById[_fi.id]
+        : (parseInt(_inp && _inp.value) || 0) * 60000;
       const nudging = Date.now() < _liveNudgeUntil;
       const sep = document.getElementById("wiz-live-sep");
       sep.textContent = nudging ? "stop it first"
@@ -22990,7 +22993,7 @@ function _liveRenderBar() {
         document.getElementById("wiz-live-cur").textContent = _liveFmt(carried);
       }
       if (stopped) {
-        document.getElementById("wiz-live-cur").textContent = _liveFmt(_liveLastItemMs);
+        document.getElementById("wiz-live-cur").textContent = _liveFmt(carried || _liveLastItemMs);
         document.getElementById("wiz-live-sep").textContent = "logged";
       }
     }
@@ -23053,11 +23056,12 @@ function _liveCommitItem(idx) {
     const block = document.getElementById(`item-block-${fi.id}`);
     const inp = block && block.querySelector(".item-duration-input");
     if (inp) {
-      // ADD to whatever the activity already has, never overwrite: minutes moved
-      // here from another activity, or a second spell on the same one, must
-      // accumulate — otherwise the item loses time the session total still counts.
-      const prev = parseInt(inp.value) || 0;
-      inp.value = String(Math.max(1, prev + Math.round(ms / 60000)));
+      // Track the EXACT time on this activity and round only for the stored
+      // duration, so a short spell reads as it really was rather than as a whole
+      // minute. Accumulates, so moved time or a second spell adds up.
+      const exact = (_liveMsById[fi.id] || (parseInt(inp.value) || 0) * 60000) + ms;
+      _liveMsById[fi.id] = exact;
+      inp.value = String(Math.max(1, Math.round(exact / 60000)));
       inp.dispatchEvent(new Event("input", { bubbles: true }));
       inp.dispatchEvent(new Event("change", { bubbles: true }));
     }
@@ -23112,6 +23116,7 @@ function wizStartLive() {
     _liveEnd();                                   // nothing to return to — start clean
   }
   _liveOn = true; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
+  _liveMsById = {};
   _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
   _liveNeedsType = true;
   wizAddFirstItem();
@@ -23120,6 +23125,7 @@ function wizStartLive() {
 function _liveEnd() {
   _liveOn = false; _liveItemStart = null; _livePausedAt = null;
   _livePausedMs = 0; _liveBankedMs = 0; _liveItemStopped = false; _liveLastItemMs = 0;
+  _liveMsById = {};
   _liveStopTick(); _livePersist(); _liveRestoreButtons(); _liveRenderBar();
 }
 // End session, from anywhere and at any time — including one started by accident
@@ -23209,7 +23215,10 @@ function _liveForgetItem(id) {
   const block = document.getElementById(`item-block-${id}`);
   const inp = block && block.querySelector(".item-duration-input");
   const mins = parseInt(inp && inp.value) || 0;
-  if (mins > 0) _liveBankedMs = Math.max(0, _liveBankedMs - mins * 60000);
+  const exact = _liveMsById[id];
+  if (exact != null) _liveBankedMs = Math.max(0, _liveBankedMs - exact);
+  else if (mins > 0) _liveBankedMs = Math.max(0, _liveBankedMs - mins * 60000);
+  delete _liveMsById[id];
   const cur = formItems[_wizItemIdx];
   if (cur && cur.id === id) {
     _liveItemStart = null; _livePausedAt = null; _livePausedMs = 0;
