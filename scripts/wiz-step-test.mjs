@@ -290,5 +290,20 @@ console.log("\n--- hiding a wizard with nothing in it closes it instead ---");
   eq("normal with something entered: hidden", c.includes("finalize"), false);
 }
 
+console.log("\n--- the wizard header cannot squash its own buttons ---");
+{
+  // Geometry is beyond these tests - jsdom has no layout - so pin the rule that
+  // caused it. Sides sized as 1fr shrink below their contents (the side carries
+  // min-width:0), and the right one then overflows leftwards onto the title.
+  const css = html.slice(html.indexOf("<style"), html.lastIndexOf("</style>"));
+  const header = css.slice(css.indexOf("#wiz-header {"), css.indexOf("#wiz-header {") + 700);
+  const cols = (header.match(/grid-template-columns:\s*([^;]+);/) || [])[1] || "";
+  eq("the sides are sized to their content", /^auto\s+minmax\(0,\s*1fr\)\s+auto$/.test(cols.trim()), true);
+  eq("and the title truncates rather than overlapping",
+     /#wiz-title[^}]*text-overflow:\s*ellipsis/.test(css), true);
+  eq("with a narrow-screen trim so it rarely has to",
+     /@media \(max-width: 430px\)[\s\S]{0,220}wiz-header-text-btn/.test(css), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
