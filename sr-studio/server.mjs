@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generate } from './generator.mjs';
+import { generateCompose } from './compose-adapter.mjs';   // the composer-model machine (harmony-first plan → melody → counter-line bass); replaces the old generator.mjs
 import { validate, toLily, lilyDoc, lilyWithMap, fingerHand, resolveFingering, serializeHand, parseHand } from './engine.mjs';
 import { enforceLocks, reindexAfterDelete } from './lock.mjs';
 
@@ -137,7 +137,7 @@ const server = http.createServer(async (req,res)=>{
   try{
     if(p==='/'){ res.writeHead(200,{'content-type':'text/html'}); return res.end(readFileSync(join(DIR,'index.html'))); }
     if(p==='/api/counts'){ return json(res,{2:loadBank(2).length,3:loadBank(3).length,4:loadBank(4).length}); }
-    if(p==='/api/generate'){ const g=+u.searchParams.get('grade')||2; const existing=loadBank(g); const ex=generate(g, undefined, existing); ex.n=existing.length+1;
+    if(p==='/api/generate'){ const g=+u.searchParams.get('grade')||2; const existing=loadBank(g); const ex=generateCompose(g, {avoid: existing}); ex.n=existing.length+1;
       const r=await render(ex); return json(res,{ex:withText(ex),...r}); }
     if(p==='/api/render' && req.method==='POST'){ const d=await body(req);
       try{ const ex = d.rh ? {...d.meta, rh:d.rh, lh:d.lh} : {...d.meta, rh:parseHand(d.rhText), lh:parseHand(d.lhText)};
@@ -232,6 +232,7 @@ const server = http.createServer(async (req,res)=>{
           });
         });
       } catch(e) {
+        execFile('rm', ['-rf', dir], () => {});   // don't leave ~6 GB of orphaned PNG frames behind on a failed encode
         res.writeHead(500); return res.end('ffmpeg failed: '+e.message);
       }
       // Stream the file rather than readFileSync — a 4K ProRes card can exceed

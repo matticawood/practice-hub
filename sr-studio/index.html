@@ -57,6 +57,10 @@
   .tick.blank{color:transparent}
   .rev{cursor:pointer;font-size:11px;color:var(--mut);text-decoration:none;white-space:nowrap}
   .rev.on{color:#1a9a4b;font-weight:700}
+  /* browse-the-bank bar under the exercise */
+  #browseBar{border-top:1px solid var(--line);margin-top:10px;padding-top:10px;align-items:center}
+  #browsePos{min-width:96px;text-align:center;font-weight:600;font-size:13px}
+  #markGreen.on{background:#1a9a4b;color:#fff;border-color:#1a9a4b}
   .bankhdr{font-size:11.5px;color:var(--mut);margin:0 0 6px}
   .bankhdr b{color:#1a9a4b} .bankhdr i{color:#d98b1a;font-style:normal}
   .hint{font-size:11.5px;color:var(--mut);margin-top:4px}
@@ -104,6 +108,12 @@
         <button id="skip">Skip</button>
         <button id="editToggle">✎ Edit notes</button>
         <button id="undoBtn" title="Undo (Ctrl/Cmd+Z)">↶ Undo</button>
+      </div>
+      <div class="btns" id="browseBar">
+        <button id="prevEx" title="Previous exercise (←)">◀ Prev</button>
+        <span id="browsePos" class="muted">no bank</span>
+        <button id="nextEx" title="Next exercise (→)">Next ▶</button>
+        <button id="markGreen" style="margin-left:10px" disabled>✓ Mark green</button>
       </div>
     </div>
     <div class="card ed" id="editor" style="margin-top:16px;display:none">
@@ -455,12 +465,14 @@ function drawGrades(c){ $('#grades').innerHTML='';
     b.innerHTML=`Grade ${g} <small>${c[g]||0}/120</small>`; b.onclick=()=>{grade=g;refresh();}; $('#grades').appendChild(b); } }
 async function newCandidate(){ $('#score').innerHTML='<span class="muted">generating…</span>'; const d=await api('/api/generate?grade='+grade);
   curBank=null; selNt=null; playBPM=null; $('#unlockNote').style.display='none';
-  setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); afterScoreRender(); renderNoteBar(); }
+  setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); afterScoreRender(); renderNoteBar(); updateBrowseUI(); }
 async function approve(){ const r=await api('/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ex:{grade,...model.meta,rh:model.rh,lh:model.lh}})});
   if(r.error){ alert(r.error); return; } await refresh(); newCandidate(); }
 async function refresh(){ const c=await api('/api/counts'); drawGrades(c);
   $('#bankGrade').textContent=grade; $('#bankCount').textContent=c[grade]||0;
   const {bank}=await api('/api/bank?grade='+grade);
+  bankCache=bank; if(curBank!=null && curBank>=bank.length) curBank=bank.length?bank.length-1:null;
+  updateBrowseUI();
   const nReviewed=bank.filter(e=>e.reviewed).length;
   const nPending=bank.filter(e=>e.revised&&!e.reviewed).length;
   const nUntouched=bank.filter(e=>!e.reviewed&&!e.revised).length;
@@ -473,8 +485,17 @@ async function refresh(){ const c=await api('/api/counts'); drawGrades(c);
     return `<div class="row${rowcls}"><span><span class="tick ${state}">${e.reviewed?'✓':(e.revised?'●':'✓')}</span>${e.i+1}. ${e.key} ${e.mode} ${e.time} · <span class="muted">${e.tempo}</span></span><span>${rev} · <a onclick="viewBank(${e.i})">view</a> · <a onclick="delBank(${e.i})">✕</a></span></div>`;
   }).join(''):'<span class="muted">none yet</span>'); }
 window.markRev=async function(i,val){ await fetch('/api/reviewed',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({grade,i,reviewed:val})}); refresh(); }
-window.viewBank=async i=>{ const d=await api(`/api/view?grade=${grade}&i=${i}`); curBank=i; selNt=null; playBPM=null; $('#unlockNote').style.display='none';
-  setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); afterScoreRender(); renderNoteBar(); };
+window.viewBank=async i=>{ stopPlay(); const d=await api(`/api/view?grade=${grade}&i=${i}`); curBank=i; selNt=null; playBPM=null; $('#unlockNote').style.display='none';
+  setModel(d.ex); $('#score').innerHTML=d.svg; showReport(d.validation); afterScoreRender(); renderNoteBar(); updateBrowseUI(); };
+// ---- browse the bank in order: Prev / Next / Mark green, all keyed off curBank ----
+let bankCache=[];
+function updateBrowseUI(){ const total=bankCache.length; const pos=$('#browsePos'), mg=$('#markGreen'), pv=$('#prevEx'), nx=$('#nextEx'); if(!pos) return;
+  if(curBank==null){ pos.textContent=total?('— / '+total):'no bank'; mg.disabled=true; mg.classList.remove('on'); mg.textContent='✓ Mark green'; }
+  else { const e=bankCache[curBank]; pos.textContent=(curBank+1)+' / '+total; mg.disabled=false; const green=!!(e&&e.reviewed); mg.classList.toggle('on',green); mg.textContent=green?'✓ Green':'Mark green'; }
+  pv.disabled = total===0 || curBank===0; nx.disabled = total===0 || (curBank!=null && curBank>=total-1); }
+function stepBank(dir){ if(!bankCache.length) return; let i = curBank==null ? (dir>0?0:bankCache.length-1) : curBank+dir; i=Math.max(0,Math.min(bankCache.length-1,i)); if(i!==curBank||curBank==null) viewBank(i); }
+async function markGreenCurrent(){ if(curBank==null) return; const cur=curBank; const e=bankCache[cur]; const val=!(e&&e.reviewed);
+  await fetch('/api/reviewed',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({grade,i:cur,reviewed:val})}); await refresh(); }
 window.delBank=async i=>{ if(!confirm('Remove exercise '+(i+1)+'?'))return; await api('/api/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({grade,i})}); refresh(); };
 // ---- audio playback: real sampled piano (soundfont) that respects dynamics, hairpins, slurs, staccato, accents, tenuto ----
 let audioCtx=null, piano=null, masterGain=null, activeNodes=[];
@@ -540,6 +561,9 @@ $('#play').onclick=togglePlay;
 $('#tempoRange').addEventListener('input',e=>{ playBPM=+e.target.value; $('#tempoVal').textContent=playBPM+' bpm'; });
 $('#regen').onclick=()=>{stopPlay();newCandidate();}; $('#skip').onclick=()=>{stopPlay();newCandidate();}; $('#approve').onclick=approve;
 $('#undoBtn').onclick=undo;
+$('#prevEx').onclick=()=>stepBank(-1); $('#nextEx').onclick=()=>stepBank(1); $('#markGreen').onclick=markGreenCurrent;
+document.addEventListener('keydown',e=>{ if(e.metaKey||e.ctrlKey||e.altKey)return; const tag=(e.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='select'||tag==='textarea')return;
+  if(e.key==='ArrowRight'){ e.preventDefault(); stepBank(1); } else if(e.key==='ArrowLeft'){ e.preventDefault(); stepBank(-1); } });
 refresh();
 </script>
 </body></html>

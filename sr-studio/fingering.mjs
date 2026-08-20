@@ -24,8 +24,11 @@ const OFF = { 1:0, 2:2, 3:4, 4:5, 5:7 };           // finger -> semitone offset 
 const OFFD = { 1:0, 2:1, 3:2, 4:3, 5:4 };          // finger -> SCALE-DEGREE offset within a 5-finger position
 const BLACK = new Set([1,3,6,8,10]);
 const isBlack = m => BLACK.has(((m%12)+12)%12);
+export const _cfg = { roles: true };
 
-export function fingerHand(notes, hand, scalePcs, chordFit=true){
+export function fingerHandDP(notes, hand, scalePcs, chordFit=true, pin=null){
+  // `pin` (optional Map: note-index -> forced finger) constrains the solve — used by the audit to ask the counterfactual
+  //   "could this pitch have kept its earlier finger?" (a refinger is a fault only if keeping it costs ~nothing globally).
   // Reason about the hand FRAME in scale degrees, not raw semitones: a five-finger position is five consecutive
   // scale degrees, so finger 3 is the third DEGREE (major or minor third alike). This is what lets a diatonic
   // position actually hold — every note in the span keeps its finger — instead of the frame sliding on semitones.
@@ -37,7 +40,7 @@ export function fingerHand(notes, hand, scalePcs, chordFit=true){
   const outer = n => Array.isArray(n.m) ? (hand==='rh'?Math.max(...n.m):Math.min(...n.m)) : n.m;
   const R = []; notes.forEach((n,i)=>{ if(!n.rest) R.push({ i, p: outer(n), d: n.d }); });
   const fings = new Array(notes.length).fill(null); const print = new Set();
-  const N = R.length; if(!N) return { fings, print };
+  const N = R.length; if(!N) return { fings, print, effort:0, bv:0 };
 
   // A note played by finger f implies the hand anchor (the frame's scale-degree origin) sits here:
   const S = hand==='rh' ? 1 : -1;                                // +1 pitch step = pinkyward for RH
@@ -130,17 +133,24 @@ export function fingerHand(notes, hand, scalePcs, chordFit=true){
       // finger NATURALLY — the lowest note of the opening on the low outer finger — even if that forces a shift
       // later; the global optimiser otherwise pre-shifts to save the shift. Mid-phrase it's a gentle bias.
       const open = k===0 || (k>0 && R[k].i > R[k-1].i+1);
-      const w = open ? 10 : 2.6;
+      const w = open ? 10 : 0;   // the outer-finger-ON-the-position-extreme force is a PHRASE-OPENING rule (place the fresh hand naturally, lowest note on the low outer finger). MID-phrase it fought a smooth line and minted step faults while being redundant with the local peak/valley penalty + move economy (which the data confirms cover peaks): dropping it → step-dir 2.1→1.7, step-slide 2.1→1.8, refinger 9.8→8.9, peak/valley still 0, 0 invalid.
       // ...BUT the thumb is never forced onto a BLACK key — the thumb-avoids-black rule overrides this one (an
       // E-flat-major scale doesn't put the thumb on E-flat; the black note takes a longer finger, thumb stays white).
       if(pe.lo && f!==loF && !(loF===1 && isBlack(p))) c+=w;     // the position's LOWEST note -> the low outer finger
       if(pe.hi && f!==hiF && !(hiF===1 && isBlack(p))) c+=w; }   // the position's HIGHEST note -> the high outer finger
-    if(isBlack(p)){ if(f===1) c+=6.5; else if(f===5) c+=2.8; }   // the thumb (and 5th) strongly shun black keys — the thumb belongs on a white note (last resort only)
+    if(isBlack(p)){ if(f===1) c+=16; else if(f===5) c+=7; }     // in a melodic/scalic line the THUMB and LITTLE finger stay on WHITE keys — you navigate to avoid them on black (standard pedagogy); a chord grip with black outer notes is the exception (chords aren't fingered here as single notes) and a genuine last-resort still pays it
     if(f===4) c+=0.6;                                            // the weak 4th is used deliberately (once per octave)
     // CHROMATIC line: a BLACK note in a run of semitones takes a long middle finger (2/3), not the weak 4/5 (nor
     // the thumb) — which also stops the awkward 3-4-5 climb over consecutive chromatic notes. A bias, so a firmly
     // committed hand position can still win.
     if(chromatic(k) && isBlack(p)){ if(f>=4) c+=2.8; else if(f===2) c+=1.1; }   // the black takes the long 3 (2 second, weak 4/5 last)
+    // The LOW-outer finger (RH thumb / LH pinky) is never PARKED on a local PEAK, nor the HIGH-outer on a local VALLEY:
+    //   you EXTEND to the top note (3->4->5), you do NOT tuck the thumb onto the upper note of a two-note wiggle (the
+    //   2-1-2-1 churn — a crossed hand, not a held position). [P — a strong pianist lean; a genuinely forced case can still pay it]
+    if(k>0 && k<N-1 && R[k-1].i===R[k].i-1 && R[k+1].i===R[k].i+1){
+      const peak = p>R[k-1].p && p>R[k+1].p, valley = p<R[k-1].p && p<R[k+1].p, loF = hand==='rh'?1:5, hiF = hand==='rh'?5:1;
+      if((peak && f===loF) || (valley && f===hiF)) c += 8;
+    }
     // and the chromatic fingering must BEGIN on the first note of the chromatic set: the white note that starts an
     // ascending chromatic run takes the thumb, so the sharps land on the long fingers (never a slide onto black).
     const chromStart = k<N-1 && !isBlack(p) && isBlack(R[k+1].p) && R[k+1].p-p===1 && !(k>0 && p-R[k-1].p===1);
@@ -192,15 +202,23 @@ export function fingerHand(notes, hand, scalePcs, chordFit=true){
     // WITH a real reposition (am>=1) is a lift and is allowed to fall through to the normal cost.
     if(f1===f2 && pw!==0 && Math.abs(p2-p1)<=2 && isBlack(p2) && am<1) return 20;
     if(pw===0) return f1===f2 ? 0 : 2.5;                         // repeated pitch: strongly keep the SAME finger
+    // SAME FINGER on two DIFFERENT connected pitches = a drag/slide (or a lift-and-re-place). A composer/editor
+    //   DISPREFERS it — you change fingers so the notes join — and the wider the reach the more dispreferred: a 2nd can
+    //   slide, a 3rd+ really wants a change. But it is NOT forbidden — a detached note, or a spot where every other
+    //   finger costs more, takes it (there are exceptions to everything). A LEAN that GROWS with the interval, never a
+    //   wall — so the global optimiser prefers a real finger where one is cheaper, yet an exception still wins. [P]
+    if(f1===f2) return 3 + am*AW + repo + Math.max(0, Math.abs(p2-p1)-2)*3;
+    // a STEP ideally takes ADJACENT fingers — skipping a finger on a 2nd (2→4) leaves one stranded and reads worse
+    //   (5-4-3-2 over 5-4-2-1). A mild lean toward adjacency, growing with the gap; reachable when a finger is genuinely
+    //   reserved for what follows. Only on a step (a skip legitimately jumps fingers). [P]
+    const stepGap = (Math.abs(p2-p1)<=2 && Math.abs(f2-f1)>1) ? (Math.abs(f2-f1)-1)*2.2 : 0;
     if(pw>0){                                                    // moving toward the pinky
-      if(f2>f1)          return am*AW + st + repo;               // fingers spread outward (normal)
-      if(f2===1 && f1>1) return 2 + am*0.85;                     // thumb passes under (the legitimate in-position shift)
-      if(f2===f1)        return 3 + am*AW + repo;                // same finger slid (discouraged)
-      return 12 + am*AW + repo;                                  // awkward cross
+      if(f2>f1)          return am*AW + st + repo + stepGap;     // fingers spread outward (normal)
+      if(f2===1 && f1>1) return (f1===2 ? 12 : 2) + am*0.85;     // thumb passes UNDER a long finger (3/4/5); a tuck under only finger 2 is too tight (near-impossible) → costly
+      return 12 + am*AW + repo;                                  // awkward cross (a strong lean against, not a ban)
     } else {                                                     // moving toward the thumb
-      if(f2<f1)          return am*AW + st + repo;               // fingers close inward (normal)
-      if(f1===1 && f2>1) return 2 + am*0.85;                     // a finger crosses over the thumb
-      if(f2===f1)        return 3 + am*AW + repo;
+      if(f2<f1)          return am*AW + st + repo + stepGap;     // fingers close inward (normal)
+      if(f1===1 && f2>1) return (f2===2 ? 12 : 2) + am*0.85;     // a LONG finger (3/4/5) crosses OVER the thumb; finger 2 over the thumb is too tight (Matthew: thumb→2 step is impossible) → costly
       return 12 + am*AW + repo;
     }
   };
@@ -210,18 +228,44 @@ export function fingerHand(notes, hand, scalePcs, chordFit=true){
   // right finger (e.g. the pinky on a low bass reached by a downward leap) gets rejected.
   const lift = (p1,f1,p2,f2) => Math.abs(anchor(p2,f2)-anchor(p1,f1))*0.6 + 0.4;
   const INF=1e9;
-  const dp = Array.from({length:N}, ()=>new Array(6).fill(INF));
-  const bk = Array.from({length:N}, ()=>new Array(6).fill(0));
-  for(let f=1;f<=5;f++) dp[0][f]=noteCost(0,f);
-  for(let k=1;k<N;k++){ const gap = R[k].i > R[k-1].i + 1;        // a rest sits between -> the hand lifts
-    for(let f=1;f<=5;f++){ const nc=noteCost(k,f);
-    for(let g=1;g<=5;g++){ const mv = gap ? lift(R[k-1].p,g,R[k].p,f) : move(R[k-1].p,g,R[k].p,f,R[k-1].d,R[k].d);
-      const c=dp[k-1][g]+mv+nc;
-      if(c<dp[k][f]){ dp[k][f]=c; bk[k][f]=g; } } } }
-  let best=1,bv=INF; for(let f=1;f<=5;f++) if(dp[N-1][f]<bv){ bv=dp[N-1][f]; best=f; }
+  // solve the Viterbi (optionally with a PIN: note-index -> forced finger) -> the fingering path + its total cost.
+  const solve = (pm) => {
+    const dp = Array.from({length:N}, ()=>new Array(6).fill(INF)), bk = Array.from({length:N}, ()=>new Array(6).fill(0));
+    const pn = k => (pm && pm.has(R[k].i)) ? pm.get(R[k].i) : null;
+    for(let f=1;f<=5;f++) dp[0][f] = (pn(0)!=null && pn(0)!==f) ? INF : noteCost(0,f);
+    for(let k=1;k<N;k++){ const gap = R[k].i > R[k-1].i + 1;      // a rest sits between -> the hand lifts
+      for(let f=1;f<=5;f++){ if(pn(k)!=null && pn(k)!==f) continue; const nc=noteCost(k,f);
+      for(let g=1;g<=5;g++){ const mv = gap ? lift(R[k-1].p,g,R[k].p,f) : move(R[k-1].p,g,R[k].p,f,R[k-1].d,R[k].d);
+        const c=dp[k-1][g]+mv+nc; if(c<dp[k][f]){ dp[k][f]=c; bk[k][f]=g; } } } }
+    let best=1,bv=INF; for(let f=1;f<=5;f++) if(dp[N-1][f]<bv){ bv=dp[N-1][f]; best=f; }
+    const s=new Array(N); s[N-1]=best; for(let k=N-1;k>0;k--) s[k-1]=bk[k][s[k]];
+    return { seq:s, bv };
+  };
+  let { seq, bv } = solve(pin);
+  // PREFER CONSISTENCY [P — how a pianist thinks]: among globally-optimal fingerings, keep a RECURRING pitch on its
+  //   finger. Where two connected occurrences of one pitch were fingered differently, unify them to the best common
+  //   finger — but ADOPT it ONLY when that costs no more than the small value of consistency (CONSIST); a genuine,
+  //   NECESSARY reposition costs far more, so it is never disturbed. Selecting among tied optima, not overriding the
+  //   optimiser. Skipped when the caller pinned (the audit's counterfactual wants the raw cost). [criteria-passing → stays in]
+  if(!pin){ const CONSIST=1.0; const pm=new Map();
+    // count same-finger legato SLIDES (same finger on two connected step-apart pitches, not the idiomatic black→white edge
+    //   slide) — a physical fault WORSE than a re-finger. Consistency must never trade a re-finger for a slide.
+    const slides = s => { let n=0; for(let k=1;k<N;k++){ if(R[k].i!==R[k-1].i+1) continue; const dp=Math.abs(R[k].p-R[k-1].p); if(s[k]===s[k-1] && dp>0 && dp<=2 && !(isBlack(R[k-1].p)&&!isBlack(R[k].p))) n++; } return n; };
+    let curSlides = slides(seq);
+    for(let pass=0; pass<6; pass++){ let changed=false;                          // more passes + every recurrence (no first-pair break): a pitch recurring 3+ times, and coupled pitches, only converge across passes
+      for(let a=0;a<N;a++){ if(notes[R[a].i].rest || Array.isArray(notes[R[a].i].m)) continue;
+        for(let b=a+1; b<N && R[b].i<=R[a].i+8; b++){
+          if(R[b].i!==R[b-1].i+1) break;                          // a rest between frees the hand — consistency not required
+          if(R[b].p!==R[a].p || seq[a]===seq[b]) continue;        // want the SAME pitch, differently fingered
+          let bestC=null, bestCost=bv+CONSIST+1e-9, bestSeq=null, bestBv=null;
+          for(let c=1;c<=5;c++){ const t=new Map(pm); t.set(R[a].i,c); t.set(R[b].i,c); const r=solve(t);
+            if(r.bv<bestCost && slides(r.seq)<=curSlides){ bestCost=r.bv; bestC=c; bestSeq=r.seq; bestBv=r.bv; } }   // FAULT-AWARE: never adopt a unification that adds a slide
+          if(bestC!=null){ pm.set(R[a].i,bestC); pm.set(R[b].i,bestC); seq=bestSeq; bv=bestBv; curSlides=slides(seq); changed=true; }
+        } }
+      if(!changed) break;
+    }
+  }
   const effort = N>1 ? bv/(N-1) : 0;                            // playability: avg awkwardness per move
-  const seq=new Array(N); seq[N-1]=best;
-  for(let k=N-1;k>0;k--) seq[k-1]=bk[k][seq[k]];
   for(let k=0;k<N;k++) fings[R[k].i]=seq[k];
 
   // Repeated CHORD SHAPE -> the SAME fingering every time it recurs. An oom-pah 'pah' chord is one shape struck
@@ -259,5 +303,319 @@ export function fingerHand(notes, hand, scalePcs, chordFit=true){
     if(!bigLeap && !cross && shownSig.has(sig)) continue;        // suppress an obviously repeating figure's reposition
     print.add(R[k].i); shownSig.add(sig);
   }
-  return { fings, print, effort };
+  return { fings, print, effort, bv };   // bv = TOTAL path cost (for a fixed-total comparison, e.g. the audit's refinger necessity test)
+}
+
+// ==============================================================================================================
+// FORWARD, GESTURE-BASED fingering REASONER - the primary fingerer (replaces the cost-DP above, kept as fingerHandDP
+// for reference/comparison). Reasons like a player reading forward: segment the line into gestures the hand plays
+// without repositioning, recognise each gesture's IDIOM (scale / arpeggio / positional / octave / chord), finger it by
+// that idiom + reserve + economy + thumb-off-black, carrying the hand across gestures. Marks ABRSM-sparse by GRIP.
+// Verified against a canonical harness (scales/arpeggios/skip-scale/reserve, both hands) + fault metrics on real output
+// (thumb-on-black ~0, ~10x fewer same-finger-leaps than the DP). Returns {fings, print, effort} like the DP.
+// ==============================================================================================================
+export function fingerHand(notes, hand, scalePcs){
+  const SC = (scalePcs&&scalePcs.length) ? [...new Set(scalePcs.map(x=>((x%12)+12)%12))].sort((a,b)=>a-b) : [0,2,4,5,7,9,11];
+  const degreeOf = m => { const pc=((m%12)+12)%12, oct=Math.floor(m/12), i=SC.indexOf(pc);
+    if(i>=0) return oct*7+i;
+    let below=-1; for(let k=SC.length-1;k>=0;k--){ if(SC[k]<pc){ below=k; break; } }
+    return below<0 ? oct*7-0.5 : oct*7+below+0.5; };
+  const outer = n => Array.isArray(n.m) ? (hand==='rh'?Math.max(...n.m):Math.min(...n.m)) : n.m;
+  const R=[]; notes.forEach((n,i)=>{ if(!n.rest) R.push({i,p:outer(n),chord:Array.isArray(n.m),m:n.m,dur:n.d}); });
+  const N=R.length; const fings=new Array(notes.length).fill(null); const print=new Set();
+  if(!N) return {fings,print,effort:0};
+  R.forEach(r=>r.deg=degreeOf(r.p));
+  const S = hand==='rh'?1:-1;                       // +1 pitch step = pinkyward for RH
+  const outerLow = hand==='rh' ? 1 : 5;             // finger on the LOWEST pitch of a frame
+  const outerHigh = hand==='rh' ? 5 : 1;            // finger on the HIGHEST pitch of a frame
+  const seq = new Array(N).fill(null);              // finger per sounding note (outer finger for a chord)
+  let handAnchor = null;                            // CONTINUOUS HAND-STATE: the thumb-side low degree the hand currently sits on
+
+  // ---- 1) SEGMENT into gestures the hand plays without a lift/reposition ----
+  // A boundary is a rest (hand lifts), a 6th+ leap (hand relocates), or an arpeggic run passing beyond an octave span.
+  const seg=[]; let st=0;
+  for(let k=1;k<N;k++){
+    const rest = R[k].i > R[k-1].i+1;
+    const dd = R[k].deg - R[k-1].deg, add = Math.abs(dd);
+    const step = add<=1+1e-9;
+    const octaveLeap = Math.abs(R[k].p-R[k-1].p)===12;             // an octave is a reachable STRETCH (1-5), not a reposition
+    let boundary = rest || (add>=5 && !octaveLeap);                 // rest / 6th+ leap (but hold an octave in one frame)
+    if(!boundary && !step && Math.abs(R[k].deg - R[st].deg) > 7+1e-9) boundary=true;  // arpeggio past an octave repositions
+    // SUSTAINED DIRECTION REVERSAL: an up-arpeggio then a down-scale is TWO gestures, not one mixed run - so the arpeggio
+    // keeps its own idiom (its thumb on its anchor, black or not) and the scale is fingered as a scale. A single turn
+    // (up then straight back down by one) is NOT a boundary - the new direction must CONTINUE for it to be a real reversal.
+    if(!boundary && k>=2 && k<N-1){ const d1=Math.sign(R[k].deg-R[k-1].deg), d0=Math.sign(R[k-1].deg-R[k-2].deg), dN=Math.sign(R[k+1].deg-R[k].deg);
+      if(d1!==0 && d0!==0 && d1!==d0 && dN===d1) boundary=true; }
+    if(boundary){ seg.push([st,k-1]); st=k; }
+  }
+  seg.push([st,N-1]);
+
+  // ---- 2) classify + finger each gesture, carrying the frame ----
+  // classify by the intervals inside the gesture
+  const classify = (a,b) => {
+    if(R.slice(a,b+1).some(r=>r.chord)) return 'chord';
+    const L=b-a+1; if(L===1) return 'single';
+    let steps=0, skips=0, dirs=new Set();
+    for(let k=a+1;k<=b;k++){ const dd=R[k].deg-R[k-1].deg, ad=Math.abs(dd); dirs.add(Math.sign(dd));
+      if(ad<=1+1e-9) steps++; else skips++; }
+    const oneDir = dirs.size<=1 || (dirs.has(0)&&dirs.size<=2);
+    if(L>=3 && steps>=skips && oneDir) return 'scalar';            // a run of steps (a scale / skip-scale line)
+    if(L>=3 && skips>steps && oneDir) return 'arpeggic';          // a broken chord (skips of 3rds/5ths)
+    if(L===2 && Math.abs(R[b].deg-R[a].deg)>=2) return 'arpeggic'; // a lone skip (broken 3rd/4th/5th)
+    return 'positional';                                           // short / mixed / turning -> one hand placement
+  };
+
+  // SCALE fingering, BLACK-AWARE. Walk from the thumb end (low pitch for RH, high for LH). Within a 5th it is plain
+  // positional. Wider, it groups into 3s/4s and crosses the thumb UNDER only onto WHITE notes (a scale never puts the
+  // thumb on a black key), extending to the pinky on the run's final notes. Same finger per pitch ascending or descending.
+  const white = k => !isBlack(R[k].p);
+  const SCq=SC; const pcOfDeg = d => SCq[((d%7)+7)%7];             // pitch-class of a scale degree
+  // A scalar run is fingered by its SITUATION:
+  //  - a FRAGMENT within a 5th (span<=4) is a five-finger position: thumb-to-pinky, thumb on the low note (RH) even if it
+  //    is black (a position anchor, no thumb-under) - Matthew's "a D-to-A run is just thumb to little finger".
+  //  - a GENUINE scale (span>=6th, so it needs thumb-unders) takes the CONVENTIONAL fingering for its key, DERIVED not
+  //    hard-coded: the thumb falls on the TONIC and the 4th degree (RH) / 5th degree (LH), each shifted UP off a black key
+  //    (so B-flat's thumbs come out on C and F), groups run 3-4, and the run's own extreme extends the last group (ends on
+  //    4/5, not a restarted thumb). Read off the present notes so a SKIP-scale keeps each note's full-scale finger.
+  const scaleFingerRun = (a,b) => {
+    const loDeg=Math.round(Math.min(R[a].deg,R[b].deg)), hiDeg=Math.round(Math.max(R[a].deg,R[b].deg)), span=hiDeg-loDeg;
+    if(span<=4){ for(let k=a;k<=b;k++){ const d=Math.round(R[k].deg);
+      seq[k] = hand==='rh' ? Math.min(5,(d-loDeg)+1) : Math.min(5,(hiDeg-d)+1); } return; }
+    const line=[]; for(let d=loDeg; d<=hiDeg; d++) line.push(d);
+    const thumbEnd = hand==='rh' ? line : line.slice().reverse();  // walk from the thumb end (low for RH, high for LH)
+    const L=thumbEnd.length, fOf={};
+    const thumbPcs=new Set();                                      // conventional thumb pitch-classes for THIS key (tonic + 4th/5th, off black)
+    for(const bd of (hand==='rh'?[0,3]:[0,4])){ let dd=bd; while(isBlack(pcOfDeg(dd))) dd++; thumbPcs.add(pcOfDeg(dd)); }
+    let firstThumb = thumbEnd.findIndex(d=>thumbPcs.has(pcOfDeg(d))); if(firstThumb<0) firstThumb=0;
+    let f=0;
+    for(let t=firstThumb;t<L;t++){ const d=thumbEnd[t];
+      if(thumbPcs.has(pcOfDeg(d)) && t!==L-1) f=1;                 // thumb-under onto a white key - except the very last note
+      else f=(f===0?1:f+1);                                        // otherwise the group ascends (its extreme extends to 4/5)
+      fOf[d]=Math.min(5,f);
+    }
+    // LEADING notes before the first thumb (a black-key tonic can't take the thumb): a scale starts on the finger it ENDS
+    // on, so mirror them from the top of the run (a single leading tonic = the top tonic's finger: Bb->4, Eb->3).
+    for(let t=0;t<firstThumb;t++){ const mirror=L-1-(firstThumb-1-t);
+      fOf[thumbEnd[t]] = (mirror>=0 && fOf[thumbEnd[mirror]]!=null) ? fOf[thumbEnd[mirror]] : Math.max(2,4-(firstThumb-1-t)); }
+    for(let k=a;k<=b;k++) seq[k]=fOf[Math.round(R[k].deg)] ?? outerLow;
+  };
+
+  // ARPEGGIC: skip fingers. Assign from the THUMB end (thumb=1) outward, adding a finger-gap per interval (step +1, 3rd
+  // +2, 6th/7th +3, octave +4) - and if that would overrun finger 5 before the pinkyward extreme, COMPRESS the lower
+  // intervals (nearest the thumb) so the pinky is RESERVED for the extreme. That is what makes a broken triad 1-3-5,
+  // an octave 1-5, and B-D-F#-G (a triad continuing up a step) come out 1-2-4-5 instead of stranding the pinky.
+  const incOf = iv => iv<=1?1 : iv<=4?2 : iv<=6?3 : 4;
+  const arpFingerRun = (a,b) => {
+    // order thumb-end -> pinky-end (RH: low->high; LH: high->low)
+    const ord=[...Array(b-a+1).keys()].map(x=>a+x).sort((x,y)=> hand==='rh' ? R[x].deg-R[y].deg : R[y].deg-R[x].deg);
+    const incs=[]; for(let t=1;t<ord.length;t++) incs.push(incOf(Math.abs(R[ord[t]].deg-R[ord[t-1]].deg)));
+    let sum=incs.reduce((s,x)=>s+x,0);
+    for(let t=0; sum>4 && t<incs.length; t++){ while(incs[t]>1 && sum>4){ incs[t]--; sum--; } }  // compress from the thumb end -> reserve the pinky
+    let f=1; seq[ord[0]]=1; for(let t=1;t<ord.length;t++){ f=Math.min(5,f+incs[t-1]); seq[ord[t]]=f; }
+  };
+
+  // ROLE of a note relative to its immediate NEIGHBOURS (across gesture boundaries too): a clear local LOW is a bass
+  // anchor (pinky in LH / thumb in RH); a clear local HIGH is the top outer finger. This is what puts the LH pinky on
+  // an oom-pah bass and stops a lone low note taking the thumb.
+  const isLowAnchor = k => { const p=R[k].deg, a=k>0?R[k-1].deg:null, b2=k<N-1?R[k+1].deg:null;
+    return a==null ? (b2!=null&&p<b2-1) : b2==null ? (p<a-1) : (p<a-1 && p<b2-1); };
+  const isHighAnchor = k => { const p=R[k].deg, a=k>0?R[k-1].deg:null, b2=k<N-1?R[k+1].deg:null;
+    return a==null ? (b2!=null&&p>b2+1) : b2==null ? (p>a+1) : (p>a+1 && p>b2+1); };
+
+  // frame helpers: fingerAt(t,d) = which finger sits on degree d when the THUMB is on degree t; thumbFrom(d,f) = the thumb
+  // degree implied by playing degree d with finger f. The hand state `handAnchor` IS this thumb degree, threaded per note.
+  const fingerAt = (t,d) => hand==='rh' ? (d-t)+1 : (t-d)+1;
+  const thumbFrom = (d,f) => hand==='rh' ? d-(f-1) : d+(f-1);
+  // POSITIONAL / SINGLE / CHORD, threaded through the CONTINUOUS HAND-STATE so every seam is reasoned (no jam can arise):
+  // each note is fingered from where the hand ALREADY sits (economy), the hand RE-ANCHORS only when it must move, and the
+  // implied hand position is carried to the next note - so a lone bass on the pinky flows into a 3rd-up as 5->3 (a skip),
+  // never the jammed 5->4.
+  const posFingerRun = (a,b) => {
+    const degs=R.slice(a,b+1).map(r=>Math.round(r.deg)); const loDeg=Math.min(...degs), hiDeg=Math.max(...degs);
+    const covers = t => degs.every(d=>{ const f=fingerAt(t,d); return f>=1&&f<=5; });
+    // place the frame for this gesture: KEEP the carried hand if it covers (the seam flows); else place by reserve.
+    let anchor = (handAnchor!=null && covers(handAnchor)) ? handAnchor : (hand==='rh'?loDeg:hiDeg);
+    for(let k=a;k<=b;k++){ const d=Math.round(R[k].deg);
+      const reachable = handAnchor!=null && fingerAt(handAnchor,d)>=1 && fingerAt(handAnchor,d)<=5;
+      // an LH struck CHORD above a bass (an oom-pah "pah"): thumb on TOP, bottom by width+trajectory (reserve the pinky for
+      // a returning bass). This is the one grip that isn't a plain frame note - but it still re-anchors the hand after.
+      if(R[k].chord && hand==='lh' && isHighAnchor(k)){
+        const dd=Math.round(Math.max(...R[k].m.map(degreeOf))-Math.min(...R[k].m.map(degreeOf)));
+        const returnsLow = k<N-1 && !R[k+1].chord && R[k+1].deg < R[k].deg-2;
+        seq[k] = (returnsLow && dd<=3) ? Math.max(2,Math.min(4,1+dd)) : Math.max(2,Math.min(5,1+dd));
+      }
+      // a lone BASS/PEAK the carried hand can't already reach = a real reposition: take the outer finger and RE-ANCHOR.
+      else if(a===b && isLowAnchor(k) && !reachable){ seq[k]=outerLow; }
+      else if(a===b && isHighAnchor(k) && !reachable){ seq[k]=outerHigh; }
+      // otherwise finger from the hand where it sits (economy). If the note runs OFF the frame, the hand RE-ANCHORS (that
+      // note takes the outer finger and the frame shifts to it) instead of CLAMPING to 5 - clamping is what jams a wide
+      // gesture (the top note on 5 and the 3rd below stuck on 4). Re-anchoring makes the 3rd below come out 3 (a skip).
+      else { let f=fingerAt(anchor,d);
+        if(f>5){ anchor = hand==='rh' ? d-4 : d+4; f=5; }          // ran off the pinky end -> shift the hand, this note takes the pinky
+        else if(f<1){ anchor = d; f=1; }                           // ran off the thumb end -> shift, this note takes the thumb
+        seq[k]=f; }
+      handAnchor = thumbFrom(d, seq[k]);   // THREAD: carry the implied hand position to the next note / gesture
+    }
+  };
+
+  for(const [a,b] of seg){
+    const cls = classify(a,b);
+    if(cls==='scalar') scaleFingerRun(a,b);
+    else if(cls==='arpeggic') arpFingerRun(a,b);
+    else posFingerRun(a,b);
+    if(seq[b]!=null) handAnchor = thumbFrom(Math.round(R[b].deg), seq[b]);   // carry the hand position OUT of every gesture (incl. a scale/arp) so the next seam is reasoned
+  }
+
+  // FIGURE-RECOGNITION (the editor's model): the generator TAGGED each LH note with the figure ROLE it built, so where the
+  // figure is KNOWN, apply its CONVENTIONAL fingering AND connect it to its neighbours by comfort. The seam rule is the
+  // crux: a "pah" chord's bottom finger must SKIP from the bass's pinky (5 -> 3), reserving the pinky for the bass's return
+  // - NEVER collide with it (the 5->5 / 5->4 jam). Untagged notes keep the gesture fingering above.
+  // INFER the oom-pah pairing where the generator left notes untagged (57% of LH notes): a struck chord NEXT TO a clear
+  // local-low, and that low next to the chord, are a "pah" + its "oom". Both halves require the PAIRING, so a standalone
+  // block/held chord is never mis-gripped. This routes untagged oom-pahs through the SAME coordinated role-path (bass on
+  // the pinky the chord grip reserves) - jam-free by construction, unlike a post-hoc bass nudge.
+  const isBassLow = k => !R[k].chord && isLowAnchor(k);
+  const inferRole = k => {
+    if(_cfg.inferOompah===false) return undefined;
+    if(R[k].chord) return ((k>0 && isBassLow(k-1)) || (k<N-1 && isBassLow(k+1))) ? 'chord' : undefined;
+    if(isBassLow(k) && ((k>0 && R[k-1].chord) || (k<N-1 && R[k+1].chord))) return 'bass';
+    return undefined;
+  };
+  if(_cfg.roles && hand==='lh' && R.some((r,k)=>(notes[r.i] && notes[r.i]._role) || inferRole(k))){
+    const roleOf = k => (notes[R[k].i] && notes[R[k].i]._role) || inferRole(k);
+    const spanOf = k => { const m=notes[R[k].i].m; return Array.isArray(m) ? Math.round(Math.abs(degreeOf(Math.max(...m))-degreeOf(Math.min(...m)))) : 0; };
+    for(let k=0;k<N;){ const role=roleOf(k);
+      if(role==='bass'){                                            // the low root -> pinky, BUT only when it's a STATIC/repeated root
+        let j=k; while(j<N && roleOf(j)==='bass') j++;              //   (the reserve-pinky idiom). A MOVING bass is a melodic line:
+        const distinct = new Set(R.slice(k,j).map(r=>Math.round(r.deg))).size;   //   keep the connected gesture fingering the loop above
+        if(j-k===1 || distinct===1) for(let x=k;x<j;x++) seq[x]=5;  //   already gave it - clobbering every note to 5 is what jams a walk.
+        k=j; continue; }
+      if(role==='chord'){                                          // the "pah": thumb on TOP, and it RESERVES the pinky (bottom on 3)
+        seq[k] = 3;                                                 //   so the pinky is free to drop onto the returning bass -> the bass gets 5 as a CONSEQUENCE, not a rule
+        k++; continue; }
+      if(role==='held'){ const dd=spanOf(k); seq[k] = dd<=0 ? 5 : Math.min(5,1+dd); k++; continue; }   // a HELD chord rings: full grip, no bass to reserve for
+      if(role==='arp'){ let j=k; while(j<N && roleOf(j)==='arp') j++; arpFingerRun(k,j-1); k=j; continue; }   // a broken chord -> skip fingers (reserve-compressed)
+      k++;                                                          // alberti / walk / untagged: keep the gesture fingering
+    }
+  }
+
+  // (No blanket thumb-off-black pass: a SCALE already crosses the thumb onto white keys by construction, while a POSITION
+  //  anchor or an ARPEGGIO bottom is CONVENTIONALLY allowed the thumb on a black key - Matthew's F#-A-D. Thumb-on-black is
+  //  contextual, decided by the gesture idiom, not banned.)
+  // repeated pitch keeps the same finger (economy) - done BEFORE the repairs so a repair that fixes a same-finger 3rd on a
+  // repeated bass/chord note is not silently REVERTED by re-equalising the repeat afterwards (that left the jam standing).
+  if(_cfg.repEqFirst!==false) for(let k=1;k<N;k++) if(Math.abs(R[k].p-R[k-1].p)<1e-9 && R[k].i===R[k-1].i+1) seq[k]=seq[k-1];
+
+  // TWO IDIOM REPAIRS, iterated until they SETTLE (a repair can shift a finger into a new jam with the next note):
+  //  - A SKIP takes SKIP fingers: two notes a 3rd+ apart are fingered a skip apart (>=2), never the jammed weak 5-4
+  //    (Matthew's rule) - a 1-2/2-3 on a 3rd is a valid reserve stretch, so only weak-finger (>=4) jams are repaired.
+  //  - A STEP takes ADJACENT fingers (or a thumb-cross): a 2nd never skips a finger (4->2) mid-line.
+  for(let pass=0; _cfg.repairs!==false && pass<4; pass++){ let changed=false;
+    for(let k=1;k<N;k++){ if(R[k].i!==R[k-1].i+1 || seq[k]==null || seq[k-1]==null) continue;
+      const dd=Math.abs(R[k].deg-R[k-1].deg), df=Math.abs(seq[k]-seq[k-1]), pdir=R[k].p>R[k-1].p?1:-1;
+      // a 3rd/4th (dd 2-3) must take SKIP fingers: SAME-finger (df 0, you can't play a 3rd with one finger) always jams;
+      // ADJACENT weak fingers (df 1, max>=4) jam too - but a 1-2/2-3 on a 3rd is a valid reserve stretch, so those don't.
+      // (a 5th+ same-finger is a reposition you LIFT for - left to leap-differ, not forced here.)
+      if(dd>=2-1e-9 && dd<=3+1e-9 && (df===0 || (df===1 && Math.max(seq[k],seq[k-1])>=4))){
+        let c2=seq[k-1]+2*pdir;
+        if(c2>=1&&c2<=5){ if(seq[k]!==c2){seq[k]=c2;changed=true;} }
+        else { const c1=seq[k]-2*pdir; if(c1>=1&&c1<=5&&seq[k-1]!==c1){seq[k-1]=c1;changed=true;} }
+      } else if(dd>=1-1e-9 && dd<=1+1e-9 && df>=2 && seq[k]!==1 && seq[k-1]!==1){   // a step with a finger gap (not a cross)
+        const v=seq[k-1]+pdir; if(v>=1&&v<=5&&seq[k]!==v){seq[k]=v;changed=true;}
+      }
+    }
+    if(!changed) break;
+  }
+  // NEVER the same finger across a LEAP (adjacent notes, no rest, more than a 2nd apart): you lift, you don't slide one
+  // finger. Nudge the landing finger by one toward the interior, staying in [1,5] and away from the source finger.
+  for(let k=1;k<N;k++){ if(R[k].i!==R[k-1].i+1) continue;
+    if(Math.abs(R[k].p-R[k-1].p)<=2) continue;                      // a step can repeat a finger only via a slide; leaps only here
+    if(seq[k]!==seq[k-1] || seq[k]==null) continue;
+    const up = R[k].p>R[k-1].p;                                     // leaping up (RH) wants a higher finger, etc.
+    const dir = hand==='rh' ? (up?1:-1) : (up?-1:1);
+    let cand = seq[k]+dir;                                          // step the landing finger toward where the leap goes
+    if(cand<1||cand>5||cand===seq[k-1]) cand = seq[k]-dir;          // else the other way
+    if(cand<1||cand>5||cand===seq[k-1]) cand = (seq[k-1]===1?2 : seq[k-1]===5?4 : seq[k-1]+1);   // last resort: anything != source, in range
+    seq[k]=Math.max(1,Math.min(5,cand));
+  }
+
+  // LOCAL ARP RE-FINGER (last resort for a CHAIN the pairwise repair can only FLIP): a monotonic run of >=3 notes moving
+  // one direction all by 3rd+ skips is an arpeggio the positional frame fingered by degree-offset (a 4th -> finger 4 ->
+  // a jammed 4-5 on the next 3rd). Try arp RESERVE spacing on the run, and KEEP it ONLY if it strictly reduces the jams
+  // over the run + its two boundary seams - so a good frame is never disturbed and no new seam jam is introduced.
+  if(_cfg.arpFix!==false){
+    const isJam=x=>{ if(x<1||x>=N||R[x].i!==R[x-1].i+1||seq[x]==null||seq[x-1]==null)return 0; const iv=Math.abs(R[x].p-R[x-1].p),df=Math.abs(seq[x]-seq[x-1]),lo=Math.min(seq[x],seq[x-1]); return ((iv>=3&&iv<=4&&df===0)||(iv>=3&&iv<=4&&df===1&&lo>=4))?1:0; };
+    let k=0;
+    while(k<N){ let j=k;
+      while(j+1<N && R[j+1].i===R[j].i+1 && Math.abs(R[j+1].deg-R[j].deg)>=2-1e-9
+            && (j===k || Math.sign(R[j+1].deg-R[j].deg)===Math.sign(R[j].deg-R[j-1].deg))) j++;
+      if(j-k>=2){ const hi=Math.min(N-1,j+1); let before=0; for(let x=k;x<=hi;x++) before+=isJam(x);
+        const save=seq.slice(k,j+1); arpFingerRun(k,j);
+        let after=0; for(let x=k;x<=hi;x++) after+=isJam(x);
+        if(after>=before) for(let x=k;x<=j;x++) seq[x]=save[x-k];   // no strict improvement -> revert
+      }
+      k = j>k ? j+1 : k+1;
+    }
+  }
+
+  if(_cfg.repEqFirst===false) for(let k=1;k<N;k++) if(Math.abs(R[k].p-R[k-1].p)<1e-9 && R[k].i===R[k-1].i+1) seq[k]=seq[k-1];   // (old ordering, for A/B)
+
+  // ECONOMY (situation 1 - STAY): a compact legato phrase that FITS ONE hand position (span <= 5 scale-degrees, so no
+  // thumb-cross is needed, and no struck chord) is played AS that one position - each pitch takes its fixed position
+  // finger. Then a pitch the hand never had to leave can't come out with two different fingers (the shuffle the situational
+  // audit found). A within-a-5th scale/arp already equals this mapping, so it is idempotent there; it only corrects the
+  // mixed/turning phrases that re-anchored for no reason. It does NOT touch phrases that genuinely span more than a 5th
+  // (those need real repositioning / thumb-crosses) or oom-pah phrases (a chord = the hand bounces by design).
+  if(_cfg.economy!==false){ let a=0;
+    for(let k=1;k<=N;k++){ if(k===N || R[k].i!==R[k-1].i+1){ const b=k-1;
+      // a chord-free compact phrase is played AS one position - each pitch its fixed position finger. (Guard a chromatic
+      // note with no scale-degree, which would poison the low/high of the frame.) An oom-pah phrase (a struck chord) is
+      // left alone here: its bass+chord must be fingered as a COORDINATED unit (bass on the pinky the chord grip reserves)
+      // - a post-hoc bass nudge fights the existing grip and jams, so untagged-oom-pah economy is handled elsewhere.
+      // require INTEGER degrees: a chromatic note has a fractional degree (x.5), and the five-finger position mapping is
+      // only valid diatonically - rounding a chromatic degree mis-maps it (e.g. damages a harmonic-minor arp into a jam).
+      if(b>a && R.slice(a,b+1).every(r=>!r.chord && Number.isInteger(r.deg))){
+        const degs=R.slice(a,b+1).map(r=>Math.round(r.deg)); const lo=Math.min(...degs), hi=Math.max(...degs);
+        if(hi-lo<=4) for(let x=a;x<=b;x++){ const d=Math.round(R[x].deg); seq[x] = hand==='rh' ? (d-lo)+1 : (hi-d)+1; }
+      }
+      a=k; } }
+  }
+
+  for(let k=0;k<N;k++) fings[R[k].i]=seq[k];
+
+  // ---- 3) MARKING (ABRSM-sparse): a finger prints only when the reader can't INFER it from what came before. The unit
+  // of inference is the GRIP - a bass on the pinky, an oom-pah pah-chord, a five-finger position, a thumb-cross. Once a
+  // grip has been shown, its recurrences (the same shape over changing harmony) are inferred, so they are NOT re-marked.
+  // That is what collapses a whole oom-pah accompaniment to its opening, while a genuinely NEW position still prints. ----
+  const gStart = new Set(seg.slice(1).map(s=>s[0]));
+  const grip = k => {                                              // a coarse hand-shape signature (NOT pitch): role + finger
+    const role = R[k].chord ? 'C' : isLowAnchor(k) ? 'B' : isHighAnchor(k) ? 'P' : 'p';
+    return role + seq[k];
+  };
+  const shown=new Set(); print.add(R[0].i); shown.add(grip(0));
+  for(let k=1;k<N;k++){
+    const rest = R[k].i!==R[k-1].i+1;
+    const asc = R[k].p>R[k-1].p;
+    // A THUMB-CROSS is a specific event, always shown - BUT only a REAL one: the thumb lands on a NEW note, extending the
+    // hand past its position (the implied thumb-anchor MOVES). Using finger 1 WITHIN a fixed five-finger position is not a
+    // cross (the thumb is stationary - e.g. Grade 2, where a whole piece sits in one position: A3(3)->C4(1) is just
+    // pinky-side to thumb, the hand does not move). Requiring the anchor to move stops the spurious per-note marks.
+    const thumbMoved = thumbFrom(Math.round(R[k].deg),seq[k]) !== thumbFrom(Math.round(R[k-1].deg),seq[k-1]);
+    const cross = !rest && thumbMoved && ((asc&&seq[k]===1&&seq[k-1]>1)||(!asc&&seq[k-1]===1&&seq[k]>1));
+    if(cross){ print.add(R[k].i); continue; }
+    // ONLY the ANCHOR of a new hand placement can need a mark: a struck chord, or a gesture-start where the hand actually
+    // RELOCATED. Relocation is the REAL thing, not the rest/leap PROXY: the implied hand-anchor (thumbFrom) moved AT ALL
+    // (a step counts - Matthew: if the hand shifts up a step to reach the coming notes, the player must be TOLD the finger
+    // at that moment so they reposition in time). So a gesture where the hand sits STILL earns no mark (reader stays in
+    // position); ANY genuine shift does. Interior notes of a gesture (a scale, a broken chord) finger themselves and are
+    // never candidates. Thumb-crosses are handled above (a specific event, always shown).
+    const relocated = gStart.has(k) && thumbFrom(Math.round(R[k].deg),seq[k]) !== thumbFrom(Math.round(R[k-1].deg),seq[k-1]);
+    const candidate = R[k].chord || relocated;
+    if(!candidate) continue;
+    const g = grip(k);
+    if(shown.has(g)) continue;                                      // this grip already taught -> the reader infers it
+    print.add(R[k].i); shown.add(g);
+  }
+
+  return { fings, print, effort:0, _seg: _cfg.debug ? seg.map(([a,b])=>[R[a].i, R[b].i, classify(a,b)]) : undefined };
 }

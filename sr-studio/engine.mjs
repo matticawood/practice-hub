@@ -4,7 +4,8 @@
 // art '--' is tenuto and 'ferm' a pause: both are Grade 4 additions (ABRSM introduces
 // tenuto, the fermata and chromatic notes at Grade 4; no new keys or rhythms).
 
-import { fingerHand } from './fingering.mjs';
+import { fingerHand, fingerHandDP } from './fingering.mjs';
+import { gradeParams } from './grade-params.mjs';   // single source of truth for the per-grade chord-size cap
 
 export const POS = { maj:[0,2,4,5,7], min:[0,2,3,5,7] };
 
@@ -94,8 +95,8 @@ export function resolveFingering(ex){
   const LET={c:0,d:2,e:4,f:5,g:7,a:9,b:11};
   const tonicPc=((LET[ex.key[0]]+(ex.key[1]==='f'?-1:ex.key[1]==='s'?1:0))%12+12)%12;
   const scalePcs=(ex.mode==='min'?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11]).map(x=>(tonicPc+x)%12);
-  return { rh: resolveHandFingers(ex.rh,'rh',fingerHand(ex.rh,'rh',scalePcs)),
-           lh: resolveHandFingers(ex.lh,'lh',fingerHand(ex.lh,'lh',scalePcs)) };
+  return { rh: resolveHandFingers(ex.rh,'rh',fingerHandDP(ex.rh,'rh',scalePcs)),
+           lh: resolveHandFingers(ex.lh,'lh',fingerHandDP(ex.lh,'lh',scalePcs)) };
 }
 
 // ---- validator ----
@@ -116,7 +117,7 @@ export function validate(ex){
   if(Math.round(tot/barUnits*100)/100!==expBars) probs.push(`length ${(tot/barUnits).toFixed(2)} bars, Grade ${ex.grade} ${ex.time} wants ${expBars}`);
   for(const [s,nm] of [[ex.rh,'RH'],[ex.lh,'LH']]){let a=0;s.forEach(n=>a+=n.d);if(Math.round((a-partial)/barUnits*100)/100!==expBars)probs.push(`${nm} total beats off`);}
   // grade cap on simultaneous notes per hand: Grade 2 is a single line; Grade 3/4 allow at most a 2-note chord
-  { const maxNotes = ex.grade<=2 ? 1 : 2;
+  { const maxNotes = gradeParams(ex.grade).chordMax ?? (ex.grade<=2 ? 1 : 2);   // read gp.chordMax, not a hard-coded grade number (was `grade<=2?1:2` - drifted from gp at grade 8)
     for(const [s,nm] of [[ex.rh,'RH'],[ex.lh,'LH']]) for(const n of s)
       if(!n.rest && Array.isArray(n.m) && n.m.length>maxNotes) probs.push(`${nm}: ${n.m.length}-note chord exceeds Grade ${ex.grade} (max ${maxNotes})`); }
   // rhythm must be readable: clean durations, and sub-beat notes may not cross a beat boundary
@@ -131,9 +132,24 @@ export function validate(ex){
   }
   // range / fingering
   function fingerOf(hand,tl,nm){
-    const mins=tl.map(lo), maxs=tl.map(hi); const lowest=Math.min(...mins), highest=Math.max(...maxs);
-    if(highest-lowest>g.maxSpan) probs.push(`${nm}: range ${highest-lowest} semis > ${g.maxSpan} (too wide for the grade)`);
-    const first=tl[0]; const fnote=hand==='rh'?lo(first):lo(first);
+    const notes=tl.filter(n=>!n.rest && n.m!=null);            // rests have no pitch: lo/hi return undefined -> NaN, which silently defeated the span check (a hand with any rest bypassed it entirely)
+    if(!notes.length) return hand==='rh'?1:5;
+    const mins=notes.map(lo), maxs=notes.map(hi); const lowest=Math.min(...mins), highest=Math.max(...maxs);
+    if(g.fixedPosition){
+      // FIVE-FINGER POSITION, measured as a composer/player thinks: FIVE FINGERS on five adjacent scale-degrees. A
+      // chromatic (the raised leading tone) is an INFLECTION of a finger's note - the hand hasn't moved - so it counts as
+      // its BASE scale-degree, not as widening the hand. So the constraint is the DIATONIC span (<=4 degrees = 5 fingers),
+      // NOT the raw semitone span (which miscounted a leading tone as leaving the position, and forced the generator to
+      // fight the harmonic minor). A note an OCTAVE out is a different degree entirely, so it is still caught.
+      const LET={c:0,d:2,e:4,f:5,g:7,a:9,b:11};
+      const tpc=(((LET[(ex.key||'c')[0]]??0)+((ex.key||'')[1]==='f'?-1:(ex.key||'')[1]==='s'?1:0))%12+12)%12;
+      const sc=(ex.mode==='min')?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11];
+      const dIdx=p=>{ const rel=(((p-tpc)%12)+12)%12; let d=0; for(let i=0;i<7;i++) if(sc[i]<=rel) d=i; return 7*Math.floor((p-tpc)/12)+d; };
+      const di=notes.flatMap(n=>Array.isArray(n.m)?n.m.map(dIdx):[dIdx(n.m)]);
+      const dspan=Math.max(...di)-Math.min(...di);
+      if(dspan>4) probs.push(`${nm}: five-finger position exceeded (${dspan+1} scale-degrees span the hand, max 5)`);
+    } else if(highest-lowest>g.maxSpan) probs.push(`${nm}: range ${highest-lowest} semis > ${g.maxSpan} (too wide for the grade)`);
+    const first=notes[0]; const fnote=hand==='rh'?lo(first):lo(first);
     if(g.fixedPosition){
       // a five-finger position may sit on ANY degree of the key. The span check above guarantees it fits one
       // hand; the exact starting finger is supplied by the generator (ex.rhFinger/ex.lhFinger). Here we only
@@ -220,7 +236,7 @@ export function toLily(ex, withNumber=true, sink=null){
   const [_top,_bot]=ex.time.split('/').map(Number); const barUnits=(_top/_bot)*4;
   // the diatonic scale (pitch classes) so the fingerer reasons in SCALE DEGREES, not raw semitones
   const scalePcs=(ex.mode==='min'?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11]).map(x=>(tonicPc+x)%12);
-  const rhFg=fingerHand(ex.rh,'rh',scalePcs), lhFg=fingerHand(ex.lh,'lh',scalePcs);
+  const rhFg=fingerHandDP(ex.rh,'rh',scalePcs), lhFg=fingerHandDP(ex.lh,'lh',scalePcs);
   // voice() emits a staff's note stream. When `sink` (an array) is passed, it also records, per emitted
   // token, the note's index + column span WITHIN the returned string (and per-chord-member pitch offsets),
   // so a rendered notehead can be mapped back to the exact data note. The emitted string is unchanged.
