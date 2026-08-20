@@ -93,5 +93,37 @@ console.log("\n--- every transition is written through ---");
 eq("persisted on each change", m.persisted.length > 0, true);
 eq("last write matches state", m.persisted[m.persisted.length - 1].autoPaused, false);
 
+console.log("\n--- step 1 / step 2 class, shared by both modes ---");
+// Regression: the step-1 LAYOUT is keyed off .choosing, which both modes share.
+// A live path that toggled only .live-choosing left the squares up and the
+// detail hidden, so picking an activity appeared to do nothing.
+{
+  const body = grab("_wizSyncChoosing");
+  const mk = (screen, liveOn, liveNeeds, wizNeeds) => {
+    let cls = new Set();
+    const el = { classList: { toggle: (n, on) => (on ? cls.add(n) : cls.delete(n)) } };
+    new Function("document", "_wizScreen", "_liveOn", "_liveNeedsType", "_wizNeedsType",
+      body + "; _wizSyncChoosing();")
+      ({ getElementById: () => el }, screen, liveOn, liveNeeds, wizNeeds);
+    return cls.has("choosing");
+  };
+  eq("live, needs type -> choosing",      mk("item", true,  true,  false), true);
+  eq("live, type picked -> not choosing", mk("item", true,  false, false), false);
+  eq("normal, new item -> choosing",      mk("item", false, false, true),  true);
+  eq("normal, type picked -> not",        mk("item", false, false, false), false);
+  eq("off the item screen -> not",        mk("overview", false, false, true), false);
+}
+
+console.log("\n--- every live path that changes step must sync the shared class ---");
+{
+  const bar = grab("_liveRenderBar");
+  eq("_liveRenderBar syncs .choosing", /_wizSyncChoosing\s*\(/.test(bar), true);
+  eq("_liveRenderBar still toggles live-choosing", /live-choosing/.test(bar), true);
+  const picker = html.slice(html.indexOf('document.getElementById("wiz-type-picker").addEventListener'));
+  const handler = picker.slice(0, picker.indexOf("});"));
+  eq("picking a square re-renders in live mode", /_liveRenderBar\s*\(/.test(handler), true);
+  eq("picking a square re-renders in normal mode", /_wizSyncChoosing\s*\(/.test(handler), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
