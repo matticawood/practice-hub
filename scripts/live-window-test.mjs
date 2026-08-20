@@ -130,9 +130,24 @@ console.log("\n--- a live session must always have a way out ---");
   // Its header only offers Hide, which leaves the clock running, so End session
   // has to stay reachable on the activity squares as well as the detail step.
   const css = html.slice(html.indexOf("<style"), html.lastIndexOf("</style>"));
-  const rule = css.split("\n").find(l => /#wiz-item-actions/.test(l) && /choosing/.test(l));
-  eq("step-1 hides the item actions", !!rule, true);
-  eq("but not during a live session", /:not\(\.live-mode\)/.test(rule || ""), true);
+  // Normal logging hides the three item buttons on the squares and puts its own
+  // single button there instead. Every one of those rules must exclude live
+  // mode, or the live session loses the only real way out of a session.
+  const stepOne = css.split("\n").filter(l => /#log-wizard-backdrop.*choosing/.test(l)
+    && /#wiz-(add-another|goto-review|remove-item|choose-exit)-btn/.test(l));
+  eq("step-1 rules exist for the item buttons", stepOne.length >= 3, true);
+  eq("and every one excludes live mode",
+     stepOne.every(l => /:not\(\.live-mode\)/.test(l)), true);
+  eq("nothing hides the whole action bar while choosing",
+     !/choosing[^\n]*#wiz-item-actions\s*[,{]/.test(css), true);
+  // Anything that SHOWS the normal step-1 button has to be scoped away from
+  // live mode. Checking for the guard is safer than checking for its absence:
+  // ":not(.live-mode)" itself contains "live-mode".
+  const shows = css.split("\n").filter(l => /#wiz-choose-exit-btn/.test(l)
+    && /display:\s*(block|flex)/.test(l));
+  eq("something shows the normal step-1 button", shows.length >= 1, true);
+  eq("and only ever outside a live session",
+     shows.every(l => /:not\(\.live-mode\)/.test(l)), true);
   const bar = grab("_liveRenderBar");
   eq("End session shown whenever live", /endBtn\.style\.display\s*=\s*_liveOn/.test(bar), true);
 }
