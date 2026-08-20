@@ -1,30 +1,27 @@
-# Audit loop — Cycle 26 (3/8 ENABLED and made good — it is required grade-4 content)
+# Audit loop — Cycle 27-28 (3/8 quality: looked hard; fixed texture-fit; flagged frequency)
 
 ## RENDERED
-- 3/8 scherzo: scratchpad/c27_2.cropped.png — A minor, 3/8, Scherzando, block (post monotony-fix).
-- Also c27_1 (C major dance broken), c27_3 (Eb scherzo rootfifth); pre-fix c26_1..4 (all monotone).
+- 3/8 lively block (post texture-fix): scratchpad/c29_1.cropped.png — Bb major, 3/8, Allegro, lively, block.
+- Spread looked at: c28_1 (scherzo block), c28_3 (lively broken), c28_4 (scherzo rootfifth, pre-fix single-note bass).
 
 ## AUDIT
-Matthew's correction: 3/8 is NOT low value — it is required grade-4 syllabus content ("in grade four these have to show
-up"). I had made the same checkbox lapse as 6/8 (declaring required content optional because the current output was thin).
-The thinness is a QUALITY problem to fix, not a reason to skip. So: enable 3/8 AND make it good.
+Looked at several 3/8 pieces across scherzo/dance/lively (as asked) and judged the three questions honestly.
 
-STEP 1 — ENABLED: un-filtered 3/8, and added it to the fast characters whose feel it is (scherzo, dance, lively — a quick
-one-in-a-bar). Now 100% valid, drawn ~19% of grade 4, across those three characters (no more all-singing fallback).
+(a) RESIDUAL MONOTONY (27%, and over-scalar melody): the rhythm now varies across bars (c28_1/c28_3/c28_4 show held dotted
+crotchets, crotchet-quaver, three-quaver runs) — reads as genuine varied one-in-a-bar. The residual 27% is acceptable; some
+scalar runs remain but broken up by the varied rhythm. NOT worth pushing lower for now (diminishing returns; reads well).
 
-STEP 2 — the MONOTONY diagnosed and fixed. Measured: 86% of 3/8 pieces had <= 2 distinct bar-rhythms across the whole piece
-(rendered examples: the same crotchet-quaver or [1,0.25,0.25] every bar, a bare rising scale). CAUSE: a 3/8 bar is ONE
-dotted-crotchet beat, so sentence-form's "repeat the germ" makes IDENTICAL bars — in a one-beat metre a repeated germ has no
-within-bar structure to read as unity. FIX (compose.mjs barCell): for nbeats == 1, lean the bars to VARYING the beat
-(variant/fresh) rather than restating the germ, the germ still opening the idea; multi-beat metres keep their germ-repetition.
-VERIFIED: monotone 86% -> 27%, avg distinct bar-rhythms 3.2, 4/4 unaffected (0% monotone, 6.0 distinct), 100% valid.
+(b) LH TOO THIN? — a REAL issue found and fixed. In 3/8 (one beat a bar) rootfifth (oom-pah) and bassline (walking) CANNOT
+perform their gesture — they degenerated to a single bass note a bar (c28_4). Same category error as the g2 oom-pah. FIX
+(compose-adapter texPool): a one-beat-bar metre drops rootfifth + bassline; 3/8 now uses block/broken (which state the chord
+in a single beat). Verified: 3/8 textures now block/broken only, LH ~1.86 notes/bar (was ~1), 100% valid; c29_1 shows a
+block chord a bar stating the harmony — fuller and clearer. RIGHT.
 
-IN NOTATION (c27_2, scherzo 3/8): now VARIED bar-rhythms — held dotted crotchets, crotchet-quaver, three-quaver runs — with
-a G# leading tone, a playful scherzo character over block chords. Reads as a real, varied one-in-a-bar scherzo, not a
-mechanical scale. RIGHT. (LH is one chord/note per bar — structural to a one-beat bar, appropriate for a light fast metre.)
+(c) COMPOUND FREQUENCY ~39% of grade 4 (6/8 + 3/8, even draw): judged high vs real grade-4 material (majority simple,
+compound a periodic challenge). But the exact proportion is a CURRICULAR preference (how much compound practice), so FLAGGED
+for Matthew rather than unilaterally weighted. If he wants it lower, weight the metre draw toward simple (both still appear).
 
 ## VERDICT
-Cycle 26: 3/8 is now ENABLED (required content, showing up with the right characters) and MADE GOOD (monotony 86% -> 27%,
-reads idiomatically). The right outcome: make required content appear AND be good, not decline it. NOTE: compound is now
-~40% of grade 4 (6/8 + 3/8) — both required, but watch whether it wants weighting toward simple. Remaining optional polish:
-richer compound accompaniment; the residual 27% 3/8 monotony could be pushed lower.
+Cycles 27-28: 3/8 monotony fixed (86%->27%) and the one-beat-bar texture-fit fixed (rootfifth/bassline dropped — a chord a
+bar now, fuller LH), both verified in notation. 3/8 is now required-and-good. One judgment left to Matthew: compound is ~39%
+of grade 4 — reduce toward simple if he prefers exam-realistic proportions (both compound metres would still appear).

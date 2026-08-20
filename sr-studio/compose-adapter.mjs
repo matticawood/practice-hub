@@ -195,7 +195,11 @@ export function generateCompose(grade, opts = {}) {
   //   fixed five-finger hand cannot make. So at grade 2 the oom-pah is not attempted at all (its "hollow fifths" were never
   //   a voicing bug, they were the wrong texture for the hand). The character keeps one of its OWN hand-fitting textures;
   //   one defined solely by the oom-pah (a waltz) takes a broken chord. Grades that leave the five-finger box keep it. [grade canvas]
-  const texPool = fixed ? chr.tex.filter(t => t !== 'rootfifth') : chr.tex;
+  const oneBeatBar = Math.round(barU / beatLen) === 1;   // 3/8 — a single dotted-crotchet beat a bar
+  const texPool = chr.tex.filter(t =>                     // a texture must fit the constraint (same reasoning as the g2 oom-pah removal)
+    (fixed && t === 'rootfifth') ? false                                              // g2 five-finger: an oom-pah cannot leap
+    : (oneBeatBar && (t === 'rootfifth' || t === 'bassline')) ? false                 // a one-beat bar cannot oom-PAH (bass+chord) or WALK — both need >1 beat; keep block/broken/alberti/sustained (they state the chord in one beat)
+    : true);
   const texture = opts.texture || (texPool.length ? rnd(texPool) : 'broken');
   // The accompaniment's SURFACE MOTION (how densely a walking/broken bass fills with passing eighths) expresses the
   // character's DRIVE — it moves a lot AND doesn't breathe (the same essence as the CONTINUE disposition). A poised
