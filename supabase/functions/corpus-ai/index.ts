@@ -236,17 +236,28 @@ Deno.serve(async (req) => {
     ? `CURRENT PLAN:\n${context}\n\nMY INSTRUCTION:\n${instruction}\n\nPASSAGES FROM MY CORPUS (for grounding any additions):\n\n${passages}`
     : `MY IDEA:\n${query}\n\nPASSAGES FROM MY CORPUS:\n\n${passages}`;
 
-  let raw = "";
+  let raw = "", truncated = false;
   try {
     const ar = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: { "x-api-key": anthropicKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 8000, system: SYSTEM[mode], messages: [{ role: "user", content: userMsg }] }),
+      // A refine carries the whole discussion, and a long one needs room to
+      // restate the entire plan. At 8000 the reply ran out mid-plan.
+      body: JSON.stringify({ model: MODEL, max_tokens: 24000, thinking: { type: "disabled" }, system: SYSTEM[mode], messages: [{ role: "user", content: userMsg }] }),
     });
     if (!ar.ok) return jsonError(502, "Claude failed: " + (await ar.text()).slice(0, 200));
     const data = await ar.json();
     raw = (data.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+    truncated = data.stop_reason === "max_tokens";
   } catch (e) { return jsonError(502, String(e)); }
+
+  // parsePlan repairs unterminated JSON by closing the brackets, which is right
+  // for display but dangerous for saving: a reply that stopped halfway looks
+  // like a valid short plan and would overwrite a complete one. A cut-off reply
+  // is a failure, not a result.
+  if (truncated) {
+    return jsonError(502, "That reply was cut off part-way through, so the saved plan was left untouched. Try folding in a shorter stretch of the discussion.");
+  }
 
   let plan: any = null, synthesis = raw;
   if (wantPlan) { plan = parsePlan(raw); synthesis = plan ? planToText(plan) : raw; }
