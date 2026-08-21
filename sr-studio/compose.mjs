@@ -350,7 +350,10 @@ function reharmoniseBar(plan, b, newChord, barU) {
 //   quaver, g3/4 = semiquaver. [P + grade gate]
 const _pickW = (opts, rnd) => { let tot = 0; for (const o of opts) tot += o.w; let r = rnd() * tot;
   for (const o of opts) { r -= o.w; if (r <= 0) return o.dur; } return opts[opts.length - 1].dur; };
-function barRhythm(nbeats, rnd, pace = 0.45, dot = 0.25, grade = 3, beatLen = 1) {
+// the longest stretch of consecutive semiquavers in a subdivision — a stretch of two or more is a scurrying RUN (as opposed
+//   to a lone ornamental semiquaver in a dotted figure or a turn), the thing a smooth/broad character resists. [P]
+const maxRun16 = s => { let run = 0, mx = 0; for (const v of s) { if (v < 0.5 - 1e-9) { run++; if (run > mx) mx = run; } else run = 0; } return mx; };
+function barRhythm(nbeats, rnd, pace = 0.45, dot = 0.25, grade = 3, beatLen = 1, runReady = 1) {
   const gmin = grade <= 2 ? 0.5 : 0.25;
   const compound = beatLen > 1 + 1e-9;                              // a DOTTED-crotchet beat (1.5): 6/8, 3/8
   // in-beat subdivisions that SUM TO THE BEAT and never cross it. Simple beat (1) -> the crotchet family; compound beat
@@ -376,6 +379,7 @@ function barRhythm(nbeats, rnd, pace = 0.45, dot = 0.25, grade = 3, beatLen = 1)
       if (s.some(v => Math.abs(v - 0.75) < 1e-9)) w *= 0.4 + 1.6 * dot;
       if (compound && s.length === 2) w *= 0.5 + 1.4 * dot;         // the compound long-short (crotchet-quaver) lilt — the 6/8 signature — follows the DOT lean
       if (n16 > 0 && grade < 4) w *= 0.3;                           // GRADE dial: semiquavers damped below g4 (g2<g3<g4 in density)
+      if (maxRun16(s) >= 2) w *= runReady;                          // a SCURRYING run belongs to a crisp character; a smooth/broad line resists it (feel-borne lean, single ornamental 16th untouched) [P]
       opts.push({ dur: s, w });
     }
     const d = _pickW(opts, rnd); cell.push(...d); b += d.reduce((a, x) => a + x, 0) / beatLen;   // advance by the number of BEATS this cell consumed
@@ -385,7 +389,7 @@ function barRhythm(nbeats, rnd, pace = 0.45, dot = 0.25, grade = 3, beatLen = 1)
 // draw ONE beat's subdivision (the SUB axis of barRhythm), optionally leaning AWAY from `avoid` — the unit of rhythmic
 //   DEVELOPMENT: re-voicing a single beat varies the motif while keeping its frame (works on dense/dotted cells too,
 //   which the old whole-note-only variant could not touch). [P]
-function drawBeat(rnd, pace, dot, gmin, avoid = null, beatLen = 1) {
+function drawBeat(rnd, pace, dot, gmin, avoid = null, beatLen = 1, runReady = 1) {
   const compound = beatLen > 1 + 1e-9;
   const SUB = (compound
     ? [[1.5], [1, 0.5], [0.5, 1], [0.5, 0.5, 0.5], [1, 0.25, 0.25], [0.25, 0.25, 1], [0.5, 0.5, 0.25, 0.25], [0.25, 0.25, 0.5, 0.5], [0.5, 0.25, 0.25, 0.5]]
@@ -396,6 +400,7 @@ function drawBeat(rnd, pace, dot, gmin, avoid = null, beatLen = 1) {
     const n16 = s.filter(v => v < 0.5 - 1e-9).length; let w = 1.6 * Math.pow(pace, 1 + n16);
     if (s.some(v => Math.abs(v - 0.75) < 1e-9)) w *= 0.4 + 1.6 * dot;
     if (compound && s.length === 2) w *= 0.5 + 1.4 * dot;          // the compound long-short lilt follows the DOT lean
+    if (maxRun16(s) >= 2) w *= runReady;                            // same feel-borne run lean when a beat is re-voiced in development [P]
     if (avoid && s.join(',') === avoid) w *= 0.12;                  // lean away from repeating this exact beat (variety, not a ban)
     opts.push({ dur: s, w });
   }
@@ -423,7 +428,7 @@ const FIGDEC = {
   playful:     { passing: 1.2, neighbour: 2.0, arp: 0.8 },
   mixed:       { passing: 1.0, neighbour: 1.0, arp: 1.0 },
 };
-export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, drama = null, breath = 0.72, legato = false, figure = 'mixed', pace = 0.45, dot = 0.25, gap = 0, gracefulCad = false, grade = 3, soph = 0.5, rnd = Math.random }) {
+export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, drama = null, breath = 0.72, legato = false, figure = 'mixed', pace = 0.45, dot = 0.25, gap = 0, gracefulCad = false, grade = 3, soph = 0.5, runReady = 1, rnd = Math.random }) {
   const fw = FIG[figure] || FIG.mixed;
   // GRADE SOPHISTICATION LEAN [P]: a composer writes the line at the grade's LEVEL — a higher grade leans toward a busier,
   //   more subdivided rhythm (more inside each beat). The note-value FLOOR still caps what is reachable (grade 2 never
@@ -439,14 +444,14 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
   const gmin = grade <= 2 ? 0.5 : 0.25;
   // the germ is the piece's BASIC IDEA, so it must be an IDEA — a rhythmic SHAPE (>=2 events). A single undifferentiated
   //   whole-bar note is a drone, not a motif; redraw until the germ has profile, and fall back to a plain per-beat tread. [composer: a motif has a shape]
-  let germCell = barRhythm(nbeats, rnd, pace, dot, grade, beatLen);
-  for (let t = 0; t < 8 && germCell.length < 2; t++) germCell = barRhythm(nbeats, rnd, pace, dot, grade, beatLen);
+  let germCell = barRhythm(nbeats, rnd, pace, dot, grade, beatLen, runReady);
+  for (let t = 0; t < 8 && germCell.length < 2; t++) germCell = barRhythm(nbeats, rnd, pace, dot, grade, beatLen, runReady);
   // a motif also wants rhythmic PROFILE — a shape, not a FLAT RUN of identical durations (four even quavers restated every
   //   bar reads as a note-spinner, not a composed idea; the same principle as ">=2 events, not a drone", one level finer).
   //   Seek a germ with some duration contrast, BOUNDED — if the character's rhythm space is genuinely flat (a fast moto-
   //   perpetuo), a flat germ still surfaces. A lean toward a characterful motif, never a wall. [composer: a motif has profile]
   const flatRun = c => c.length >= 3 && new Set(c).size === 1;
-  for (let t = 0; t < 3 && flatRun(germCell); t++) { const g2 = barRhythm(nbeats, rnd, pace, dot, grade, beatLen); if (g2.length >= 2 && !flatRun(g2)) { germCell = g2; break; } }
+  for (let t = 0; t < 3 && flatRun(germCell); t++) { const g2 = barRhythm(nbeats, rnd, pace, dot, grade, beatLen, runReady); if (g2.length >= 2 && !flatRun(g2)) { germCell = g2; break; } }
   if (germCell.length < 2) germCell = Array(Math.max(2, nbeats)).fill(1);
   // DEVELOP the germ [P — motivic variation]: split a long note (diminution), OR re-voice ONE beat to a DIFFERENT
   //   subdivision (works on a dense/dotted cell, which the old whole-note-only variant returned unchanged — the root of
@@ -457,10 +462,10 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
     segs.forEach((s, i) => { const sum = s.reduce((a, x) => a + x, 0); if (sum >= 2) longs.push(i); else if (Math.abs(sum - 1) < 1e-9) beats.push(i); });
     if (longs.length && (rnd() < 0.5 || !beats.length)) { const i = longs[Math.floor(rnd() * longs.length)]; const k = segs[i].reduce((a, x) => a + x, 0);   // diminish a long note into k beats of motion (KEEP the beat count); always take it when there is no beat to re-voice (development must MOVE)
       const rep = []; for (let j = 0; j < k; j++) rep.push(1);                          // k plain crotchets...
-      if (rnd() < 0.6) { const j = Math.floor(rnd() * k); rep.splice(j, 1, ...drawBeat(rnd, pace, dot, gmin, null, beatLen)); }   // ...one subdivided for motion
+      if (rnd() < 0.6) { const j = Math.floor(rnd() * k); rep.splice(j, 1, ...drawBeat(rnd, pace, dot, gmin, null, beatLen, runReady)); }   // ...one subdivided for motion
       segs[i] = rep; return segs.flat(); }
     if (beats.length) { const i = beats[Math.floor(rnd() * beats.length)], avoid = segs[i].join(',');   // re-voice one beat, biased to change
-      let nd = segs[i]; for (let t = 0; t < 5; t++) { const d = drawBeat(rnd, pace, dot, gmin, avoid, beatLen); if (d.join(',') !== avoid) { nd = d; break; } }
+      let nd = segs[i]; for (let t = 0; t < 5; t++) { const d = drawBeat(rnd, pace, dot, gmin, avoid, beatLen, runReady); if (d.join(',') !== avoid) { nd = d; break; } }
       segs[i] = nd; return segs.flat(); }
     return cell.slice();
   };
@@ -487,7 +492,7 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
       : toCad <= 1 ? { variant: 7, germ: 2 }                         // drive to the cadence: a developed (fragmented) unit
       : { germ: 3, variant: 6, fresh: 1 };                           // continuation: mostly develop, a rare contrasting idea
     const kind = pick(w, rnd);
-    return kind === 'germ' ? germCell.slice() : kind === 'variant' ? variant(germCell) : barRhythm(nbeats, rnd, pace, dot, grade, beatLen);
+    return kind === 'germ' ? germCell.slice() : kind === 'variant' ? variant(germCell) : barRhythm(nbeats, rnd, pace, dot, grade, beatLen, runReady);
   };
   const notes = [];
   for (let b = 0; b < nbars; b++) {
@@ -1083,8 +1088,15 @@ export function composeBass({ plan, tonic, mode, barU, nbars, range, melody = nu
   //   allows) — so it always MOVES, no stall. [composer: arpeggiate the chord up from its foundation]
   const downFrom = (ceil, pcs) => { const d = []; for (let p = ceil - 1; p >= lo; p--) if (isChordTone(p, pcs)) d.push(p); return d; };
   const arpAnchor = (pcs, ev) => chordLowest(pcs, fifthPcOf(ev));                // the lowest root/third (the fifth only if the hand holds nothing else — chordLowest's fallback)
+  // the figure arpeggiates from the foundation the PLAN chose: the skeleton's voice-led bass note (root by default, the third
+  //   for the line / a chosen inversion, leaning to the root where the melody left it unstated), taken at its LOWEST octave so
+  //   the figure has room to climb — so a structural chord sounds the plan's foundation, never a rootless voicing it didn't
+  //   choose. Where that pitch-class isn't reachable low, the old lowest-root/third anchor stands. [P — realise the plan]
+  const planAnchor = (a) => { const apc = (((a.m % 12) + 12) % 12);
+    for (let p = lo; p <= hi; p++) if ((((p % 12) + 12) % 12) === apc && isChordTone(p, a.pcs)) return p;
+    return arpAnchor(a.pcs, a.ev); };
   const arpNote = (a, isAnchor) => {
-    if (isAnchor) { curAnchor = arpAnchor(a.pcs, a.ev) ?? a.m; arpPos = 0; return curAnchor; }
+    if (isAnchor) { curAnchor = planAnchor(a) ?? a.m; arpPos = 0; return curAnchor; }
     const up = upFrom(curAnchor, a.pcs); if (up.length) { arpPos++; return up[(arpPos - 1) % up.length]; }   // climb the chord
     const dn = downFrom(curAnchor, a.pcs); if (dn.length) { arpPos++; return dn[(arpPos - 1) % dn.length]; }  // foundation high in the hand → arpeggiate down
     return curAnchor;                                                            // only one chord tone fits the hand (rare)
@@ -1505,13 +1517,17 @@ export function realizeLH({ plan, tonic, mode, barU, beatLen = 1, nbars, range, 
     return fix(resolveFinalToClose(out, skel, voice));
   }
   if (texture === 'alberti') {                                      // ALBERTI: a low–high–mid–high broken-chord MURMUR in eighths (single notes)
-    // anchor the figure on the LOWEST chord tone in range (the bass foundation), then build upward — never on the skeleton
-    //   note, which can sit high and leave no room above (that is what collapsed the murmur to a single repeated note).
+    // anchor the figure on the foundation the PLAN chose — the skeleton's voice-led bass note (root by default, a chosen
+    //   inversion / the third otherwise), taken at its LOWEST octave so the murmur has room to build above it (which is why
+    //   the skeleton note itself, possibly high, is not used directly). So the murmur states the plan's foundation, not the
+    //   lowest chord tone blind (which could be the fifth — a rootless 6/4 murmur). Where the pitch-class isn't reachable low,
+    //   the lowest chord tone stands. [P — realise the plan]
     const chordLo = pcs => { for (let p = lo; p <= hi; p++) if (isChordTone(p, pcs)) return p; return null; };
+    const planLow = a => { const apc = (((a.m % 12) + 12) % 12); for (let p = lo; p <= hi; p++) if ((((p % 12) + 12) % 12) === apc && isChordTone(p, a.pcs)) return p; return null; };
     const compound = beatLen > 1 + 1e-9;                             // a dotted-crotchet beat divides into THREE quavers, not two
     const per = compound ? beatLen / 3 : beatLen / 2;               // the beat's OWN division: 2 quavers a crotchet beat, 3 a compound beat
     for (const a of skel) {
-      const base = chordLo(a.pcs) ?? a.m;
+      const base = planLow(a) ?? chordLo(a.pcs) ?? a.m;
       const tones = []; for (let p = base; p <= hi && tones.length < 3; p++) if (isChordTone(p, a.pcs)) tones.push(p);
       const beatIdx = Math.round((((a.t % barU) + barU) % barU) / beatLen);
       if (compound) {                                                // COMPOUND: a three-quaver ripple per beat (the 6/8 broken-chord murmur), low-mid-high

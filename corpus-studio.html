@@ -655,7 +655,12 @@ function renderResult(data){
   let plan=data.plan;
   if((!plan||!Array.isArray(plan.sections)||!plan.sections.length) && data.synthesis){ const p=synthToPlan(data.synthesis); if(p&&p.sections.length) plan=p; }
   if(plan&&Array.isArray(plan.sections)&&plan.sections.length) renderPlan(plan);
-  else $("d-sheet").innerHTML=mdRender(data.synthesis||"");
+  else {
+    // Never wipe the sheet with an empty render — whatever is already there is
+    // more use than nothing.
+    const md=mdRender(data.synthesis||"");
+    if(md.trim()) $("d-sheet").innerHTML=md;
+  }
   const src=(data.sources||_dsrc||[]).map(s=>s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title||SRC[s.source_type]||s.source_type||"source")}</a>`:esc(s.title||"")).filter(Boolean).join(" · ");
   $("d-src").innerHTML=src?`<b style="color:var(--ink2);">Built from your:</b> ${src}`:"";
 }
@@ -758,7 +763,18 @@ async function applyDiscussion(){
   if(_selPassages)rbody.passages=_selPassages; if(_runId)rbody.run_id=_runId;
   const{data,error}=await db.functions.invoke("corpus-ai",{body:rbody});
   $("d-sheet").style.opacity="1"; btn.disabled=false; btn.textContent=ol;
-  if(error||(data&&data.error))return;
+  const say=m=>{ _chat.push({role:"assistant",content:m}); renderChat(); saveDiscussion(); };
+  // This used to return silently on any failure, so a fold that went wrong
+  // looked identical to one that did nothing. runDraft has always reported its
+  // errors; this now does too, in the chat where you are already looking.
+  const failed=(error&&error.message)||(data&&data.error);
+  if(failed){ say("That didn't go through: "+failed+" Your plan above is unchanged, so you can try again."); return; }
+  // A reply with no plan and no text would blank the sheet, which is worse than
+  // not folding at all. Keep what is there and say so.
+  if(!data||(!data.plan&&!String(data.synthesis||"").trim())){
+    say("That came back empty, so I've left your plan as it was. Worth trying again; if it keeps happening the discussion may be too long to fold in one go.");
+    return;
+  }
   _runId=data.run_id||_runId; commitVersion(data);
   _chat.push({role:"assistant",content:"Done — I've folded that into the plan above. If you preferred the previous version, use the ‹ › version arrows to go back."}); renderChat(); saveDiscussion();
 }

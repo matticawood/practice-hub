@@ -189,7 +189,11 @@ export function generateCompose(grade, opts = {}) {
   // MOTIVIC AIR: a CRISP character's detachment is partly rhythmic — a weak-beat crotchet clips to a quaver + quaver-rest
   //   (note-then-air), not only a staccato dot. A smooth/legato tune has none. A lean, applied piece-wide for consistency. [P]
   const gap = chr.artic === 'detached' ? 0.55 : chr.feel === 'crisp' ? 0.4 : chr.stac >= 0.5 ? 0.28 : 0;
-  const melody = composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range: melRange, drama, breath, legato: chr.artic === 'legato', figure: chr.figure, pace: chr.pace, dot: chr.dot, gap, gracefulCad: chr.feel !== 'crisp', grade, soph, rnd: Math.random });   // a smooth/lilting line resolves the cadence by step/third; a crisp one may leap to a bright tonic; soph = the grade's sophistication lean
+  // how readily the line strings a semiquaver RUN (2+ consecutive) is the character's own feel: a crisp brilliance runs
+  //   freely, a smooth singing/broad line treats a run as a rare flourish, a lilting dance sits between — the single
+  //   ornamental semiquaver stays available to all. [P]
+  const runReady = chr.feel === 'crisp' ? 1 : chr.feel === 'lilt' ? 0.55 : 0.32;
+  const melody = composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range: melRange, drama, breath, legato: chr.artic === 'legato', figure: chr.figure, pace: chr.pace, dot: chr.dot, gap, gracefulCad: chr.feel !== 'crisp', grade, soph, runReady, rnd: Math.random });   // a smooth/lilting line resolves the cadence by step/third; a crisp one may leap to a bright tonic; soph = the grade's sophistication lean
   reharmoniseStaticSpans(plan, melody, { tonic, mode, barU, beatLen });   // harmony travels under a still line (common-tone recolour) — before the bass is realised
   // GRADE-CANVAS gate: an oom-pah (rootfifth) is a LEAP — a low bass, then the chord sprung a register above it — which a
   //   fixed five-finger hand cannot make. So at grade 2 the oom-pah is not attempted at all (its "hollow fifths" were never
@@ -250,6 +254,9 @@ export function generateCompose(grade, opts = {}) {
   const ex = {
     grade, time, key: keyStr, mode, flat, tempo: opts.tempo || chr.tempo,
     rh, lh, _mel: 'rh', _barU: barU, partial: 0,
+    // the five-finger HAND PLACEMENT the composer chose (fixed grades): the octave-placed low pitch of each hand's
+    //   position, so the fingerer reads the fingers off the placed hand instead of re-guessing it. [see fingerFixedPosition]
+    _pos: fixed ? { rhLo: melLo, lhLo: melLo - 12 } : null,
     _prog: prog, _prog2: prog.map(() => null),
     _char: chr.id, _texture: texture, _compose: true,
     _events: plan.events.map(e => ({ deg: e.deg, q: e.q, fn: e.fn, start: e.start, dur: e.dur, bassDeg: e.bassDeg, sec: !!e.sec, is64: !!e.is64 })),  // for the composer-likeness audit (strip before persisting)

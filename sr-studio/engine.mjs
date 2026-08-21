@@ -4,7 +4,7 @@
 // art '--' is tenuto and 'ferm' a pause: both are Grade 4 additions (ABRSM introduces
 // tenuto, the fermata and chromatic notes at Grade 4; no new keys or rhythms).
 
-import { fingerHand, fingerHandDP } from './fingering.mjs';
+import { fingerHand, fingerHandDP, fingerFixedPosition } from './fingering.mjs';
 import { gradeParams } from './grade-params.mjs';   // single source of truth for the per-grade chord-size cap
 
 export const POS = { maj:[0,2,4,5,7], min:[0,2,3,5,7] };
@@ -91,12 +91,30 @@ export function resolveHandFingers(notes, hand, fg){
     return hasManual ? n.fing : fg.fings[i];
   });
 }
+// Choose the fingerer by HAND SPAN, not by grade — a player sees whether the line fits under one hand, not what grade it is.
+// Where this hand's line sits within one five-finger position (≤4 diatonic degrees, a chromatic folding to its base degree),
+// the hand is PLACED and each finger is read off it (fingerFixedPosition) — no guess, so no wobble; at ANY grade. Where the
+// line reaches beyond one hand it TRAVELS, and the cost-DP reasons the moving hand (for now). ex._pos gives the composer's
+// exact placement where it fixed one (the fixed grades); otherwise the placement is the natural one on the notes themselves.
+function fingerHandFor(ex, hand, scalePcs, tonicPc){
+  const SC = ex.mode==='min' ? [0,2,3,5,7,8,10] : [0,2,4,5,7,9,11];
+  const degOf = m => { for(const o of [0,-1,1]){ const p=m+o, rel=(((p-tonicPc)%12)+12)%12, i=SC.indexOf(rel); if(i>=0) return Math.floor((p-tonicPc)/12)*7+i; } return null; };
+  const outer = n => Array.isArray(n.m) ? (hand==='rh'?Math.max(...n.m):Math.min(...n.m)) : n.m;
+  let lo=Infinity, hi=-Infinity;
+  for(const n of ex[hand]) if(!n.rest){ const d=degOf(outer(n)); if(d!=null){ if(d<lo)lo=d; if(d>hi)hi=d; } }
+  const fitsOneHand = lo!==Infinity && (hi-lo) <= 4;                 // the whole hand line sits within one five-finger position
+  if(fitsOneHand){
+    const lowPitch = ex._pos ? ex._pos[hand==='rh'?'rhLo':'lhLo'] : null;   // the composer's fixed placement where given, else read off the notes
+    return fingerFixedPosition(ex[hand], hand, tonicPc, ex.mode, lowPitch);
+  }
+  return fingerHand(ex[hand], hand, scalePcs);   // travels: finger by GESTURE idiom (scale/arpeggio/leap, carry the hand), not the cost-DP proxy
+}
 export function resolveFingering(ex){
   const LET={c:0,d:2,e:4,f:5,g:7,a:9,b:11};
   const tonicPc=((LET[ex.key[0]]+(ex.key[1]==='f'?-1:ex.key[1]==='s'?1:0))%12+12)%12;
   const scalePcs=(ex.mode==='min'?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11]).map(x=>(tonicPc+x)%12);
-  return { rh: resolveHandFingers(ex.rh,'rh',fingerHandDP(ex.rh,'rh',scalePcs)),
-           lh: resolveHandFingers(ex.lh,'lh',fingerHandDP(ex.lh,'lh',scalePcs)) };
+  return { rh: resolveHandFingers(ex.rh,'rh',fingerHandFor(ex,'rh',scalePcs,tonicPc)),
+           lh: resolveHandFingers(ex.lh,'lh',fingerHandFor(ex,'lh',scalePcs,tonicPc)) };
 }
 
 // ---- validator ----
@@ -236,7 +254,7 @@ export function toLily(ex, withNumber=true, sink=null){
   const [_top,_bot]=ex.time.split('/').map(Number); const barUnits=(_top/_bot)*4;
   // the diatonic scale (pitch classes) so the fingerer reasons in SCALE DEGREES, not raw semitones
   const scalePcs=(ex.mode==='min'?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11]).map(x=>(tonicPc+x)%12);
-  const rhFg=fingerHandDP(ex.rh,'rh',scalePcs), lhFg=fingerHandDP(ex.lh,'lh',scalePcs);
+  const rhFg=fingerHandFor(ex,'rh',scalePcs,tonicPc), lhFg=fingerHandFor(ex,'lh',scalePcs,tonicPc);
   // voice() emits a staff's note stream. When `sink` (an array) is passed, it also records, per emitted
   // token, the note's index + column span WITHIN the returned string (and per-chord-member pitch offsets),
   // so a rendered notehead can be mapped back to the exact data note. The emitted string is unchanged.

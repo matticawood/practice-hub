@@ -26,6 +26,37 @@ const BLACK = new Set([1,3,6,8,10]);
 const isBlack = m => BLACK.has(((m%12)+12)%12);
 export const _cfg = { roles: true };
 
+// PLACED-HAND fingering — how a player fingers a line that fits under ONE hand. This is span-based, NOT grade-based: it
+// applies wherever a hand's line sits within a five-finger position (the caller gates on the span, at any grade). The hand
+// is PLACED — `lowPitch` is the pitch of the position's LOWEST scale degree (the little finger in the LH, the thumb in the
+// RH), the composer's ex._pos where given, else the lowest note played — and each note takes the finger that falls on its
+// degree. Nothing is searched, the hand never travels. A chromatic inflection (a raised leading tone) is played by the SAME
+// finger as its diatonic base — the hand does not move to raise a note, you play the black key with that finger. So the
+// fingering is READ OFF the placement. One opening finger is printed (it tells the reader where the hand sits).
+export function fingerFixedPosition(notes, hand, tonicPc, mode, lowPitch){
+  const SC = mode==='min' ? [0,2,3,5,7,8,10] : [0,2,4,5,7,9,11];
+  const tpc = ((tonicPc%12)+12)%12;
+  // absolute scale-degree of a pitch: octave*7 + its index in the key's scale. A chromatic (raised/lowered) note folds to
+  // the degree of the adjacent scale tone — its diatonic base — because the finger is the base's finger (the hand hasn't moved).
+  const degOf = m => { for(const off of [0,-1,1]){ const p=m+off, rel=(((p-tpc)%12)+12)%12, i=SC.indexOf(rel);
+      if(i>=0) return Math.floor((p-tpc)/12)*7 + i; } return null; };
+  const outer = n => Array.isArray(n.m) ? (hand==='rh'?Math.max(...n.m):Math.min(...n.m)) : n.m;  // the OUTER note (RH top / LH bottom) — matches resolveHandFingers, which derives the chord's partner finger from it
+  // the position's lowest degree: the placement the composer chose (lowPitch), else — as a graceful fallback when the
+  // placement wasn't threaded — the lowest note actually played (still one consistent frame, never the DP's guess).
+  let lowDeg = lowPitch!=null ? degOf(lowPitch) : null;
+  if(lowDeg==null){ let mn=Infinity; notes.forEach(n=>{ if(!n.rest){ const d=degOf(outer(n)); if(d!=null && d<mn) mn=d; } }); lowDeg = mn===Infinity?null:mn; }
+  const fings = new Array(notes.length).fill(null); const print = new Set(); let first=-1;
+  notes.forEach((n,i)=>{ if(n.rest) return;
+    const g = degOf(outer(n));
+    let f;
+    if(g==null || lowDeg==null) f = hand==='rh'?1:5;
+    else { const off = g - lowDeg; f = Math.max(1, Math.min(5, hand==='rh' ? off+1 : 5-off)); }
+    fings[i] = f;
+    if(first<0){ first=i; print.add(i); }   // ONE mark: the opening finger tells the reader where the hand sits; the rest follow the placement
+  });
+  return { fings, print, effort:0 };
+}
+
 export function fingerHandDP(notes, hand, scalePcs, chordFit=true, pin=null){
   // `pin` (optional Map: note-index -> forced finger) constrains the solve — used by the audit to ask the counterfactual
   //   "could this pitch have kept its earlier finger?" (a refinger is a fault only if keeping it costs ~nothing globally).
@@ -113,10 +144,10 @@ export function fingerHandDP(notes, hand, scalePcs, chordFit=true, pin=null){
   // thumb below the melody to sit nearer a high note later. This enforces "lowest = thumb, 2nd-lowest = 2, ...".
   const SPAN2 = 9;          // a consecutive leap beyond this repositions the hand
   const POSSPAN = 7;        // a five-finger POSITION spans a 5th; a note more than this from the anchor is a new position
-  const posExtreme = k => { const p=R[k].p; let lo=true, hi=true, any=false;
-    for(let j=k+1;j<N;j++){ if(R[j].i>R[j-1].i+1 || Math.abs(R[j].p-R[j-1].p)>SPAN2 || Math.abs(R[j].p-p)>POSSPAN) break; any=true; if(R[j].p<p)lo=false; if(R[j].p>p)hi=false; }
-    for(let j=k-1;j>=0;j--){ if(R[j+1].i>R[j].i+1 || Math.abs(R[j].p-R[j+1].p)>SPAN2 || Math.abs(R[j].p-p)>POSSPAN) break; any=true; if(R[j].p<p)lo=false; if(R[j].p>p)hi=false; }
-    return any ? {lo,hi} : {lo:false,hi:false}; };   // an ISOLATED note has no position, so no extreme rule
+  const posExtreme = k => { const p=R[k].p; let lo=true, hi=true, any=false, pmin=p, pmax=p;
+    for(let j=k+1;j<N;j++){ if(R[j].i>R[j-1].i+1 || Math.abs(R[j].p-R[j-1].p)>SPAN2 || Math.abs(R[j].p-p)>POSSPAN) break; any=true; if(R[j].p<p)lo=false; if(R[j].p>p)hi=false; if(R[j].p<pmin)pmin=R[j].p; if(R[j].p>pmax)pmax=R[j].p; }
+    for(let j=k-1;j>=0;j--){ if(R[j+1].i>R[j].i+1 || Math.abs(R[j].p-R[j+1].p)>SPAN2 || Math.abs(R[j].p-p)>POSSPAN) break; any=true; if(R[j].p<p)lo=false; if(R[j].p>p)hi=false; if(R[j].p<pmin)pmin=R[j].p; if(R[j].p>pmax)pmax=R[j].p; }
+    return any ? {lo,hi,span:pmax-pmin} : {lo:false,hi:false,span:0}; };   // an ISOLATED note has no position, so no extreme rule
   const noteCost = (k,f) => { const p=R[k].p; let c=0;
     // CHORD FIT (look-ahead): the DP only sees a chord's OUTER note, but the note stacked toward the thumb needs a
     // finger too. For an interval of `dd` scale-degrees the outer finger must be at least dd+1 (a 3rd needs >=3, a
@@ -133,7 +164,12 @@ export function fingerHandDP(notes, hand, scalePcs, chordFit=true, pin=null){
       // finger NATURALLY — the lowest note of the opening on the low outer finger — even if that forces a shift
       // later; the global optimiser otherwise pre-shifts to save the shift. Mid-phrase it's a gentle bias.
       const open = k===0 || (k>0 && R[k].i > R[k-1].i+1);
-      const w = open ? 10 : 0;   // the outer-finger-ON-the-position-extreme force is a PHRASE-OPENING rule (place the fresh hand naturally, lowest note on the low outer finger). MID-phrase it fought a smooth line and minted step faults while being redundant with the local peak/valley penalty + move economy (which the data confirms cover peaks): dropping it → step-dir 2.1→1.7, step-slide 2.1→1.8, refinger 9.8→8.9, peak/valley still 0, 0 invalid.
+      // ...AND only when the opening position actually REACHES the edge of the hand (spans a 5th): a full-hand opening
+      // sits its outer fingers on the outer notes by nature (D-up-to-A = 1-2-3-4-5, and a scale's thumb on its low note),
+      // but a COMPACT opening (a 3rd/4th) is just dropped onto — its extreme is reached by an inner finger, the outer
+      // fingers stay free — so forcing the thumb/pinky onto that extreme would both mis-finger it and (via this +10) block
+      // consistency from settling the phrase into its one natural frame (the G3-C4 wobble). The gate is the hand's own span.
+      const w = (open && pe.span>=POSSPAN) ? 10 : 0;
       // ...BUT the thumb is never forced onto a BLACK key — the thumb-avoids-black rule overrides this one (an
       // E-flat-major scale doesn't put the thumb on E-flat; the black note takes a longer finger, thumb stays white).
       if(pe.lo && f!==loF && !(loF===1 && isBlack(p))) c+=w;     // the position's LOWEST note -> the low outer finger

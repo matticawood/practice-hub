@@ -1,27 +1,45 @@
-# Audit loop — Cycle 27-28 (3/8 quality: looked hard; fixed texture-fit; flagged frequency)
+# Audit — fingering by SPAN + GESTURE: placement core (one hand) + gesture reasoner (travels)
 
 ## RENDERED
-- 3/8 lively block (post texture-fix): scratchpad/c29_1.cropped.png — Bb major, 3/8, Allegro, lively, block.
-- Spread looked at: c28_1 (scherzo block), c28_3 (lively broken), c28_4 (scherzo rootfifth, pre-fix single-note bass).
+- g2fix_a/b/c.cropped.png — three GRADE 2 pieces (whole line fits one hand → placement core).
+- g3mix.cropped.png — D major, GRADE 3: LH one position (placed), RH travels — span decides, not grade.
+- tv1 (G3 C 2/4), tv2 (G3 F Alla marcia), tv4 (G4 Dm 6/8) — TRAVELLING hands, now fingered by the GESTURE reasoner.
 
 ## AUDIT
-Looked at several 3/8 pieces across scherzo/dance/lively (as asked) and judged the three questions honestly.
 
-(a) RESIDUAL MONOTONY (27%, and over-scalar melody): the rhythm now varies across bars (c28_1/c28_3/c28_4 show held dotted
-crotchets, crotchet-quaver, three-quaver runs) — reads as genuine varied one-in-a-bar. The residual 27% is acceptable; some
-scalar runs remain but broken up by the varied rhythm. NOT worth pushing lower for now (diminishing returns; reads well).
-
-(b) LH TOO THIN? — a REAL issue found and fixed. In 3/8 (one beat a bar) rootfifth (oom-pah) and bassline (walking) CANNOT
-perform their gesture — they degenerated to a single bass note a bar (c28_4). Same category error as the g2 oom-pah. FIX
-(compose-adapter texPool): a one-beat-bar metre drops rootfifth + bassline; 3/8 now uses block/broken (which state the chord
-in a single beat). Verified: 3/8 textures now block/broken only, LH ~1.86 notes/bar (was ~1), 100% valid; c29_1 shows a
-block chord a bar stating the harmony — fuller and clearer. RIGHT.
-
-(c) COMPOUND FREQUENCY ~39% of grade 4 (6/8 + 3/8, even draw): judged high vs real grade-4 material (majority simple,
-compound a periodic challenge). But the exact proportion is a CURRICULAR preference (how much compound practice), so FLAGGED
-for Matthew rather than unilaterally weighted. If he wants it lower, weight the metre draw toward simple (both still appear).
+The three grade-2 pages, read as an editor. g2fix_a (G major, G-A-B-C-D position): RH prints ONE finger — "1" on the
+opening G4 (thumb on the position's lowest note); the whole staccato line stays in that five-finger box and needs no
+further mark. LH prints ONE "5" on the opening G3 (little finger on the lowest note). g2fix_b (F major, hand placed on
+the DOMINANT position C-D-E-F-G, not the tonic — the composer put the chord roots under the hand): RH "1" on the opening
+C4, LH "2" on its opening F3; both single, both correct for the placement, the lines hold the box. g2fix_c (G minor,
+G-A-Bb-C-D): RH "1" on G4, LH "3" on its opening Bb3; the raised leading tone (F#) that appears at the cadence takes the
+SAME finger as its natural ^7 base (the hand does not move to raise it) — no thumb-grab, no wobble, exactly how a player
+plays it. Across 200 generated grade-2 pieces: ZERO same-pitch wobbles (the whole g2 fault class is gone by construction),
+exactly 1.00 printed marks per hand (the opening placement), 0 invalid. Dynamics, slurs, staccato all coherent and
+unaffected. The fingering now reads the way a player fingers a five-finger piece: told where the hand sits, each note the
+finger on its degree.
 
 ## VERDICT
-Cycles 27-28: 3/8 monotony fixed (86%->27%) and the one-beat-bar texture-fit fixed (rootfifth/bassline dropped — a chord a
-bar now, fuller LH), both verified in notation. 3/8 is now required-and-good. One judgment left to Matthew: compound is ~39%
-of grade 4 — reduce toward simple if he prefers exam-realistic proportions (both compound metres would still appear).
+Fingering now branches on HAND SPAN, not grade — a player sees whether the line fits under one hand, not what grade it is.
+Where a hand's line sits within one five-finger position (≤4 diatonic degrees, chromatics folding to their base), the hand
+is placed and each finger is read off it (fingerFixedPosition: RH thumb on the lowest degree, LH little finger on the
+lowest; a raised leading tone folds to its base finger); where it reaches beyond one hand it travels (the cost-DP, for now).
+This removes the guess wherever the hand stays put, at EVERY grade, so the frame-wobble and leading-tone-on-thumb faults
+cannot arise (one degree = one finger). The placement is the composer's ex._pos where it fixed one (the fixed grades), else
+the natural placement on the notes. Verified: routing split by span — G2 300/300 hands placed (0 wobbles), G3 42 placed /
+258 travelling, G4 44 / 256, all 0 wobbles in placed; 150/150 valid each at g2/g3/g4, 0 fingering crashes. g3mix confirms
+a placed LH (one opening mark, held) and a travelling RH on the same page.
+
+TRAVELLING hands now go to the GESTURE reasoner (fingerHand), not the cost-DP — a player fingers a travelling line by
+gesture idiom (scale = conventional key fingering, thumb off black; arpeggio = chord shape; leap = reposition), carrying the
+hand. Verified against the DP on 850 travelling hands: same-finger-across-a-leap (a real can't-play fault) 15→1; the real
+scales the DP botched (F major 1-3-1…, Eb 4-3-4 wobble, a 2-2 step slide) now finger conventionally (1-2-3-4-1-2-3, thumb
+off black); 22/22 canonical scale/arpeggio cases pass; 150/150 valid at every grade, 0 crashes; tv1/tv2/tv4 render with
+sparse reposition marks at sensible points and the Dm cadential C# handled without a thumb-grab. HONEST residual: the
+gesture reasoner shows more thumb-on-black-in-a-step than the DP (~419 FORCED = the black note is the position's lowest, an
+editor plays those with the thumb; plus ~325 flagged avoidable, itself inflated by a window spanning sub-positions) and a
+few more weak-finger jams (66 vs 24). Both trace to fingerHand's POSITIONAL sub-gesture core (its posFingerRun) — the one
+part that isn't the clean placement logic. NEXT juncture: unify fingerHand's positional sub-gestures with the placement core
+(same read-off-the-hand reasoning used for a whole-hand line), which removes the avoidable thumb-on-blacks and the jams
+while keeping the correct scale/arpeggio idioms. Follow-up: ex._pos threaded live; a bank piece without it reconstructs the
+frame from its notes (still one position, never the DP guess).
