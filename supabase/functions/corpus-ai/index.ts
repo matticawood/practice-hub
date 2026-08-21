@@ -122,11 +122,19 @@ function planToText(p: any): string {
   return s.trim();
 }
 
+// text-embedding-3-small caps at 8192 tokens. A long refine sends the whole
+// discussion as its instruction, which sails past that and fails the request
+// outright, so the retrieval never happens. Roughly four characters per token,
+// kept well under the limit; this text is only used to find relevant passages,
+// so trimming it costs nothing.
+const EMBED_MAX_CHARS = 24000;
+
 async function embedQuery(text: string, key: string): Promise<number[]> {
+  const input = text.length > EMBED_MAX_CHARS ? text.slice(0, EMBED_MAX_CHARS) : text;
   const r = await fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: "text-embedding-3-small", input: text }),
+    body: JSON.stringify({ model: "text-embedding-3-small", input }),
   });
   if (!r.ok) throw new Error("embedding failed: " + (await r.text()).slice(0, 200));
   return (await r.json()).data[0].embedding;
@@ -242,6 +250,14 @@ Deno.serve(async (req) => {
 
   let plan: any = null, synthesis = raw;
   if (wantPlan) { plan = parsePlan(raw); synthesis = plan ? planToText(plan) : raw; }
+
+  // Refuse to save nothing over something. This function PATCHes the saved row
+  // with whatever came back, so an empty reply used to wipe a plan that had been
+  // worked on for hours and leave no way back. Failing loudly is always better:
+  // the row keeps what it had and the caller can try again.
+  if (!plan && !String(synthesis || "").trim()) {
+    return jsonError(502, "Claude returned nothing, so the saved plan was left untouched. Try again.");
+  }
 
   const seen = new Set<string>();
   const sources = hits.filter(h => !seen.has(h.entry_id) && seen.add(h.entry_id))
