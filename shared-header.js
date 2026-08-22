@@ -1418,6 +1418,7 @@ const _SH_PAGE_LABELS = {
   "/practice-log.html":   "Hub",
   "/community.html":      "Community",
   "/chat.html":           "Chat",
+  "/learn.html":          "Learn",
   "/resources.html":      "Resources",
   "/tools.html":          "Practice Tools",
   "/focus.html":          "Weekly Focus",
