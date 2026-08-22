@@ -32,6 +32,14 @@ const SH_SUBNAV = {
     { label: "Just Post", href: "/community.html?filter=post" },
     { label: "Practice Logs", href: "/community.html?tab=practice-log" },
   ],
+  learn: [
+    { label: "Everything", href: "/learn.html" },
+    { label: "Courses", href: "/learn.html?type=course" },
+    { label: "Clinic replays", href: "/learn.html?type=clinic" },
+    { label: "Videos", href: "/learn.html?type=video" },
+    { label: "Piano Practice Daily", href: "/learn.html?type=sheet" },
+    { label: "Monday Music Tips", href: "/learn.html?type=article" },
+  ],
   resources: [
     { label: "Pieces Library", href: "/resources.html" },
     { label: "Courses", href: "/courses.html" },
@@ -1173,6 +1181,7 @@ function _shBuildChrome() {
   const _sbSections = [
     { key: "hub", label: "Hub", href: "/practice-log.html" },
     { key: "community", label: "Community", href: "/community.html" },
+    { key: "learn", label: "Learn", href: "/learn.html" },
     { key: "resources", label: "Resources", href: "/resources.html" },
     { key: "tools", label: "Tools", href: "/tools.html" },
     { key: "studio", label: "Studio", href: "/focus.html" },
