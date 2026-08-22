@@ -42,19 +42,13 @@ const SH_SUBNAV = {
     { label: "Piano Practice Daily", href: "/learn.html?type=sheet" },
     { label: "Weekly Focus", href: "/focus.html" },
   ],
-  // tools.html has no landing picker — a bare /tools.html opens the Passage
-  // Fixer — so every drill needs its own entry here or it becomes unreachable.
   tools: [
+    { label: "Practice Tools", href: "/tools.html" },
     { label: "Pieces Library", href: "/resources.html" },
-    { label: "Note Recognition", href: "/tools.html?section=note" },
-    { label: "Chord Recognition", href: "/tools.html?section=chord" },
-    { label: "Chord Ear Training", href: "/tools.html?section=ear" },
-    { label: "Interval Training", href: "/tools.html?section=interval" },
-    { label: "Metronome", href: "/tools.html?section=metro" },
-    { label: "Passage Fixer", href: "/tools.html" },
     { label: "Glossary", href: "/resources.html?section=glossary" },
     { label: "Key Explorer", href: "/resources.html?section=key" },
   ],
+
   community: [
     { label: "Feed", href: "/community.html" },
     { label: "Progress", href: "/community.html?filter=progress" },
