@@ -27,6 +27,7 @@ const SH_SUBNAV = {
   hub: [
     { label: "Dashboard", href: "/practice-log.html" },
     { label: "Weekly Focus", href: "/focus.html" },
+    { label: "My Pieces", href: "/resources.html?lib=collection" },
     { label: "Stats", href: "/practice-log.html?goto=stats" },
     { label: "Goals", href: "/practice-log.html?goto=goals" },
     { label: "Roadmap", href: "/practice-log.html?goto=roadmap" },
@@ -36,11 +37,11 @@ const SH_SUBNAV = {
   ],
   learn: [
     { label: "Library", href: "/learn.html" },
+    { label: "Pieces Library", href: "/resources.html" },
     { label: "Courses", href: "/learn.html?type=course" },
     { label: "Videos", href: "/learn.html?type=video" },
     { label: "Clinic replays", href: "/learn.html?type=clinic" },
     { label: "Piano Practice Daily", href: "/learn.html?type=sheet" },
-    { label: "Pieces", href: "/resources.html" },
     { label: "Practice Tools", href: "/tools.html" },
     { label: "Glossary", href: "/resources.html?section=glossary" },
   ],
@@ -2423,7 +2424,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       // Every param a sub-nav link can vary by must be compared here. A link that
       // varies by an uncompared param matches every sibling, which lights the
       // whole row up at once.
-      const SUBNAV_PARAMS = ["goto", "filter", "tab", "section", "type", "topic", "q"];
+      const SUBNAV_PARAMS = ["goto", "filter", "tab", "section", "type", "topic", "q", "lib"];
       return SUBNAV_PARAMS.every(k => (u.searchParams.get(k) || "") === (p.get(k) || "")) &&
              (u.hash || "") === (location.hash || "");
     } catch(e) { return false; }
