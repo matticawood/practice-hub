@@ -4471,7 +4471,7 @@ const ET_SIG_NAMES = {
   "0,3,6,10,14":{qual:"hdim9",  label:"Half-dim add9",  abbr:"half-dim 9"},
   "0,3,6,10,13":{qual:"hdim7b9",label:"Half-dim ♭9",    abbr:"half-dim ♭9"},
 };
-function etRootStr(root){ return root.letter + (root.acc==="#"?"♯":root.acc==="b"?"♭":""); }
+function etRootStr(root){ return root.letter + (root.acc==="##"?"\uD834\uDD2A":root.acc==="#"?"♯":root.acc==="b"?"♭":""); }
 function etNameFromAbbr(root, abbr){
   const r = etRootStr(root);
   if (abbr==="") return r;
@@ -4529,7 +4529,10 @@ function etBuildKeyPool(){
   if (!key) return etGetPool();
   const natural = etKeyScale(key);
   // Minor keys: raise the 7th degree (harmonic minor) when building the V chord only, so the dominant is major / V7 / V7♭9.
-  const harmonic = key.minor ? natural.map((s,i)=> i===6 ? { ...s, st:(s.st+1)%12 } : s) : natural;
+  const RAISE = { "b":null, null:"#", "#":"##" };
+  const harmonic = key.minor
+    ? natural.map((s,i)=> i===6 ? { ...s, st:(s.st+1)%12, acc:RAISE[s.acc===null?null:s.acc] } : s)
+    : natural;
   const density = etChordSet==="sevenths" ? 4 : etChordSet==="extensions" ? 5 : 3;   // triads / major_minor = 3
   let pool = [];
   for (let d=0; d<7; d++){
@@ -4537,6 +4540,18 @@ function etBuildKeyPool(){
     const ch = etDiatonicChord(scale, d, density);
     const named = etNameChord(ch.root, ch.intervals);
     pool.push({ root:ch.root, intervals:ch.intervals, qual:named.qual, label:named.label, name:named.name });
+  }
+  // Minor keys also contain two chords the natural scale can't produce, both from the raised 7th:
+  // III+ (the only diatonic augmented triad in any key — major keys have none) and vii° / vii°7.
+  if (key.minor && (etChordSet === "triads" || etChordSet === "sevenths")) {
+    const raised = etChordSet === "triads" ? [2, 6] : [6];
+    raised.forEach(d => {
+      const ch = etDiatonicChord(harmonic, d, density);
+      const named = etNameChord(ch.root, ch.intervals);
+      if (named.qual === "chord") return;                       // unnamed shape, don't offer it
+      if (pool.some(p => p.name === named.name)) return;
+      pool.push({ root:ch.root, intervals:ch.intervals, qual:named.qual, label:named.label, name:named.name });
+    });
   }
   // "Major / Minor" in a key = only the diatonic major and minor chords (drops the dim/aug degrees).
   if (etChordSet === "major_minor") pool = pool.filter(p => p.qual==="maj" || p.qual==="min");
