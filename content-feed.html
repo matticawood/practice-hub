@@ -942,6 +942,23 @@ function _setMeta(parentId, totalRx, cc) {
 }
 
 /* ── Load feed ────────────────────────────────────────────────────────────── */
+  /* An .in() filter goes into the query STRING, so a long id list makes a URL the
+     server rejects with a bare "Bad Request". At 732 posts that list was 27,000
+     characters, and because the error was discarded every poll, reaction and
+     comment count silently vanished from the feed. Chunk the ids, and surface a
+     failure instead of swallowing it. */
+  async function _inChunks(table, select, column, values, extra) {
+    const out = [];
+    for (let i = 0; i < values.length; i += 100) {
+      let q = db.from(table).select(select).in(column, values.slice(i, i + 100));
+      if (extra) q = extra(q);
+      const { data, error } = await q;
+      if (error) { console.error(`feed: ${table} chunk failed`, error.message || error); continue; }
+      if (data) out.push(...data);
+    }
+    return out;
+  }
+
 async function loadFeed(deepId = null) {
   const feed = document.getElementById("cf-feed");
   feed.innerHTML = '<div class="cf-empty"><div class="loading-spinner" style="margin:0 auto 12px"></div>Loading…</div>';
@@ -974,9 +991,9 @@ async function loadFeed(deepId = null) {
   });
 
   const ids = rows.map(r => r.id);
-  const [{ data: allLikes }, { data: cmtRows }] = await Promise.all([
-    db.from("content_feed_likes").select("post_id,email,emoji").in("post_id", ids),
-    db.from("content_feed_comments").select("post_id").in("post_id", ids),
+  const [allLikes, cmtRows] = await Promise.all([
+    _inChunks("content_feed_likes", "post_id,email,emoji", "post_id", ids),
+    _inChunks("content_feed_comments", "post_id", "post_id", ids),
   ]);
 
   await Comments.loadReactions(ids);
@@ -995,22 +1012,21 @@ async function loadFeed(deepId = null) {
   // Avatar map for likers
   const likerEmails = [...new Set((allLikes || []).map(l => l.email))];
   if (likerEmails.length) {
-    const { data: likerRows } = await db.from("allowed_emails")
-      .select("email,avatar_url,name").in("email", likerEmails);
+    const likerRows = await _inChunks("allowed_emails", "email,avatar_url,name", "email", likerEmails);
     (likerRows || []).forEach(r => { _likerAvatarMap[r.email] = { url: r.avatar_url, name: r.name }; });
   }
 
   // Polls attached to posts (content_feed_post_polls). Mirror community's shape:
   // poll = { id, question, options:[{id,label}], voteCounts:{optId:n}, totalVotes, myVote }
   const pollMap = {};
-  const { data: pollRows } = await db.from("content_feed_post_polls").select("id,post_id,question").in("post_id", ids);
+  const pollRows = await _inChunks("content_feed_post_polls", "id,post_id,question", "post_id", ids);
   (pollRows || []).forEach(pr => { pollMap[pr.post_id] = { id: pr.id, question: pr.question }; });
   const pollIds = (pollRows || []).map(pr => pr.id);
   if (pollIds.length) {
     const [{ data: optRows }, { data: voteRows }, { data: myVoteRows }] = await Promise.all([
-      db.from("content_feed_post_poll_options").select("id,poll_id,label,position").in("poll_id", pollIds).order("position"),
-      db.from("content_feed_post_poll_votes").select("poll_id,option_id,email").in("poll_id", pollIds),
-      db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", pollIds),
+      _inChunks("content_feed_post_poll_options", "id,poll_id,label,position", "poll_id", pollIds, q => q.order("position")).then(d => ({ data: d })),
+      _inChunks("content_feed_post_poll_votes", "poll_id,option_id,email", "poll_id", pollIds).then(d => ({ data: d })),
+      _inChunks("content_feed_post_poll_votes", "poll_id,option_id", "poll_id", pollIds, q => q.eq("email", myEmail)).then(d => ({ data: d })),
     ]);
     const optsByPoll = {}, vcByPoll = {}, totByPoll = {}, myByPoll = {}, votersByPoll = {};
     (optRows || []).forEach(o => { (optsByPoll[o.poll_id] = optsByPoll[o.poll_id] || []).push(o); });
@@ -1027,7 +1043,7 @@ async function loadFeed(deepId = null) {
     if (isAdmin) {
       const voterEmails = [...new Set((voteRows || []).map(v => v.email))];
       if (voterEmails.length) {
-        const { data: nameRows } = await db.from("allowed_emails").select("email,name").in("email", voterEmails);
+        const nameRows = await _inChunks("allowed_emails", "email,name", "email", voterEmails);
         (nameRows || []).forEach(r => { voterNameMap[r.email] = r.name || r.email.split("@")[0]; });
       }
     }
