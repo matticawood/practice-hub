@@ -81,18 +81,12 @@
      genuinely playing, so there is no black frame and no jump. */
   .ln-bb-vid { opacity:0; transition:opacity .6s ease; }
   .ln-bb-vid.ready { opacity:1; }
-  /* YouTube will not be talked out of its own chrome: the title strip along the
-     top and the control strip along the bottom come back whatever the embed
-     parameters say. The frame is oversized by a sixth so both strips fall
-     outside the hero, which costs about 8% off each edge of a talking-head
-     shot and is the only reliable way to be rid of them. */
-  iframe.ln-bb-vid { position:absolute; top:50%; left:50%;
-    transform:translate(-50%,-50%) scale(1.18);
-    width:max(100%, calc(var(--bbh) * 16 / 9)); aspect-ratio:16 / 9; height:auto;
-    border:0; pointer-events:none; z-index:0; }
-  /* mux-player crops itself, so it just fills the frame. */
-  /* Every part of the player chrome is named off, not just --controls: the big
-     centre play button and the spinner are the two that show through. */
+  /* Both play something we hold ourselves, so there is no player chrome to
+     fight and no need to oversize anything: they simply fill the frame.
+     Every part of mux-player's chrome is named off, not just --controls; the
+     big centre play button and the spinner are the two that show through. */
+  video.ln-bb-clip { position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; z-index:0; pointer-events:none; }
   mux-player.ln-bb-mux { position:absolute; inset:0; width:100%; height:100%;
     z-index:0; pointer-events:none; --media-object-fit:cover;
     --controls:none; --center-controls:none; --play-button:none;
@@ -548,7 +542,7 @@ async function load() {
     db.from("theory_sheets").select("id,title,slug,category,created_at").order("created_at",{ascending:false}),
     db.from("reading_list").select("sheet_id,status").eq("email", myEmail),
     db.from("live_events").select("id,title,scheduled_at,duration_mins,mux_playback_id,status").order("scheduled_at",{ascending:false}),
-    db.from("content_feed_posts").select("id,type,title,url,youtube_id,media,published_at,duration_seconds,orientation").order("published_at",{ascending:false}),
+    db.from("content_feed_posts").select("id,type,title,url,youtube_id,media,published_at,duration_seconds,orientation,preview_path").order("published_at",{ascending:false}),
     db.from("mmt_articles").select("id,slug,title,cover_image,published_at,created_at").order("created_at",{ascending:false}),
     db.from("user_pieces").select("id,title,composer,last_practiced_at").eq("email", myEmail).order("last_practiced_at",{ascending:false,nullsFirst:false}).limit(1),
     db.from("content_feed_post_polls").select("post_id"),
@@ -618,6 +612,9 @@ async function load() {
       const vert = p.orientation === "portrait";
       ITEMS.push({ type:"video", ctype:"video", ref:p.youtube_id, title:p.title, date:p.published_at, playable:true, vertical:vert,
         yt:p.youtube_id, mins:Math.max(1, Math.round((p.duration_seconds || 0) / 60)),
+        /* Our own silent cut, where we hold one. It is what the hero plays;
+           the YouTube embed cannot be stripped of its chrome. */
+        clip: p.preview_path ? PREVIEW_BASE + p.preview_path : null,
         img:"https://i.ytimg.com/vi/" + p.youtube_id + (vert ? "/oardefault.jpg" : "/mqdefault.jpg"),
         href:"/content-feed.html?post=" + encodeURIComponent(p.id),
         dur:p.duration_seconds ? mins(p.duration_seconds) : "",
@@ -860,6 +857,7 @@ function filtered() {
     (!symptom || (i.syms || []).includes(symptom)) &&
     (!t     || i.title.toLowerCase().includes(t) || (i.topic || "").toLowerCase().includes(t)));
 }
+const PREVIEW_BASE = SUPABASE_URL + "/storage/v1/object/public/video-previews/";
 const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
 
 /* ── lightbox ───────────────────────────────────────────────────────────────
@@ -1036,15 +1034,15 @@ function render() {
     title:relevant.title, when:relevant.meta || "",
     blurb:relevant.topic ? "Picked because you have been working on " + relevant.topic + "."
                          : "Picked for what you have been working on.",
-    href:relevant.href, img:heroImg(relevant), yt:relevant.yt, go:"Open", mux:relevant.mux });
+    href:relevant.href, img:heroImg(relevant), clip:relevant.clip, go:"Open", mux:relevant.mux });
   if (fresh) slides.push({ kick:"Latest", title:fresh.title, when:fresh.meta,
-    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh), yt:fresh.yt, go:"Watch now", mux:fresh.mux });
+    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh), clip:fresh.clip, go:"Watch now", mux:fresh.mux });
 
   const slideHtml = b =>
       '<div class="ln-bb-slide" data-href="' + esc(b.href) + '">'
       + (b.img ? '<span class="ln-bb-img"><img src="' + esc(b.img) + '" alt=""'
           + (b.mux ? ' data-mux="' + esc(b.mux) + '"' : "")
-          + (b.yt ? ' data-yt="' + esc(b.yt) + '"' : "") + "></span>"
+          + (b.clip ? ' data-clip="' + esc(b.clip) + '"' : "") + "></span>"
          : b.plate ? '<span class="ln-bb-img ln-bb-plate" style="--pc:'
               + esc(b.plate.colour || "#2563eb") + '"><span class="ln-bb-pic">'
               + (b.plate.icon || "") + "</span></span>"
@@ -1257,7 +1255,7 @@ function bbExpand() {
 
 function billboardMotion() {
   /* The ACTIVE slide's still, not simply the first on the page. */
-  const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux], .ln-bb-slide.on .ln-bb-img img[data-yt]");
+  const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux], .ln-bb-slide.on .ln-bb-img img[data-clip]");
   document.querySelectorAll(".ln-bb-slide:not(.on) .ln-bb-img img").forEach(o => {
     if (o.dataset.still) o.src = o.dataset.still;       // put the resting slides back to a still
   });
@@ -1303,37 +1301,22 @@ function billboardMotion() {
     return m;
   });
 
-  if (img.dataset.yt) return play(ready => {
-    const id = img.dataset.yt;
-    const f = document.createElement("iframe");
-    f.className = "ln-bb-vid";
-    f.allow = "autoplay; encrypted-media";
-    f.setAttribute("tabindex", "-1");
-    f.src = "https://www.youtube.com/embed/" + encodeURIComponent(id)
-      + "?autoplay=1&mute=1&controls=0&loop=1&playsinline=1&modestbranding=1&rel=0&disablekb=1"
-      + "&iv_load_policy=3&fs=0&cc_load_policy=0&enablejsapi=1&origin=" + encodeURIComponent(location.origin)
-      + "&start=15&playlist=" + encodeURIComponent(id);
-    /* The embed will say when it is actually playing, which is the only moment
-       worth fading in on. It has to be asked first: enablejsapi plus a
-       `listening` handshake, and it posts its state changes back. No library. */
-    const onMsg = e => {
-      let host = ""; try { host = new URL(e.origin).hostname; } catch (x) { return; }
-      if (!/(^|\.)youtube(-nocookie)?\.com$/.test(host)) return;
-      let d; try { d = JSON.parse(e.data); } catch (x) { return; }
-      const st = d && d.info && typeof d.info.playerState === "number" ? d.info.playerState
-               : (d && typeof d.info === "number" ? d.info : null);
-      if (st !== 1) return;                      // 1 = playing
-      window.removeEventListener("message", onMsg);
-      setTimeout(() => ready(f), 500);           // let the opening title strip go
-    };
-    window.addEventListener("message", onMsg);
-    f.addEventListener("load", () => {
-      try { f.contentWindow.postMessage(JSON.stringify({ event:"listening", id:"ln-bb" }), "*"); }
-      catch (x) {}
-      setTimeout(() => ready(f), 2000);          // if it never answers, show it anyway
-    }, { once:true });
-    return f;
+  /* Nothing from YouTube plays here. The embed brings its own title strip and
+     control strip back whatever the parameters say, and the only ways round
+     that are to oversize the frame until they fall outside it, which crops the
+     shot, or to live with them. So the hero plays a video only where we hold
+     our own silent cut of it; anything else stays on its still. */
+  if (img.dataset.clip) return play(ready => {
+    const v = document.createElement("video");
+    v.className = "ln-bb-vid ln-bb-clip";
+    v.muted = true; v.loop = true; v.playsInline = true; v.preload = "auto";
+    v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); v.setAttribute("tabindex", "-1");
+    v.addEventListener("playing", () => ready(v), { once:true });
+    v.src = img.dataset.clip;
+    v.play().catch(() => {});                   // a refusal just leaves the still
+    return v;
   });
+  nothingToWaitFor();
 }
 
 function wire() {
