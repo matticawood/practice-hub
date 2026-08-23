@@ -171,6 +171,17 @@
   .ln-big { --cardw:19.5rem; }
   .ln-ck-t { color:var(--accent-dark); }
   @media (max-width:640px) { .ln-big { --cardw:80vw; } }
+  .ln-fbar { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 14px; }
+  .ln-sel { display:inline-flex; align-items:center; gap:9px; background:var(--surface);
+    border:1px solid var(--border); border-radius:var(--r-pill); padding:7px 10px 7px 15px; }
+  .ln-sel > span { font:700 .68rem/1 var(--sans); letter-spacing:.08em; text-transform:uppercase;
+    color:var(--text-muted); }
+  .ln-sel select { appearance:none; -webkit-appearance:none; border:0; background:transparent;
+    font:600 .86rem/1 var(--sans); color:var(--text); cursor:pointer; padding:2px 24px 2px 0;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b6155' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 2px center; background-size:14px; }
+  .ln-sel:focus-within { border-color:var(--accent-dark); }
+  .ln-libcount { font:500 .84rem/1 var(--sans); color:var(--text-muted); margin:0 0 14px; }
   .ln-rh { display:flex; align-items:baseline; gap:12px; margin:0 0 14px; }
   .ln-rh h2 { margin:0; font:700 1.12rem/1.2 var(--sans); letter-spacing:-.012em; }
   .ln-rh .ln-rs { color:var(--text-muted); font-size:.82rem; }
@@ -424,7 +435,7 @@ function fmtDate(d) {
 }
 function mins(sec) { return sec ? (sec < 60 ? sec + "s" : Math.round(sec / 60) + " min") : ""; }
 async function load() {
-  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, vocab, tags, cmeta, mine] = await Promise.all([
+  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, sheetWords, vocab, tags, cmeta, mine] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
     db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
     db.from("lesson_progress").select("lesson_id,completed").eq("email", myEmail),
@@ -435,7 +446,8 @@ async function load() {
     db.from("mmt_articles").select("id,slug,title,cover_image,published_at,created_at").order("created_at",{ascending:false}),
     db.from("user_pieces").select("id,title,composer,last_practiced_at").eq("email", myEmail).order("last_practiced_at",{ascending:false,nullsFirst:false}).limit(1),
     db.from("content_feed_post_polls").select("post_id"),
-    db.from("symptom_vocab").select("id,family,label,sort_order").order("sort_order"),
+    db.from("corpus_entries").select("source_type,source_ref,word_count").in("source_type", ["theory_sheet","mmt"]),
+    db.from("symptom_vocab").select("id,family,label,topic,sort_order").order("sort_order"),
     db.from("content_symptoms").select("content_type,content_ref,symptom_id"),
     db.from("content_meta").select("content_type,content_ref,kind"),
     db.from("my_practice_symptoms").select("symptom_id,session_date").eq("email", myEmail),
@@ -462,13 +474,16 @@ async function load() {
       blurb:"Play music you have never seen before, with the exact formula for improvement." });
 
   /* every browsable item, normalised to one shape */
+  const READ_WPM = 200, words = {};
+  (sheetWords.data || []).forEach(r => { words[r.source_type + ":" + r.source_ref] = r.word_count; });
   ITEMS = [];
   (sheets.data || []).forEach(s => ITEMS.push({
     type:"sheet", ctype:"theory_sheet", ref:s.id, title:s.title, topic:s.category, date:s.created_at, done:readSet.has(s.id), only:true,
+    mins:Math.max(1, Math.round((words["theory_sheet:" + s.id] || 600) / READ_WPM)),
     href:"/theory/sheets/view.html?slug=" + encodeURIComponent(s.slug),
     meta:fmtDate(s.created_at) }));
   (evs.data || []).filter(e => e.mux_playback_id).forEach(e => ITEMS.push({
-    type:"clinic", ctype:"clinic", ref:e.id, title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
+    type:"clinic", ctype:"clinic", ref:e.id, mins:e.duration_mins || 60, title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
     img:"https://image.mux.com/" + e.mux_playback_id + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=25",
     mux:e.mux_playback_id, only:true,
     playable:true, dur:e.duration_mins ? e.duration_mins + " min" : "",
@@ -496,7 +511,7 @@ async function load() {
     if (p.youtube_id) {
       const vert = p.orientation === "portrait";
       ITEMS.push({ type:"video", ctype:"video", ref:p.youtube_id, title:p.title, date:p.published_at, playable:true, vertical:vert,
-        yt:p.youtube_id,
+        yt:p.youtube_id, mins:Math.max(1, Math.round((p.duration_seconds || 0) / 60)),
         img:"https://i.ytimg.com/vi/" + p.youtube_id + (vert ? "/oardefault.jpg" : "/mqdefault.jpg"),
         href:"/content-feed.html?post=" + encodeURIComponent(p.id),
         dur:p.duration_seconds ? mins(p.duration_seconds) : "",
@@ -515,11 +530,12 @@ async function load() {
   });
   (mmt.data || []).forEach(a => ITEMS.push({
     type:"article", ctype:"mmt", ref:String(a.id), title:a.title, date:a.published_at || a.created_at,
+    mins:Math.max(1, Math.round((words["mmt:" + a.id] || 800) / READ_WPM)),
     bg:mmtBg(a.slug || ""),
     href:"https://matthewcawood.com/monday-music-tips/" + encodeURIComponent(a.slug), external:true,
     meta:fmtDate(a.published_at || a.created_at) }));
   lessons.forEach(l => { if (META[l.course]) ITEMS.push({
-    type:"course", ctype:"lesson", ref:l.id, title:l.title, topic:META[l.course].label, done:done.has(l.id),
+    type:"course", ctype:"lesson", ref:l.id, title:l.title, topic:META[l.course].label, done:done.has(l.id), mins:l.est_minutes || 8,
     href:"/courses.html?lesson=" + encodeURIComponent(l.id),
     meta:META[l.course].label + (l.est_minutes ? " · " + l.est_minutes + " min" : "") }); });
 
@@ -681,6 +697,46 @@ function row(title, sub, items, opts) {
     + (o.big ? " ln-big" : "")
     + (o.vertical ? " ln-vrail" : "") + (o.course ? " ln-crail" : "") + '">'
     + items.map(it => o.course ? courseCard(it) : card(it, o)).join("") + "</div></section>";
+}
+
+/* ── Everything ──────────────────────────────────────────────────────────────
+   The whole library in one place, filtered by the two questions a member
+   actually asks: how long have I got, and what do I want to work on. Shorts
+   are excluded; they have their own row and never sit right beside long-form. */
+const TIME_BANDS = [
+  { k:"s", label:"Under 5 min", test:i => (i.mins || 0) > 0 && i.mins < 5 },
+  { k:"m", label:"5 to 15 min", test:i => i.mins >= 5 && i.mins < 15 },
+  { k:"l", label:"15 min plus", test:i => i.mins >= 15 },
+];
+let band = "", libTopic = "", libShown = 24;
+
+function everything() {
+  const base = ITEMS.filter(i => !i.vertical);
+  const b = TIME_BANDS.find(x => x.k === band);
+  const pool = base.filter(i => (!b || b.test(i)) && (!libTopic || (i.syms || []).includes(libTopic)));
+  const topics = VOCAB.map(v => ({ id:v.id, label:v.topic || v.label,
+      n:base.filter(i => (i.syms || []).includes(v.id)).length }))
+    .filter(t => t.n >= 6).sort((a, x) => x.n - a.n);
+
+  let h = '<section class="ln-row"><div class="ln-rh"><h2>Everything</h2>'
+    + '<span class="ln-rs">' + base.length + " pieces to work through</span></div>"
+    + '<div class="ln-fbar">'
+    + '<label class="ln-sel"><span>Length</span><select id="ln-band"><option value="">Any length</option>'
+    + TIME_BANDS.map(t => '<option value="' + t.k + '"' + (band === t.k ? " selected" : "") + ">"
+        + t.label + "</option>").join("") + "</select></label>"
+    + '<label class="ln-sel"><span>Focus</span><select id="ln-topic"><option value="">Anything</option>'
+    + topics.map(t => '<option value="' + esc(t.id) + '"' + (libTopic === t.id ? " selected" : "") + ">"
+        + esc(t.label) + " (" + t.n + ")</option>").join("") + "</select></label></div>"
+    + '<div class="ln-libcount">' + pool.length + (pool.length === 1 ? " piece" : " pieces")
+    + (band || libTopic ? ' · <button class="ln-all" type="button" id="ln-libclear">clear</button>' : "")
+    + "</div>";
+
+  const shown = pool.slice().sort(byDate).slice(0, libShown);
+  h += shown.length ? '<div class="ln-grid">' + shown.map(card).join("") + "</div>"
+                    : '<div class="ln-empty">Nothing matches that yet.</div>';
+  if (pool.length > shown.length)
+    h += '<div class="ln-morewrap"><button class="ln-more" id="ln-libmore" type="button">Show more</button></div>';
+  return h + "</section>";
 }
 
 /* ── filtering ──────────────────────────────────────────────────────────────── */
@@ -917,6 +973,7 @@ function render() {
     html += row("Monday Music Tips", (counts.article || 0) + " articles", take(i => i.type === "article", 14), { seeAll:"article" });
     const shorts = ITEMS.filter(i => i.vertical).sort(byDate).slice(0, 24);
     html += row("Shorts", "a minute or two each", shorts, { vertical:true });
+    html += everything();
   }
 
   $("ln-root").innerHTML = html;
@@ -983,6 +1040,10 @@ function wire() {
     showAll = false; render(); window.scrollTo({ top:0, behavior:"smooth" });
   });
   const all = $("ln-all");   if (all) all.onclick = () => { showAll = true; render(); };
+  const bs = $("ln-band");  if (bs) bs.onchange = e => { band = e.target.value; libShown = 24; render(); };
+  const ts = $("ln-topic"); if (ts) ts.onchange = e => { libTopic = e.target.value; libShown = 24; render(); };
+  const lm = $("ln-libmore");  if (lm) lm.onclick = () => { libShown += 24; render(); };
+  const lc = $("ln-libclear"); if (lc) lc.onclick = () => { band = ""; libTopic = ""; libShown = 24; render(); };
   const clr = $("ln-clear"); if (clr) clr.onclick = () => { topic = type = term = symptom = ""; showAll = false; render(); };
 }
 
