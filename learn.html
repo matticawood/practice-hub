@@ -50,6 +50,8 @@
     margin:-22px calc(clamp(18px,2.6vw,52px) * -1) 30px;
     /* Height lives in a variable so the video can do its own cover maths. */
     --bbh:clamp(22rem, 30vw, 30rem); border-radius:0; height:var(--bbh);
+    /* So the settle into 16:9 when playback starts is a move, not a jump. */
+    transition:height .55s cubic-bezier(.4,0,.2,1);
     text-decoration:none; color:#fff; background:#1a1512;
     box-shadow:none; }
   /* Slides stack; only the active one is painted. Cross-fade rather than slide,
@@ -71,9 +73,29 @@
      hero is never viewport-wide, and sizing off vw overshot badly. Widen the
      16:9 frame to whichever is bigger, the hero's width or the width its own
      height demands, and centre the overflow. */
-  .ln-bb-vid { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  iframe.ln-bb-vid { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
     width:max(100%, calc(var(--bbh) * 16 / 9)); aspect-ratio:16 / 9; height:auto;
     border:0; pointer-events:none; z-index:0; }
+  /* mux-player crops itself, so it just fills the frame. */
+  /* Every part of the player chrome is named off, not just --controls: the big
+     centre play button and the spinner are the two that show through. */
+  mux-player.ln-bb-mux { position:absolute; inset:0; width:100%; height:100%;
+    z-index:0; pointer-events:none; --media-object-fit:cover;
+    --controls:none; --center-controls:none; --play-button:none;
+    --loading-indicator:none; --dialog:none; --media-object-position:center; }
+  mux-player.ln-bb-mux::part(center play button),
+  mux-player.ln-bb-mux::part(play button),
+  mux-player.ln-bb-mux::part(loading indicator) { display:none; }
+  /* A slide with no artwork of its own gets the course's own plate, in the
+     course's own colour, rather than a photograph belonging to something else. */
+  .ln-bb-plate { background:
+      radial-gradient(120% 140% at 76% 16%, color-mix(in srgb, var(--pc) 40%, transparent), transparent 62%),
+      linear-gradient(140deg, color-mix(in srgb, var(--pc) 24%, #17130f), #110e0c); }
+  .ln-bb-pic { position:absolute; right:8%; top:50%; transform:translateY(-50%);
+    width:clamp(5rem,10vw,8.5rem); aspect-ratio:1; border-radius:24px; display:grid; place-items:center;
+    background:rgba(18,15,13,.55); border:1px solid color-mix(in srgb, var(--pc) 38%, transparent);
+    color:var(--pc); box-shadow:0 18px 44px -18px color-mix(in srgb, var(--pc) 80%, transparent); }
+  .ln-bb-pic svg { width:52%; height:52%; }
   /* A 16:9 still inside a very wide, short box crops from the centre and takes
      the top of the head off. Bias the crop upward so the face stays in frame. */
   .ln-bb-img img { width:100%; height:100%; object-fit:cover; object-position:50% 22%; display:block; }
@@ -111,6 +133,8 @@
         rgba(14,12,10,0) 0%, rgba(14,12,10,.10) 30%, rgba(14,12,10,.80) 62%,
         rgba(14,12,10,.95) 84%, rgba(14,12,10,.97) 100%); }
     .ln-bb-img img { object-position:50% 20%; }
+    .ln-bb-pic { right:auto; left:18px; top:auto; bottom:auto; transform:none;
+      width:4.6rem; margin:22px 0 0; position:absolute; }
     .ln-bb-in { padding:20px 18px 22px; height:100%; max-width:none; justify-content:flex-end; }
     .ln-bb-krow { margin-bottom:10px; }
     .ln-bb h2 { font-size:1.42rem; margin-bottom:8px; }
@@ -645,7 +669,11 @@ async function load() {
   CONTINUE = [];
   const started = COURSES.filter(c => c.key && c.done > 0 && c.done < c.n).sort((a,b) => b.pct - a.pct)[0];
   if (started) CONTINUE.push({ k:"Course", mark:"course", tc:"var(--t-course)", t:started.label,
-    m:started.done + " of " + started.n + " lessons", pct:started.pct, href:"/courses.html?course=" + started.key });
+    m:started.done + " of " + started.n + " lessons", pct:started.pct, href:"/courses.html?course=" + started.key,
+    /* Carried so the hero can show the course itself rather than borrowing a
+       photograph from whatever happened to be published last. */
+    mux:started.thumbId || null, muxTime:started.thumbTime || 0,
+    colour:started.color, icon:started.icon });
   const piece = (ups.data || [])[0];
   if (piece) CONTINUE.push({ k:"Piece", mark:"sheet", tc:"var(--t-sheet)", t:piece.title + (piece.composer ? " — " + piece.composer : ""),
     m:piece.last_practiced_at ? "Last practised " + fmtDate(piece.last_practiced_at) : "Not practised yet",
@@ -938,17 +966,26 @@ function render() {
   /* The hero rotates rather than showing one thing: the clinic, the newest
      piece, and whatever is most relevant to this member. One slot, three jobs,
      instead of three competing blocks down the page. */
-  /* mqdefault is 320px wide and turns to mush across a full-bleed hero. */
+  /* Every still on the page is sized for a card: 320px from YouTube, 480 from
+     Mux. Across a full-bleed hero they turn to mush, so both are asked for
+     again at full size. Rewriting the Mux width keeps its own crop and time. */
+  const bigStill = u => !u ? ""
+    : u.replace(/width=\d+/, "width=1600").replace(/height=\d+/, "height=900");
   const heroImg = it => !it ? "" : (it.yt
-    ? "https://i.ytimg.com/vi/" + it.yt + "/maxresdefault.jpg" : (it.img || ""));
+    ? "https://i.ytimg.com/vi/" + it.yt + "/maxresdefault.jpg" : bigStill(it.img));
   const slides = [];
   if (soon) slides.push({ kick:"Next live clinic", title:soon.t, when:soon.m,
     blurb:"A live session working through one topic. It becomes a replay here afterwards.",
     href:soon.href, img:heroImg(lastClinic || fresh), go:"RSVP", mux:(lastClinic || {}).mux,
     go2:lastClinic ? { label:"Watch the last one", href:lastClinic.href } : null });
   if (carry) slides.push({ kick:"Pick up where you left off", title:carry.t, when:carry.m,
-    blurb:"You are part way through this one.", href:carry.href, img:heroImg(fresh),
-    yt:fresh && fresh.yt, mux:fresh && fresh.mux, go:"Continue" });
+    blurb:"You are part way through this one.", href:carry.href, go:"Continue",
+    img: carry.mux ? "https://image.mux.com/" + carry.mux
+        + "/thumbnail.webp?width=1600&height=900&fit_mode=smartcrop&time=" + (carry.muxTime || 0) : "",
+    mux: carry.mux,
+    /* A course with no video of its own gets its own plate, in its own colour,
+       so it still looks like that course and not like a missing image. */
+    plate: carry.mux ? null : { colour:carry.colour, icon:carry.icon } });
   const relevant = PICKS.find(p => p.img);
   if (relevant) slides.push({ kick:"For you",
     title:relevant.title, when:relevant.meta || "",
@@ -962,7 +999,11 @@ function render() {
       '<div class="ln-bb-slide" data-href="' + esc(b.href) + '">'
       + (b.img ? '<span class="ln-bb-img"><img src="' + esc(b.img) + '" alt=""'
           + (b.mux ? ' data-mux="' + esc(b.mux) + '"' : "")
-          + (b.yt ? ' data-yt="' + esc(b.yt) + '"' : "") + "></span>" : "")
+          + (b.yt ? ' data-yt="' + esc(b.yt) + '"' : "") + "></span>"
+         : b.plate ? '<span class="ln-bb-img ln-bb-plate" style="--pc:'
+              + esc(b.plate.colour || "#2563eb") + '"><span class="ln-bb-pic">'
+              + (b.plate.icon || "") + "</span></span>"
+         : "")
       + '<span class="ln-bb-in"><span class="ln-bb-krow">'
       + '<span class="ln-bb-k">' + esc(b.kick) + "</span>"
       + (b.when ? '<span class="ln-bb-when">' + esc(b.when) + "</span>" : "") + "</span>"
@@ -1125,6 +1166,28 @@ function wireCarousel() {
   start();
 }
 
+/* Once moving picture starts, the hero settles into the video's own 16:9 so
+   nothing is cropped. It grows ONCE and stays there for the rest of the visit,
+   so the height still never changes from slide to slide: a slide with no video
+   simply fills the taller frame with its still. Phones keep the compact hero,
+   where 16:9 would leave no room for the title. */
+function bbExpand() {
+  const bb = document.getElementById("ln-bb");
+  if (!bb || bb.dataset.tall || window.innerWidth <= 640) return;
+  const from = bb.clientHeight, to = Math.round(bb.clientWidth * 9 / 16);
+  if (to <= from + 8) return;
+  bb.dataset.tall = "1";
+  // Growing under somebody who has scrolled past would shove the page down, so
+  // off-screen it happens instantly and the scroll position absorbs it.
+  const away = window.scrollY > 60;
+  if (away) bb.style.transition = "none";
+  bb.style.setProperty("--bbh", to + "px");
+  if (away) {
+    window.scrollBy(0, to - from);
+    requestAnimationFrame(() => { bb.style.transition = ""; });
+  }
+}
+
 function billboardMotion() {
   /* The ACTIVE slide's still, not simply the first on the page. */
   const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux], .ln-bb-slide.on .ln-bb-img img[data-yt]");
@@ -1140,30 +1203,44 @@ function billboardMotion() {
   if (net.saveData) return;
   if (/(^|-)2g$/.test(net.effectiveType || "")) return;
   if (!img.dataset.still) img.dataset.still = img.src;   // remember the still to return to
-  if (img.dataset.mux) {
-    const probe = new Image();
-    probe.onload = () => { img.src = probe.src; };
-    probe.src = "https://image.mux.com/" + img.dataset.mux + "/animated.webp?width=640&start=20&end=25&fps=10";
-    return;
-  }
-  /* YouTube has no animated still, so the slide plays the video itself: muted,
-     no controls, not clickable, and only on the slide you are looking at. */
-  if (img.dataset.yt) {
-    const wrap = img.closest(".ln-bb-img");
-    if (!wrap || wrap.querySelector("iframe")) return;
+  const wrap = img.closest(".ln-bb-img");
+  if (!wrap || wrap.querySelector(".ln-bb-vid")) return;
+
+  /* Same shape either way: the still lands, then the slide plays its own video
+     muted, without controls, not clickable, and only while you are on it. */
+  const play = build => setTimeout(() => {
+    if (!wrap.closest(".ln-bb-slide").classList.contains("on")) return;
+    if (wrap.querySelector(".ln-bb-vid")) return;
+    wrap.appendChild(build());
+    bbExpand();
+  }, 1200);                                     // let the still land first
+
+  if (img.dataset.mux) return play(() => {
+    const m = document.createElement("mux-player");
+    m.className = "ln-bb-vid ln-bb-mux";
+    m.setAttribute("playback-id", img.dataset.mux);
+    m.setAttribute("stream-type", "on-demand");
+    m.setAttribute("autoplay", "muted");
+    m.setAttribute("muted", "");
+    m.setAttribute("loop", "");
+    m.setAttribute("playsinline", "");
+    m.setAttribute("nohotkeys", "");
+    m.setAttribute("tabindex", "-1");
+    m.setAttribute("start-time", "20");
+    return m;
+  });
+
+  if (img.dataset.yt) return play(() => {
     const id = img.dataset.yt;
-    setTimeout(() => {
-      if (!wrap.closest(".ln-bb-slide").classList.contains("on")) return;
-      const f = document.createElement("iframe");
-      f.className = "ln-bb-vid";
-      f.allow = "autoplay; encrypted-media";
-      f.setAttribute("tabindex", "-1");
-      f.src = "https://www.youtube.com/embed/" + encodeURIComponent(id)
-        + "?autoplay=1&mute=1&controls=0&loop=1&playsinline=1&modestbranding=1&rel=0&disablekb=1"
-        + "&start=15&playlist=" + encodeURIComponent(id);
-      wrap.appendChild(f);
-    }, 1200);                                   // let the still land first
-  }
+    const f = document.createElement("iframe");
+    f.className = "ln-bb-vid";
+    f.allow = "autoplay; encrypted-media";
+    f.setAttribute("tabindex", "-1");
+    f.src = "https://www.youtube.com/embed/" + encodeURIComponent(id)
+      + "?autoplay=1&mute=1&controls=0&loop=1&playsinline=1&modestbranding=1&rel=0&disablekb=1"
+      + "&start=15&playlist=" + encodeURIComponent(id);
+    return f;
+  });
 }
 
 function wire() {
