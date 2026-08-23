@@ -245,16 +245,17 @@ function tile(it) {
 
 /* ── data ── */
 async function load() {
-  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups] = await Promise.all([
+  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
     db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
     db.from("course_progress").select("lesson_id,status").eq("email", myEmail),
     db.from("theory_sheets").select("id,title,slug,category,created_at").order("created_at",{ascending:false}),
     db.from("reading_list").select("sheet_id,status").eq("email", myEmail),
     db.from("live_events").select("id,title,scheduled_at,duration_mins,mux_playback_id,status").order("scheduled_at",{ascending:false}),
-    db.from("content_feed_posts").select("id,type,title,url,youtube_id,published_at").order("published_at",{ascending:false}),
+    db.from("content_feed_posts").select("id,type,title,url,youtube_id,media,published_at").order("published_at",{ascending:false}),
     db.from("mmt_articles").select("slug,title,cover_image,published_at,created_at").order("created_at",{ascending:false}),
     db.from("user_pieces").select("id,title,composer,last_practiced_at").eq("email", myEmail).order("last_practiced_at",{ascending:false,nullsFirst:false}).limit(1),
+    db.from("content_feed_post_polls").select("post_id"),
   ]);
 
   const lessons = ls.data || [], done = new Set((prog.data || []).filter(p => p.status === "completed").map(p => p.lesson_id));
@@ -295,17 +296,35 @@ async function load() {
   // is already here from mmt_articles, so they would show everything twice.
   // Clinic topic polls are a question to the room, not something to learn from,
   // and clinic announcements duplicate the clinic itself from live_events.
+  // A poll is identified by having a poll row, not by its title, because a post
+  // is a poll, a video or a written post and the title cannot be trusted to say
+  // which. The title check is only a backstop for one older poll whose rows are
+  // gone. Clinic announcements are dropped because live_events already has them.
+  const pollIds = new Set((polls.data || []).map(p => p.post_id));
   const FEED_SKIP = /topic poll|^live practice clinic|^live q&a/i;
+  const muxId = p => {
+    const m = (p.media || []).find(x => x && x.type === "mux");
+    return m ? (m.playbackId || m.playback_id || "") : "";
+  };
   (feed.data || []).forEach(p => {
-    if (p.type === "blog") return;
-    if (FEED_SKIP.test(p.title || "")) return;
-    ITEMS.push(p.youtube_id ? {
-      type:"video", title:p.title, date:p.published_at, playable:true,
-      img:"https://i.ytimg.com/vi/" + p.youtube_id + "/mqdefault.jpg",
-      href:p.url || ("https://youtu.be/" + p.youtube_id), external:true, meta:"Video · " + fmtDate(p.published_at)
-    } : {
-      type:"video", title:p.title, date:p.published_at,
-      href:"/content-feed.html?post=" + encodeURIComponent(p.id), meta:"Post · " + fmtDate(p.published_at) });
+    if (p.type === "blog") return;                       // duplicates mmt_articles
+    if (pollIds.has(p.id) || FEED_SKIP.test(p.title || "")) return;
+    const mux = muxId(p);
+    if (p.youtube_id) {
+      ITEMS.push({ type:"video", title:p.title, date:p.published_at, playable:true,
+        img:"https://i.ytimg.com/vi/" + p.youtube_id + "/mqdefault.jpg",
+        href:p.url || ("https://youtu.be/" + p.youtube_id), external:true,
+        meta:"Video · " + fmtDate(p.published_at) });
+    } else if (mux) {                                    // Matthew's own uploads
+      ITEMS.push({ type:"video", title:p.title, date:p.published_at, playable:true,
+        img:"https://image.mux.com/" + mux + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=8",
+        href:"/content-feed.html?post=" + encodeURIComponent(p.id),
+        meta:"Video · " + fmtDate(p.published_at) });
+    } else {
+      ITEMS.push({ type:"video", title:p.title, date:p.published_at,
+        href:"/content-feed.html?post=" + encodeURIComponent(p.id),
+        meta:"Post · " + fmtDate(p.published_at) });
+    }
   });
   (mmt.data || []).forEach(a => ITEMS.push({
     type:"article", title:a.title, date:a.published_at || a.created_at, img:a.cover_image || "",
