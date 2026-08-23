@@ -416,7 +416,7 @@ function fmtDate(d) {
 }
 function mins(sec) { return sec ? (sec < 60 ? sec + "s" : Math.round(sec / 60) + " min") : ""; }
 async function load() {
-  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, vocab, tags, cmeta, mine, picks] = await Promise.all([
+  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, vocab, tags, cmeta, mine] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
     db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
     db.from("lesson_progress").select("lesson_id,completed").eq("email", myEmail),
@@ -431,7 +431,6 @@ async function load() {
     db.from("content_symptoms").select("content_type,content_ref,symptom_id"),
     db.from("content_meta").select("content_type,content_ref,kind"),
     db.from("my_practice_symptoms").select("symptom_id,session_date").eq("email", myEmail),
-    db.rpc("picks_for", { em: myEmail, n: 14 }),
   ]);
 
   const lessons = ls.data || [], done = new Set((prog.data || []).filter(p => p.completed).map(p => p.lesson_id));
@@ -551,6 +550,12 @@ async function load() {
      written about, then what their practice shows, then what they read. */
   PICKS = [];
   PICK_WHY = "";
+  /* Issued after the batch above, not inside it. Fired in parallel with the very
+     first requests it can go out before the client has attached the session, and
+     these views return nothing to an unauthenticated caller, so the row silently
+     never appeared. */
+  let picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
+  if (!(picks.data || []).length) picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
   const pk = (picks && picks.data) || [];
   if (pk.length) {
     const byHref = {};
