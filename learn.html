@@ -87,6 +87,11 @@
      big centre play button and the spinner are the two that show through. */
   video.ln-bb-clip { position:absolute; inset:0; width:100%; height:100%;
     object-fit:cover; z-index:0; pointer-events:none; }
+  /* No oversizing: the hero settles to 16:9 for playback, so the frame is the
+     video's own shape and nothing is cropped. */
+  iframe.ln-bb-yt { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:max(100%, calc(var(--bbh) * 16 / 9)); aspect-ratio:16 / 9; height:auto;
+    border:0; pointer-events:none; z-index:0; }
   mux-player.ln-bb-mux { position:absolute; inset:0; width:100%; height:100%;
     z-index:0; pointer-events:none; --media-object-fit:cover;
     --controls:none; --center-controls:none; --play-button:none;
@@ -857,6 +862,10 @@ function filtered() {
     (!symptom || (i.syms || []).includes(symptom)) &&
     (!t     || i.title.toLowerCase().includes(t) || (i.topic || "").toLowerCase().includes(t)));
 }
+/* How long YouTube's own chrome stays up once playback starts. Its player
+   autohides after three seconds of pointer inactivity; the extra second is
+   headroom, since this is their timing and not ours. */
+const YT_AUTOHIDE = 4000;
 const PREVIEW_BASE = SUPABASE_URL + "/storage/v1/object/public/video-previews/";
 const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
 
@@ -1034,15 +1043,16 @@ function render() {
     title:relevant.title, when:relevant.meta || "",
     blurb:relevant.topic ? "Picked because you have been working on " + relevant.topic + "."
                          : "Picked for what you have been working on.",
-    href:relevant.href, img:heroImg(relevant), clip:relevant.clip, go:"Open", mux:relevant.mux });
+    href:relevant.href, img:heroImg(relevant), clip:relevant.clip, yt:relevant.yt, go:"Open", mux:relevant.mux });
   if (fresh) slides.push({ kick:"Latest", title:fresh.title, when:fresh.meta,
-    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh), clip:fresh.clip, go:"Watch now", mux:fresh.mux });
+    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh), clip:fresh.clip, yt:fresh.yt, go:"Watch now", mux:fresh.mux });
 
   const slideHtml = b =>
       '<div class="ln-bb-slide" data-href="' + esc(b.href) + '">'
       + (b.img ? '<span class="ln-bb-img"><img src="' + esc(b.img) + '" alt=""'
           + (b.mux ? ' data-mux="' + esc(b.mux) + '"' : "")
-          + (b.clip ? ' data-clip="' + esc(b.clip) + '"' : "") + "></span>"
+          + (b.clip ? ' data-clip="' + esc(b.clip) + '"' : "")
+          + (b.yt && !b.clip ? ' data-yt="' + esc(b.yt) + '"' : "") + "></span>"
          : b.plate ? '<span class="ln-bb-img ln-bb-plate" style="--pc:'
               + esc(b.plate.colour || "#2563eb") + '"><span class="ln-bb-pic">'
               + (b.plate.icon || "") + "</span></span>"
@@ -1199,10 +1209,23 @@ function wireCarousel() {
   });
 
   const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  /* A still has said what it has to say in a few seconds. A slide that is
+     playing has spent most of that getting the video up: a YouTube one cannot
+     be shown for four seconds while its chrome clears, and then there is the
+     cross-fade. Seven seconds would leave about two of actual video, so a slide
+     that is playing keeps the hero for longer. Checked as it goes rather than
+     fixed up front, because when the slide arrives it is not playing yet. */
+  const DWELL_STILL = 7000, DWELL_PLAYING = 16000;
   function start() {
     if (BB_TIMER) clearInterval(BB_TIMER);
     if (reduced) return;
-    BB_TIMER = setInterval(() => show(BB_AT + 1), 7000);
+    let waited = 0;
+    BB_TIMER = setInterval(() => {
+      waited += 1000;
+      const on = bb.querySelector(".ln-bb-slide.on");
+      const need = on && on.querySelector(".ln-bb-vid.ready") ? DWELL_PLAYING : DWELL_STILL;
+      if (waited >= need) { waited = 0; show(BB_AT + 1); }
+    }, 1000);
   }
   bb.addEventListener("mouseenter", () => { if (BB_TIMER) clearInterval(BB_TIMER); });
   bb.addEventListener("mouseleave", start);
@@ -1220,6 +1243,9 @@ function wireCarousel() {
 let BB_GO = null, BB_REVEALED = false;
 const BB_PENDING = [];
 const BB_FIRST = new Promise(res => { BB_GO = res; setTimeout(res, 2500); });
+/* A YouTube slide cannot be shown for four seconds after it starts, and the
+   loading screen will not wait that long, so it reveals mid-wait and the
+   cross-fade happens on the live page. Our own cuts have no such wait. */
 
 /* Ready during the hold means wait: the settle into 16:9 is worth seeing, and
    it cannot be seen behind a loading screen. */
@@ -1255,7 +1281,8 @@ function bbExpand() {
 
 function billboardMotion() {
   /* The ACTIVE slide's still, not simply the first on the page. */
-  const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux], .ln-bb-slide.on .ln-bb-img img[data-clip]");
+  const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux], "
+    + ".ln-bb-slide.on .ln-bb-img img[data-clip], .ln-bb-slide.on .ln-bb-img img[data-yt]");
   document.querySelectorAll(".ln-bb-slide:not(.on) .ln-bb-img img").forEach(o => {
     if (o.dataset.still) o.src = o.dataset.still;       // put the resting slides back to a still
   });
@@ -1301,11 +1328,7 @@ function billboardMotion() {
     return m;
   });
 
-  /* Nothing from YouTube plays here. The embed brings its own title strip and
-     control strip back whatever the parameters say, and the only ways round
-     that are to oversize the frame until they fall outside it, which crops the
-     shot, or to live with them. So the hero plays a video only where we hold
-     our own silent cut of it; anything else stays on its still. */
+  /* Our own cut where we hold one: no player at all, so nothing to wait for. */
   if (img.dataset.clip) return play(ready => {
     const v = document.createElement("video");
     v.className = "ln-bb-vid ln-bb-clip";
@@ -1315,6 +1338,45 @@ function billboardMotion() {
     v.src = img.dataset.clip;
     v.play().catch(() => {});                   // a refusal just leaves the still
     return v;
+  });
+
+  /* Otherwise YouTube, played behind the still until its own chrome has gone.
+     The embed cannot be told to drop its chrome: modestbranding and showinfo
+     are deprecated, and hiding the iframe hides the picture with it. What it
+     does do is autohide, about three seconds after playback starts. So the
+     video runs where it cannot be seen for that long, and only then does the
+     still cross-fade to it. controls=0 means the bottom bar never draws, and
+     pointer-events:none means nothing can bring the chrome back by hovering. */
+  if (img.dataset.yt) return play(ready => {
+    const id = img.dataset.yt;
+    const f = document.createElement("iframe");
+    f.className = "ln-bb-vid ln-bb-yt";
+    f.allow = "autoplay; encrypted-media";
+    f.setAttribute("tabindex", "-1");
+    f.src = "https://www.youtube.com/embed/" + encodeURIComponent(id)
+      + "?autoplay=1&mute=1&controls=0&loop=1&playsinline=1&modestbranding=1&rel=0&disablekb=1"
+      + "&iv_load_policy=3&fs=0&cc_load_policy=0&enablejsapi=1&origin=" + encodeURIComponent(location.origin)
+      + "&start=15&playlist=" + encodeURIComponent(id);
+    /* The embed reports its own state once asked: enablejsapi plus a
+       `listening` handshake, and it posts state changes back. No library. The
+       clock for the autohide starts when it says it is playing, not when the
+       iframe loads, or a slow start would reveal it with the chrome still up. */
+    const onMsg = e => {
+      let host = ""; try { host = new URL(e.origin).hostname; } catch (x) { return; }
+      if (!/(^|\.)youtube(-nocookie)?\.com$/.test(host)) return;
+      let d; try { d = JSON.parse(e.data); } catch (x) { return; }
+      const st = d && d.info && typeof d.info.playerState === "number" ? d.info.playerState
+               : (d && typeof d.info === "number" ? d.info : null);
+      if (st !== 1) return;                      // 1 = playing
+      window.removeEventListener("message", onMsg);
+      setTimeout(() => ready(f), YT_AUTOHIDE);
+    };
+    window.addEventListener("message", onMsg);
+    f.addEventListener("load", () => {
+      try { f.contentWindow.postMessage(JSON.stringify({ event:"listening", id:"ln-bb" }), "*"); }
+      catch (x) {}
+    }, { once:true });
+    return f;
   });
   nothingToWaitFor();
 }
