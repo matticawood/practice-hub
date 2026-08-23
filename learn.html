@@ -171,6 +171,16 @@
   .ln-big { --cardw:19.5rem; }
   .ln-ck-t { color:var(--accent-dark); }
   @media (max-width:640px) { .ln-big { --cardw:80vw; } }
+  .ln-fbar { display:flex; flex-wrap:wrap; gap:8px 18px; margin:0 0 14px; }
+  .ln-fgrp { display:flex; flex-wrap:wrap; gap:8px; }
+  .ln-fchip { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-pill);
+    padding:7px 13px; cursor:pointer; font:600 .82rem/1 var(--sans); color:var(--text-muted);
+    display:inline-flex; align-items:center; gap:7px; }
+  .ln-fchip:hover { border-color:var(--accent-dark); color:var(--text); }
+  .ln-fchip.on { background:var(--text); border-color:var(--text); color:var(--bg); }
+  .ln-fchip .ln-fn { font-size:.72rem; opacity:.7; font-variant-numeric:tabular-nums; }
+  .ln-libcount { font:500 .84rem/1 var(--sans); color:var(--text-muted); margin:0 0 14px; }
+  .ln-flag .ln-crail .ln-c { width:24rem; }
   .ln-rh { display:flex; align-items:baseline; gap:12px; margin:0 0 14px; }
   .ln-rh h2 { margin:0; font:700 1.12rem/1.2 var(--sans); letter-spacing:-.012em; }
   .ln-rh .ln-rs { color:var(--text-muted); font-size:.82rem; }
@@ -410,7 +420,7 @@ const CMETA = [
 const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
-let PICKS = [], PICK_SHORTS = [], PICK_WHY = "", PICK_SUB = "";
+let PICKS = [], PICK_SHORTS = [], PICK_WHY = "", PICK_SUB = "", COURSE_DEPTH = "";
 let FEED = {};                      // post id -> raw row, for the lightbox
 let topic = "", type = "", term = "", showAll = false, symptom = "";
 
@@ -424,7 +434,7 @@ function fmtDate(d) {
 }
 function mins(sec) { return sec ? (sec < 60 ? sec + "s" : Math.round(sec / 60) + " min") : ""; }
 async function load() {
-  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, vocab, tags, cmeta, mine] = await Promise.all([
+  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, sheetWords, vocab, tags, cmeta, mine] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
     db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
     db.from("lesson_progress").select("lesson_id,completed").eq("email", myEmail),
@@ -435,6 +445,7 @@ async function load() {
     db.from("mmt_articles").select("id,slug,title,cover_image,published_at,created_at").order("created_at",{ascending:false}),
     db.from("user_pieces").select("id,title,composer,last_practiced_at").eq("email", myEmail).order("last_practiced_at",{ascending:false,nullsFirst:false}).limit(1),
     db.from("content_feed_post_polls").select("post_id"),
+    db.from("corpus_entries").select("source_type,source_ref,word_count").in("source_type", ["theory_sheet","mmt"]),
     db.from("symptom_vocab").select("id,family,label,sort_order").order("sort_order"),
     db.from("content_symptoms").select("content_type,content_ref,symptom_id"),
     db.from("content_meta").select("content_type,content_ref,kind"),
@@ -463,12 +474,16 @@ async function load() {
 
   /* every browsable item, normalised to one shape */
   ITEMS = [];
+  const READ_WPM = 200;
+  const words = {};
+  (sheetWords.data || []).forEach(r => { words[r.source_type + ":" + r.source_ref] = r.word_count; });
   (sheets.data || []).forEach(s => ITEMS.push({
     type:"sheet", ctype:"theory_sheet", ref:s.id, title:s.title, topic:s.category, date:s.created_at, done:readSet.has(s.id), only:true,
+    mins:Math.max(1, Math.round((words["theory_sheet:" + s.id] || 600) / READ_WPM)),
     href:"/theory/sheets/view.html?slug=" + encodeURIComponent(s.slug),
     meta:fmtDate(s.created_at) }));
   (evs.data || []).filter(e => e.mux_playback_id).forEach(e => ITEMS.push({
-    type:"clinic", ctype:"clinic", ref:e.id, title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
+    type:"clinic", ctype:"clinic", ref:e.id, mins:e.duration_mins || 60, title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
     img:"https://image.mux.com/" + e.mux_playback_id + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=25",
     mux:e.mux_playback_id, only:true,
     playable:true, dur:e.duration_mins ? e.duration_mins + " min" : "",
@@ -496,7 +511,7 @@ async function load() {
     if (p.youtube_id) {
       const vert = p.orientation === "portrait";
       ITEMS.push({ type:"video", ctype:"video", ref:p.youtube_id, title:p.title, date:p.published_at, playable:true, vertical:vert,
-        yt:p.youtube_id,
+        yt:p.youtube_id, mins:Math.max(1, Math.round((p.duration_seconds || 0) / 60)),
         img:"https://i.ytimg.com/vi/" + p.youtube_id + (vert ? "/oardefault.jpg" : "/mqdefault.jpg"),
         href:"/content-feed.html?post=" + encodeURIComponent(p.id),
         dur:p.duration_seconds ? mins(p.duration_seconds) : "",
@@ -515,11 +530,12 @@ async function load() {
   });
   (mmt.data || []).forEach(a => ITEMS.push({
     type:"article", ctype:"mmt", ref:String(a.id), title:a.title, date:a.published_at || a.created_at,
+    mins:Math.max(1, Math.round((words["mmt:" + a.id] || 800) / READ_WPM)),
     bg:mmtBg(a.slug || ""),
     href:"https://matthewcawood.com/monday-music-tips/" + encodeURIComponent(a.slug), external:true,
     meta:fmtDate(a.published_at || a.created_at) }));
   lessons.forEach(l => { if (META[l.course]) ITEMS.push({
-    type:"course", ctype:"lesson", ref:l.id, title:l.title, topic:META[l.course].label, done:done.has(l.id),
+    type:"course", ctype:"lesson", ref:l.id, title:l.title, topic:META[l.course].label, done:done.has(l.id), mins:l.est_minutes || 8,
     href:"/courses.html?lesson=" + encodeURIComponent(l.id),
     meta:META[l.course].label + (l.est_minutes ? " · " + l.est_minutes + " min" : "") }); });
 
@@ -586,6 +602,16 @@ async function load() {
   const counts = {};
   ITEMS.forEach(i => { if (i.topic) counts[i.topic] = (counts[i.topic] || 0) + 1; });
   TOPICS = Object.keys(counts).map(n => ({ name:n, count:counts[n] })).sort((a,b) => b.count - a.count);
+
+  /* Courses are the flagship, and their weight is in what is inside them, not
+     in how many there are. */
+  {
+    const live = COURSES.filter(c => c.key);
+    const lessons_n = live.reduce((a, c) => a + (c.n || 0), 0);
+    const soon_n = COURSES.length - live.length;
+    COURSE_DEPTH = lessons_n + " lessons across " + live.length + " course" + (live.length === 1 ? "" : "s")
+      + (soon_n ? " · " + soon_n + " more coming" : "");
+  }
 
   /* continue row */
   CONTINUE = [];
@@ -681,6 +707,53 @@ function row(title, sub, items, opts) {
     + (o.big ? " ln-big" : "")
     + (o.vertical ? " ln-vrail" : "") + (o.course ? " ln-crail" : "") + '">'
     + items.map(it => o.course ? courseCard(it) : card(it, o)).join("") + "</div></section>";
+}
+
+/* ── the library ─────────────────────────────────────────────────────────────
+   One filterable, endless collection. The filters are the two questions a
+   member actually asks: how long have I got, and what do I want to work on.
+   Type was our own filing system and meant nothing to them. */
+const TIME_BANDS = [
+  { k:"s",  label:"Under 5 min",  test:i => (i.mins || 0) > 0 && i.mins < 5 },
+  { k:"m",  label:"5 to 15 min",  test:i => i.mins >= 5 && i.mins < 15 },
+  { k:"l",  label:"15 min plus",  test:i => i.mins >= 15 },
+];
+let band = "", libTopic = "", libShown = 24;
+
+function libraryPool() {
+  return ITEMS.filter(i =>
+    (!band  || (TIME_BANDS.find(b => b.k === band) || {}).test(i)) &&
+    (!libTopic || (i.syms || []).includes(libTopic)));
+}
+
+function library() {
+  const pool = libraryPool();
+  const topics = VOCAB.map(v => ({ id:v.id, label:v.topic || v.label,
+      n:ITEMS.filter(i => (i.syms || []).includes(v.id)).length }))
+    .filter(t => t.n >= 6).sort((a, b) => b.n - a.n).slice(0, 10);
+
+  let h = '<section class="ln-row ln-lib"><div class="ln-rh"><h2>Everything</h2>'
+    + '<span class="ln-rs">' + ITEMS.length + " pieces to work through</span></div>";
+
+  h += '<div class="ln-fbar"><span class="ln-fgrp">'
+    + TIME_BANDS.map(b => '<button type="button" class="ln-fchip' + (band === b.k ? " on" : "")
+        + '" data-band="' + b.k + '">' + b.label + "</button>").join("")
+    + "</span>";
+  if (topics.length) h += '<span class="ln-fgrp ln-ftop">'
+    + topics.map(t => '<button type="button" class="ln-fchip' + (libTopic === t.id ? " on" : "")
+        + '" data-topic="' + esc(t.id) + '">' + esc(t.label)
+        + '<span class="ln-fn">' + t.n + "</span></button>").join("") + "</span>";
+  h += "</div>";
+
+  h += '<div class="ln-libcount">' + pool.length + (pool.length === 1 ? " piece" : " pieces")
+    + (band || libTopic ? ' · <button class="ln-all" type="button" id="ln-libclear">clear</button>' : "")
+    + "</div>";
+
+  const shown = pool.slice().sort(byDate).slice(0, libShown);
+  h += '<div class="ln-grid">' + shown.map(i => card(i, {})).join("") + "</div>";
+  if (pool.length > shown.length)
+    h += '<div class="ln-morewrap"><button class="ln-more" id="ln-libmore" type="button">Show more</button></div>';
+  return h + "</section>";
 }
 
 /* ── filtering ──────────────────────────────────────────────────────────────── */
@@ -870,12 +943,9 @@ function render() {
       + "</span></div>"
     : "";
 
-  html +=
-    '<div class="ln-lctl"><div id="ln-types" style="display:flex;gap:8px;flex-wrap:wrap">'
-    + Object.keys(TYPES).map(k => '<button class="ln-lfil" type="button" data-type="' + k + '" aria-pressed="'
-        + (type === k) + '" style="--fc:' + TYPES[k].colour + '">' + esc(TYPES[k].label)
-        + '<span class="ln-fn">' + (counts[k] || 0) + "</span></button>").join("")
-    + "</div></div>";
+  /* The Video / Clinic / PPD / Article pills filtered by our own filing system,
+     which means nothing to a member. The library below filters by time and by
+     what they want to work on instead. */
 
   if (browsing) {
     const list = filtered().sort(byDate);
@@ -906,17 +976,14 @@ function render() {
     const recent = flat.filter(i => i.date && new Date(i.date).getTime() > weekAgo);
     if (recent.length >= 4) html += row("New this week", "", take(i => recent.includes(i), 12), {});
     else html += row("Recently added", "", take(() => true, 12), {});
-    html += row("Paths", "courses", COURSES, { course:true });
-    html += row("Clinic replays", (counts.clinic || 0) + " sessions", take(i => i.type === "clinic", 12), { seeAll:"clinic" });
-    html += row("Videos", (counts.video || 0) + " on the channel", take(i => i.type === "video", 14), { seeAll:"video" });
-    // Topic rows are deliberately absent. A topic like pedalling should gather a
-    // video, an article, a Monday Music Tip and a short, and only Piano Practice
-    // Daily carries a category today, so a "topic" row here would in fact be a
-    // Piano Practice Daily row wearing a topic's name. They return with tagging.
-    html += row("Piano Practice Daily", (counts.sheet || 0) + " sheets", take(i => i.type === "sheet", 14), { seeAll:"sheet" });
-    html += row("Monday Music Tips", (counts.article || 0) + " articles", take(i => i.type === "article", 14), { seeAll:"article" });
-    const shorts = ITEMS.filter(i => i.vertical).sort(byDate).slice(0, 24);
-    html += row("Shorts", "a minute or two each", shorts, { vertical:true });
+    html += '<section class="ln-row ln-flag"><div class="ln-rh"><h2>Courses</h2>'
+      + '<span class="ln-rs">' + COURSE_DEPTH + "</span></div>"
+      + '<div class="ln-rail ln-crail">' + COURSES.map(courseCard).join("") + "</div></section>";
+    /* Everything else becomes one library that does not end, filtered by the
+       two things a member actually asks: how long have I got, and what do I
+       want to work on. Format rows made the collection look like eight things
+       rather than a thousand. */
+    html += library();
   }
 
   $("ln-root").innerHTML = html;
@@ -983,6 +1050,12 @@ function wire() {
     showAll = false; render(); window.scrollTo({ top:0, behavior:"smooth" });
   });
   const all = $("ln-all");   if (all) all.onclick = () => { showAll = true; render(); };
+  document.querySelectorAll("[data-band]").forEach(b => b.onclick = () => {
+    band = band === b.dataset.band ? "" : b.dataset.band; libShown = 24; render(); });
+  document.querySelectorAll("[data-topic]").forEach(b => b.onclick = () => {
+    libTopic = libTopic === b.dataset.topic ? "" : b.dataset.topic; libShown = 24; render(); });
+  const lm = $("ln-libmore"); if (lm) lm.onclick = () => { libShown += 24; render(); };
+  const lc = $("ln-libclear"); if (lc) lc.onclick = () => { band = ""; libTopic = ""; libShown = 24; render(); };
   const clr = $("ln-clear"); if (clr) clr.onclick = () => { topic = type = term = symptom = ""; showAll = false; render(); };
 }
 
