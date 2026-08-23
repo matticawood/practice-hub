@@ -410,7 +410,7 @@ const CMETA = [
 const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
-let PICKS = [], PICK_WHY = "", PICK_SUB = "";
+let PICKS = [], PICK_SHORTS = [], PICK_WHY = "", PICK_SUB = "";
 let FEED = {};                      // post id -> raw row, for the lightbox
 let topic = "", type = "", term = "", showAll = false, symptom = "";
 
@@ -556,7 +556,7 @@ async function load() {
 
   /* One row of things that might actually help, chosen from what this member has
      written about, then what their practice shows, then what they read. */
-  PICKS = [];
+  PICKS = []; PICK_SHORTS = [];
   PICK_WHY = ""; PICK_SUB = "";
   /* Issued after the batch above, not inside it. Fired in parallel with the very
      first requests it can go out before the client has attached the session, and
@@ -564,10 +564,14 @@ async function load() {
      never appeared. */
   let picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
   if (!(picks.data || []).length) picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
-  const pk = (picks && picks.data) || [];
+  let pk = (picks && picks.data) || [];
   if (pk.length) {
     const byHref = {};
     ITEMS.forEach(i => { byHref[i.href] = i; });
+    PICK_SHORTS = pk.filter(r => r.fmt === "short").map(r => Object.assign({},
+      byHref[r.href] || { type:"video", title:r.title, href:r.href, meta:"" },
+      { topic:r.topic, vertical:true })).filter(Boolean);
+    pk = pk.filter(r => r.fmt !== "short");
     PICKS = pk.map(r => Object.assign({}, byHref[r.href] || {
       type: r.content_type === "mmt" ? "article" : r.content_type === "theory_sheet" ? "sheet"
           : r.content_type === "lesson" ? "course" : r.content_type,
@@ -896,6 +900,12 @@ function render() {
       /* Shorts are ranked in by picks_for, so render whatever it gave us. */
       if (PICKS.length >= 3)
         html += row(PICK_WHY, PICK_SUB, PICKS.slice(0, 12), { rail:true, big:true, showTopic:true });
+      /* Shorts get their own shelf rather than being squeezed into a row built
+         for 16:9. It replaces the generic Shorts row further down rather than
+         adding to it, so the page does not grow a row. */
+      if (PICK_SHORTS.length >= 3)
+        html += row("Quick ones", "a minute or two each", PICK_SHORTS.slice(0, 14),
+                    { vertical:true, showTopic:true });
     }
 
     const weekAgo = Date.now() - 8 * 86400000;
@@ -911,8 +921,11 @@ function render() {
     // Piano Practice Daily row wearing a topic's name. They return with tagging.
     html += row("Piano Practice Daily", (counts.sheet || 0) + " sheets", take(i => i.type === "sheet", 14), { seeAll:"sheet" });
     html += row("Monday Music Tips", (counts.article || 0) + " articles", take(i => i.type === "article", 14), { seeAll:"article" });
-    const shorts = ITEMS.filter(i => i.vertical).sort(byDate).slice(0, 24);
-    html += row("Shorts", "a minute or two each", shorts, { vertical:true });
+    /* Only when there was nothing personal to shelve above. */
+    if (PICK_SHORTS.length < 3) {
+      const shorts = ITEMS.filter(i => i.vertical).sort(byDate).slice(0, 24);
+      html += row("Shorts", "a minute or two each", shorts, { vertical:true });
+    }
   }
 
   $("ln-root").innerHTML = html;
