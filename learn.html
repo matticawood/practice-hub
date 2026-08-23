@@ -175,7 +175,7 @@
   .ln-row { margin-top:30px; }
   /* Everything fades but the control: it is the one thing that should be seen
      to move while the rest is replaced. */
-  #ln-root .ln-row > *, #ln-root .ln-rh > * { transition:opacity .18s ease; }
+  #ln-rows .ln-row > *, #ln-rows .ln-rh > * { transition:opacity .18s ease; }
   #ln-root.ln-swap .ln-row > *:not(.ln-rh),
   #ln-root.ln-swap .ln-rh > *:not(.ln-seg) { opacity:0; }
 
@@ -1213,7 +1213,7 @@ function render() {
       + "<span><b>" + COURSES.filter(c => c.key).length + "</b> courses</span>"
       + "</span></div>";
 
-  let html = slides.length
+  const heroHtml = slides.length
     ? '<div class="ln-bb" id="ln-bb">'
       + slides.map((b, i) => slideHtml(b).replace('class="ln-bb-slide"',
           'class="ln-bb-slide' + (i === BB_AT % slides.length ? " on" : "") + '"')).join("")
@@ -1224,6 +1224,7 @@ function render() {
           : "")
       + "</div>"
     : "";
+  let html = "";
 
   /* The one question nothing else on the page answers. Both states are shown
      rather than one toggle, so the exclusives can be seen to exist without
@@ -1309,11 +1310,29 @@ function render() {
     html += everything(pool);
   }
 
-  $("ln-root").innerHTML = html;
-  wire();
+  /* The hero is kept out of the rows and replaced only when it would actually
+     differ. Rebuilding it on every render restarted the carousel and killed
+     whatever was playing, so filtering the library below it threw the hero
+     back to its first slide and its still. Nothing about the hero depends on
+     the filter, so pressing a filter should leave it alone. */
+  const root = $("ln-root");
+  let rows = document.getElementById("ln-rows");
+  if (!rows) {
+    root.innerHTML = '<div id="ln-hero"></div><div id="ln-rows"></div>';
+    rows = document.getElementById("ln-rows");
+  }
+  const heroChanged = heroHtml !== LAST_HERO;
+  if (heroChanged) {
+    document.getElementById("ln-hero").innerHTML = heroHtml;
+    LAST_HERO = heroHtml;
+  }
+  rows.innerHTML = html;
+  wire(heroChanged);
   fixShortThumbs();
-  billboardMotion();
+  if (heroChanged) billboardMotion();
 }
+/* What the hero was last built from, so it is rebuilt only when it differs. */
+let LAST_HERO = "";
 
 /* Netflix-style: the billboard still becomes a short silent loop once it is
    ready. Mux serves animated webp straight from the playback id, so there is no
@@ -1547,12 +1566,12 @@ function billboardMotion() {
   nothingToWaitFor();
 }
 
-function wire() {
+function wire(heroChanged) {
   document.querySelectorAll(".ln-bb-slide[data-href]").forEach(sl => {
     sl.onclick = e => { if (!e.target.closest("a") && !e.target.closest(".ln-bb-dot"))
       location.href = sl.dataset.href; };
   });
-  wireCarousel();
+  if (heroChanged !== false) wireCarousel();
   // Anything that points at a feed post opens in place instead of navigating.
   document.querySelectorAll('a[href^="/content-feed.html?post="]').forEach(a => {
     a.addEventListener("click", e => {
