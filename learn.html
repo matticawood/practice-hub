@@ -1296,25 +1296,36 @@ function billboardMotion() {
      muted, without controls, not clickable, and only while you are on it. The
      very first one starts straight away, because the loading screen is holding
      for it; later slides let their still land first. */
-  /* Attached at once, not after a pause. The player is invisible behind the
-     still either way, so every moment it is not loading is a moment taken off
-     the head start it needs to get its own chrome out of the way before it is
-     shown. It used to wait 1.2s for the still to land, which the still does
-     not need, since the still is already the thing on screen. */
-  const play = build => {
-    if (!wrap.closest(".ln-bb-slide").classList.contains("on")) return nothingToWaitFor();
-    if (wrap.querySelector(".ln-bb-vid")) return;
-    const el = build(el0 => bbShow(el0));
-    wrap.appendChild(el);
-    /* No backstop reveal. A timer that shows the player regardless is a timer
-       that shows the play button, because the one state we must never reveal
-       is the one before playback starts. If a player never reports itself
-       playing, the slide simply stays on its still, which is the right
-       outcome: a still beats somebody else's play button. The page itself
-       cannot hang on this, because the loading gate has its own timeout. */
+  /* The two sources do not get the same treatment, because they do not have
+     the same problem. Mux is our own player with its chrome switched off, so
+     there is nothing to hide from and nothing to wait out. YouTube has to run
+     unseen until its chrome clears, which is the only reason any of the
+     waiting exists: it must not leak onto the slides that never needed it. */
+  const attach = (build, delay, backstop) => {
+    const go = () => {
+      if (!wrap.closest(".ln-bb-slide").classList.contains("on")) return nothingToWaitFor();
+      if (wrap.querySelector(".ln-bb-vid")) return;
+      const el = build(el0 => bbShow(el0));
+      wrap.appendChild(el);
+      if (backstop) setTimeout(() => bbShow(el), backstop);
+    };
+    if (delay) setTimeout(go, delay); else go();
   };
+  /* Mux: the still lands, then it plays, and however it reports itself ready
+     it never hangs, because a backstop shows it anyway. Its chrome is already
+     off, so there is no state of it that is wrong to show. */
+  const playMux = build => attach(build, BB_REVEALED ? 1200 : 0, 2600);
+  /* YouTube: attached at once, since it is invisible behind the still either
+     way and every moment it is not loading is taken off the head start it
+     needs. No backstop, ever: a timer that shows the player regardless is a
+     timer that shows the play button, because the one state that must never
+     be revealed is the one before playback starts. If it never reports itself
+     playing the slide stays on its still, which beats somebody else's play
+     button. The page cannot hang on that; the loading gate has its own
+     timeout. */
+  const playYt = build => attach(build, 0, 0);
 
-  if (img.dataset.mux) return play(ready => {
+  if (img.dataset.mux) return playMux(ready => {
     const m = document.createElement("mux-player");
     m.addEventListener("playing", () => ready(m), { once:true });
     m.className = "ln-bb-vid ln-bb-mux";
@@ -1337,7 +1348,7 @@ function billboardMotion() {
      video runs where it cannot be seen for that long, and only then does the
      still cross-fade to it. controls=0 means the bottom bar never draws, and
      pointer-events:none means nothing can bring the chrome back by hovering. */
-  if (img.dataset.yt) return play(ready => {
+  if (img.dataset.yt) return playYt(ready => {
     const id = img.dataset.yt;
     const f = document.createElement("iframe");
     f.className = "ln-bb-vid ln-bb-yt";
