@@ -2003,7 +2003,10 @@ async function _shPalRemoteSearch(query, navHits) {
       ppd = r.data || [];
     } catch (e) {}
     try {
+      // Clinics carry a post row only so their comments share one table; the
+      // clinic itself is found through Live, not through this palette.
       const r = await _shPalDb.from("content_feed_posts").select("id,title,type")
+        .neq("type", "clinic")
         .ilike("title", "%" + esc + "%").order("published_at", { ascending: false }).limit(6);
       content = r.data || [];
     } catch (e) {}
