@@ -419,24 +419,36 @@
   @media (max-width:640px) { .ln-crail .course-card { width:76vw; } }
 
   /* ── search + grid ── */
-  /* Tight under the hero: the two are one unit, and 56px of air between them
-     read as two separate things. */
-  .ln-lctl { display:flex; gap:10px; align-items:center; margin:0 0 4px; }
-  /* Two halves of one control rather than two loose chips, so it reads as a
-     single question with two answers. */
-  .ln-seg { display:inline-flex; padding:4px; gap:4px; background:var(--surface);
-    border:1px solid var(--border); border-radius:var(--r-pill); }
-  .ln-segb { border:0; background:none; cursor:pointer; border-radius:var(--r-pill);
-    padding:9px 18px; font:600 .85rem/1 var(--sans); color:var(--text-2);
-    display:inline-flex; align-items:center; gap:8px; white-space:nowrap;
-    transition:background .16s, color .16s; }
-  .ln-segb:hover { color:var(--text); background:var(--surface-2); }
-  .ln-segb[aria-pressed="true"] { background:var(--text); color:var(--bg); }
+  /* Two halves of one control, not two chips: a thumb slides between them, so
+     the control has a position rather than two lights. The thumb is measured
+     and moved in JS because the halves are different widths. */
+  .ln-seg { position:relative; display:inline-flex; padding:4px; background:var(--surface);
+    border:1px solid var(--border); border-radius:var(--r-pill); flex:0 0 auto; }
+  .ln-segt { position:absolute; top:4px; bottom:4px; left:0; width:0;
+    border-radius:var(--r-pill); background:var(--text); pointer-events:none;
+    transform:translateX(4px);
+    transition:transform .32s cubic-bezier(.4,0,.2,1), width .32s cubic-bezier(.4,0,.2,1); }
+  .ln-seg.ln-seg-init .ln-segt { transition:none; }   /* no slide on first paint */
+  .ln-segb { position:relative; z-index:1; border:0; background:none; cursor:pointer;
+    border-radius:var(--r-pill); padding:8px 16px; font:600 .82rem/1 var(--sans);
+    color:var(--text-2); display:inline-flex; align-items:center; gap:8px;
+    white-space:nowrap; transition:color .2s; }
+  .ln-segb:hover { color:var(--text); }
+  .ln-segb[aria-pressed="true"] { color:var(--bg); }
   .ln-segb[aria-pressed="true"] .ln-fn { color:rgba(12,12,14,.55); }
-  .ln-segb .ln-fn { font-size:.74rem; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+  .ln-segb .ln-fn { font-size:.73rem; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+  /* It rides in the first row's heading, so it costs no vertical space. The
+     heading's See all uses margin-left:auto to push right; when the control is
+     there it takes that job instead. */
+  .ln-row-1st .ln-rh { gap:14px; }
+  .ln-row-1st .ln-rh .ln-seg { margin-left:auto; align-self:center; }
+  .ln-row-1st .ln-rh .ln-all { margin-left:0; }
   @media (max-width:640px) {
-    .ln-seg { width:100%; }
-    .ln-segb { flex:1 1 0; justify-content:center; padding:10px; font-size:.8rem; }
+    /* No room beside a heading on a phone, so it takes its own full-width line
+       above the first row rather than squeezing the title to nothing. */
+    .ln-row-1st .ln-rh { flex-wrap:wrap; }
+    .ln-row-1st .ln-rh .ln-seg { order:-1; margin:0 0 12px; width:100%; }
+    .ln-segb { flex:1 1 0; justify-content:center; padding:9px 8px; font-size:.78rem; }
   }
   .ln-lsearch { flex:1; min-width:15rem; display:flex; align-items:center; gap:9px; background:var(--control);
     border:1px solid var(--border-2); border-radius:var(--r-s); padding:11px 14px; box-shadow:var(--shadow); }
@@ -848,12 +860,50 @@ function courseCard(c) {
     : '<a class="course-card" href="/courses.html?course=' + esc(c.key) + '" style="--cc-accent:' + c.color + '">' + hero + body + "</a>";
 }
 
+/* Set by render, claimed by whichever row draws first. */
+let SEG_HTML = "";
+/* The two halves are different widths, so the thumb is measured rather than
+   given a fraction.
+   Pressing a half re-renders the page, which rebuilds this control, so a thumb
+   that simply drew itself in the new place would never appear to move. It is
+   put back where it was on the render before, without a transition, and only
+   then moved: that is what makes the slide happen across a rebuild. On the
+   first paint there is no previous position, so it just lands. */
+let SEG_AT = null;
+function segThumb(seg) {
+  const t = seg.querySelector(".ln-segt");
+  const btns = [...seg.querySelectorAll(".ln-segb")];
+  const at = Math.max(0, btns.findIndex(b => b.getAttribute("aria-pressed") === "true"));
+  if (!t || !btns.length) return;
+  const place = i => {
+    t.style.width = btns[i].offsetWidth + "px";
+    t.style.transform = "translateX(" + btns[i].offsetLeft + "px)";
+  };
+  const moved = SEG_AT !== null && SEG_AT !== at && btns[SEG_AT];
+  seg.classList.add("ln-seg-init");
+  place(moved ? SEG_AT : at);
+  if (moved) {
+    requestAnimationFrame(() => {
+      seg.classList.remove("ln-seg-init");
+      requestAnimationFrame(() => place(at));
+    });
+  } else {
+    requestAnimationFrame(() => requestAnimationFrame(() => seg.classList.remove("ln-seg-init")));
+  }
+  SEG_AT = at;
+  // Fonts land after first paint and change the widths under it.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => place(at)).catch(() => {});
+  window.addEventListener("resize", () => place(at));
+}
 function row(title, sub, items, opts) {
   if (!items.length) return "";
   const o = opts || {};
-  return '<section class="ln-row"><div class="ln-rh"><h2>' + esc(title) + "</h2>"
+  const seg = SEG_HTML; SEG_HTML = "";
+  return '<section class="ln-row' + (seg ? " ln-row-1st" : "") + '"><div class="ln-rh"><h2>'
+    + esc(title) + "</h2>"
     + (sub ? '<span class="ln-rs">' + esc(sub) + "</span>" : "")
     + (o.seeAll ? '<button class="ln-all" type="button" data-see="' + esc(o.seeAll) + '">See all</button>' : "")
+    + seg
     + '</div><div class="' + (items.length <= 4 && !o.vertical && !o.rail ? "ln-grid" : "ln-rail")
     + (o.big ? " ln-big" : "")
     + (o.vertical ? " ln-vrail" : "") + (o.course ? " ln-crail" : "") + '">'
@@ -1073,9 +1123,14 @@ function closePost(fromPop) {
 
 /* ── render ─────────────────────────────────────────────────────────────────── */
 function render() {
-  const counts = {}; ITEMS.forEach(i => counts[i.type] = (counts[i.type] || 0) + 1);
-  const browsing = !!(term || type || topic || symptom || onlyEx);
-  const flat = ITEMS.filter(i => !i.vertical);
+  const counts = {}; pool.forEach(i => counts[i.type] = (counts[i.type] || 0) + 1);
+  /* onlyEx is deliberately not in here. Searching or picking a type gives a
+     flat grid of results; Practice Room exclusives is not a search, it is this
+     same page with the public material taken out, so it keeps its rows and the
+     order they come in. */
+  const browsing = !!(term || type || topic || symptom);
+  const pool = onlyEx ? ITEMS.filter(i => i.only) : ITEMS;
+  const flat = pool.filter(i => !i.vertical);
   const next = CONTINUE.find(c => c.k === "Next clinic");
   const resume = CONTINUE.filter(c => c.k !== "Next clinic");
 
@@ -1155,18 +1210,22 @@ function render() {
       + "</div>"
     : "";
 
-  /* The only question this bar asks that nothing else on the page answers.
-     Two states side by side rather than one toggle, so both are visible and a
-     member can see the exclusives exist without pressing anything. */
-  const exCount = ITEMS.filter(i => i.only).length
-    + COURSES.filter(c => c.key).reduce((a, c) => a + (c.n || 0), 0);
-  html +=
-    '<div class="ln-lctl"><div class="ln-seg" id="ln-types" role="group">'
-    + '<button class="ln-segb" type="button" data-ex="0" aria-pressed="' + (!onlyEx)
-        + '">Everything</button>'
+  /* The one question nothing else on the page answers. Both states are shown
+     rather than one toggle, so the exclusives can be seen to exist without
+     pressing anything, and the thumb slides between them so it reads as one
+     control with a position rather than two that light up.
+     It is handed to the first row heading rather than given a line of its own,
+     where a single control would push the first row of content down the page. */
+  const lessons = COURSES.filter(c => c.key).reduce((a, c) => a + (c.n || 0), 0);
+  SEG_HTML =
+    '<div class="ln-seg" id="ln-types" role="group">'
+    + '<span class="ln-segt" aria-hidden="true"></span>'
+    + '<button class="ln-segb" type="button" data-ex="0" aria-pressed="' + (!onlyEx) + '">'
+    + 'Everything<span class="ln-fn">' + (ITEMS.length + lessons) + "</span></button>"
     + '<button class="ln-segb" type="button" data-ex="1" aria-pressed="' + onlyEx + '">'
-    + 'Practice Room exclusives<span class="ln-fn">' + exCount + "</span></button>"
-    + "</div></div>";
+    + 'Practice Room exclusives<span class="ln-fn">'
+    + (ITEMS.filter(i => i.only).length + lessons) + "</span></button>"
+    + "</div>";
 
   if (browsing) {
     const all = filtered().sort(byDate);
@@ -1178,17 +1237,8 @@ function render() {
     html += '<div class="ln-lcount"><b>' + all.length + "</b> item" + (all.length === 1 ? "" : "s")
       + (topic ? " in " + esc(topic) : "")
       + (symptom ? " for \u201c" + esc((VOCAB.find(v => v.id === symptom) || {}).label || symptom) + "\u201d" : "")
-      + (onlyEx ? " you only get here, plus the courses" : "")
       + (term ? ' matching "' + esc(term) + '"' : "")
       + ' · <button class="ln-all" id="ln-clear" type="button">clear</button></div>';
-    /* Courses are members-only too, and they are the biggest thing in here, so
-       the Members only view leads with them rather than leaving them out. */
-    if (onlyEx && COURSES.length) {
-      const live = COURSES.filter(c => c.key);
-      const n = live.reduce((a, c) => a + (c.n || 0), 0);
-      html += row("Courses", n + " lessons across " + live.length
-                  + " course" + (live.length === 1 ? "" : "s"), COURSES, { course:true });
-    }
     if (brief.length)
       html += row("Shorts", brief.length + (brief.length === 1 ? " short" : " shorts"),
                   brief, { vertical:true });
@@ -1217,7 +1267,12 @@ function render() {
     const recent = flat.filter(i => i.date && new Date(i.date).getTime() > weekAgo);
     if (recent.length >= 4) html += row("New this week", "", take(i => recent.includes(i), 12), {});
     else html += row("Recently added", "", take(() => true, 12), {});
-    html += row("Paths", "courses", COURSES, { course:true });
+    /* Courses are members-only in their entirety, so the row is the same in
+       both views and holds the place it holds on the full page. */
+    html += row(onlyEx ? "Courses" : "Paths",
+                onlyEx ? COURSES.filter(c => c.key).reduce((a, c) => a + (c.n || 0), 0)
+                         + " lessons across " + COURSES.filter(c => c.key).length + " courses"
+                       : "courses", COURSES, { course:true });
     html += row("Clinic replays", (counts.clinic || 0) + " sessions", take(i => i.type === "clinic", 12), { seeAll:"clinic" });
     html += row("Videos", (counts.video || 0) + " on the channel", take(i => i.type === "video", 14), { seeAll:"video" });
     // Topic rows are deliberately absent. A topic like pedalling should gather a
@@ -1226,7 +1281,7 @@ function render() {
     // Piano Practice Daily row wearing a topic's name. They return with tagging.
     html += row("Piano Practice Daily", (counts.sheet || 0) + " sheets", take(i => i.type === "sheet", 14), { seeAll:"sheet" });
     html += row("Monday Music Tips", (counts.article || 0) + " articles", take(i => i.type === "article", 14), { seeAll:"article" });
-    const shorts = ITEMS.filter(i => i.vertical).sort(byDate).slice(0, 24);
+    const shorts = pool.filter(i => i.vertical).sort(byDate).slice(0, 24);
     html += row("Shorts", "a minute or two each", shorts, { vertical:true });
     html += everything();
   }
@@ -1486,9 +1541,12 @@ function wire() {
   const q = $("ln-q");
   if (q) q.oninput = e => { term = e.target.value; showAll = false; render(); const n = $("ln-q"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } };
   const ty = $("ln-types");
-  if (ty) ty.querySelectorAll(".ln-segb").forEach(b => b.onclick = () => {
-    onlyEx = b.dataset.ex === "1"; showAll = false; render();
-  });
+  if (ty) {
+    ty.querySelectorAll(".ln-segb").forEach(b => b.onclick = () => {
+      onlyEx = b.dataset.ex === "1"; showAll = false; render();
+    });
+    segThumb(ty);
+  }
   document.querySelectorAll("[data-see]").forEach(b => b.onclick = () => {
     const v = b.dataset.see;
     if (v.startsWith("topic:")) { topic = v.slice(6); type = ""; } else { type = v; topic = ""; }
