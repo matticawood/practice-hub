@@ -117,8 +117,7 @@
     box-shadow:0 40px 90px -30px rgba(0,0,0,.75); }
   .ln-lb-media .cf-yt-embed, .ln-lb-media .cf-yt-thumb { border-radius:0; }
   .ln-lb-media mux-player, .ln-lb-media video { width:100%; display:block; }
-  .ln-lb-body { background:var(--surface); border:1px solid var(--border);
-    border-radius:var(--r-l); margin-top:14px; padding:18px 20px; }
+  .ln-lb-body { padding:18px 20px 14px; }
   .ln-lb-body .cf-card-title { font:700 1.32rem/1.3 var(--serif); margin:0 0 6px; }
   .ln-lb-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
     border-top:1px solid var(--border); margin-top:14px; padding-top:12px;
@@ -127,9 +126,16 @@
   /* .tc-comments-section already draws its own card, so this is only spacing.
      Giving it a background and border made a box inside a box. */
   .ln-lb-cmts { margin-top:14px; }
+  /* Everything below the video arrives at once. Until it does, this is a plain
+     surface with one spinner, rather than four things appearing in sequence and
+     the loader creeping down the page. */
+  .ln-lb-under { background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--r-l); margin-top:14px; overflow:hidden; }
+  .ln-lb-under > .ln-lb-loader { display:none; }
+  .ln-lb-under.loading > .ln-lb-loader { display:grid; place-items:center; min-height:190px; }
+  .ln-lb-under.loading > .ln-lb-body, .ln-lb-under.loading > .ln-lb-cmts { display:none; }
   .ln-lb-loading { display:grid; place-items:center; padding:34px 0;
     color:var(--text-muted); font:500 .85rem/1 var(--sans); }
-  .ln-lb-spin { width:16px; height:16px; border-width:2px; }
   /* The embed keeps a 16:9 box, so capping only its height would letterbox it.
      Cap the WIDTH to whatever 16:9 allows at this screen height and centre it,
      and the whole video scales to fit instead of running off the bottom. */
@@ -146,10 +152,8 @@
     .ln-lb { padding:0; background:rgba(14,12,10,.92); }
     /* Video hard against the top, as it is on YouTube, so the close sits on it. */
     .ln-lb-in { padding-top:0; }
-    .ln-lb-media, .ln-lb-body { border-radius:0; border-left:0; border-right:0; }
-    .ln-lb-body { border-top:0; margin-top:0; }
-    .ln-lb-cmts { margin-top:0; }
-    .ln-lb-cmts .tc-comments-section { border-radius:0; border-left:0; border-right:0; border-top:0; }
+    .ln-lb-media { border-radius:0; }
+    .ln-lb-under { border-radius:0; border-left:0; border-right:0; border-top:0; margin-top:0; }
     .ln-lb-close { position:fixed; top:10px; right:10px;
       background:rgba(0,0,0,.55); border-color:rgba(255,255,255,.35); }
   }
@@ -309,10 +313,10 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-practice-autolog.js?v=4"></script>
-<link rel="stylesheet" href="/shared-post-view.css?v=20260823e">
+<link rel="stylesheet" href="/shared-post-view.css?v=20260823f">
 <script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3.12.0"></script>
 <script src="/shared-comments.js?v=20260823a"></script>
-<script src="/shared-post-view.js?v=20260823e"></script>
+<script src="/shared-post-view.js?v=20260823f"></script>
 <script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-achievements.js?v=9"></script>
 <script src="/shared-header.js?v=2026071802"></script>
@@ -322,8 +326,11 @@
   <div class="ln-lb-in">
     <button class="ln-lb-close" id="ln-lb-close" type="button" aria-label="Close">&#10005;</button>
     <div class="ln-lb-media" id="ln-lb-media"></div>
-    <div class="ln-lb-body"  id="ln-lb-body"></div>
-    <div class="ln-lb-cmts"  id="ln-lb-cmts"></div>
+    <div class="ln-lb-under loading" id="ln-lb-under">
+      <div class="ln-lb-loader"><span class="spinner"></span></div>
+      <div class="ln-lb-body"  id="ln-lb-body"></div>
+      <div class="ln-lb-cmts"  id="ln-lb-cmts"></div>
+    </div>
   </div>
 </div>
 <main id="app-main" style="display:none">
@@ -689,8 +696,8 @@ async function openPost(postId) {
   const embed = PostView.embedHtml(p);
   if (embed) media.innerHTML = embed;
   media.querySelectorAll("mux-player, video").forEach(v => { try { v.play(); } catch (err) {} });
-  body.insertAdjacentHTML("beforeend", '<div class="ln-lb-meta" id="ln-lb-meta"><span class="spinner ln-lb-spin"></span></div>');
-  cmts.innerHTML = '<div class="ln-lb-loading"><span class="spinner"></span></div>';
+  cmts.innerHTML = "";
+  $("ln-lb-under").classList.add("loading");    // one spinner, nothing showing yet
 
   LB_OPEN = postId;
   $("ln-lb").classList.remove("closing");
@@ -735,27 +742,29 @@ async function openPost(postId) {
     await Comments.loadReactions([postId]);
     if (LB_OPEN !== postId) return;
 
-    // A poll only exists on written posts, so re-render the body when there is one.
-    if (p.poll) {
-      const keepMedia = media.innerHTML;
-      body.innerHTML = PostView.bodyHtml(p);
-      body.querySelectorAll(".cf-yt-thumb, .cf-yt-embed, .cf-post-media").forEach(el => el.remove());
-      media.innerHTML = keepMedia;
-      body.insertAdjacentHTML("beforeend", '<div class="ln-lb-meta" id="ln-lb-meta"></div>');
-    }
+    // Build the whole panel while it is still hidden, including the comment list,
+    // so it appears complete rather than assembling itself on screen.
+    body.innerHTML = PostView.bodyHtml(p);
+    body.querySelectorAll(".cf-yt-thumb, .cf-yt-embed, .cf-post-media").forEach(el => el.remove());
     const cc = p.commentCount || 0;
-    const meta = $("ln-lb-meta");
-    if (meta) meta.innerHTML = Comments.reactBtnHtml(postId, "ln_lb_" + postId.replace(/-/g, "_"))
+    body.insertAdjacentHTML("beforeend",
+      '<div class="ln-lb-meta">' + Comments.reactBtnHtml(postId, "ln_lb_" + postId.replace(/-/g, "_"))
       + likerChips(p)
-      + '<span class="ln-lb-count">' + (cc ? cc + " comment" + (cc === 1 ? "" : "s") : "No comments yet") + "</span>";
+      + '<span class="ln-lb-count">' + (cc ? cc + " comment" + (cc === 1 ? "" : "s") : "No comments yet") + "</span>"
+      + "</div>");
 
     cmts.innerHTML = '<div class="tc-comments-section">'
       + '<div id="tc-comments-hdr-' + postId + '" class="tc-comments-hdr">Comments</div>'
       + '<div id="tc-comments-list-' + postId + '"></div>' + Comments.formHtml(postId) + "</div>";
-    Comments.load(postId);
+    await Comments.load(postId);                 // wait for the list, not just the shell
+    if (LB_OPEN !== postId) return;
+    $("ln-lb-under").classList.remove("loading");
   } catch (e) {
     console.error("lightbox load error:", e);
-    if (LB_OPEN === postId) cmts.innerHTML = '<div class="ln-lb-loading">Comments could not load.</div>';
+    if (LB_OPEN === postId) {
+      cmts.innerHTML = '<div class="ln-lb-loading">Comments could not load.</div>';
+      $("ln-lb-under").classList.remove("loading");
+    }
   }
 }
 
@@ -771,6 +780,7 @@ function closePost(fromPop) {
   const done = () => {
     lb.classList.remove("open", "closing");
     $("ln-lb-media").innerHTML = ""; $("ln-lb-body").innerHTML = ""; $("ln-lb-cmts").innerHTML = "";
+    $("ln-lb-under").classList.add("loading");
   };
   if (reduced) return done();
   lb.classList.add("closing");
