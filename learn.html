@@ -859,6 +859,8 @@ function filtered() {
    autohides after three seconds of pointer inactivity; the extra second is
    headroom, since this is their timing and not ours. */
 const YT_AUTOHIDE = 4000;
+/* Where the embed is told to begin, so the opening titles are already past. */
+const YT_START = 15;
 const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
 
 /* ── lightbox ───────────────────────────────────────────────────────────────
@@ -1299,8 +1301,12 @@ function billboardMotion() {
     if (wrap.querySelector(".ln-bb-vid")) return;
     const el = build(el0 => bbShow(el0));
     wrap.appendChild(el);
-    // However it reports itself ready, it never hangs: a backstop shows it anyway.
-    setTimeout(() => bbShow(el), 2600);
+    /* No backstop reveal. A timer that shows the player regardless is a timer
+       that shows the play button, because the one state we must never reveal
+       is the one before playback starts. If a player never reports itself
+       playing, the slide simply stays on its still, which is the right
+       outcome: a still beats somebody else's play button. The page itself
+       cannot hang on this, because the loading gate has its own timeout. */
   }, BB_REVEALED ? 1200 : 0);
 
   if (img.dataset.mux) return play(ready => {
@@ -1335,20 +1341,23 @@ function billboardMotion() {
     f.src = "https://www.youtube.com/embed/" + encodeURIComponent(id)
       + "?autoplay=1&mute=1&controls=0&loop=1&playsinline=1&modestbranding=1&rel=0&disablekb=1"
       + "&iv_load_policy=3&fs=0&cc_load_policy=0&enablejsapi=1&origin=" + encodeURIComponent(location.origin)
-      + "&start=15&playlist=" + encodeURIComponent(id);
-    /* The embed reports its own state once asked: enablejsapi plus a
-       `listening` handshake, and it posts state changes back. No library. The
-       clock for the autohide starts when it says it is playing, not when the
-       iframe loads, or a slow start would reveal it with the chrome still up. */
+      + "&start=" + YT_START + "&playlist=" + encodeURIComponent(id);
+    /* The embed reports on itself once asked: enablejsapi plus a `listening`
+       handshake, and it posts back both state changes and a running position.
+       The position is what we key off, because it is the one signal that
+       cannot lie about whether the video is really moving: once it has passed
+       four seconds beyond where we told it to start, playback has genuinely
+       run that long and the chrome has autohidden. A state change alone would
+       fire the moment it says "playing", which is before the title strip has
+       gone anywhere. */
     const onMsg = e => {
       let host = ""; try { host = new URL(e.origin).hostname; } catch (x) { return; }
       if (!/(^|\.)youtube(-nocookie)?\.com$/.test(host)) return;
       let d; try { d = JSON.parse(e.data); } catch (x) { return; }
-      const st = d && d.info && typeof d.info.playerState === "number" ? d.info.playerState
-               : (d && typeof d.info === "number" ? d.info : null);
-      if (st !== 1) return;                      // 1 = playing
+      const t = d && d.info && typeof d.info.currentTime === "number" ? d.info.currentTime : null;
+      if (t === null || t < YT_START + YT_AUTOHIDE / 1000) return;
       window.removeEventListener("message", onMsg);
-      setTimeout(() => ready(f), YT_AUTOHIDE);
+      ready(f);
     };
     window.addEventListener("message", onMsg);
     f.addEventListener("load", () => {
