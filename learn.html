@@ -88,6 +88,36 @@
 
   /* ── rows ── */
   .ln-row { margin-top:30px; }
+
+  /* Watch without leaving the page: the row stays exactly where it was behind
+     the scrim, so dipping in and out of a row costs nothing. */
+  .ln-lb { position:fixed; inset:0; z-index:900; display:none; overflow-y:auto;
+    background:rgba(14,12,10,.78); backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px);
+    padding:clamp(16px,5vh,56px) clamp(12px,4vw,40px); }
+  .ln-lb.open { display:block; }
+  .ln-lb-in { max-width:min(1040px,100%); margin:0 auto; }
+  .ln-lb-close { position:sticky; top:0; float:right; z-index:2;
+    width:38px; height:38px; border-radius:50%; border:1px solid rgba(255,255,255,.28);
+    background:rgba(20,17,15,.72); color:#fff; font-size:1.15rem; line-height:1; cursor:pointer;
+    display:grid; place-items:center; }
+  .ln-lb-close:hover { background:rgba(255,255,255,.16); border-color:#fff; }
+  /* The media is the point, so it sits first and full width. */
+  .ln-lb-media { border-radius:var(--r-l); overflow:hidden; background:#000;
+    box-shadow:0 40px 90px -30px rgba(0,0,0,.75); }
+  .ln-lb-media .cf-yt-embed, .ln-lb-media .cf-yt-thumb { border-radius:0; }
+  .ln-lb-media mux-player, .ln-lb-media video { width:100%; display:block; }
+  .ln-lb-body { background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--r-l); margin-top:14px; padding:18px 20px; }
+  .ln-lb-body .cf-card-title { font:700 1.32rem/1.3 var(--serif); margin:0 0 6px; }
+  .ln-lb-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    font:500 .8rem/1 var(--sans); color:var(--text-muted); margin-bottom:12px; }
+  .ln-lb-cmts { background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--r-l); margin-top:14px; padding:6px 18px 14px; }
+  @media (max-width:640px) {
+    .ln-lb { padding:0; }
+    .ln-lb-media, .ln-lb-body, .ln-lb-cmts { border-radius:0; border-left:0; border-right:0; }
+    .ln-lb-close { margin:10px 10px 0 0; }
+  }
   .ln-stuck { display:grid; grid-template-columns:repeat(auto-fill,minmax(15.5rem,1fr)); gap:12px; }
   .ln-fam { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-m); padding:14px 14px 11px; }
   .ln-fam-mine { border-color:color-mix(in srgb,var(--accent) 55%,var(--border)); }
@@ -244,10 +274,23 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-practice-autolog.js?v=4"></script>
+<link rel="stylesheet" href="/shared-post-view.css">
+<script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3.12.0"></script>
+<script src="/shared-comments.js"></script>
+<script src="/shared-post-view.js"></script>
+<script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-achievements.js?v=9"></script>
 <script src="/shared-header.js?v=2026071802"></script>
 <script src="/live-session.js?v=1"></script>
 
+<div class="ln-lb" id="ln-lb" aria-modal="true" role="dialog">
+  <div class="ln-lb-in">
+    <button class="ln-lb-close" id="ln-lb-close" type="button" aria-label="Close">&#10005;</button>
+    <div class="ln-lb-media" id="ln-lb-media"></div>
+    <div class="ln-lb-body"  id="ln-lb-body"></div>
+    <div class="ln-lb-cmts"  id="ln-lb-cmts"></div>
+  </div>
+</div>
 <main id="app-main" style="display:none">
   <div id="ln-root"></div>
 </main>
@@ -308,6 +351,7 @@ const CMETA = [
 const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
+let FEED = {};                      // post id -> raw row, for the lightbox
 let topic = "", type = "", term = "", showAll = false, symptom = "";
 
 function fmtDate(d) {
@@ -384,6 +428,7 @@ async function load() {
     const m = (p.media || []).find(x => x && x.type === "mux");
     return m ? (m.playbackId || m.playback_id || "") : "";
   };
+  (feed.data || []).forEach(p => { FEED[p.id] = p; });
   (feed.data || []).forEach(p => {
     if (p.type === "blog") return;                       // duplicates mmt_articles
     if (pollIds.has(p.id) || FEED_SKIP.test(p.title || "")) return;
@@ -568,6 +613,70 @@ function filtered() {
 }
 const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
 
+/* ── lightbox ───────────────────────────────────────────────────────────────
+   Watching should not cost a page load. The post renders through the shared
+   module, so it is the same thing content-feed shows, in a different frame. */
+let LB_OPEN = null;
+
+async function openPost(postId) {
+  const p = FEED[postId];
+  if (!p) { location.href = "/content-feed.html?post=" + encodeURIComponent(postId); return; }
+
+  // Poll, reactions and comment count are only needed for the post being opened,
+  // so they are fetched now rather than for all 700 on page load.
+  try {
+    const [polls, cmtRows] = await Promise.all([
+      db.from("content_feed_post_polls").select("id,post_id,question").eq("post_id", postId),
+      db.from("content_feed_comments").select("post_id").eq("post_id", postId),
+    ]);
+    p.commentCount = (cmtRows.data || []).length;
+    const pr = (polls.data || [])[0];
+    if (pr) {
+      const [opts, votes, mine] = await Promise.all([
+        db.from("content_feed_post_poll_options").select("id,poll_id,label,position").eq("poll_id", pr.id).order("position"),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id,email").eq("poll_id", pr.id),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pr.id).eq("email", myEmail),
+      ]);
+      const counts = {}; let total = 0;
+      (votes.data || []).forEach(v => { counts[v.option_id] = (counts[v.option_id] || 0) + 1; total++; });
+      p.poll = { id: pr.id, question: pr.question, options: opts.data || [],
+                 voteCounts: counts, totalVotes: total,
+                 myVote: (mine.data || [])[0] ? (mine.data || [])[0].option_id : null };
+    }
+    await Comments.loadReactions([postId]);
+  } catch (e) { console.error("lightbox load error:", e); }
+
+  const media = $("ln-lb-media"), body = $("ln-lb-body"), cmts = $("ln-lb-cmts");
+  media.innerHTML = "";
+  body.innerHTML = PostView.bodyHtml(p);
+  // The media belongs at the top, on its own, so hoist whatever the module made.
+  const m = body.querySelector(".cf-yt-thumb, .cf-yt-embed, .cf-post-media");
+  if (m) media.appendChild(m);
+  const rx = Comments.reactBtnHtml(postId, "ln_lb_" + postId.replace(/-/g, "_"));
+  body.insertAdjacentHTML("beforeend", '<div class="ln-lb-meta">' + rx + "</div>");
+  cmts.innerHTML = '<div class="tc-comments-section">'
+    + '<div id="tc-comments-hdr-' + postId + '" class="tc-comments-hdr">Comments</div>'
+    + '<div id="tc-comments-list-' + postId + '"></div>' + Comments.formHtml(postId) + "</div>";
+  Comments.load(postId);
+  PostView.trackMedia(media, "video", p.youtube_id || postId);
+  PostView.recordView("video", p.youtube_id || postId, 0, false);
+
+  LB_OPEN = postId;
+  $("ln-lb").classList.add("open");
+  document.body.style.overflow = "hidden";
+  history.pushState({ lb: postId }, "", "?post=" + encodeURIComponent(postId));
+}
+
+function closePost(fromPop) {
+  if (!LB_OPEN) return;
+  PostView.pauseVideosIn("#ln-lb", LB_OPEN);
+  $("ln-lb").classList.remove("open");
+  $("ln-lb-media").innerHTML = ""; $("ln-lb-body").innerHTML = ""; $("ln-lb-cmts").innerHTML = "";
+  document.body.style.overflow = "";
+  LB_OPEN = null;
+  if (!fromPop) history.pushState({}, "", location.pathname);
+}
+
 /* ── render ─────────────────────────────────────────────────────────────────── */
 function render() {
   const counts = {}; ITEMS.forEach(i => counts[i.type] = (counts[i.type] || 0) + 1);
@@ -680,6 +789,14 @@ function billboardMotion() {
 function wire() {
   const bbEl = document.querySelector(".ln-bb[data-href]");
   if (bbEl) bbEl.onclick = e => { if (!e.target.closest("a")) location.href = bbEl.dataset.href; };
+  // Anything that points at a feed post opens in place instead of navigating.
+  document.querySelectorAll('a[href^="/content-feed.html?post="]').forEach(a => {
+    a.addEventListener("click", e => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;   // let people open a new tab
+      e.preventDefault();
+      openPost(decodeURIComponent(a.getAttribute("href").split("post=")[1] || ""));
+    });
+  });
   document.querySelectorAll("[data-sym]").forEach(b => b.onclick = () => {
     symptom = b.dataset.sym; term = ""; type = ""; topic = ""; showAll = false;
     render(); window.scrollTo({ top:0, behavior:"smooth" });
@@ -699,6 +816,21 @@ function wire() {
   const clr = $("ln-clear"); if (clr) clr.onclick = () => { topic = type = term = symptom = ""; showAll = false; render(); };
 }
 
+/* Close on the cross, on the scrim, on Escape, and on Back. */
+(function wireLightbox() {
+  const lb = document.getElementById("ln-lb");
+  if (!lb) return;
+  const close = document.getElementById("ln-lb-close");
+  if (close) close.onclick = () => closePost();
+  lb.addEventListener("click", e => { if (e.target === lb) closePost(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && LB_OPEN) closePost(); });
+  window.addEventListener("popstate", e => {
+    const want = e.state && e.state.lb;
+    if (LB_OPEN && !want) closePost(true);
+    else if (want && want !== LB_OPEN) openPost(want);
+  });
+})();
+
 /* ── boot ───────────────────────────────────────────────────────────────────── */
 (async function() {
   const { data: { session } } = await db.auth.getSession();
@@ -706,10 +838,30 @@ function wire() {
   myEmail = session.user.email;
   const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName = (ae && ae.name) || myEmail.split("@")[0];
+  const myAvatarUrl = (ae && ae.avatar_url) || null;
+  const iAmOwner = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
   try {
-    initSharedHeader({ db, myEmail, myName, isAdmin: myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase(),
-      activePage:"learn", avatarUrl:(ae && ae.avatar_url) || null });
+    initSharedHeader({ db, myEmail, myName, isAdmin: iAmOwner,
+      activePage:"learn", avatarUrl: myAvatarUrl });
   } catch (e) { console.error("initSharedHeader error:", e); }
+
+  // The lightbox renders a real content-feed post, so it needs the same three
+  // modules that page uses. Failing here must not stop the library loading.
+  try {
+    PostView.init({ getPost: id => FEED[id], isAdmin: iAmOwner });
+    if (window.initMemberModal) initMemberModal({ db, myEmail });
+    initCommentsSystem({
+      db,
+      auth: { email: myEmail, name: myName, avatarUrl: myAvatarUrl, isAdmin: iAmOwner },
+      comments:  { table: "content_feed_comments", parentField: "post_id" },
+      reactions: { table: "content_feed_likes",    parentField: "post_id" },
+      commentReactionEventType: "content_comment",
+      replyNotificationLinkFn: id => `/content-feed.html?post=${id}`,
+      ownerEmail: OWNER_EMAIL,
+      ownerNotifyTitleFn:   name => `${name} commented on your content`,
+      ownerReactionTitleFn: (name, emoji) => `${name} reacted ${emoji} to your content`,
+    });
+  } catch (e) { console.error("post modules init error:", e); }
 
   const sp = new URLSearchParams(location.search);
   topic = sp.get("topic") || ""; type = sp.get("type") || ""; term = sp.get("q") || "";
