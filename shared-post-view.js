@@ -21,6 +21,7 @@ window.PostView = (function () {
   const POLL_COLOURS = ["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"];
 
   let getPost = () => null;
+  let client = null;                   // the host's Supabase client
   let isAdmin = false;
   let adminMenu = () => "";
   let castVote = null;
@@ -33,6 +34,7 @@ window.PostView = (function () {
   function init(opts) {
     opts = opts || {};
     if (opts.getPost)   getPost   = opts.getPost;
+    if (opts.db)        client    = opts.db;
     if (opts.adminMenu) adminMenu = opts.adminMenu;
     if (opts.castVote)  castVote  = opts.castVote;
     isAdmin = !!opts.isAdmin;
@@ -174,7 +176,8 @@ window.PostView = (function () {
      host page's Supabase client. */
   function recordView(contentType, contentRef, seconds, done) {
     try {
-      const client = window.db || window.supabaseClient;
+      // `db` is module-scoped on the host pages, so it has to be handed in;
+      // reading window.db silently did nothing.
       if (!client || !contentRef) return;
       client.rpc("record_view", {
         ct: contentType, cr: String(contentRef),
