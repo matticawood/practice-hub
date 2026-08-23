@@ -309,10 +309,10 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-practice-autolog.js?v=4"></script>
-<link rel="stylesheet" href="/shared-post-view.css?v=20260823i">
+<link rel="stylesheet" href="/shared-post-view.css?v=20260823j">
 <script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3.12.0"></script>
 <script src="/shared-comments.js?v=20260823a"></script>
-<script src="/shared-post-view.js?v=20260823i"></script>
+<script src="/shared-post-view.js?v=20260823j"></script>
 <script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-achievements.js?v=9"></script>
 <script src="/shared-header.js?v=2026071802"></script>
@@ -389,6 +389,7 @@ const CMETA = [
 const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
+let PICKS = [], PICK_WHY = "";
 let FEED = {};                      // post id -> raw row, for the lightbox
 let topic = "", type = "", term = "", showAll = false, symptom = "";
 
@@ -402,7 +403,7 @@ function fmtDate(d) {
 }
 function mins(sec) { return sec ? (sec < 60 ? sec + "s" : Math.round(sec / 60) + " min") : ""; }
 async function load() {
-  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, vocab, tags, cmeta, mine] = await Promise.all([
+  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, vocab, tags, cmeta, mine, picks] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
     db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
     db.from("lesson_progress").select("lesson_id,completed").eq("email", myEmail),
@@ -417,6 +418,7 @@ async function load() {
     db.from("content_symptoms").select("content_type,content_ref,symptom_id"),
     db.from("content_meta").select("content_type,content_ref,kind"),
     db.from("my_practice_symptoms").select("symptom_id,session_date").eq("email", myEmail),
+    db.rpc("picks_for", { em: myEmail, n: 14 }),
   ]);
 
   const lessons = ls.data || [], done = new Set((prog.data || []).filter(p => p.completed).map(p => p.lesson_id));
@@ -529,6 +531,24 @@ async function load() {
     if (r.session_date && new Date(r.session_date).getTime() < recent) return;
     MYSYMS[r.symptom_id] = (MYSYMS[r.symptom_id] || 0) + 1;
   });
+
+  /* One row of things that might actually help, chosen from what this member has
+     written about, then what their practice shows, then what they read. */
+  PICKS = [];
+  PICK_WHY = "";
+  const pk = (picks && picks.data) || [];
+  if (pk.length) {
+    const byHref = {};
+    ITEMS.forEach(i => { byHref[i.href] = i; });
+    PICKS = pk.map(r => byHref[r.href] || {
+      type: r.content_type === "mmt" ? "article" : r.content_type === "theory_sheet" ? "sheet"
+          : r.content_type === "lesson" ? "course" : r.content_type,
+      title: r.title, href: r.href, meta: "" }).filter(Boolean);
+    const topic = pk[0].topic, src = pk[0].source;
+    PICK_WHY = src === "said"      ? "you\u2019ve mentioned " + topic + " a few times"
+             : src === "behaviour" ? "based on what you\u2019ve been practising"
+             :                       "you\u2019ve been reading about " + topic;
+  }
 
   /* topics come from the only vocabulary that is actually populated today */
   const counts = {};
@@ -823,6 +843,7 @@ function render() {
     const recent = flat.filter(i => i.date && new Date(i.date).getTime() > weekAgo);
     if (recent.length >= 4) html += row("New this week", "", take(i => recent.includes(i), 12), {});
     else html += row("Recently added", "", take(() => true, 12), {});
+    if (PICKS.length >= 3) html += row("Might help right now", PICK_WHY, PICKS.slice(0, 14), {});
     html += row("Paths", "courses", COURSES, { course:true });
     html += row("Clinic replays", (counts.clinic || 0) + " sessions", take(i => i.type === "clinic", 12), { seeAll:"clinic" });
     html += row("Videos", (counts.video || 0) + " on the channel", take(i => i.type === "video", 14), { seeAll:"video" });
