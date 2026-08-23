@@ -48,13 +48,16 @@
     /* One shorthand, or a later `margin` wipes the negative sides. Pulls out
        through the page padding and up under the chrome. */
     margin:-22px calc(clamp(18px,2.6vw,52px) * -1) 30px;
-    border-radius:0; min-height:19rem; text-decoration:none; color:#fff; background:#1a1512;
+    border-radius:0; height:clamp(22rem, 30vw, 30rem);
+    text-decoration:none; color:#fff; background:#1a1512;
     box-shadow:none; }
   /* Slides stack; only the active one is painted. Cross-fade rather than slide,
      which sits better under fixed chrome. */
+  /* Every slide is absolute so the container never resizes to its content.
+     The hero holds one height and the slides cross-fade inside it. */
   .ln-bb-slide { position:absolute; inset:0; opacity:0; pointer-events:none;
     transition:opacity .5s ease; }
-  .ln-bb-slide.on { position:relative; opacity:1; pointer-events:auto; }
+  .ln-bb-slide.on { opacity:1; pointer-events:auto; }
   .ln-bb-dots { position:absolute; right:clamp(16px,2.4vw,34px); bottom:16px; z-index:3;
     display:flex; gap:8px; }
   .ln-bb-dot { width:8px; height:8px; padding:0; border-radius:50%; cursor:pointer;
@@ -63,6 +66,10 @@
   .ln-bb-dot.on { background:#fff; border-color:#fff; transform:scale(1.15); }
   @media (prefers-reduced-motion: reduce) { .ln-bb-slide { transition:none; } }
   .ln-bb-img { position:absolute; inset:0; }
+  /* Sized to cover a wide, short hero: a 16:9 frame scaled up until it fills. */
+  .ln-bb-vid { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:100vw; height:56.25vw; min-height:100%; min-width:177.78%;
+    border:0; pointer-events:none; }
   /* A 16:9 still inside a very wide, short box crops from the centre and takes
      the top of the head off. Bias the crop upward so the face stays in frame. */
   .ln-bb-img img { width:100%; height:100%; object-fit:cover; object-position:50% 22%; display:block; }
@@ -94,12 +101,12 @@
   /* On a phone: one image, text anchored to the bottom of it, over a scrim that
      is clear at the top and opaque where the words are. No second panel. */
   @media (max-width:640px) {
-    .ln-bb { min-height:26rem; margin:-16px -14px 26px; }
+    .ln-bb { height:26rem; margin:-16px -14px 26px; }
     .ln-bb-img::after { background:linear-gradient(180deg,
         rgba(14,12,10,0) 0%, rgba(14,12,10,.10) 30%, rgba(14,12,10,.80) 62%,
         rgba(14,12,10,.95) 84%, rgba(14,12,10,.97) 100%); }
     .ln-bb-img img { object-position:50% 20%; }
-    .ln-bb-in { padding:20px 18px 22px; min-height:26rem; max-width:none; justify-content:flex-end; }
+    .ln-bb-in { padding:20px 18px 22px; height:100%; max-width:none; justify-content:flex-end; }
     .ln-bb-krow { margin-bottom:10px; }
     .ln-bb h2 { font-size:1.42rem; margin-bottom:8px; }
     .ln-bb p { font-size:.88rem; line-height:1.45; margin-bottom:15px;
@@ -929,23 +936,27 @@ function render() {
   const slides = [];
   if (soon) slides.push({ kick:"Next live clinic", title:soon.t, when:soon.m,
     blurb:"A live session working through one topic. It becomes a replay here afterwards.",
-    href:soon.href, img:(lastClinic || fresh || {}).img, go:"RSVP", mux:(lastClinic || {}).mux,
+    href:soon.href, img:heroImg(lastClinic || fresh), go:"RSVP", mux:(lastClinic || {}).mux,
     go2:lastClinic ? { label:"Watch the last one", href:lastClinic.href } : null });
   if (carry) slides.push({ kick:"Pick up where you left off", title:carry.t, when:carry.m,
-    blurb:"You are part way through this one.", href:carry.href, img:(fresh || {}).img, go:"Continue" });
+    blurb:"You are part way through this one.", href:carry.href, img:heroImg(fresh), go:"Continue" });
+  /* mqdefault is 320px wide and turns to mush across a full-bleed hero. */
+  const heroImg = it => !it ? "" : (it.yt
+    ? "https://i.ytimg.com/vi/" + it.yt + "/maxresdefault.jpg" : (it.img || ""));
   const relevant = PICKS.find(p => p.img);
   if (relevant) slides.push({ kick:"For you",
     title:relevant.title, when:relevant.meta || "",
     blurb:relevant.topic ? "Picked because you have been working on " + relevant.topic + "."
                          : "Picked for what you have been working on.",
-    href:relevant.href, img:relevant.img, go:"Open", mux:relevant.mux });
+    href:relevant.href, img:heroImg(relevant), yt:relevant.yt, go:"Open", mux:relevant.mux });
   if (fresh) slides.push({ kick:"Latest", title:fresh.title, when:fresh.meta,
-    blurb:"The newest thing in the library.", href:fresh.href, img:fresh.img, go:"Watch now", mux:fresh.mux });
+    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh), yt:fresh.yt, go:"Watch now", mux:fresh.mux });
 
   const slideHtml = b =>
       '<div class="ln-bb-slide" data-href="' + esc(b.href) + '">'
       + (b.img ? '<span class="ln-bb-img"><img src="' + esc(b.img) + '" alt=""'
-          + (b.mux ? ' data-mux="' + esc(b.mux) + '"' : "") + "></span>" : "")
+          + (b.mux ? ' data-mux="' + esc(b.mux) + '"' : "")
+          + (b.yt ? ' data-yt="' + esc(b.yt) + '"' : "") + "></span>" : "")
       + '<span class="ln-bb-in"><span class="ln-bb-krow">'
       + '<span class="ln-bb-k">' + esc(b.kick) + "</span>"
       + (b.when ? '<span class="ln-bb-when">' + esc(b.when) + "</span>" : "") + "</span>"
@@ -1110,10 +1121,11 @@ function wireCarousel() {
 
 function billboardMotion() {
   /* The ACTIVE slide's still, not simply the first on the page. */
-  const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux]");
-  document.querySelectorAll(".ln-bb-slide:not(.on) .ln-bb-img img[data-mux]").forEach(o => {
+  const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux], .ln-bb-slide.on .ln-bb-img img[data-yt]");
+  document.querySelectorAll(".ln-bb-slide:not(.on) .ln-bb-img img").forEach(o => {
     if (o.dataset.still) o.src = o.dataset.still;       // put the resting slides back to a still
   });
+  document.querySelectorAll(".ln-bb-slide:not(.on) .ln-bb-vid").forEach(f => f.remove());
   if (!img) return;
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   // Runs on a phone too, but the phone gets to say no: Data Saver, or a
@@ -1121,11 +1133,31 @@ function billboardMotion() {
   const net = navigator.connection || {};
   if (net.saveData) return;
   if (/(^|-)2g$/.test(net.effectiveType || "")) return;
-  const id = img.dataset.mux;
   if (!img.dataset.still) img.dataset.still = img.src;   // remember the still to return to
-  const probe = new Image();
-  probe.onload = () => { img.src = probe.src; };
-  probe.src = "https://image.mux.com/" + id + "/animated.webp?width=640&start=20&end=25&fps=10";
+  if (img.dataset.mux) {
+    const probe = new Image();
+    probe.onload = () => { img.src = probe.src; };
+    probe.src = "https://image.mux.com/" + img.dataset.mux + "/animated.webp?width=640&start=20&end=25&fps=10";
+    return;
+  }
+  /* YouTube has no animated still, so the slide plays the video itself: muted,
+     no controls, not clickable, and only on the slide you are looking at. */
+  if (img.dataset.yt) {
+    const wrap = img.closest(".ln-bb-img");
+    if (!wrap || wrap.querySelector("iframe")) return;
+    const id = img.dataset.yt;
+    setTimeout(() => {
+      if (!wrap.closest(".ln-bb-slide").classList.contains("on")) return;
+      const f = document.createElement("iframe");
+      f.className = "ln-bb-vid";
+      f.allow = "autoplay; encrypted-media";
+      f.setAttribute("tabindex", "-1");
+      f.src = "https://www.youtube.com/embed/" + encodeURIComponent(id)
+        + "?autoplay=1&mute=1&controls=0&loop=1&playsinline=1&modestbranding=1&rel=0&disablekb=1"
+        + "&start=15&playlist=" + encodeURIComponent(id);
+      wrap.appendChild(f);
+    }, 1200);                                   // let the still land first
+  }
 }
 
 function wire() {
