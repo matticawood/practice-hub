@@ -306,6 +306,7 @@
   .ln-lfil { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-pill); padding:8px 14px;
     font:600 .82rem/1 var(--sans); color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:7px; }
   .ln-lfil:hover { border-color:var(--accent-dark); color:var(--text); }
+  .ln-lex { --fc:var(--accent-dark); }
   .ln-lfil[aria-pressed="true"] { color:#fff; background:var(--fc); border-color:var(--fc); }
   .ln-lfil .ln-fn { font-size:.72rem; opacity:.75; font-variant-numeric:tabular-nums; }
   .ln-lcount { font-size:.82rem; color:var(--text-muted); margin:12px 0; }
@@ -426,7 +427,7 @@ const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
 let PICKS = [], PICK_SHORTS = [], PICK_WHY = "", PICK_SUB = "";
 let FEED = {};                      // post id -> raw row, for the lightbox
-let topic = "", type = "", term = "", showAll = false, symptom = "";
+let topic = "", type = "", term = "", showAll = false, symptom = "", onlyEx = false;
 
 function fmtDate(d) {
   if (!d) return "";
@@ -538,10 +539,10 @@ async function load() {
     bg:mmtBg(a.slug || ""),
     href:"https://matthewcawood.com/monday-music-tips/" + encodeURIComponent(a.slug), external:true,
     meta:fmtDate(a.published_at || a.created_at) }));
-  lessons.forEach(l => { if (META[l.course]) ITEMS.push({
-    type:"course", ctype:"lesson", ref:l.id, title:l.title, topic:META[l.course].label, done:done.has(l.id), mins:l.est_minutes || 8,
-    href:"/courses.html?lesson=" + encodeURIComponent(l.id),
-    meta:META[l.course].label + (l.est_minutes ? " · " + l.est_minutes + " min" : "") }); });
+  /* Course lessons are deliberately NOT browsable on their own. They sit in a
+     sequence, and a lesson met out of order assumes things the member has not
+     been told yet. Courses are reachable through Paths and the courses page,
+     and For you can still surface a lesson, but only when they are up to it. */
 
   /* A title can legitimately exist in two tables; show it once. */
   const seenTitle = new Set();
@@ -747,6 +748,7 @@ function everything() {
 function filtered() {
   const t = term.trim().toLowerCase();
   return ITEMS.filter(i =>
+    (!onlyEx  || i.only) &&
     (!type    || i.type === type) &&
     (!topic   || i.topic === topic) &&
     (!symptom || (i.syms || []).includes(symptom)) &&
@@ -889,7 +891,7 @@ function closePost(fromPop) {
 /* ── render ─────────────────────────────────────────────────────────────────── */
 function render() {
   const counts = {}; ITEMS.forEach(i => counts[i.type] = (counts[i.type] || 0) + 1);
-  const browsing = !!(term || type || topic || symptom);
+  const browsing = !!(term || type || topic || symptom || onlyEx);
   const flat = ITEMS.filter(i => !i.vertical);
   const next = CONTINUE.find(c => c.k === "Next clinic");
   const resume = CONTINUE.filter(c => c.k !== "Next clinic");
@@ -935,6 +937,8 @@ function render() {
     + Object.keys(TYPES).map(k => '<button class="ln-lfil" type="button" data-type="' + k + '" aria-pressed="'
         + (type === k) + '" style="--fc:' + TYPES[k].colour + '">' + esc(TYPES[k].label)
         + '<span class="ln-fn">' + (counts[k] || 0) + "</span></button>").join("")
+    + '<button class="ln-lfil ln-lex" type="button" id="ln-exc" aria-pressed="' + onlyEx + '">'
+    + "Members only" + '<span class="ln-fn">' + ITEMS.filter(i => i.only).length + "</span></button>"
     + "</div></div>";
 
   if (browsing) {
@@ -947,6 +951,7 @@ function render() {
     html += '<div class="ln-lcount"><b>' + all.length + "</b> item" + (all.length === 1 ? "" : "s")
       + (topic ? " in " + esc(topic) : "")
       + (symptom ? " for \u201c" + esc((VOCAB.find(v => v.id === symptom) || {}).label || symptom) + "\u201d" : "")
+      + (onlyEx ? " you only get here" : "")
       + (term ? ' matching "' + esc(term) + '"' : "")
       + ' · <button class="ln-all" id="ln-clear" type="button">clear</button></div>';
     if (brief.length)
@@ -1059,7 +1064,8 @@ function wire() {
   const ts = $("ln-topic"); if (ts) ts.onchange = e => { libTopic = e.target.value; libShown = 24; render(); };
   const lm = $("ln-libmore");  if (lm) lm.onclick = () => { libShown += 24; render(); };
   const lc = $("ln-libclear"); if (lc) lc.onclick = () => { band = ""; libTopic = ""; libShown = 24; render(); };
-  const clr = $("ln-clear"); if (clr) clr.onclick = () => { topic = type = term = symptom = ""; showAll = false; render(); };
+  const ex = $("ln-exc"); if (ex) ex.onclick = () => { onlyEx = !onlyEx; showAll = false; render(); };
+  const clr = $("ln-clear"); if (clr) clr.onclick = () => { topic = type = term = symptom = ""; onlyEx = false; showAll = false; render(); };
 }
 
 /* Close on the cross, on the scrim, on Escape, and on Back. */
