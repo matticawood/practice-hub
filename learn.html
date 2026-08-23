@@ -167,6 +167,9 @@
       background:rgba(0,0,0,.55); border-color:rgba(255,255,255,.35); }
   }
 
+  /* The lead shelf carries more weight than the browse rows under it. */
+  .ln-big .ln-c { width:19.5rem; }
+  @media (max-width:640px) { .ln-big .ln-c { width:80vw; } }
   .ln-rh { display:flex; align-items:baseline; gap:12px; margin:0 0 14px; }
   .ln-rh h2 { margin:0; font:700 1.12rem/1.2 var(--sans); letter-spacing:-.012em; }
   .ln-rh .ln-rs { color:var(--text-muted); font-size:.82rem; }
@@ -402,7 +405,7 @@ const CMETA = [
 const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
-let PICKS = [], PICK_WHY = "";
+let PICKS = [], PICK_WHY = "", PICK_SUB = "";
 let FEED = {};                      // post id -> raw row, for the lightbox
 let topic = "", type = "", term = "", showAll = false, symptom = "";
 
@@ -549,7 +552,7 @@ async function load() {
   /* One row of things that might actually help, chosen from what this member has
      written about, then what their practice shows, then what they read. */
   PICKS = [];
-  PICK_WHY = "";
+  PICK_WHY = ""; PICK_SUB = "";
   /* Issued after the batch above, not inside it. Fired in parallel with the very
      first requests it can go out before the client has attached the session, and
      these views return nothing to an unauthenticated caller, so the row silently
@@ -565,9 +568,12 @@ async function load() {
           : r.content_type === "lesson" ? "course" : r.content_type,
       title: r.title, href: r.href, meta: "" }).filter(Boolean);
     const topic = pk[0].topic, src = pk[0].source;
-    PICK_WHY = src === "said"      ? "you\u2019ve mentioned " + topic + " a few times"
-             : src === "behaviour" ? "based on what you\u2019ve been practicing"
-             :                       "you\u2019ve been reading about " + topic;
+    PICK_WHY  = src === "said"      ? "Because you\u2019ve mentioned " + topic
+              : src === "behaviour" ? "Because you\u2019ve been working on " + topic
+              :                       "Because you\u2019ve been reading about " + topic;
+    PICK_SUB  = src === "said"      ? "from your practice notes"
+              : src === "behaviour" ? "from what you\u2019ve been practicing"
+              :                       "from what you keep opening";
   }
 
   /* topics come from the only vocabulary that is actually populated today */
@@ -663,6 +669,7 @@ function row(title, sub, items, opts) {
     + (sub ? '<span class="ln-rs">' + esc(sub) + "</span>" : "")
     + (o.seeAll ? '<button class="ln-all" type="button" data-see="' + esc(o.seeAll) + '">See all</button>' : "")
     + '</div><div class="' + (items.length <= 4 && !o.vertical && !o.rail ? "ln-grid" : "ln-rail")
+    + (o.big ? " ln-big" : "")
     + (o.vertical ? " ln-vrail" : "") + (o.course ? " ln-crail" : "") + '">'
     + items.map(o.course ? courseCard : card).join("") + "</div></section>";
 }
@@ -878,18 +885,18 @@ function render() {
     const take = (pred, n) => flat.filter(i => pred(i) && !seen.has(i.href)).sort(byDate).slice(0, n)
       .map(i => { seen.add(i.href); return i; });
 
+    /* This goes FIRST. It is the answer to "where do I start", so it should not
+       sit below a row of whatever happened to be published last week. */
+    {
+      const long = PICKS.filter(p => !p.vertical);
+      const use = long.length >= 3 ? long : PICKS;
+      if (use.length >= 3) html += row(PICK_WHY, PICK_SUB, use.slice(0, 14), { rail:true, big:true });
+    }
+
     const weekAgo = Date.now() - 8 * 86400000;
     const recent = flat.filter(i => i.date && new Date(i.date).getTime() > weekAgo);
     if (recent.length >= 4) html += row("New this week", "", take(i => recent.includes(i), 12), {});
     else html += row("Recently added", "", take(() => true, 12), {});
-    /* A normal row, in the page's own language. The reason line carries the
-       personalisation; a second Shorts shelf here only added height, and Shorts
-       already have their own row further down. */
-    {
-      const long = PICKS.filter(p => !p.vertical);
-      const use = long.length >= 3 ? long : PICKS;
-      if (use.length >= 3) html += row("Might help right now", PICK_WHY, use.slice(0, 14), { rail:true });
-    }
     html += row("Paths", "courses", COURSES, { course:true });
     html += row("Clinic replays", (counts.clinic || 0) + " sessions", take(i => i.type === "clinic", 12), { seeAll:"clinic" });
     html += row("Videos", (counts.video || 0) + " on the channel", take(i => i.type === "video", 14), { seeAll:"video" });
