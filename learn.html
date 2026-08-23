@@ -88,6 +88,20 @@
 
   /* ── rows ── */
   .ln-row { margin-top:30px; }
+  .ln-stuck { display:grid; grid-template-columns:repeat(auto-fill,minmax(15.5rem,1fr)); gap:12px; }
+  .ln-fam { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-m); padding:14px 14px 11px; }
+  .ln-fam-mine { border-color:color-mix(in srgb,var(--accent) 55%,var(--border)); }
+  .ln-fam h3 { display:flex; align-items:center; gap:7px; margin:0 0 9px;
+    font:600 .7rem/1 var(--sans); letter-spacing:.09em; text-transform:uppercase; color:var(--text-muted); }
+  .ln-fam-you { background:var(--accent); color:#12100e; border-radius:var(--r-pill);
+    padding:3px 7px; font:700 .58rem/1 var(--sans); letter-spacing:.07em; }
+  .ln-sym { display:flex; width:100%; align-items:baseline; gap:8px; text-align:left; cursor:pointer;
+    background:none; border:0; border-radius:var(--r-s); padding:7px 8px; margin:0 -8px;
+    font:500 .88rem/1.35 var(--sans); color:var(--text); }
+  .ln-sym:hover { background:var(--surface-2); }
+  .ln-sym-mine { font-weight:650; }
+  .ln-sym-n { margin-left:auto; flex:0 0 auto; font:500 .74rem/1 var(--sans);
+    color:var(--text-muted); font-variant-numeric:tabular-nums; }
   .ln-rh { display:flex; align-items:baseline; gap:10px; margin:0 0 11px; }
   .ln-rh h2 { margin:0; font:700 1.12rem/1.2 var(--sans); letter-spacing:-.012em; }
   .ln-rh .ln-rs { color:var(--text-muted); font-size:.82rem; }
@@ -293,8 +307,8 @@ const CMETA = [
 ];
 const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
-let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [];
-let topic = "", type = "", term = "", showAll = false;
+let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
+let topic = "", type = "", term = "", showAll = false, symptom = "";
 
 function fmtDate(d) {
   if (!d) return "";
@@ -306,7 +320,7 @@ function fmtDate(d) {
 }
 function mins(sec) { return sec ? (sec < 60 ? sec + "s" : Math.round(sec / 60) + " min") : ""; }
 async function load() {
-  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls] = await Promise.all([
+  const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, vocab, tags, cmeta, mine] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
     db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
     db.from("lesson_progress").select("lesson_id,completed").eq("email", myEmail),
@@ -314,9 +328,13 @@ async function load() {
     db.from("reading_list").select("sheet_id,status").eq("email", myEmail),
     db.from("live_events").select("id,title,scheduled_at,duration_mins,mux_playback_id,status").order("scheduled_at",{ascending:false}),
     db.from("content_feed_posts").select("id,type,title,url,youtube_id,media,published_at,duration_seconds,orientation").order("published_at",{ascending:false}),
-    db.from("mmt_articles").select("slug,title,cover_image,published_at,created_at").order("created_at",{ascending:false}),
+    db.from("mmt_articles").select("id,slug,title,cover_image,published_at,created_at").order("created_at",{ascending:false}),
     db.from("user_pieces").select("id,title,composer,last_practiced_at").eq("email", myEmail).order("last_practiced_at",{ascending:false,nullsFirst:false}).limit(1),
     db.from("content_feed_post_polls").select("post_id"),
+    db.from("symptom_vocab").select("id,family,label,sort_order").order("sort_order"),
+    db.from("content_symptoms").select("content_type,content_ref,symptom_id"),
+    db.from("content_meta").select("content_type,content_ref,kind"),
+    db.from("my_practice_symptoms").select("symptom_id,session_date").eq("email", myEmail),
   ]);
 
   const lessons = ls.data || [], done = new Set((prog.data || []).filter(p => p.completed).map(p => p.lesson_id));
@@ -342,11 +360,11 @@ async function load() {
   /* every browsable item, normalised to one shape */
   ITEMS = [];
   (sheets.data || []).forEach(s => ITEMS.push({
-    type:"sheet", title:s.title, topic:s.category, date:s.created_at, done:readSet.has(s.id), only:true,
+    type:"sheet", ctype:"theory_sheet", ref:s.id, title:s.title, topic:s.category, date:s.created_at, done:readSet.has(s.id), only:true,
     href:"/theory/sheets/view.html?slug=" + encodeURIComponent(s.slug),
     meta:fmtDate(s.created_at) }));
   (evs.data || []).filter(e => e.mux_playback_id).forEach(e => ITEMS.push({
-    type:"clinic", title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
+    type:"clinic", ctype:"clinic", ref:e.id, title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
     img:"https://image.mux.com/" + e.mux_playback_id + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=25",
     mux:e.mux_playback_id, only:true,
     playable:true, dur:e.duration_mins ? e.duration_mins + " min" : "",
@@ -372,7 +390,7 @@ async function load() {
     const mux = muxId(p);
     if (p.youtube_id) {
       const vert = p.orientation === "portrait";
-      ITEMS.push({ type:"video", title:p.title, date:p.published_at, playable:true, vertical:vert,
+      ITEMS.push({ type:"video", ctype:"video", ref:p.youtube_id, title:p.title, date:p.published_at, playable:true, vertical:vert,
         img:"https://i.ytimg.com/vi/" + p.youtube_id + (vert ? "/oardefault.jpg" : "/mqdefault.jpg"),
         href:"/content-feed.html?post=" + encodeURIComponent(p.id),
         dur:p.duration_seconds ? mins(p.duration_seconds) : "",
@@ -390,11 +408,11 @@ async function load() {
     }
   });
   (mmt.data || []).forEach(a => ITEMS.push({
-    type:"article", title:a.title, date:a.published_at || a.created_at, img:a.cover_image || "",
+    type:"article", ctype:"mmt", ref:String(a.id), title:a.title, date:a.published_at || a.created_at, img:a.cover_image || "",
     href:"https://matthewcawood.com/monday-music-tips/" + encodeURIComponent(a.slug), external:true,
     meta:fmtDate(a.published_at || a.created_at) }));
   lessons.forEach(l => { if (META[l.course]) ITEMS.push({
-    type:"course", title:l.title, topic:META[l.course].label, done:done.has(l.id),
+    type:"course", ctype:"lesson", ref:l.id, title:l.title, topic:META[l.course].label, done:done.has(l.id),
     href:"/courses.html?lesson=" + encodeURIComponent(l.id),
     meta:META[l.course].label + (l.est_minutes ? " · " + l.est_minutes + " min" : "") }); });
 
@@ -404,6 +422,29 @@ async function load() {
     const k = (i.type === "course" ? "lesson:" : "") + (i.title || "").trim().toLowerCase();
     if (!k || seenTitle.has(k)) return false;
     seenTitle.add(k); return true;
+  });
+
+  /* Symptoms: one vocabulary, used at both ends. Content says which problem it
+     solves; a member's practice notes say which problem they have. The join is
+     (content_type, content_ref), which every source resolves to exactly. */
+  VOCAB = (vocab.data || []).filter(v => v.id !== "__none__");
+  const kindOf = {};
+  (cmeta.data || []).forEach(m => kindOf[m.content_type + ":" + m.content_ref] = m.kind);
+  const symOf = {};
+  (tags.data || []).forEach(t => (symOf[t.content_type + ":" + t.content_ref] ||= []).push(t.symptom_id));
+  ITEMS.forEach(i => {
+    const k = i.ctype + ":" + i.ref;
+    i.kind = kindOf[k] || "";
+    i.syms = symOf[k] || [];
+  });
+
+  /* The member's own recent signals decide which families lead. Only their own
+     practice notes feed this, never anything they wrote to other people. */
+  const recent = Date.now() - 120 * 86400000;
+  MYSYMS = {};
+  (mine.data || []).forEach(r => {
+    if (r.session_date && new Date(r.session_date).getTime() < recent) return;
+    MYSYMS[r.symptom_id] = (MYSYMS[r.symptom_id] || 0) + 1;
   });
 
   /* topics come from the only vocabulary that is actually populated today */
@@ -473,6 +514,38 @@ function courseCard(c) {
     : '<a class="course-card" href="/courses.html?course=' + esc(c.key) + '" style="--cc-accent:' + c.color + '">' + hero + body + "</a>";
 }
 
+/* "What's getting in your way" — the way in for someone who cannot name what
+   they want. People cannot answer "what is your weakness"; they can recognise
+   their own complaint in a sentence. Families a member has actually written
+   about in their practice notes float to the front. */
+function stuckSection() {
+  if (!VOCAB.length) return "";
+  const count = {};
+  ITEMS.forEach(i => (i.syms || []).forEach(x => count[x] = (count[x] || 0) + 1));
+
+  const fams = [];
+  VOCAB.forEach(v => {
+    if (!count[v.id]) return;
+    let f = fams.find(x => x.name === v.family);
+    if (!f) fams.push(f = { name:v.family, syms:[], n:0, mine:0 });
+    f.syms.push(v); f.n += count[v.id]; f.mine += MYSYMS[v.id] || 0;
+  });
+  if (fams.length < 3) return "";
+  fams.sort((a, b) => (b.mine - a.mine) || (b.n - a.n));
+
+  const anyMine = fams.some(f => f.mine);
+  return '<section class="ln-row"><div class="ln-rh"><h2>What\'s getting in your way</h2>'
+    + '<span class="ln-rs">' + (anyMine ? "starting with what you\'ve been writing about" : "pick the one that sounds like you") + "</span></div>"
+    + '<div class="ln-stuck">' + fams.map(f =>
+        '<div class="ln-fam' + (f.mine ? " ln-fam-mine" : "") + '">'
+        + '<h3>' + esc(f.name) + (f.mine ? '<span class="ln-fam-you">you</span>' : "") + "</h3>"
+        + f.syms.map(v => '<button type="button" class="ln-sym' + (MYSYMS[v.id] ? " ln-sym-mine" : "")
+            + '" data-sym="' + esc(v.id) + '">' + esc(v.label)
+            + '<span class="ln-sym-n">' + count[v.id] + "</span></button>").join("")
+        + "</div>").join("")
+    + "</div></section>";
+}
+
 function row(title, sub, items, opts) {
   if (!items.length) return "";
   const o = opts || {};
@@ -488,8 +561,9 @@ function row(title, sub, items, opts) {
 function filtered() {
   const t = term.trim().toLowerCase();
   return ITEMS.filter(i =>
-    (!type  || i.type === type) &&
-    (!topic || i.topic === topic) &&
+    (!type    || i.type === type) &&
+    (!topic   || i.topic === topic) &&
+    (!symptom || (i.syms || []).includes(symptom)) &&
     (!t     || i.title.toLowerCase().includes(t) || (i.topic || "").toLowerCase().includes(t)));
 }
 const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
@@ -497,7 +571,7 @@ const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
 /* ── render ─────────────────────────────────────────────────────────────────── */
 function render() {
   const counts = {}; ITEMS.forEach(i => counts[i.type] = (counts[i.type] || 0) + 1);
-  const browsing = !!(term || type || topic);
+  const browsing = !!(term || type || topic || symptom);
   const flat = ITEMS.filter(i => !i.vertical);
   const next = CONTINUE.find(c => c.k === "Next clinic");
   const resume = CONTINUE.filter(c => c.k !== "Next clinic");
@@ -549,7 +623,9 @@ function render() {
     const list = filtered().sort(byDate);
     const shown = showAll ? list : list.slice(0, 36);
     html += '<div class="ln-lcount"><b>' + list.length + "</b> item" + (list.length === 1 ? "" : "s")
-      + (topic ? " in " + esc(topic) : "") + (term ? ' matching "' + esc(term) + '"' : "")
+      + (topic ? " in " + esc(topic) : "")
+      + (symptom ? " for \u201c" + esc((VOCAB.find(v => v.id === symptom) || {}).label || symptom) + "\u201d" : "")
+      + (term ? ' matching "' + esc(term) + '"' : "")
       + ' · <button class="ln-all" id="ln-clear" type="button">clear</button></div>'
       + (shown.length ? '<div class="ln-grid">' + shown.map(card).join("") + "</div>"
           + (!showAll && list.length > shown.length
@@ -564,6 +640,7 @@ function render() {
     const recent = flat.filter(i => i.date && new Date(i.date).getTime() > weekAgo);
     if (recent.length >= 4) html += row("New this week", "", take(i => recent.includes(i), 12), {});
     else html += row("Recently added", "", take(() => true, 12), {});
+    html += stuckSection();
     html += row("Paths", "courses", COURSES, { course:true });
     html += row("Clinic replays", (counts.clinic || 0) + " sessions", take(i => i.type === "clinic", 12), { seeAll:"clinic" });
     html += row("Videos", (counts.video || 0) + " on the channel", take(i => i.type === "video", 14), { seeAll:"video" });
@@ -603,6 +680,10 @@ function billboardMotion() {
 function wire() {
   const bbEl = document.querySelector(".ln-bb[data-href]");
   if (bbEl) bbEl.onclick = e => { if (!e.target.closest("a")) location.href = bbEl.dataset.href; };
+  document.querySelectorAll("[data-sym]").forEach(b => b.onclick = () => {
+    symptom = b.dataset.sym; term = ""; type = ""; topic = ""; showAll = false;
+    render(); window.scrollTo({ top:0, behavior:"smooth" });
+  });
   const q = $("ln-q");
   if (q) q.oninput = e => { term = e.target.value; showAll = false; render(); const n = $("ln-q"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } };
   const ty = $("ln-types");
@@ -615,7 +696,7 @@ function wire() {
     showAll = false; render(); window.scrollTo({ top:0, behavior:"smooth" });
   });
   const all = $("ln-all");   if (all) all.onclick = () => { showAll = true; render(); };
-  const clr = $("ln-clear"); if (clr) clr.onclick = () => { topic = type = term = ""; showAll = false; render(); };
+  const clr = $("ln-clear"); if (clr) clr.onclick = () => { topic = type = term = symptom = ""; showAll = false; render(); };
 }
 
 /* ── boot ───────────────────────────────────────────────────────────────────── */
