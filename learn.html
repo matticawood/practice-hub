@@ -659,7 +659,7 @@ async function load() {
     db.from("lesson_progress").select("lesson_id,completed").eq("email", myEmail),
     db.from("theory_sheets").select("id,title,slug,category,created_at").order("created_at",{ascending:false}),
     db.from("reading_list").select("sheet_id,status").eq("email", myEmail),
-    db.from("live_events").select("id,title,scheduled_at,duration_mins,mux_playback_id,status").order("scheduled_at",{ascending:false}),
+    db.from("live_events").select("id,title,scheduled_at,duration_mins,mux_playback_id,status,feed_post_id").order("scheduled_at",{ascending:false}),
     db.from("content_feed_posts").select("id,type,title,url,youtube_id,media,published_at,duration_seconds,orientation").order("published_at",{ascending:false}),
     db.from("mmt_articles").select("id,slug,title,cover_image,published_at,created_at").order("created_at",{ascending:false}),
     db.from("user_pieces").select("id,title,composer,last_practiced_at").eq("email", myEmail).order("last_practiced_at",{ascending:false,nullsFirst:false}).limit(1),
@@ -705,7 +705,14 @@ async function load() {
     img:"https://image.mux.com/" + e.mux_playback_id + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=25",
     mux:e.mux_playback_id, only:true,
     playable:true, dur:e.duration_mins ? e.duration_mins + " min" : "",
-    href:"/events.html?event=" + encodeURIComponent(e.id), meta:fmtDate(e.scheduled_at) }));
+    /* Opens in the lightbox rather than navigating, like every other post,
+       because a clinic replay now has a post of its own carrying the same Mux
+       video and the same discussion. Without one it still goes to the clinic
+       page, so nothing breaks if a clinic has not been linked. */
+    href: e.feed_post_id
+      ? "/content-feed.html?post=" + encodeURIComponent(e.feed_post_id)
+      : "/events.html?event=" + encodeURIComponent(e.id),
+    meta:fmtDate(e.scheduled_at) }));
   // The content feed carries three kinds of thing and only two of them are
   // learning material. `blog` posts announce a Monday Music Tips article, which
   // is already here from mmt_articles, so they would show everything twice.
@@ -724,6 +731,10 @@ async function load() {
   (feed.data || []).forEach(p => { FEED[p.id] = p; });
   (feed.data || []).forEach(p => {
     if (p.type === "blog") return;                       // duplicates mmt_articles
+    /* A clinic's post exists so its video and discussion live with everything
+       else. The card for it is built from live_events above, which knows the
+       schedule, so the post must not raise a second one. */
+    if (p.type === "clinic") return;
     if (pollIds.has(p.id) || FEED_SKIP.test(p.title || "")) return;
     const mux = muxId(p);
     if (p.youtube_id) {
