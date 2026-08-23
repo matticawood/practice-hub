@@ -822,6 +822,9 @@
             return part || [];
           })))).flat();
       const auth=_auth();
+      // A reload REPLACES the counts for these ids. Without this the tallies
+      // climb every time the same post is opened, because the loop increments.
+      parentIds.forEach(id => { _rxState[id] = {}; });
       (data||[]).forEach(l=>{
         const pid=l[_rParent()];
         if(!_rxState[pid]) _rxState[pid]={};

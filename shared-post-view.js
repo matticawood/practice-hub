@@ -50,7 +50,8 @@ window.PostView = (function () {
     }
     return `
     <div class="cf-yt-thumb" onclick="event.stopPropagation();PostView.embedYt('${p.id}', this)">
-      <img src="https://img.youtube.com/vi/${ytId}/hqdefault.jpg" alt="${title}" loading="lazy" />
+      <img src="https://img.youtube.com/vi/${ytId}/maxresdefault.jpg" alt="${title}" loading="lazy"
+           onerror="this.onerror=null;this.src='https://img.youtube.com/vi/${ytId}/hqdefault.jpg'" />
       <div class="cf-yt-play"><div class="cf-yt-play-btn"><div class="cf-yt-play-icon"></div></div></div>
     </div>
     <div class="cf-card-title">${title}</div>`;
@@ -133,6 +134,14 @@ window.PostView = (function () {
     return `${SVG_POST}Post`;
   }
 
+  /* Just the player, for a host that lays the media out itself. embedYt() is
+     for the feed, where the embed replaces a whole card body. */
+  function embedHtml(p) {
+    if (p.type !== "youtube" || !p.youtube_id) return "";
+    embedded.add(p.id);
+    return `<div class="cf-yt-embed"><iframe src="https://www.youtube.com/embed/${esc(p.youtube_id)}?autoplay=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>`;
+  }
+
   /* ── playback ─────────────────────────────────────────────────────────── */
 
   function embedYt(postId, thumbEl) {
@@ -203,6 +212,6 @@ window.PostView = (function () {
     });
   }
 
-  return { init, bodyHtml, typeBadge, embedYt, pauseVideosIn, vote,
+  return { init, bodyHtml, embedHtml, typeBadge, embedYt, pauseVideosIn, vote,
            recordView, trackMedia, embedded, esc };
 })();
