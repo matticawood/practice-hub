@@ -21,6 +21,7 @@
   <script src="/shared-header.js?v=2026071802"></script>
 <script src="/live-session.js?v=1"></script>
   <script src="/shared-comments.js"></script>
+  <script src="/shared-post-view.js"></script>
   <script src="/shared-member-modal.js?v=14"></script>
   <style>
     /* ── Theme ──────────────────────────────────────────────────────────────── */
@@ -852,6 +853,9 @@ let _toolbarInjected = false;
   myName      = ae?.name || myEmail.split("@")[0];
   myAvatarUrl = ae?.avatar_url || null;
   isAdmin     = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  // The post body, poll and media now live in shared-post-view.js so learn.html
+  // can render the same thing inside a different shell.
+  PostView.init({ getPost: id => _posts.find(x => x.id === id), isAdmin, castVote: castCfVote });
 
   initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "learn", avatarUrl: myAvatarUrl });
   initMemberModal({ db, myEmail });
@@ -1128,46 +1132,10 @@ function cfCardHTML(p) {
     </div>`;
 }
 
-function _cardBody(p) {
-  let body;
-  if (p.type === "youtube") body = _ytBody(p);
-  else if (p.type === "blog") body = _blogBody(p);
-  else body = _postBody(p);
-  return body + _cfPollHtml(p);
-}
+function _cardBody(p) { return PostView.bodyHtml(p); }
 
 /* Inline poll on a content-feed post (mirrors community's card poll). */
-function _cfPollHtml(p) {
-  const poll = p.poll;
-  if (!poll || !poll.options?.length) return "";
-  const hasVoted = !!poll.myVote || isAdmin; // the owner (author) always sees results
-  const COLORS = ["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"]; // site category palette
-  let html = `<div class="cf-poll" onclick="event.stopPropagation()"><div class="cf-poll-q">${_esc(poll.question)}</div>`;
-  if (!hasVoted) {
-    html += poll.options.map((o, i) =>
-      `<button class="cf-poll-btn" style="border-left-color:${COLORS[i % COLORS.length]}" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">${_esc(o.label)}</button>`
-    ).join("");
-  } else {
-    html += poll.options.map((o, i) => {
-      const c      = COLORS[i % COLORS.length];
-      const count  = poll.voteCounts[o.id] || 0;
-      const pct    = poll.totalVotes > 0 ? Math.round(count / poll.totalVotes * 100) : 0;
-      const isMine = o.id === poll.myVote;
-      const voters = (isAdmin && poll.voters && poll.voters[o.id]) ? poll.voters[o.id] : null;
-      const votersHtml = (voters && voters.length) ? `<div class="cf-poll-voters">${voters.map(n => _esc(n)).join(", ")}</div>` : "";
-      return `<div class="cf-poll-bar-row${isMine ? " mine" : ""}" style="border-left-color:${c}" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(o.id)}','${p.id}')">
-        <div class="cf-poll-bar-track"><div class="cf-poll-bar-fill" style="width:${pct}%;background:${c}"></div></div>
-        <div class="cf-poll-bar-meta"><span>${_esc(o.label)}${isMine ? " <span class='cf-poll-mine'>● you</span>" : ""}</span><span class="cf-poll-pct">${pct}%</span></div>
-        ${votersHtml}
-      </div>`;
-    }).join("");
-    const clearBtn = poll.myVote
-      ? `<button class="cf-poll-clear" onclick="castCfVote(event,'${_esc(poll.id)}','${_esc(poll.myVote)}','${p.id}')">Clear my vote</button>`
-      : "";
-    html += `<div class="cf-poll-footer">${clearBtn}<span class="cf-poll-total">${poll.totalVotes} vote${poll.totalVotes !== 1 ? "s" : ""}</span></div>`;
-  }
-  return html + `</div>`;
-}
+
 
 async function castCfVote(ev, pollId, optionId, postId) {
   if (ev && ev.stopPropagation) ev.stopPropagation();
@@ -1199,51 +1167,13 @@ async function castCfVote(ev, pollId, optionId, postId) {
   }
 }
 
-function _ytBody(p) {
-  const ytId = _esc(p.youtube_id || "");
-  const title = _esc(p.title || "");
-  if (_embeddedYt.has(p.id)) {
-    return `<div class="cf-yt-embed"><iframe src="https://www.youtube.com/embed/${ytId}?autoplay=1" allowfullscreen loading="lazy"></iframe></div><div class="cf-card-title">${title}</div>`;
-  }
-  return `
-    <div class="cf-yt-thumb" onclick="event.stopPropagation();embedYt('${p.id}', this)">
-      <img src="https://img.youtube.com/vi/${ytId}/hqdefault.jpg" alt="${title}" loading="lazy" />
-      <div class="cf-yt-play"><div class="cf-yt-play-btn"><div class="cf-yt-play-icon"></div></div></div>
-    </div>
-    <div class="cf-card-title">${title}</div>`;
-}
 
-function _blogBody(p) {
-  const url  = _esc(p.url || "#");
-  const bulletData = (Array.isArray(p.media) ? p.media : []).find(m => m.type === "bullets");
-  const bulletsHtml = bulletData?.items?.length
-    ? `<p class="cf-blog-intro">In this week's article:</p>
-       <ul class="cf-blog-bullets">${bulletData.items.map((item, i) =>
-        `<li class="cf-blog-bullet">
-          <span class="cf-blog-bullet-num">${i + 1}</span>
-          <span class="cf-blog-bullet-text">${_esc(item)}</span>
-        </li>`).join("")}</ul>`
-    : "";
-  return `
-    <div class="cf-card-title">${_esc(p.title || "")}</div>
-    ${bulletsHtml}
-    <a href="${url}" target="_blank" rel="noopener" class="cf-blog-link">Read post ↗</a>`;
-}
 
-function _postBody(p) {
-  const title   = p.title ? `<div class="cf-card-title">${_esc(p.title)}</div>` : "";
-  const body    = p.body  ? `<div class="cf-post-body">${(window.renderUserContent?renderUserContent(p.body):_esc(p.body))}</div>`   : "";
-  const media   = (Array.isArray(p.media) && p.media.length && window._tcRenderMedia)
-    ? `<div class="cf-post-media">${window._tcRenderMedia({ media: p.media })}</div>`
-    : "";
-  return `${title}${body}${media}`;
-}
 
-function _typeBadge(type) {
-  if (type === "youtube") return `${SVG_YT}YouTube`;
-  if (type === "blog")    return `${SVG_BLOG}Monday Music Tips`;
-  return `${SVG_POST}Post`;
-}
+
+
+
+function _typeBadge(type) { return PostView.typeBadge(type); }
 
 /* ── Embed YouTube inline ────────────────────────────────────────────────── */
 /* ── Post detail view ────────────────────────────────────────────────────── */
@@ -1254,26 +1184,7 @@ let _openedInPage = false; // true when a post was opened by tapping a card on t
 // stops on the way out. Mirrors community.html's _pauseVideosIn.
 let _cfFeedScrollY = 0;
 let _cfDetailPid = null;   // post currently shown in the detail view
-function _cfPauseVideosIn(sel) {
-  document.querySelectorAll(`${sel} mux-player, ${sel} video`).forEach(v => { try { v.pause(); } catch (e) {} });
-  // YouTube iframes have no .pause() and keep playing (even hidden). Stop them:
-  // a feed card reverts to its thumbnail (clean + no re-autoplay); anywhere else
-  // (the detail view) the iframe is simply removed.
-  document.querySelectorAll(`${sel} iframe`).forEach(f => {
-    try {
-      const body = f.closest('[id^="cf-body-"]');
-      if (body) {
-        const pid = body.id.slice("cf-body-".length);
-        _embeddedYt.delete(pid);
-        const p = _posts.find(x => x.id === pid);
-        body.innerHTML = p ? _cardBody(p) : "";
-      } else {
-        f.remove();                       // detail iframe: just remove it
-        if (_cfDetailPid) _embeddedYt.delete(_cfDetailPid);  // keep embed state honest
-      }
-    } catch (e) {}
-  });
-}
+function _cfPauseVideosIn(sel) { return PostView.pauseVideosIn(sel, _cfDetailPid); }
 
 function showCfDetail(postId, push = true) {
   const p = _posts.find(x => x.id === postId);
@@ -1367,16 +1278,7 @@ window.addEventListener("popstate", (e) => {
   }
 });
 
-function embedYt(postId, thumbEl) {
-  _embeddedYt.add(postId);
-  const p = _posts.find(x => x.id === postId);
-  if (!p) return;
-  // Embed where the thumbnail was actually tapped — works in both the feed card
-  // and the detail view (whose body has no cf-body-<id> element). Fall back to the
-  // feed card body when no element is passed (e.g. programmatic calls).
-  const body = (thumbEl && thumbEl.parentElement) || document.getElementById(`cf-body-${postId}`);
-  if (body) body.innerHTML = _ytBody(p);
-}
+function embedYt(postId, thumbEl) { return PostView.embedYt(postId, thumbEl); }
 
 /* ── Comments toggle ─────────────────────────────────────────────────────── */
 function toggleComments(postId) {
