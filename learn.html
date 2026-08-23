@@ -127,6 +127,20 @@
   /* .tc-comments-section already draws its own card, so this is only spacing.
      Giving it a background and border made a box inside a box. */
   .ln-lb-cmts { margin-top:14px; }
+  .ln-lb-loading { display:grid; place-items:center; padding:34px 0;
+    color:var(--text-muted); font:500 .85rem/1 var(--sans); }
+  .ln-lb-spin { width:16px; height:16px; border-width:2px; }
+  /* The embed keeps a 16:9 box, so capping only its height would letterbox it.
+     Cap the WIDTH to whatever 16:9 allows at this screen height and centre it,
+     and the whole video scales to fit instead of running off the bottom. */
+  @media (orientation:landscape) and (max-height:520px) {
+    .ln-lb-media .cf-yt-embed, .ln-lb-media .cf-yt-thumb {
+      width:min(100%, calc(100vh * 16 / 9)); margin-left:auto; margin-right:auto; }
+    .ln-lb-media mux-player, .ln-lb-media video { max-height:100vh; width:auto; margin:0 auto; }
+  }
+  /* Inside the lightbox the media block IS the spacing, so the embed's own
+     bottom margin just leaves a black strip under the video. */
+  .ln-lb-media .cf-yt-embed, .ln-lb-media .cf-yt-thumb, .ln-lb-media .cf-post-media { margin-bottom:0; }
   .ln-lb-cmts .tc-comments-section { border-radius:var(--r-l); }
   @media (max-width:640px) {
     .ln-lb { padding:0; background:rgba(14,12,10,.92); }
@@ -295,10 +309,10 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-practice-autolog.js?v=4"></script>
-<link rel="stylesheet" href="/shared-post-view.css?v=20260823d">
+<link rel="stylesheet" href="/shared-post-view.css?v=20260823e">
 <script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3.12.0"></script>
 <script src="/shared-comments.js?v=20260823a"></script>
-<script src="/shared-post-view.js?v=20260823d"></script>
+<script src="/shared-post-view.js?v=20260823e"></script>
 <script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-achievements.js?v=9"></script>
 <script src="/shared-header.js?v=2026071802"></script>
@@ -663,14 +677,47 @@ async function openPost(postId) {
   const p = FEED[postId];
   if (!p) { location.href = "/content-feed.html?post=" + encodeURIComponent(postId); return; }
 
-  // Poll, reactions and comment count are only needed for the post being opened,
-  // so they are fetched now rather than for all 700 on page load.
+  const media = $("ln-lb-media"), body = $("ln-lb-body"), cmts = $("ln-lb-cmts");
+
+  /* Open FIRST. The media needs nothing from the server, so it can play straight
+     away; only the reaction tally and the comments have to be fetched, and those
+     show a loader rather than an empty box. */
+  body.innerHTML = PostView.bodyHtml(p);
+  media.innerHTML = "";
+  const hoisted = body.querySelector(".cf-yt-thumb, .cf-yt-embed, .cf-post-media");
+  if (hoisted) media.appendChild(hoisted);
+  const embed = PostView.embedHtml(p);
+  if (embed) media.innerHTML = embed;
+  media.querySelectorAll("mux-player, video").forEach(v => { try { v.play(); } catch (err) {} });
+  body.insertAdjacentHTML("beforeend", '<div class="ln-lb-meta" id="ln-lb-meta"><span class="spinner ln-lb-spin"></span></div>');
+  cmts.innerHTML = '<div class="ln-lb-loading"><span class="spinner"></span></div>';
+
+  LB_OPEN = postId;
+  $("ln-lb").classList.remove("closing");
+  $("ln-lb").classList.add("open");
+  document.body.style.overflow = "hidden";
+  history.pushState({ lb: postId }, "", "?post=" + encodeURIComponent(postId));
+
+  PostView.trackMedia(media, "video", p.youtube_id || postId);
+  PostView.recordView("video", p.youtube_id || postId, 0, false);
+
+  /* Now fill in what needed a round trip. */
   try {
-    const [polls, cmtRows] = await Promise.all([
+    const [polls, cmtRows, likes] = await Promise.all([
       db.from("content_feed_post_polls").select("id,post_id,question").eq("post_id", postId),
       db.from("content_feed_comments").select("post_id").eq("post_id", postId),
+      db.from("content_feed_likes").select("email").eq("post_id", postId),
     ]);
+    if (LB_OPEN !== postId) return;                  // they closed it, or opened another
     p.commentCount = (cmtRows.data || []).length;
+
+    const emails = [...new Set((likes.data || []).map(l => l.email))];
+    p._likers = emails;
+    if (emails.length) {
+      const who = await db.from("allowed_emails").select("email,avatar_url,name").in("email", emails.slice(0, 40));
+      p._likerInfo = Object.fromEntries((who.data || []).map(r => [r.email, r]));
+    }
+
     const pr = (polls.data || [])[0];
     if (pr) {
       const [opts, votes, mine] = await Promise.all([
@@ -684,43 +731,32 @@ async function openPost(postId) {
                  voteCounts: counts, totalVotes: total,
                  myVote: (mine.data || [])[0] ? (mine.data || [])[0].option_id : null };
     }
+
     await Comments.loadReactions([postId]);
-    const likes = await db.from("content_feed_likes").select("email").eq("post_id", postId);
-    const emails = [...new Set((likes.data || []).map(l => l.email))];
-    p._likers = emails;
-    if (emails.length) {
-      const who = await db.from("allowed_emails").select("email,avatar_url,name").in("email", emails.slice(0, 40));
-      p._likerInfo = Object.fromEntries((who.data || []).map(r => [r.email, r]));
+    if (LB_OPEN !== postId) return;
+
+    // A poll only exists on written posts, so re-render the body when there is one.
+    if (p.poll) {
+      const keepMedia = media.innerHTML;
+      body.innerHTML = PostView.bodyHtml(p);
+      body.querySelectorAll(".cf-yt-thumb, .cf-yt-embed, .cf-post-media").forEach(el => el.remove());
+      media.innerHTML = keepMedia;
+      body.insertAdjacentHTML("beforeend", '<div class="ln-lb-meta" id="ln-lb-meta"></div>');
     }
-  } catch (e) { console.error("lightbox load error:", e); }
+    const cc = p.commentCount || 0;
+    const meta = $("ln-lb-meta");
+    if (meta) meta.innerHTML = Comments.reactBtnHtml(postId, "ln_lb_" + postId.replace(/-/g, "_"))
+      + likerChips(p)
+      + '<span class="ln-lb-count">' + (cc ? cc + " comment" + (cc === 1 ? "" : "s") : "No comments yet") + "</span>";
 
-  const media = $("ln-lb-media"), body = $("ln-lb-body"), cmts = $("ln-lb-cmts");
-  media.innerHTML = "";
-  body.innerHTML = PostView.bodyHtml(p);
-  // The media belongs at the top, on its own, so hoist whatever the module made.
-  const m = body.querySelector(".cf-yt-thumb, .cf-yt-embed, .cf-post-media");
-  if (m) media.appendChild(m);
-  const rx = Comments.reactBtnHtml(postId, "ln_lb_" + postId.replace(/-/g, "_"));
-  const cc = p.commentCount || 0;
-  body.insertAdjacentHTML("beforeend",
-    '<div class="ln-lb-meta">' + rx + likerChips(p)
-    + '<span class="ln-lb-count">' + (cc ? cc + " comment" + (cc === 1 ? "" : "s") : "No comments yet") + "</span>"
-    + "</div>");
-  cmts.innerHTML = '<div class="tc-comments-section">'
-    + '<div id="tc-comments-hdr-' + postId + '" class="tc-comments-hdr">Comments</div>'
-    + '<div id="tc-comments-list-' + postId + '"></div>' + Comments.formHtml(postId) + "</div>";
-  Comments.load(postId);
-  // Opening it IS the request to watch it, so don't make them click twice.
-  const embed = PostView.embedHtml(p);
-  if (embed) media.innerHTML = embed;
-  media.querySelectorAll("mux-player, video").forEach(v => { try { v.play(); } catch (err) {} });
-  PostView.trackMedia(media, "video", p.youtube_id || postId);
-  PostView.recordView("video", p.youtube_id || postId, 0, false);
-
-  LB_OPEN = postId;
-  $("ln-lb").classList.add("open");
-  document.body.style.overflow = "hidden";
-  history.pushState({ lb: postId }, "", "?post=" + encodeURIComponent(postId));
+    cmts.innerHTML = '<div class="tc-comments-section">'
+      + '<div id="tc-comments-hdr-' + postId + '" class="tc-comments-hdr">Comments</div>'
+      + '<div id="tc-comments-list-' + postId + '"></div>' + Comments.formHtml(postId) + "</div>";
+    Comments.load(postId);
+  } catch (e) {
+    console.error("lightbox load error:", e);
+    if (LB_OPEN === postId) cmts.innerHTML = '<div class="ln-lb-loading">Comments could not load.</div>';
+  }
 }
 
 function closePost(fromPop) {
