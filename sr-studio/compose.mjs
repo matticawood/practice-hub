@@ -10,7 +10,7 @@ import { fingerHandDP } from './fingering.mjs';   // to negotiate NOTES against 
 //
 // A weighted pick — the weights ARE the reasoning; nothing is zero-forbidden unless it's [T]/[C]. (A near-never
 // move is a tiny weight, not an omission, so it stays reachable — a composer can do anything, some things never.)
-function pick(weights, rnd = Math.random) {
+export function pick(weights, rnd = Math.random) {
   const es = Object.entries(weights).filter(([, w]) => w > 0);
   const tot = es.reduce((a, [, w]) => a + w, 0);
   if (!tot) return null;
@@ -139,8 +139,8 @@ function chordForFunction(mode, fn, rnd, opts = {}) {
 //
 // form: { nbars, cadences: [{ bar, type }] } where type ∈ 'HC' (half, ends on D) | 'PAC'|'IAC' (authentic, D→T)
 //       | 'DC' (deceptive, D→AWAY) | 'continuous' (no stop). bar is the LAST bar of that phrase.
-// harmonicRhythmBars: how many bars a structural chord holds by default (1 = a chord per bar; 2 = per two bars…),
-//       leaned from the character; broadens at cadence bars. [P].
+// Harmonic RHYTHM is not a flat "hold N bars" constant — it emerges from the journey's `pace` (character moveBias × drama
+//   tension): a chord holds one or more strong-beat slots, quicker into cadences, slower at repose (see `pace` below). [P]
 export function harmonicPlan({ grade, mode, barU, beatLen = 1, form, character = {}, drama = null, rnd = Math.random }) {
   const nbars = form.nbars;
   const diat = DIATONIC[mode];
@@ -456,11 +456,13 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
   // DEVELOP the germ [P — motivic variation]: split a long note (diminution), OR re-voice ONE beat to a DIFFERENT
   //   subdivision (works on a dense/dotted cell, which the old whole-note-only variant returned unchanged — the root of
   //   the "same cell every bar" monotony). The frame stays; one beat moves — a real variation, not a fresh cell.
-  const variant = cell => {
+  const variant = (cell, drive = 0.5) => {
     const segs = beatSegs(cell, beatLen);
     const longs = [], beats = [];
     segs.forEach((s, i) => { const sum = s.reduce((a, x) => a + x, 0); if (sum >= 2) longs.push(i); else if (Math.abs(sum - 1) < 1e-9) beats.push(i); });
-    if (longs.length && (rnd() < 0.5 || !beats.length)) { const i = longs[Math.floor(rnd() * longs.length)]; const k = segs[i].reduce((a, x) => a + x, 0);   // diminish a long note into k beats of motion (KEEP the beat count); always take it when there is no beat to re-voice (development must MOVE)
+    // develop by DIMINUTION (add motion — DRIVE) or by RE-VOICING a beat (gentle variation), leaning by the bar's `drive`
+    //   (the shared drama tension): build with motion where it's tense, vary gently where it's calm. Both reachable.
+    if (longs.length && (!beats.length || pick({ diminish: drive, revoice: 1 - drive }, rnd) === 'diminish')) { const i = longs[Math.floor(rnd() * longs.length)]; const k = segs[i].reduce((a, x) => a + x, 0);   // diminish a long note into k beats of motion (KEEP the beat count); always take it when there is no beat to re-voice (development must MOVE)
       const rep = []; for (let j = 0; j < k; j++) rep.push(1);                          // k plain crotchets...
       if (rnd() < 0.6) { const j = Math.floor(rnd() * k); rep.splice(j, 1, ...drawBeat(rnd, pace, dot, gmin, null, beatLen, runReady)); }   // ...one subdivided for motion
       segs[i] = rep; return segs.flat(); }
@@ -492,7 +494,7 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
       : toCad <= 1 ? { variant: 7, germ: 2 }                         // drive to the cadence: a developed (fragmented) unit
       : { germ: 3, variant: 6, fresh: 1 };                           // continuation: mostly develop, a rare contrasting idea
     const kind = pick(w, rnd);
-    return kind === 'germ' ? germCell.slice() : kind === 'variant' ? variant(germCell) : barRhythm(nbeats, rnd, pace, dot, grade, beatLen, runReady);
+    return kind === 'germ' ? germCell.slice() : kind === 'variant' ? variant(germCell, drama ? drama.tensionAt((b + 0.5) * barU) : 0.5) : barRhythm(nbeats, rnd, pace, dot, grade, beatLen, runReady);
   };
   const notes = [];
   for (let b = 0; b < nbars; b++) {
@@ -544,11 +546,15 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
   // the melody's registral peak is PLACED at the shared dramatic climax (not a private per-melody guess), so the tune
   //   summits where the harmony is most tense and the dynamics swell — one coherent high point.
   const climaxPos = drama ? (drama.climaxBar + 0.55) * barU / total : 0.42 + rnd() * 0.36;
-  // a FIVE-FINGER box (a fifth) should be used WHOLE — all five fingers — so the contour spans the full box (valley→lo,
-  //   peak→hi) rather than clustering near the tonic (which, in a subdominant/dominant position, sits at the TOP). A wide
-  //   grade-3/4 range needn't reach its extremes every piece, so it keeps the gentler 0.12→0.94 span. [P]
-  const narrowBox = (hi - lo) <= 8, peakF = narrowBox ? 1.0 : 0.94;
-  const startF = narrowBox ? rnd() * 0.12 : 0.12 + rnd() * 0.22, endF = narrowBox ? rnd() * 0.14 : 0.08 + rnd() * 0.25;
+  // USE THE ROOM YOU HAVE — how fully the contour reaches its range's extremes scales CONTINUOUSLY with that range, not a
+  //   threshold that flips the shape. A five-finger box (a fifth) is used WHOLE (valley→lo, peak→hi, all five fingers); a WIDE
+  //   grade-3/4 compass is shaped WITHIN it (peak just below the top, start/end off the edges). `fill` = 1 at a fifth, easing
+  //   to 0 as the range widens; it interpolates the same peak/start/end bands, so no two near-equal ranges shape differently. [P]
+  const fill = Math.max(0, Math.min(1, (15 - (hi - lo)) / 7));
+  const peakF = 0.94 + 0.06 * fill;                                                        // reach the top fully in a small box; just below it in a wide range
+  const startLo = 0.12 * (1 - fill), endLo = 0.08 * (1 - fill);                            // valley/start band floor (0 in a small box → off the edge in a wide one)
+  const startF = startLo + rnd() * ((0.12 + 0.22 * (1 - fill)) - startLo);                 // per-piece spread within a fill-scaled band
+  const endF = endLo + rnd() * ((0.14 + 0.19 * (1 - fill)) - endLo);
   const contourAt = tt => { const x = tt / total; const f = x <= climaxPos ? startF + (peakF - startF) * (x / climaxPos) : peakF - (peakF - endF) * ((x - climaxPos) / Math.max(1e-6, 1 - climaxPos)); return lo + (hi - lo) * f; };
   let germ = null, gi = 0, inv = 1;                                  // the motif's interval pattern + a rolling pointer + inversion sign
   let prev = null, prev2 = null, prevMove = 0; const recent = [];
@@ -608,7 +614,7 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
       // WRITE THE TUNE AGAINST THE BASS [P — a composer hears the bass while writing the melody]: the bass now STATES the root,
       //   so the tune must not run a parallel octave / fifth WITH that root — move in contrary / oblique motion instead. This
       //   is the melody's half of "no accidental 6/4, no parallel": the bass keeps its root, the tune steps around it. [P]
-      if (narrowBox && prev != null && prevRootPc != null) {
+      if (prev != null && prevRootPc != null) {   // a composer avoids parallel 8ve/5th with the bass in EVERY piece — not only a narrow-range one (the narrowBox gate here was a false precondition; range is irrelevant to a parallel being wrong)
         const md = Math.sign(q - prev), sd = x => (((x % 12) + 18) % 12) - 6, rd = Math.sign(sd(curRootPc - prevRootPc));
         if (md !== 0 && md === rd) { const above = (p, r) => (((p - r) % 12) + 12) % 12;
           if (above(q, curRootPc) === 0 && above(prev, prevRootPc) === 0) s -= 4;   // parallel octave with the root bass
@@ -682,13 +688,15 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
     { const ct = nearestPC(pcs, (a + c) / 2, Math.min(a, c), Math.max(a, c)); if (ct != null && ct !== a && ct !== c) choices[ct] = (choices[ct] || 0) + 3 * dw.arp; }
     // a decoration must stay inside the register window (the grade's hand) — drop any choice out of [lo,hi].
     for (const k of Object.keys(choices)) if (+k < lo || +k > hi) delete choices[k];
-    delete choices[a];                                             // a decoration MOVES — it never simply restates its predecessor (a fast run is a scale/arpeggio, not a stutter)
-    // fallback: a scalar STEP from the predecessor toward the goal — always moving, in-key, in-window. [P]
+    delete choices[a]; if (c !== a) delete choices[c];             // a decoration MOVES — it is a connecting note, so it never restates EITHER the note it comes from OR the note it goes to (landing on the successor is the pre-echo stutter that made higher-grade lines read static)
+    // fallback: a connecting STEP that is NEITHER end-point — toward the goal if that is a distinct note, else a neighbour away from it, always in-key + in-window. [P]
     if (!Object.keys(choices).length) {
+      const distinct = q => q != null && q >= lo && q <= hi && q !== a && q !== c;
       let q = diatStep(c > a ? 1 : c < a ? -1 : 1);
-      if (q == null || q < lo || q > hi) q = diatStep(c > a ? -1 : 1);
-      if (q == null || q < lo || q > hi) { const ct = nearestPC(pcs, Math.round((a + c) / 2), lo, hi); q = (ct != null && ct !== a) ? ct : a; }
-      choices[q] = 1;
+      if (!distinct(q)) q = diatStep(c > a ? -1 : 1);
+      if (!distinct(q)) { const ct = nearestPC(pcs, Math.round((a + c) / 2), lo, hi); q = distinct(ct) ? ct : null; }
+      if (!distinct(q)) { for (let d = 1; d <= 2 && !distinct(q); d++) for (const dir of [1, -1]) { const cnd = a + dir * d; if (distinct(cnd) && scalePcs.includes(((cnd % 12) + 12) % 12)) q = cnd; } }
+      choices[distinct(q) ? q : a] = 1;                            // genuine last resort (a tiny range boxing in both ends): the old behaviour, rare
     }
     n.m = +pick(Object.fromEntries(Object.entries(choices).map(([k, v]) => [k, v])), rnd);
   }

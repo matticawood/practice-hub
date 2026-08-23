@@ -33,23 +33,31 @@ const PLAN_SPEC = `Return ONLY a JSON object (no prose, no markdown, no code fen
   "sections": [
     {
       "label": "short tag, e.g. 'Opening', 'Section A', 'Point 1', 'Close'",
-      "heading": "the topic / point of this section",
+      "heading": "a chapter-card title for this section. Name the PROBLEM or the BELIEF plainly and neutrally — not a jargon label for the phenomenon ('Multitasking' means nothing to a viewer), and not in the first person ('My hands won't...') which only lands for someone who already owns that complaint. e.g. 'Doing Two Things at Once'. The heading is what people CALL it; the refrain in the points is what it ACTUALLY is.",
       "framework": "the NAMED principle or model this section teaches — give it a short, memorable name he can say on camera (e.g. 'Loss vs Access', 'The Consolidation Lag'). Null only for the Opening/Close.",
-      "points": ["a short beat/bullet to cover (the false belief, the mechanism, the reframe, etc.)", "another beat", "..."],
+      "points": ["an ORDERED CHAIN of beats, where each one is forced by the beat above it — state the belief, why it is believable, the strongest objection answered, the kill, the rename, the fix, the refrain. NOT a set of true statements in any order: if a beat could be moved somewhere else without the argument breaking, it is not a chain and he will have to build the logic live on camera.", "the next link", "..."],
       "example": "one concrete example, analogy or demo-at-the-piano to use here (or null)",
       "action": "the ACTIONABLE takeaway — one concrete thing the viewer can DO, try, or change at the piano because of this section (not just a reframe). Null only for the Opening.",
       "source": "the passage title this section draws on (or null)",
+      "bridge": "the HANDOFF line he says on the way out of this section and into the next — it must set up the next section's belief, and the next section should open by stating that same belief. Null only for the Close. Without this every transition gets improvised on camera.",
       "addition": "an optional relevant concept from OUTSIDE his corpus that links to this section — a named psychological phenomenon or music-theory point — shown asterisked as a suggested extra. Use sparingly, only when it genuinely strengthens the idea (or null)"
     }
   ],
   "close": "the closing / payoff line (or null)"
 }
-Keep bullets short and scannable. 3-6 sections is typical. Every body section MUST name its "framework" and give a concrete "action". Everything must be grounded in the passages.`;
+Keep bullets short and scannable. 3-6 sections is typical. Every body section MUST name its "framework", give a concrete "action", and (except the Close) a "bridge". Everything must be grounded in the passages.
+
+THREE RULES THAT DECIDE WHETHER THE PLAN IS FILMABLE:
+1. CHAIN, NOT LIST. Every "points" array is a single argument read top to bottom. Test each beat: does it follow from the one above? If not, reorder or cut it.
+2. HAND OFF. Each section's "bridge" leads into the next, and the next section's first beat states the belief the bridge named.
+3. PRE-ANSWER THE OBJECTION. Name the strongest counterexample a knowledgeable viewer would shout at the screen, inside the section it threatens, and answer it there. A debunking piece that leaves its obvious counterexample unaddressed falls apart the moment he is asked about it.
+
+These are PROMPTS to talk from, never a script: no lines to read out word for word, no on-screen or production directions, no tone notes, and no commentary about the plan itself. He is not thinking about the screen while he is talking.`;
 
 const SYSTEM: Record<string, string> = {
   video: `You turn Matthew's idea into a PLAN for one of his YouTube videos, laid out as fill-in section boxes, in HIS ACTUAL structure (learned from his own transcripts — follow it, not generic YouTube advice):
 - First section, label "Opening": pick the mode that fits — a problem/advice video opens by naming the viewer's private frustration with an "If you…" line then REFRAMING it as a misdiagnosis (the real problem isn't what they think); a concept video opens with a "What if I told you…" paradox. Its "points" should include that opening line, the reframe, and his roadmap sentence ("So in today's video I'm going to…") that NUMBERS what's coming. State the PROMISE explicitly here and fill the top-level "promise" field: a clear thing they'll understand or be able to do by the end.
-- Then ONE section per body point. Each is built on a BINARY DISTINCTION (his signature device: reading vs sight-reading, success vs reliability, playing vs practising) as the "heading"; name the "framework" it teaches; "points" = the common false belief, the mechanism, and the fix ("instead of asking X, ask Y"); "example" = an analogy from OUTSIDE music (golf, tennis, the alphabet) or a demo at the piano; "action" = the concrete thing to do about it; "source" = the passage.
+- Then ONE section per body point. "heading" = the problem or belief, named plainly; "framework" = the named principle underneath it, which is where his binary distinctions live (reading vs sight-reading, success vs reliability, playing vs practising); "points" = the chain — the false belief, why it is believable, the strongest objection answered, the mechanism that kills it, the fix ("instead of asking X, ask Y"), and the refrain that renames it; "example" = an analogy from OUTSIDE music (golf, tennis, the alphabet) or a demo at the piano; "action" = the concrete thing to do about it; "bridge" = the handoff into the next point; "source" = the passage.
 - A final section, label "Close": pay off the PROMISE from the opening with the concrete takeaway/tool, so the viewer feels they genuinely took something away. Mention his app The Practice Room only where it genuinely fits.
 ${COMMON}
 ${PLAN_SPEC}`,
@@ -115,6 +123,7 @@ function planToText(p: any): string {
     if (sec.example) s += `  Example: ${sec.example}\n`;
     if (sec.action) s += `  Do this: ${sec.action}\n`;
     if (sec.addition) s += `  * Suggested extra (not from your corpus): ${sec.addition}\n`;
+    if (sec.bridge) s += `  Next: ${sec.bridge}\n`;
     if (sec.source) s += `  [Source: ${sec.source}]\n`;
     s += "\n";
   }
@@ -241,9 +250,10 @@ Deno.serve(async (req) => {
     const ar = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: { "x-api-key": anthropicKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
-      // A refine carries the whole discussion, and a long one needs room to
-      // restate the entire plan. At 8000 the reply ran out mid-plan.
-      body: JSON.stringify({ model: MODEL, max_tokens: 24000, thinking: { type: "disabled" }, system: SYSTEM[mode], messages: [{ role: "user", content: userMsg }] }),
+      // A refine carries the whole discussion and has to restate the ENTIRE
+      // plan, so this is set at the model's ceiling rather than a guess. A plan
+      // must never come back shortened because the budget ran out.
+      body: JSON.stringify({ model: MODEL, max_tokens: 64000, thinking: { type: "disabled" }, system: SYSTEM[mode], messages: [{ role: "user", content: userMsg }] }),
     });
     if (!ar.ok) return jsonError(502, "Claude failed: " + (await ar.text()).slice(0, 200));
     const data = await ar.json();
@@ -277,8 +287,33 @@ Deno.serve(async (req) => {
   // Adjusting an existing outline updates that saved row; a fresh draft inserts a new one.
   const priorRun = String(body.run_id || "").trim();
   let run_id: string | null = priorRun || null;
+
+  // Every saved state is kept, so nothing this function writes can ever be the
+  // only copy. Two moments matter: whatever the row holds BEFORE it is replaced,
+  // and the new state after. The first is what makes a bad fold undoable.
+  const keepVersion = async (rid: string, p: any, syn: string, srcs: any, note: string) => {
+    if (!rid || (!p && !String(syn || "").trim())) return;
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/corpus_idea_versions`, {
+        method: "POST",
+        headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "content-type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ run_id: rid, email: caller.toLowerCase(), plan: p, synthesis: syn, sources: srcs, note }),
+      });
+    } catch { /* history is a safety net, never a reason to fail the request */ }
+  };
+
   try {
     if (priorRun) {
+      // Snapshot what is about to be replaced.
+      try {
+        const cur = await fetch(`${SUPABASE_URL}/rest/v1/corpus_idea_runs?id=eq.${priorRun}&select=plan,synthesis,sources`, {
+          headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` },
+        });
+        if (cur.ok) {
+          const row = (await cur.json())?.[0];
+          if (row) await keepVersion(priorRun, row.plan, row.synthesis, row.sources, "before " + mode);
+        }
+      } catch { /* ignore */ }
       await fetch(`${SUPABASE_URL}/rest/v1/corpus_idea_runs?id=eq.${priorRun}&email=eq.${encodeURIComponent(caller.toLowerCase())}`, {
         method: "PATCH",
         headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "content-type": "application/json", Prefer: "return=minimal" },
@@ -292,6 +327,7 @@ Deno.serve(async (req) => {
       });
       if (ins.ok) run_id = (await ins.json())?.[0]?.id ?? null;
     }
+    if (run_id) await keepVersion(run_id, plan, synthesis, sources, mode);
   } catch { /* ignore */ }
 
   return json({ plan, synthesis, sources, run_id, mode });

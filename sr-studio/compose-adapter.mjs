@@ -6,7 +6,7 @@
 // SCOPE (first pass): simple metres only (4/4, 2/4, 3/4). Compound metres (6/8, 3/8) need the core's per-bar rhythm
 // expressed in compound-beat units — a separate step — so they are deferred here, not faked.
 
-import { dramaticPlan, harmonicPlan, composeMelody, composeBass, realizeLH, resolveOuterParallels, animateInnerVoice, reharmoniseStaticSpans, breatheLH, respondToBreaths } from './compose.mjs';
+import { dramaticPlan, harmonicPlan, composeMelody, composeBass, realizeLH, resolveOuterParallels, animateInnerVoice, reharmoniseStaticSpans, breatheLH, respondToBreaths, pick } from './compose.mjs';
 import { gradeParams } from './grade-params.mjs';
 import { GRADES, resolveFingering } from './engine.mjs';
 
@@ -150,7 +150,10 @@ export function generateCompose(grade, opts = {}) {
   //   sequences and the melody sequences over it). A smooth/lyrical or formal line spins sequences (the Baroque/Classical
   //   spinning-out, the rosalia); a crisp march/dance leans on repetition instead. Grade leans it up (a spun sequence is a
   //   sophistication). [P — a style trait × the grade level]
-  const character = { harmonicRhythmBars: opts.holdBars || rnd(fixed ? [1, 1, 2] : [1, 2]), moveBias, cadWeight, chromColour, soph, feel: chr.feel, accent: chr.accent, climaxLate: chr.feel === 'crisp' ? 0.7 : chr.feel === 'smooth' ? 0.35 : 0.5, seqBias: (chr.feel === 'smooth' ? 0.5 : chr.feel === 'lilt' ? 0.34 : 0.2) * (0.7 + 0.6 * soph) };
+  // (harmonicRhythmBars removed — a vestigial flat "hold N bars" field nothing read; harmonic rhythm is reasoned intrinsically
+  //  by the journey's `pace` = character moveBias × drama tension, quicker into cadences. A flat per-piece constant is not how
+  //  a composer's harmonic rhythm works, and it fed no decision.)
+  const character = { moveBias, cadWeight, chromColour, soph, feel: chr.feel, accent: chr.accent, climaxLate: chr.feel === 'crisp' ? 0.7 : chr.feel === 'smooth' ? 0.35 : 0.5, seqBias: (chr.feel === 'smooth' ? 0.5 : chr.feel === 'lilt' ? 0.34 : 0.2) * (0.7 + 0.6 * soph) };
   // THE DRAMATIC PLAN first — the shared tension/climax spine that harmony, melody, bass and dynamics all read.
   const drama = dramaticPlan({ nbars, barU, beatLen, form, character, rnd: Math.random });
   const plan = harmonicPlan({ grade, mode, barU, beatLen, form, character, drama, rnd: Math.random });
@@ -244,6 +247,32 @@ export function generateCompose(grade, opts = {}) {
     const soundD = barU / 2;   // match the melody's button proportion (half the bar plays, half breathes)
     if (closePitch != null) { kept.push({ m: closePitch, d: soundD }); if (barU - soundD > 1e-9) kept.push({ rest: true, d: barU - soundD }); lh = kept; }
   }
+  // STATE THE CADENTIAL BASS AS ROOT MOTION — the leading tone lives in ONE voice. When the MELODY resolves ^7→^1 into the
+  //   close (its key-confirming gesture), the last two sounding bass notes are the dominant ROOT then the tonic ROOT (V→I root
+  //   motion), so the two outer voices do not double the leading tone in parallel octaves. Stated HERE, after the button has
+  //   settled which notes are actually last (a held ending keeps its final bass; a buttoned ending's rebuild surfaced the
+  //   dominant bar's note as the penult) — the one place both paths meet. Conditional (only a genuine ^7→^1 melody close) and
+  //   reachable (kept as-is if the dominant root is not in the hand). [P — voice the cadential bass as a composer does]
+  {
+    const tPc = ((tonic % 12) + 12) % 12, ltPc = (tPc + 11) % 12, domRootPc = (tPc + 7) % 12;
+    const pcTop = m => (((( Array.isArray(m) ? Math.max(...m) : m) % 12) + 12) % 12);
+    const pcBot = m => (((( Array.isArray(m) ? Math.min(...m) : m) % 12) + 12) % 12);
+    const rhSnd = rh.filter(n => !n.rest);
+    const melLT = rhSnd.length >= 2 && pcTop(rhSnd[rhSnd.length - 1].m) === tPc && pcTop(rhSnd[rhSnd.length - 2].m) === ltPc;
+    const lhIdx = []; lh.forEach((n, i) => { if (!n.rest) lhIdx.push(i); });
+    if (melLT && lhIdx.length >= 2) {
+      const pen = lh[lhIdx[lhIdx.length - 2]];
+      if (pcBot(pen.m) === ltPc) {                                            // the penult bass doubles the melody's leading tone
+        const [blo, bhi] = bassRange, curBot = Array.isArray(pen.m) ? Math.min(...pen.m) : pen.m;
+        let root = null; for (let p = curBot; p >= blo; p--) if ((((p % 12) + 12) % 12) === domRootPc) { root = p; break; }
+        if (root == null) for (let p = curBot + 1; p <= bhi; p++) if ((((p % 12) + 12) % 12) === domRootPc) { root = p; break; }
+        if (root != null) {                                                  // state the dominant root (root motion V→I); an inner voice may keep the third — only the OUTER doubling is the fault
+          if (Array.isArray(pen.m)) { const others = pen.m.filter(x => x !== curBot && x !== root); pen.m = others.length ? [root, ...others].sort((a, b) => a - b) : root; }
+          else pen.m = root;
+        }
+      }
+    }
+  }
   // (the bare-leading-tone naturalise pass is gone: breatheLH now REFUSES to lift a beat that would strand a hollow ^7,
   //  so the sharp is never left unsupported in the first place — decided at the moment of the breath, not repaired after.)
   // (the final-6/4 correction is gone: structuralBassLine now excludes the fifth at the closing tonic outright — a 6/4 is
@@ -264,7 +293,7 @@ export function generateCompose(grade, opts = {}) {
   };
   dress(ex, chr, drama);
   articulate(ex, chr, grade);
-  if (gp.rhythmDevices?.anacrusis) addAnacrusis(ex, { tonic, mode, beatLen, grade, range: melRange, chrId: chr.id, rnd: Math.random });   // the pickup is a GRADE-CANVAS device (the exam introduces it at grade 4); WHETHER a character leads in is still its own lean, but only where the grade admits it. (before fingering, so the pickup is fingered too)
+  if (gp.rhythmDevices?.anacrusis) addAnacrusis(ex, { tonic, mode, beatLen, grade, range: melRange, chrId: chr.id, pace: chr.pace, rnd: Math.random });   // the pickup is a GRADE-CANVAS device (the exam introduces it at grade 4); WHETHER a character leads in is still its own lean, but only where the grade admits it. (before fingering, so the pickup is fingered too)
   const _fg = resolveFingering(ex); ex.rhFinger = _fg.rh; ex.lhFinger = _fg.lh;   // attach the resolved fingering so `ex` matches the studio contract (bank persistence reads rhFinger/lhFinger)
   return ex;
 }
@@ -369,7 +398,7 @@ function articulate(ex, chr, grade, rnd = Math.random) {
 //   melody-alone upbeat) and enters on the downbeat. Where the register/box leaves no room below the first note, the tune
 //   states the beat instead (no pickup forced). Rendered through ex.partial, which the engine already threads. [P]
 const ANAC = { march: 0.5, lively: 0.35, dance: 0.32, scherzo: 0.3, singing: 0.3, flowing: 0.3, lyricalslow: 0.25, gentle: 0.2, minuet: 0.15, waltz: 0.1, grand: 0.1 };
-function addAnacrusis(ex, { tonic, mode, beatLen, grade, range, chrId, rnd = Math.random }) {
+function addAnacrusis(ex, { tonic, mode, beatLen, grade, range, chrId, pace = 0.5, rnd = Math.random }) {
   if (ex.partial) return;
   const first = ex.rh[0]; if (!first || first.rest) return;
   if (rnd() >= (ANAC[chrId] ?? 0.2)) return;                                   // this character states the beat this time
@@ -381,7 +410,9 @@ function addAnacrusis(ex, { tonic, mode, beatLen, grade, range, chrId, rnd = Mat
   const s1 = stepBelow(m0); if (s1 == null || s1 < lo) return;                 // no room below in the register / five-finger box → state the beat
   const p = beatLen;                                                          // a one-beat pickup
   let pickup;
-  if (rnd() < 0.5) { const s2 = stepBelow(s1); pickup = beatLen > 1 + 1e-9
+  // the pickup's SHAPE follows the character's momentum: a weighted lean over {run into the beat, state a single upbeat},
+  //   weighted by `pace` (a run into the beat IS a burst of that momentum). Both reachable; not a bare coin.
+  if (pick({ run: pace, single: 1 - pace }, rnd) === 'run') { const s2 = stepBelow(s1); pickup = beatLen > 1 + 1e-9
       ? ((s2 != null && s2 >= lo && stepBelow(s2) != null && stepBelow(s2) >= lo) ? [{ m: stepBelow(s2), d: 0.5 }, { m: s2, d: 0.5 }, { m: s1, d: 0.5 }]   // COMPOUND: a rising three-quaver run into the downbeat (the beat divides in three, not two)
          : (s2 != null && s2 >= lo) ? [{ m: s2, d: 1 }, { m: s1, d: 0.5 }]                                                                                 // fewer tones below: a crotchet + quaver rise
          : [{ m: s1, d: p }])

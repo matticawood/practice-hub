@@ -279,10 +279,10 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-practice-autolog.js?v=4"></script>
-<link rel="stylesheet" href="/shared-post-view.css?v=20260823a">
+<link rel="stylesheet" href="/shared-post-view.css?v=20260823b">
 <script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3.12.0"></script>
 <script src="/shared-comments.js?v=20260823a"></script>
-<script src="/shared-post-view.js?v=20260823a"></script>
+<script src="/shared-post-view.js?v=20260823b"></script>
 <script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-achievements.js?v=9"></script>
 <script src="/shared-header.js?v=2026071802"></script>
@@ -623,6 +623,26 @@ const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
    module, so it is the same thing content-feed shows, in a different frame. */
 let LB_OPEN = null;
 
+/* The faces beside the count, as the feed shows them. */
+function likerChips(p) {
+  const all = p._likers || [];
+  if (!all.length) return "";
+  const info = p._likerInfo || {};
+  const chips = all.slice(0, 3).map(em => {
+    const r = info[em] || {};
+    const name = r.name || em.split("@")[0];
+    const inner = r.avatar_url
+      ? '<img src="' + esc(r.avatar_url) + '" alt="' + esc(name) + '">'
+      : '<span style="background:var(--surface-2);color:var(--text-muted);width:100%;height:100%;display:flex;'
+        + 'align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">'
+        + esc(name[0].toUpperCase()) + "</span>";
+    return '<div class="tc-like-chip">' + inner + "</div>";
+  }).join("");
+  return '<span class="tc-like-avatars" style="display:inline-flex;align-items:center;margin-left:4px">'
+    + chips + (all.length > 3 ? '<span style="font-size:.72rem;color:var(--text-muted);margin-left:6px">+'
+    + (all.length - 3) + "</span>" : "") + "</span>";
+}
+
 async function openPost(postId) {
   const p = FEED[postId];
   if (!p) { location.href = "/content-feed.html?post=" + encodeURIComponent(postId); return; }
@@ -649,6 +669,13 @@ async function openPost(postId) {
                  myVote: (mine.data || [])[0] ? (mine.data || [])[0].option_id : null };
     }
     await Comments.loadReactions([postId]);
+    const likes = await db.from("content_feed_likes").select("email").eq("post_id", postId);
+    const emails = [...new Set((likes.data || []).map(l => l.email))];
+    p._likers = emails;
+    if (emails.length) {
+      const who = await db.from("allowed_emails").select("email,avatar_url,name").in("email", emails.slice(0, 40));
+      p._likerInfo = Object.fromEntries((who.data || []).map(r => [r.email, r]));
+    }
   } catch (e) { console.error("lightbox load error:", e); }
 
   const media = $("ln-lb-media"), body = $("ln-lb-body"), cmts = $("ln-lb-cmts");
@@ -660,7 +687,7 @@ async function openPost(postId) {
   const rx = Comments.reactBtnHtml(postId, "ln_lb_" + postId.replace(/-/g, "_"));
   const cc = p.commentCount || 0;
   body.insertAdjacentHTML("beforeend",
-    '<div class="ln-lb-meta">' + rx
+    '<div class="ln-lb-meta">' + rx + likerChips(p)
     + '<span class="ln-lb-count">' + (cc ? cc + " comment" + (cc === 1 ? "" : "s") : "No comments yet") + "</span>"
     + "</div>");
   cmts.innerHTML = '<div class="tc-comments-section">'
