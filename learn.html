@@ -290,13 +290,23 @@ async function load() {
     img:"https://image.mux.com/" + e.mux_playback_id + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=25",
     playable:true, dur:e.duration_mins ? e.duration_mins + " min" : "",
     href:"/events.html?event=" + encodeURIComponent(e.id), meta:"Clinic replay · " + fmtDate(e.scheduled_at) }));
-  (feed.data || []).forEach(p => ITEMS.push(p.youtube_id ? {
-    type:"video", title:p.title, date:p.published_at, playable:true,
-    img:"https://i.ytimg.com/vi/" + p.youtube_id + "/mqdefault.jpg",
-    href:p.url || ("https://youtu.be/" + p.youtube_id), external:true, meta:"Video · " + fmtDate(p.published_at)
-  } : {
-    type:"video", title:p.title, date:p.published_at,
-    href:"/content-feed.html?post=" + encodeURIComponent(p.id), meta:"Post · " + fmtDate(p.published_at) }));
+  // The content feed carries three kinds of thing and only two of them are
+  // learning material. `blog` posts announce a Monday Music Tips article, which
+  // is already here from mmt_articles, so they would show everything twice.
+  // Clinic topic polls are a question to the room, not something to learn from,
+  // and clinic announcements duplicate the clinic itself from live_events.
+  const FEED_SKIP = /topic poll|^live practice clinic|^live q&a/i;
+  (feed.data || []).forEach(p => {
+    if (p.type === "blog") return;
+    if (FEED_SKIP.test(p.title || "")) return;
+    ITEMS.push(p.youtube_id ? {
+      type:"video", title:p.title, date:p.published_at, playable:true,
+      img:"https://i.ytimg.com/vi/" + p.youtube_id + "/mqdefault.jpg",
+      href:p.url || ("https://youtu.be/" + p.youtube_id), external:true, meta:"Video · " + fmtDate(p.published_at)
+    } : {
+      type:"video", title:p.title, date:p.published_at,
+      href:"/content-feed.html?post=" + encodeURIComponent(p.id), meta:"Post · " + fmtDate(p.published_at) });
+  });
   (mmt.data || []).forEach(a => ITEMS.push({
     type:"article", title:a.title, date:a.published_at || a.created_at, img:a.cover_image || "",
     href:"https://matthewcawood.com/monday-music-tips/" + encodeURIComponent(a.slug), external:true,
@@ -305,6 +315,14 @@ async function load() {
     type:"course", title:l.title, topic:META[l.course].label, done:done.has(l.id),
     href:"/courses.html?lesson=" + encodeURIComponent(l.id),
     meta:META[l.course].label + (l.est_minutes ? " · " + l.est_minutes + " min" : "") }); });
+
+  /* A title can legitimately exist in two tables; show it once. */
+  const seenTitle = new Set();
+  ITEMS = ITEMS.filter(i => {
+    const k = (i.type === "course" ? "lesson:" : "") + (i.title || "").trim().toLowerCase();
+    if (!k || seenTitle.has(k)) return false;
+    seenTitle.add(k); return true;
+  });
 
   /* topics come from the only vocabulary that is actually populated today */
   const counts = {};
