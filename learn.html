@@ -77,7 +77,17 @@
      hero is never viewport-wide, and sizing off vw overshot badly. Widen the
      16:9 frame to whichever is bigger, the hero's width or the width its own
      height demands, and centre the overflow. */
-  iframe.ln-bb-vid { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  /* The video starts invisible over its own still and fades in only once it is
+     genuinely playing, so there is no black frame and no jump. */
+  .ln-bb-vid { opacity:0; transition:opacity .6s ease; }
+  .ln-bb-vid.ready { opacity:1; }
+  /* YouTube will not be talked out of its own chrome: the title strip along the
+     top and the control strip along the bottom come back whatever the embed
+     parameters say. The frame is oversized by a sixth so both strips fall
+     outside the hero, which costs about 8% off each edge of a talking-head
+     shot and is the only reliable way to be rid of them. */
+  iframe.ln-bb-vid { position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%) scale(1.18);
     width:max(100%, calc(var(--bbh) * 16 / 9)); aspect-ratio:16 / 9; height:auto;
     border:0; pointer-events:none; z-index:0; }
   /* mux-player crops itself, so it just fills the frame. */
@@ -1206,6 +1216,28 @@ function wireCarousel() {
    so the height still never changes from slide to slide: a slide with no video
    simply fills the taller frame with its still. Phones keep the compact hero,
    where 16:9 would leave no room for the title. */
+/* The first slide's video is fetched while the loading screen is still up, so
+   the page opens on something ready to move rather than on a still that jumps a
+   second later. Capped, so a slow video never holds the page hostage. */
+let BB_GO = null, BB_REVEALED = false;
+const BB_PENDING = [];
+const BB_FIRST = new Promise(res => { BB_GO = res; setTimeout(res, 2500); });
+
+/* Ready during the hold means wait: the settle into 16:9 is worth seeing, and
+   it cannot be seen behind a loading screen. */
+function bbShow(el) {
+  if (!el || !el.isConnected) return;
+  if (BB_GO) { BB_GO(); }
+  if (!BB_REVEALED) { BB_PENDING.push(el); return; }
+  bbExpand(); el.classList.add("ready");
+}
+function bbReveal() {
+  BB_REVEALED = true;
+  setTimeout(() => BB_PENDING.splice(0).forEach(el => {
+    if (el.isConnected) { bbExpand(); el.classList.add("ready"); }
+  }), 400);                                   // a beat, so the page settles first
+}
+
 function bbExpand() {
   const bb = document.getElementById("ln-bb");
   if (!bb || bb.dataset.tall || window.innerWidth <= 640) return;
@@ -1230,28 +1262,34 @@ function billboardMotion() {
     if (o.dataset.still) o.src = o.dataset.still;       // put the resting slides back to a still
   });
   document.querySelectorAll(".ln-bb-slide:not(.on) .ln-bb-vid").forEach(f => f.remove());
-  if (!img) return;
-  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const nothingToWaitFor = () => { if (BB_GO) BB_GO(); };
+  if (!img) return nothingToWaitFor();
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return nothingToWaitFor();
   // Runs on a phone too, but the phone gets to say no: Data Saver, or a
   // connection the browser reports as 2g, and it stays a still.
   const net = navigator.connection || {};
-  if (net.saveData) return;
-  if (/(^|-)2g$/.test(net.effectiveType || "")) return;
+  if (net.saveData) return nothingToWaitFor();
+  if (/(^|-)2g$/.test(net.effectiveType || "")) return nothingToWaitFor();
   if (!img.dataset.still) img.dataset.still = img.src;   // remember the still to return to
   const wrap = img.closest(".ln-bb-img");
   if (!wrap || wrap.querySelector(".ln-bb-vid")) return;
 
   /* Same shape either way: the still lands, then the slide plays its own video
-     muted, without controls, not clickable, and only while you are on it. */
+     muted, without controls, not clickable, and only while you are on it. The
+     very first one starts straight away, because the loading screen is holding
+     for it; later slides let their still land first. */
   const play = build => setTimeout(() => {
-    if (!wrap.closest(".ln-bb-slide").classList.contains("on")) return;
+    if (!wrap.closest(".ln-bb-slide").classList.contains("on")) return nothingToWaitFor();
     if (wrap.querySelector(".ln-bb-vid")) return;
-    wrap.appendChild(build());
-    bbExpand();
-  }, 1200);                                     // let the still land first
+    const el = build(el0 => bbShow(el0));
+    wrap.appendChild(el);
+    // However it reports itself ready, it never hangs: a backstop shows it anyway.
+    setTimeout(() => bbShow(el), 2600);
+  }, BB_REVEALED ? 1200 : 0);
 
-  if (img.dataset.mux) return play(() => {
+  if (img.dataset.mux) return play(ready => {
     const m = document.createElement("mux-player");
+    m.addEventListener("playing", () => ready(m), { once:true });
     m.className = "ln-bb-vid ln-bb-mux";
     m.setAttribute("playback-id", img.dataset.mux);
     m.setAttribute("stream-type", "on-demand");
@@ -1265,7 +1303,7 @@ function billboardMotion() {
     return m;
   });
 
-  if (img.dataset.yt) return play(() => {
+  if (img.dataset.yt) return play(ready => {
     const id = img.dataset.yt;
     const f = document.createElement("iframe");
     f.className = "ln-bb-vid";
@@ -1273,7 +1311,27 @@ function billboardMotion() {
     f.setAttribute("tabindex", "-1");
     f.src = "https://www.youtube.com/embed/" + encodeURIComponent(id)
       + "?autoplay=1&mute=1&controls=0&loop=1&playsinline=1&modestbranding=1&rel=0&disablekb=1"
+      + "&iv_load_policy=3&fs=0&cc_load_policy=0&enablejsapi=1&origin=" + encodeURIComponent(location.origin)
       + "&start=15&playlist=" + encodeURIComponent(id);
+    /* The embed will say when it is actually playing, which is the only moment
+       worth fading in on. It has to be asked first: enablejsapi plus a
+       `listening` handshake, and it posts its state changes back. No library. */
+    const onMsg = e => {
+      let host = ""; try { host = new URL(e.origin).hostname; } catch (x) { return; }
+      if (!/(^|\.)youtube(-nocookie)?\.com$/.test(host)) return;
+      let d; try { d = JSON.parse(e.data); } catch (x) { return; }
+      const st = d && d.info && typeof d.info.playerState === "number" ? d.info.playerState
+               : (d && typeof d.info === "number" ? d.info : null);
+      if (st !== 1) return;                      // 1 = playing
+      window.removeEventListener("message", onMsg);
+      setTimeout(() => ready(f), 500);           // let the opening title strip go
+    };
+    window.addEventListener("message", onMsg);
+    f.addEventListener("load", () => {
+      try { f.contentWindow.postMessage(JSON.stringify({ event:"listening", id:"ln-bb" }), "*"); }
+      catch (x) {}
+      setTimeout(() => ready(f), 2000);          // if it never answers, show it anyway
+    }, { once:true });
     return f;
   });
 }
@@ -1367,9 +1425,11 @@ function wire() {
     console.error("learn load error:", e);
     $("ln-root").innerHTML = '<div class="ln-empty">Something went wrong loading the library. Reload to try again.</div>';
   }
+  await BB_FIRST;                       // capped, so this is never a long wait
   $("loading-screen").style.display = "none";
   $("app-main").style.display = "block";
   $("app-header").style.display = "";
+  bbReveal();
 })();
 
 </script>
