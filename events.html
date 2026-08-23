@@ -2933,7 +2933,7 @@ async function _evLoadCommentReactions(commentIds) {
   const ids = commentIds.map(String);
   const { data: rows } = await db.from("activity_reactions")
     .select("item_id,email,emoji")
-    .eq("event_type", "event_comment")
+    .eq("event_type", EV_CMT_RX_TYPE)
     .in("item_id", ids);
   ids.forEach(id => { delete _evCmtRxMap[id]; });
   (rows || []).forEach(r => {
@@ -3011,13 +3011,13 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
     if (data[emoji]) { data[emoji].mine = false; data[emoji].count = Math.max(0, data[emoji].count - 1); }
     _evRefreshCmtBtn(safeKey, idStr);
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", emoji);
+      .eq("email", myEmail).eq("event_type", EV_CMT_RX_TYPE).eq("item_id", idStr).eq("emoji", emoji);
     return;
   }
   if (existingEmoji) {
     if (data[existingEmoji]) { data[existingEmoji].mine = false; data[existingEmoji].count = Math.max(0, data[existingEmoji].count - 1); }
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", existingEmoji);
+      .eq("email", myEmail).eq("event_type", EV_CMT_RX_TYPE).eq("item_id", idStr).eq("emoji", existingEmoji);
   }
   pickerBtn.classList.add("picked");
   if (!data[emoji]) data[emoji] = { count: 0, mine: false };
@@ -3025,7 +3025,7 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
   data[emoji].count++;
   _evRefreshCmtBtn(safeKey, idStr);
   await db.from("activity_reactions")
-    .insert({ email: myEmail, event_type: "event_comment", item_id: idStr, emoji });
+    .insert({ email: myEmail, event_type: EV_CMT_RX_TYPE, item_id: idStr, emoji });
 
   // Notify the comment author (skip self). Resolve from the DB so a missing
   // client meta entry can't silently drop the notification (esp. for replies).
@@ -3033,7 +3033,7 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
   let authorEmail = meta?.email;
   let isReply = false;
   {
-    const { data: crow } = await db.from("event_comments")
+    const { data: crow } = await db.from("content_feed_comments")
       .select("email,parent_comment_id").eq("id", idStr).maybeSingle();
     if (crow) {
       if (!authorEmail) authorEmail = crow.email;
@@ -3047,7 +3047,7 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
       title:    `${myName || "Someone"} reacted ${emoji} to your ${isReply ? "reply" : "comment"}`,
       body:     "",
       link_url: `/events.html?event=${_currentEventId}`,
-      metadata: { event_type: "event_comment", item_id: idStr, emoji },
+      metadata: { event_type: EV_CMT_RX_TYPE, item_id: idStr, emoji },
     });
   }
 }
@@ -3078,18 +3078,44 @@ document.addEventListener("click", (e) => {
   }
 });
 
+/* Clinic discussion lives in content_feed_comments with everything else, so a
+   clinic replay opened in Learn and the clinic page itself are reading and
+   writing the same thread. The rendering below is untouched: only which table
+   it talks to has changed, and rows are aliased back to the field names this
+   page already uses. event_comments is left in place, unread, so reverting
+   this file restores the old behaviour with the old data intact. */
+const _evPostIdCache = {};
+async function _evPostId(eventId) {
+  if (_evPostIdCache[eventId]) return _evPostIdCache[eventId];
+  if (currentEvent && currentEvent.id === eventId && currentEvent.feed_post_id) {
+    return (_evPostIdCache[eventId] = currentEvent.feed_post_id);
+  }
+  const { data } = await db.from("live_events").select("feed_post_id").eq("id", eventId).maybeSingle();
+  if (data?.feed_post_id) _evPostIdCache[eventId] = data.feed_post_id;
+  return data?.feed_post_id || null;
+}
+/* The reaction rows for these comments are the shared kind now. */
+const EV_CMT_RX_TYPE = "content_comment";
+
 async function loadComments(eventId) {
   _currentEventId = eventId;
   const listEl = document.getElementById("comments-list");
   const hdrEl  = document.getElementById("comments-hdr");
   if (listEl) listEl.innerHTML = '<div class="comments-empty">Loading…</div>';
 
-  const { data: comments, error } = await db.from("event_comments")
+  const postId = await _evPostId(eventId);
+  if (!postId) {
+    if (listEl) listEl.innerHTML = '<div class="comments-empty">Could not load comments.</div>';
+    return;
+  }
+  const { data: rawComments, error } = await db.from("content_feed_comments")
     .select("*")
-    .eq("event_id", eventId)
+    .eq("post_id", postId)
     .order("created_at", { ascending: true });
+  // Aliased so the renderer below, which predates the move, needs no changes.
+  const comments = (rawComments || []).map(c => ({ ...c, parent_id: c.parent_comment_id }));
 
-  if (error || !comments) {
+  if (error || !rawComments) {
     if (listEl) listEl.innerHTML = '<div class="comments-empty">Could not load comments.</div>';
     return;
   }
@@ -3224,11 +3250,12 @@ async function evSubmitReply(parentCommentId, textarea) {
   try { mediaJson = await _evUploadMedia(parentCommentId); }
   catch(e) { if (textarea) textarea.disabled = false; alert("Upload failed: " + e.message); return; }
 
-  const { data: row, error } = await db.from("event_comments").insert({
-    event_id: _currentEventId, email: myEmail, name: myName,
-    content: content || "", parent_id: parentCommentId,
+  const _postId = await _evPostId(_currentEventId);
+  const { data: row, error } = await db.from("content_feed_comments").insert({
+    post_id: _postId, email: myEmail, name: myName,
+    content: content || "", parent_comment_id: parentCommentId,
     reply_to_name: replyToName,
-    media: mediaJson.length ? mediaJson : null,
+    media: mediaJson.length ? mediaJson : [],   // NOT NULL on this table
   }).select().single();
 
   if (poll && row) {
@@ -3241,7 +3268,7 @@ async function evSubmitReply(parentCommentId, textarea) {
   if (error) { alert("Couldn't post reply: " + error.message); return; }
 
   // Notify the original commenter (unless replying to yourself)
-  const { data: parent } = await db.from("event_comments").select("email,name").eq("id", parentCommentId).single();
+  const { data: parent } = await db.from("content_feed_comments").select("email,name").eq("id", parentCommentId).single();
   if (parent?.email && parent.email !== myEmail) {
     const evTitle = currentEvent?.title || "an event";
     await db.from("notifications").insert({
@@ -4120,7 +4147,7 @@ async function castVote(pollId, optionIndex, commentId) {
 
 async function deleteComment(commentId, eventId) {
   if (!confirm("Delete this message?")) return;
-  await db.from("event_comments").delete().eq("id", commentId);
+  await db.from("content_feed_comments").delete().eq("id", commentId);
   loadComments(eventId);
 }
 
@@ -4128,9 +4155,9 @@ async function deleteComment(commentId, eventId) {
 async function editEvComment(commentId, eventId) {
   const textEl = document.querySelector(`#comment-${commentId} .comment-text`);
   if (!textEl) return;
-  const { data } = await db.from("event_comments").select("content").eq("id", commentId).single();
+  const { data } = await db.from("content_feed_comments").select("content").eq("id", commentId).single();
   window.shInlineEdit(textEl, data?.content || "", async (val) => {
-    const { data: upd, error } = await db.from("event_comments")
+    const { data: upd, error } = await db.from("content_feed_comments")
       .update({ content: val, edited_at: new Date().toISOString() }).eq("id", commentId).select("id");
     if (error) throw error;
     if (!upd || !upd.length) throw new Error("Edit not permitted.");
@@ -4176,10 +4203,11 @@ async function postComment(eventId) {
   try { mediaJson = await _evUploadMedia("main"); }
   catch(e) { input.disabled = false; alert("Upload failed: " + e.message); return; }
 
-  const { data: row, error } = await db.from("event_comments").insert({
-    event_id: eventId, email: myEmail, name: myName,
+  const _postId = await _evPostId(eventId);
+  const { data: row, error } = await db.from("content_feed_comments").insert({
+    post_id: _postId, email: myEmail, name: myName,
     content: content || "",
-    media: mediaJson.length ? mediaJson : null,
+    media: mediaJson.length ? mediaJson : [],   // NOT NULL on this table
   }).select().single();
   input.disabled = false;
   if (error) { alert("Could not post: " + error.message); return; }
@@ -5042,8 +5070,12 @@ function setupRealtimeStream(ev) {
 
   // Discussion comments + poll votes
   discussionChannel = db.channel(`event-discussion-${ev.id}-${gen}`)
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_comments",
-      filter: `event_id=eq.${ev.id}` }, () => loadComments(ev.id))
+    /* Same thread, so the live channel listens where the rows now are. Without
+       the post id there is nothing to filter on, so the subscription is simply
+       not added and the page falls back to loading on demand. */
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "content_feed_comments",
+      filter: `post_id=eq.${ev.feed_post_id || "00000000-0000-0000-0000-000000000000"}` },
+      () => loadComments(ev.id))
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "event_comment_poll_votes" },
       () => loadComments(ev.id))
     .subscribe((status) => {
