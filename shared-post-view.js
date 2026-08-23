@@ -201,9 +201,16 @@ window.PostView = (function () {
     root.querySelectorAll("mux-player, video").forEach(el => {
       if (el._pvTracked) return;
       el._pvTracked = true;
-      let last = 0;
+      let last = 0, marked = false;
       el.addEventListener("timeupdate", () => {
-        const t = el.currentTime || 0;
+        const t = el.currentTime || 0, dur = el.duration || 0;
+        // Nobody sits through the outro, so treat most of the way through as
+        // watched. Otherwise only a video played to the very end ever counts,
+        // and it never gets dropped from what we recommend.
+        if (!marked && dur > 0 && t / dur >= 0.85) {
+          marked = true;
+          recordView(contentType, contentRef, 0, true);
+        }
         if (t - last < 15) return;                       // report every 15s, not every frame
         recordView(contentType, contentRef, t - last, false);
         last = t;
