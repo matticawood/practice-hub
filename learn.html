@@ -173,6 +173,11 @@
 
   /* ── rows ── */
   .ln-row { margin-top:30px; }
+  /* Everything fades but the control: it is the one thing that should be seen
+     to move while the rest is replaced. */
+  #ln-root .ln-row > *, #ln-root .ln-rh > * { transition:opacity .18s ease; }
+  #ln-root.ln-swap .ln-row > *:not(.ln-rh),
+  #ln-root.ln-swap .ln-rh > *:not(.ln-seg) { opacity:0; }
 
   /* Watch without leaving the page: the row stays exactly where it was behind
      the scrim, so dipping in and out of a row costs nothing. */
@@ -419,20 +424,21 @@
   @media (max-width:640px) { .ln-crail .course-card { width:76vw; } }
 
   /* ── search + grid ── */
-  /* Two halves of one control, not two chips: a thumb slides between them, so
-     the control has a position rather than two lights. The thumb is measured
-     and moved in JS because the halves are different widths. */
-  .ln-seg { position:relative; display:inline-flex; padding:4px; background:var(--surface);
+  /* Two halves of one control, not two chips. They are equal, so the thumb is
+     a plain half-width slide rather than a measured one, and the control keeps
+     one shape whatever the numbers in it are. */
+  .ln-seg { position:relative; display:grid; grid-template-columns:1fr 1fr;
+    width:min(30rem, 100%); padding:4px; background:var(--surface);
     border:1px solid var(--border); border-radius:var(--r-pill); flex:0 0 auto; }
-  .ln-segt { position:absolute; top:4px; bottom:4px; left:0; width:0;
+  .ln-segt { position:absolute; top:4px; bottom:4px; left:4px; width:calc(50% - 4px);
     border-radius:var(--r-pill); background:var(--text); pointer-events:none;
-    transform:translateX(4px);
-    transition:transform .32s cubic-bezier(.4,0,.2,1), width .32s cubic-bezier(.4,0,.2,1); }
+    transition:transform .34s cubic-bezier(.4,0,.2,1); }
+  .ln-seg[data-at="1"] .ln-segt { transform:translateX(100%); }
   .ln-seg.ln-seg-init .ln-segt { transition:none; }   /* no slide on first paint */
   .ln-segb { position:relative; z-index:1; border:0; background:none; cursor:pointer;
-    border-radius:var(--r-pill); padding:8px 16px; font:600 .82rem/1 var(--sans);
-    color:var(--text-2); display:inline-flex; align-items:center; gap:8px;
-    white-space:nowrap; transition:color .2s; }
+    border-radius:var(--r-pill); padding:9px 12px; font:600 .82rem/1 var(--sans);
+    color:var(--text-2); display:inline-flex; align-items:center; justify-content:center;
+    gap:8px; white-space:nowrap; transition:color .2s; }
   .ln-segb:hover { color:var(--text); }
   .ln-segb[aria-pressed="true"] { color:var(--bg); }
   .ln-segb[aria-pressed="true"] .ln-fn { color:rgba(12,12,14,.55); }
@@ -448,7 +454,7 @@
        above the first row rather than squeezing the title to nothing. */
     .ln-row-1st .ln-rh { flex-wrap:wrap; }
     .ln-row-1st .ln-rh .ln-seg { order:-1; margin:0 0 12px; width:100%; }
-    .ln-segb { flex:1 1 0; justify-content:center; padding:9px 8px; font-size:.78rem; }
+    .ln-segb { padding:9px 6px; font-size:.76rem; gap:6px; }
   }
   .ln-lsearch { flex:1; min-width:15rem; display:flex; align-items:center; gap:9px; background:var(--control);
     border:1px solid var(--border-2); border-radius:var(--r-s); padding:11px 14px; box-shadow:var(--shadow); }
@@ -862,38 +868,43 @@ function courseCard(c) {
 
 /* Set by render, claimed by whichever row draws first. */
 let SEG_HTML = "";
-/* The two halves are different widths, so the thumb is measured rather than
-   given a fraction.
-   Pressing a half re-renders the page, which rebuilds this control, so a thumb
+/* Pressing a half re-renders the page, which rebuilds this control, so a thumb
    that simply drew itself in the new place would never appear to move. It is
-   put back where it was on the render before, without a transition, and only
-   then moved: that is what makes the slide happen across a rebuild. On the
-   first paint there is no previous position, so it just lands. */
+   put back where it was on the render before, the browser is made to look at
+   that, and only then is it moved: that is what makes the slide survive a
+   rebuild. On the first paint there is no previous position, so it lands. */
+/* Toggling rebuilds the whole page under the reader, which without this reads
+   as a jump rather than as a change. The rows fade down, are rebuilt at the
+   scroll position they were already at, and fade back. The control is inside
+   the first row's heading, so it is deliberately left out of the fade: the
+   thumb goes on sliding while everything around it changes. Reduced motion
+   gets the rebuild with none of the movement. */
+function swapView() {
+  const root = document.getElementById("ln-root");
+  const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!root || still) return render();
+  const y = window.scrollY;
+  root.classList.add("ln-swap");
+  setTimeout(() => {
+    render();                                  // the class is on the container, so it survives
+    window.scrollTo(0, y);
+    requestAnimationFrame(() => root.classList.remove("ln-swap"));
+  }, 180);
+}
 let SEG_AT = null;
 function segThumb(seg) {
-  const t = seg.querySelector(".ln-segt");
-  const btns = [...seg.querySelectorAll(".ln-segb")];
-  const at = Math.max(0, btns.findIndex(b => b.getAttribute("aria-pressed") === "true"));
-  if (!t || !btns.length) return;
-  const place = i => {
-    t.style.width = btns[i].offsetWidth + "px";
-    t.style.transform = "translateX(" + btns[i].offsetLeft + "px)";
-  };
-  const moved = SEG_AT !== null && SEG_AT !== at && btns[SEG_AT];
-  seg.classList.add("ln-seg-init");
-  place(moved ? SEG_AT : at);
-  if (moved) {
-    requestAnimationFrame(() => {
-      seg.classList.remove("ln-seg-init");
-      requestAnimationFrame(() => place(at));
-    });
+  const on = seg.querySelector('.ln-segb[aria-pressed="true"]');
+  const at = on && on.dataset.ex === "1" ? 1 : 0;
+  if (SEG_AT !== null && SEG_AT !== at) {
+    seg.dataset.at = SEG_AT;
+    seg.getBoundingClientRect();               // force the old position to be laid out
+    requestAnimationFrame(() => { seg.dataset.at = at; });
   } else {
+    seg.classList.add("ln-seg-init");
+    seg.dataset.at = at;
     requestAnimationFrame(() => requestAnimationFrame(() => seg.classList.remove("ln-seg-init")));
   }
   SEG_AT = at;
-  // Fonts land after first paint and change the widths under it.
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => place(at)).catch(() => {});
-  window.addEventListener("resize", () => place(at));
 }
 function row(title, sub, items, opts) {
   if (!items.length) return "";
@@ -1260,11 +1271,12 @@ function render() {
        sit below a row of whatever happened to be published last week. */
     {
       /* Shorts are ranked in by picks_for, so render whatever it gave us. */
-      // The picks are drawn from everything, so in the exclusives view they
-      // have to be filtered too, or the first row is full of public material.
-      const picks = onlyEx ? PICKS.filter(p => p.only) : PICKS;
-      if (picks.length >= 3)
-        html += row(PICK_WHY, PICK_SUB, picks.slice(0, 12), { rail:true, big:true, showTopic:true });
+      /* For you answers "what should I do next", and the honest answer to that
+         includes public material, so it has no place in a view that is only
+         exclusives. Filtering it to exclusives would make it a worse answer to
+         its own question. */
+      if (!onlyEx && PICKS.length >= 3)
+        html += row(PICK_WHY, PICK_SUB, PICKS.slice(0, 12), { rail:true, big:true, showTopic:true });
     }
 
     const weekAgo = Date.now() - 8 * 86400000;
@@ -1547,7 +1559,9 @@ function wire() {
   const ty = $("ln-types");
   if (ty) {
     ty.querySelectorAll(".ln-segb").forEach(b => b.onclick = () => {
-      onlyEx = b.dataset.ex === "1"; showAll = false; render();
+      if ((b.dataset.ex === "1") === onlyEx) return;      // already there
+      onlyEx = b.dataset.ex === "1"; showAll = false;
+      swapView();
     });
     segThumb(ty);
   }
