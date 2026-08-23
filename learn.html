@@ -40,7 +40,10 @@
     margin:0 0 30px; min-height:19rem; text-decoration:none; color:#fff; background:#1a1512;
     box-shadow:0 2px 8px rgba(23,19,16,.10), 0 30px 60px -40px rgba(23,19,16,.75); }
   .ln-bb-img { position:absolute; inset:0; }
-  .ln-bb-img img { width:100%; height:100%; object-fit:cover; display:block; }
+  /* A 16:9 still inside a very wide, short box crops from the centre and takes
+     the top of the head off. Bias the crop upward so the face stays in frame. */
+  .ln-bb-img img { width:100%; height:100%; object-fit:cover; object-position:50% 22%; display:block; }
+  @media (max-width:640px) { .ln-bb-img img { object-position:50% 30%; } }
   .ln-bb-img::after { content:""; position:absolute; inset:0;
     background:linear-gradient(90deg, rgba(14,12,10,.94) 0%, rgba(14,12,10,.82) 38%, rgba(14,12,10,.28) 72%, rgba(14,12,10,.12) 100%); }
   .ln-bb-in { position:relative; padding:38px 40px; max-width:38rem; display:flex; flex-direction:column;
@@ -56,8 +59,7 @@
     font:600 .92rem/1 var(--sans); }
   .ln-bb:hover .ln-bb-go { background:var(--accent); }
   .ln-bb-go::after { content:"→"; font-size:1.05em; }
-  .ln-bb-meta { display:flex; gap:14px; flex-wrap:wrap; margin-top:18px;
-    font:500 .8rem/1 var(--sans); color:rgba(255,255,255,.6); }
+  .ln-bb-when { font:500 .88rem/1 var(--sans); color:rgba(255,255,255,.72); margin-bottom:20px; }
   @media (max-width:640px) {
     .ln-bb { min-height:0; }
     .ln-bb-in { padding:24px 20px 26px; min-height:0; max-width:none; }
@@ -108,7 +110,11 @@
   .ln-vrail .ln-c .ln-th { aspect-ratio:9/16; }
 
   /* ── course card ── */
-  .ln-crail .ln-c { flex:0 0 auto; width:16.5rem; }
+  /* A course is a collection, not a single item, so it gets more room. */
+  .ln-crail .ln-c { flex:0 0 auto; width:20rem; }
+  .ln-crail .ln-th { aspect-ratio:3/2; }
+  .ln-crail .ln-ct { font:600 1.16rem/1.25 var(--disp); letter-spacing:-.01em; }
+  .ln-crail .ln-cb { gap:5px; padding-top:2px; }
   .ln-c .ln-cb { display:flex; flex-direction:column; gap:4px; }
   .ln-c .ln-lv { font:700 .72rem/1 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
   .ln-c .ln-bl { font-size:.82rem; color:var(--text-muted); line-height:1.45; }
@@ -196,7 +202,6 @@ const TYPES = {
   clinic:  { label:"Clinic",  colour:"var(--t-clinic)"  },
   sheet:   { label:"PPD",     colour:"var(--t-sheet)"   },
   article: { label:"Article", colour:"var(--t-article)" },
-  course:  { label:"Lesson",  colour:"var(--t-course)"  },
 };
 /* One mark per content type, used when a thing has no thumbnail of its own. */
 const MARK = {
@@ -293,6 +298,7 @@ async function load() {
   (evs.data || []).filter(e => e.mux_playback_id).forEach(e => ITEMS.push({
     type:"clinic", title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
     img:"https://image.mux.com/" + e.mux_playback_id + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=25",
+    mux:e.mux_playback_id,
     playable:true, dur:e.duration_mins ? e.duration_mins + " min" : "",
     href:"/events.html?event=" + encodeURIComponent(e.id), meta:fmtDate(e.scheduled_at) }));
   // The content feed carries three kinds of thing and only two of them are
@@ -441,22 +447,20 @@ function render() {
   const fresh = flat.filter(i => i.img).sort(byDate)[0];
   const lastClinic = flat.filter(i => i.type === "clinic" && i.img).sort(byDate)[0];
   let bb = null;
-  if (soon)        bb = { kick:"Next live clinic", title:soon.t, blurb:"Bring a question. It becomes a replay afterwards, so you can watch it back either way.", meta:[soon.m], href:soon.href, img:(lastClinic || fresh || {}).img, go:"Reserve your place" };
-  else if (carry)  bb = { kick:"Pick up where you left off", title:carry.t, blurb:"", meta:[carry.m], href:carry.href, img:(fresh||{}).img, go:"Continue" };
-  else if (fresh)  bb = { kick:"New this week", title:fresh.title, blurb:"", meta:[fresh.meta], href:fresh.href, img:fresh.img, go:"Watch now" };
+  if (soon)        bb = { kick:"Next live clinic", title:soon.t, when:soon.m, href:soon.href, img:(lastClinic || fresh || {}).img, go:"RSVP", mux:(lastClinic || {}).mux };
+  else if (carry)  bb = { kick:"Pick up where you left off", title:carry.t, when:carry.m, href:carry.href, img:(fresh||{}).img, go:"Continue" };
+  else if (fresh)  bb = { kick:"Latest", title:fresh.title, when:fresh.meta, href:fresh.href, img:fresh.img, go:"Watch now", mux:fresh.mux };
 
   let html = bb
     ? '<a class="ln-bb" href="' + esc(bb.href) + '">'
-      + (bb.img ? '<span class="ln-bb-img"><img src="' + esc(bb.img) + '" alt=""></span>' : "")
+      + (bb.img ? '<span class="ln-bb-img"><img src="' + esc(bb.img) + '" alt=""'
+          + (bb.mux ? ' data-mux="' + esc(bb.mux) + '"' : "") + "></span>" : "")
       + '<span class="ln-bb-in"><span class="ln-bb-k">' + esc(bb.kick) + "</span>"
       + "<h2>" + esc(bb.title) + "</h2>"
-      + (bb.blurb ? "<p>" + esc(bb.blurb) + "</p>" : "")
-      + '<span class="ln-bb-go">' + esc(bb.go) + "</span>"
-      + '<span class="ln-bb-meta">' + bb.meta.filter(Boolean).map(m => "<span>" + esc(m) + "</span>").join("")
-      + "<span>" + (counts.video || 0) + " videos</span><span>" + (counts.clinic || 0) + " clinic replays</span>"
-      + "<span>" + (counts.sheet || 0) + " sheets</span><span>" + (counts.article || 0) + " articles</span></span>"
-      + "</span></a>"
+      + (bb.when ? '<span class="ln-bb-when">' + esc(bb.when) + "</span>" : "")
+      + '<span class="ln-bb-go">' + esc(bb.go) + "</span></span></a>"
     : "";
+
   html +=
     '<div class="ln-lctl"><div id="ln-types" style="display:flex;gap:8px;flex-wrap:wrap">'
     + Object.keys(TYPES).map(k => '<button class="ln-lfil" type="button" data-type="' + k + '" aria-pressed="'
@@ -479,14 +483,17 @@ function render() {
     const take = (pred, n) => flat.filter(i => pred(i) && !seen.has(i.href)).sort(byDate).slice(0, n)
       .map(i => { seen.add(i.href); return i; });
 
-    html += row("New this week", "", take(() => true, 12), {});
+    const weekAgo = Date.now() - 8 * 86400000;
+    const recent = flat.filter(i => i.date && new Date(i.date).getTime() > weekAgo);
+    if (recent.length >= 4) html += row("New this week", "", take(i => recent.includes(i), 12), {});
+    else html += row("Recently added", "", take(() => true, 12), {});
     html += row("Paths", "courses", COURSES, { course:true });
     html += row("Clinic replays", (counts.clinic || 0) + " sessions", take(i => i.type === "clinic", 12), { seeAll:"clinic" });
     html += row("Videos", (counts.video || 0) + " on the channel", take(i => i.type === "video", 14), { seeAll:"video" });
-    TOPICS.slice(0, 6).forEach(t => {
-      html += row(t.name, t.count + " items",
-        flat.filter(i => i.topic === t.name).sort(byDate).slice(0, 12), { seeAll:"topic:" + t.name });
-    });
+    // Topic rows are deliberately absent. A topic like pedalling should gather a
+    // video, an article, a Monday Music Tip and a short, and only Piano Practice
+    // Daily carries a category today, so a "topic" row here would in fact be a
+    // Piano Practice Daily row wearing a topic's name. They return with tagging.
     html += row("Piano Practice Daily", (counts.sheet || 0) + " sheets", take(i => i.type === "sheet", 14), { seeAll:"sheet" });
     html += row("Monday Music Tips", (counts.article || 0) + " articles", take(i => i.type === "article", 14), { seeAll:"article" });
     const shorts = ITEMS.filter(i => i.vertical).sort(byDate).slice(0, 24);
@@ -501,6 +508,20 @@ function render() {
 
   $("ln-root").innerHTML = html;
   wire();
+  billboardMotion();
+}
+
+/* Netflix-style: the billboard still becomes a short silent loop once it is
+   ready. Mux serves animated webp straight from the playback id, so there is no
+   player and no sound; if it fails the still simply stays. */
+function billboardMotion() {
+  const img = document.querySelector(".ln-bb-img img[data-mux]");
+  if (!img || window.innerWidth < 900) return;
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const id = img.dataset.mux;
+  const probe = new Image();
+  probe.onload = () => { img.src = probe.src; };
+  probe.src = "https://image.mux.com/" + id + "/animated.webp?width=640&start=20&end=25&fps=10";
 }
 
 function wire() {
