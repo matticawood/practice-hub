@@ -248,7 +248,25 @@
     border-radius:var(--r-l); margin-top:14px; overflow:hidden; }
   .ln-lb-under > .ln-lb-loader { display:none; }
   .ln-lb-under.loading > .ln-lb-loader { display:grid; place-items:center; min-height:190px; }
-  .ln-lb-under.loading > .ln-lb-body, .ln-lb-under.loading > .ln-lb-cmts { display:none; }
+  .ln-lb-under.loading > .ln-lb-body, .ln-lb-under.loading > .ln-lb-cmts,
+  .ln-lb-under.loading > .ln-lb-qa { display:none; }
+  /* The questions taken during a clinic, each a jump into the replay. Sits
+     between the title and the discussion: it is part of the recording, not
+     part of the conversation about it. */
+  .ln-lb-qa:empty { display:none; }
+  .cqa { border-top:1px solid var(--border); padding:14px 20px 4px; }
+  .cqa-title { font:700 .7rem/1 var(--sans); letter-spacing:.1em; text-transform:uppercase;
+    color:var(--text-muted); margin-bottom:12px; }
+  .cqa-row { display:flex; gap:12px; align-items:flex-start; padding:8px 0;
+    border-top:1px solid var(--surface-2); }
+  .cqa-row:first-of-type { border-top:0; }
+  .cqa-times { flex:0 0 auto; display:flex; flex-direction:column; gap:4px; }
+  .cqa-ts { font:600 .74rem/1 ui-monospace,monospace; font-variant-numeric:tabular-nums;
+    color:var(--text); background:var(--surface-2); border:1px solid var(--border);
+    border-radius:var(--r-s); padding:5px 8px; cursor:pointer; transition:background .15s, border-color .15s; }
+  .cqa-ts:hover { background:var(--accent-subtle); border-color:var(--accent-dark); }
+  .cqa-q { font:500 .92rem/1.4 var(--sans); color:var(--text); }
+  .cqa-asker { font-size:.78rem; color:var(--text-muted); margin-top:3px; }
   .ln-lb-loading { display:grid; place-items:center; padding:34px 0;
     color:var(--text-muted); font:500 .85rem/1 var(--sans); }
   /* The embed keeps a 16:9 box, so capping only its height would letterbox it.
@@ -555,6 +573,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3.12.0"></script>
 <script src="/shared-comments.js?v=20260823a"></script>
 <script src="/shared-post-view.js?v=20260823l"></script>
+<script src="/shared-clinic-qa.js?v=1"></script>
 <script src="/shared-member-modal.js?v=14"></script>
 <script src="/shared-achievements.js?v=9"></script>
 <script src="/shared-header.js?v=2026071802"></script>
@@ -567,6 +586,7 @@
     <div class="ln-lb-under loading" id="ln-lb-under">
       <div class="ln-lb-loader"><span class="spinner"></span></div>
       <div class="ln-lb-body"  id="ln-lb-body"></div>
+      <div class="ln-lb-qa"    id="ln-lb-qa"></div>
       <div class="ln-lb-cmts"  id="ln-lb-cmts"></div>
     </div>
   </div>
@@ -638,6 +658,12 @@ const CMETA = [
 const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
+/* A clinic's post id back to its event id. A view is recorded against the
+   event, because that is what the content index and every recommendation is
+   keyed by. Filing a clinic under its post would record against a reference
+   nothing matches, so it would never count as watched and would go on being
+   recommended after it had been. */
+const CLINIC_EVENT_BY_POST = {};
 let PICKS = [], PICK_SHORTS = [], PICK_WHY = "", PICK_SUB = "";
 let BB_AT = 0, BB_TIMER = null;
 let FEED = {};                      // post id -> raw row, for the lightbox
@@ -700,7 +726,9 @@ async function load() {
     mins:Math.max(1, Math.round((words["theory_sheet:" + s.id] || 600) / READ_WPM)),
     href:"/theory/sheets/view.html?slug=" + encodeURIComponent(s.slug),
     meta:fmtDate(s.created_at) }));
-  (evs.data || []).filter(e => e.mux_playback_id).forEach(e => ITEMS.push({
+  (evs.data || []).filter(e => e.mux_playback_id).forEach(e => {
+    if (e.feed_post_id) CLINIC_EVENT_BY_POST[e.feed_post_id] = e.id;
+    ITEMS.push({
     type:"clinic", ctype:"clinic", ref:e.id, mins:e.duration_mins || 60, title:(e.title || "").replace(/^Live Practice Clinic:?\s*/i, ""), date:e.scheduled_at,
     img:"https://image.mux.com/" + e.mux_playback_id + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=25",
     mux:e.mux_playback_id, only:true,
@@ -712,7 +740,8 @@ async function load() {
     href: e.feed_post_id
       ? "/content-feed.html?post=" + encodeURIComponent(e.feed_post_id)
       : "/events.html?event=" + encodeURIComponent(e.id),
-    meta:fmtDate(e.scheduled_at) }));
+    meta:fmtDate(e.scheduled_at) });
+  });
   // The content feed carries three kinds of thing and only two of them are
   // learning material. `blog` posts announce a Monday Music Tips article, which
   // is already here from mmt_articles, so they would show everything twice.
@@ -1093,8 +1122,13 @@ async function openPost(postId) {
   document.body.style.overflow = "hidden";
   history.pushState({ lb: postId }, "", "?post=" + encodeURIComponent(postId));
 
-  PostView.trackMedia(media, "video", p.youtube_id || postId);
-  PostView.recordView("video", p.youtube_id || postId, 0, false);
+  /* Filed as what it is: a clinic is indexed by its event, everything else by
+     its own reference. */
+  const evId  = CLINIC_EVENT_BY_POST[postId];
+  const vType = evId ? "clinic" : "video";
+  const vRef  = evId || p.youtube_id || postId;
+  PostView.trackMedia(media, vType, vRef);
+  PostView.recordView(vType, vRef, 0, false);
 
   /* Now fill in what needed a round trip. */
   try {
@@ -1126,6 +1160,10 @@ async function openPost(postId) {
                  voteCounts: counts, totalVotes: total,
                  myVote: (mine.data || [])[0] ? (mine.data || [])[0].option_id : null };
     }
+
+    /* Only a clinic has these, and a failure to find them must never keep the
+       panel from opening, so it resolves to nothing rather than throwing. */
+    const qa = evId && window.ClinicQA ? await ClinicQA.load(db, evId) : null;
 
     await Comments.loadReactions([postId]);
     if (LB_OPEN !== postId) return;
