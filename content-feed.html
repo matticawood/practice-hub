@@ -948,15 +948,17 @@ function _setMeta(parentId, totalRx, cc) {
      comment count silently vanished from the feed. Chunk the ids, and surface a
      failure instead of swallowing it. */
   async function _inChunks(table, select, column, values, extra) {
-    const out = [];
-    for (let i = 0; i < values.length; i += 100) {
-      let q = db.from(table).select(select).in(column, values.slice(i, i + 100));
+    const slices = [];
+    for (let i = 0; i < values.length; i += 100) slices.push(values.slice(i, i + 100));
+    const results = await Promise.all(slices.map(slice => {
+      let q = db.from(table).select(select).in(column, slice);
       if (extra) q = extra(q);
-      const { data, error } = await q;
-      if (error) { console.error(`feed: ${table} chunk failed`, error.message || error); continue; }
-      if (data) out.push(...data);
-    }
-    return out;
+      return q.then(({ data, error }) => {
+        if (error) { console.error(`feed: ${table} chunk failed`, error.message || error); return []; }
+        return data || [];
+      });
+    }));
+    return results.flat();
   }
 
 async function loadFeed(deepId = null) {

@@ -813,13 +813,14 @@
       // An .in() list rides in the query string, so a few hundred ids make a URL
       // the server rejects outright. Chunk it, and log a failure rather than
       // discarding it, which is how this went unnoticed on a grown feed.
-      const data = [];
-      for (let i = 0; i < parentIds.length; i += 100) {
-        const { data: part, error } = await _db().from(_rTable())
-          .select(`${_rParent()},email,emoji`).in(_rParent(), parentIds.slice(i, i + 100));
-        if (error) { console.error("loadReactions chunk failed:", error.message || error); continue; }
-        if (part) data.push(...part);
-      }
+      const slices = [];
+      for (let i = 0; i < parentIds.length; i += 100) slices.push(parentIds.slice(i, i + 100));
+      const data = (await Promise.all(slices.map(slice =>
+        _db().from(_rTable()).select(`${_rParent()},email,emoji`).in(_rParent(), slice)
+          .then(({ data: part, error }) => {
+            if (error) { console.error("loadReactions chunk failed:", error.message || error); return []; }
+            return part || [];
+          })))).flat();
       const auth=_auth();
       (data||[]).forEach(l=>{
         const pid=l[_rParent()];
