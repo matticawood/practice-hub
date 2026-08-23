@@ -50,6 +50,18 @@
     margin:-22px calc(clamp(18px,2.6vw,52px) * -1) 30px;
     border-radius:0; min-height:19rem; text-decoration:none; color:#fff; background:#1a1512;
     box-shadow:none; }
+  /* Slides stack; only the active one is painted. Cross-fade rather than slide,
+     which sits better under fixed chrome. */
+  .ln-bb-slide { position:absolute; inset:0; opacity:0; pointer-events:none;
+    transition:opacity .5s ease; }
+  .ln-bb-slide.on { position:relative; opacity:1; pointer-events:auto; }
+  .ln-bb-dots { position:absolute; right:clamp(16px,2.4vw,34px); bottom:16px; z-index:3;
+    display:flex; gap:8px; }
+  .ln-bb-dot { width:8px; height:8px; padding:0; border-radius:50%; cursor:pointer;
+    border:1px solid rgba(255,255,255,.55); background:transparent; transition:.2s; }
+  .ln-bb-dot:hover { background:rgba(255,255,255,.55); }
+  .ln-bb-dot.on { background:#fff; border-color:#fff; transform:scale(1.15); }
+  @media (prefers-reduced-motion: reduce) { .ln-bb-slide { transition:none; } }
   .ln-bb-img { position:absolute; inset:0; }
   /* A 16:9 still inside a very wide, short box crops from the centre and takes
      the top of the head off. Bias the crop upward so the face stays in frame. */
@@ -434,6 +446,7 @@ const CMETA_BY_KEY = Object.fromEntries(CMETA.map(c => [c.key, c]));
 
 let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {};
 let PICKS = [], PICK_SHORTS = [], PICK_WHY = "", PICK_SUB = "";
+let BB_AT = 0, BB_TIMER = null;
 let FEED = {};                      // post id -> raw row, for the lightbox
 let topic = "", type = "", term = "", showAll = false, symptom = "", onlyEx = false;
 
@@ -910,26 +923,35 @@ function render() {
   const carry = resume[0];
   const fresh = flat.filter(i => i.img).sort(byDate)[0];
   const lastClinic = flat.filter(i => i.type === "clinic" && i.img).sort(byDate)[0];
-  let bb = null;
-  if (soon)        bb = { kick:"Next live clinic", title:soon.t, when:soon.m, blurb:"A live session working through one topic. It becomes a replay here afterwards.", href:soon.href, img:(lastClinic || fresh || {}).img, go:"RSVP", mux:(lastClinic || {}).mux,
-                       go2:lastClinic ? { label:"Watch the last one", href:lastClinic.href } : null };
-  else if (carry)  bb = { kick:"Pick up where you left off", title:carry.t, when:carry.m, blurb:"You are part way through this one.", href:carry.href, img:(fresh||{}).img, go:"Continue",
-                       go2:lastClinic ? { label:"Browse the replays", href:lastClinic.href } : null };
-  else if (fresh)  bb = { kick:"Latest", title:fresh.title, when:fresh.meta, blurb:"The newest thing in the library.", href:fresh.href, img:fresh.img, go:"Watch now", mux:fresh.mux,
-                       go2:lastClinic ? { label:"Browse the replays", href:lastClinic.href } : null };
+  /* The hero rotates rather than showing one thing: the clinic, the newest
+     piece, and whatever is most relevant to this member. One slot, three jobs,
+     instead of three competing blocks down the page. */
+  const slides = [];
+  if (soon) slides.push({ kick:"Next live clinic", title:soon.t, when:soon.m,
+    blurb:"A live session working through one topic. It becomes a replay here afterwards.",
+    href:soon.href, img:(lastClinic || fresh || {}).img, go:"RSVP", mux:(lastClinic || {}).mux,
+    go2:lastClinic ? { label:"Watch the last one", href:lastClinic.href } : null });
+  if (carry) slides.push({ kick:"Pick up where you left off", title:carry.t, when:carry.m,
+    blurb:"You are part way through this one.", href:carry.href, img:(fresh || {}).img, go:"Continue" });
+  const relevant = PICKS.find(p => p.img);
+  if (relevant) slides.push({ kick:relevant.topic ? "Because of " + relevant.topic : "For you",
+    title:relevant.title, when:relevant.meta || "", blurb:"Picked for what you have been working on.",
+    href:relevant.href, img:relevant.img, go:"Open", mux:relevant.mux });
+  if (fresh) slides.push({ kick:"Latest", title:fresh.title, when:fresh.meta,
+    blurb:"The newest thing in the library.", href:fresh.href, img:fresh.img, go:"Watch now", mux:fresh.mux });
 
-  let html = bb
-    ? '<div class="ln-bb" data-href="' + esc(bb.href) + '">'
-      + (bb.img ? '<span class="ln-bb-img"><img src="' + esc(bb.img) + '" alt=""'
-          + (bb.mux ? ' data-mux="' + esc(bb.mux) + '"' : "") + "></span>" : "")
+  const slideHtml = b =>
+      '<div class="ln-bb-slide" data-href="' + esc(b.href) + '">'
+      + (b.img ? '<span class="ln-bb-img"><img src="' + esc(b.img) + '" alt=""'
+          + (b.mux ? ' data-mux="' + esc(b.mux) + '"' : "") + "></span>" : "")
       + '<span class="ln-bb-in"><span class="ln-bb-krow">'
-      + '<span class="ln-bb-k">' + esc(bb.kick) + "</span>"
-      + (bb.when ? '<span class="ln-bb-when">' + esc(bb.when) + "</span>" : "") + "</span>"
-      + "<h2>" + esc(bb.title) + "</h2>"
-      + (bb.blurb ? "<p>" + esc(bb.blurb) + "</p>" : "")
+      + '<span class="ln-bb-k">' + esc(b.kick) + "</span>"
+      + (b.when ? '<span class="ln-bb-when">' + esc(b.when) + "</span>" : "") + "</span>"
+      + "<h2>" + esc(b.title) + "</h2>"
+      + (b.blurb ? "<p>" + esc(b.blurb) + "</p>" : "")
       + '<span class="ln-bb-acts">'
-      + '<a class="ln-bb-go" href="' + esc(bb.href) + '">' + esc(bb.go) + "</a>"
-      + (bb.go2 ? '<a class="ln-bb-go2" href="' + esc(bb.go2.href) + '">' + esc(bb.go2.label) + "</a>" : "")
+      + '<a class="ln-bb-go" href="' + esc(b.href) + '">' + esc(b.go) + "</a>"
+      + (b.go2 ? '<a class="ln-bb-go2" href="' + esc(b.go2.href) + '">' + esc(b.go2.label) + "</a>" : "")
       + "</span>"
       + '<span class="ln-bb-lib">'
       + "<span><b>" + (counts.video || 0) + "</b> videos</span>"
@@ -937,7 +959,18 @@ function render() {
       + "<span><b>" + (counts.sheet || 0) + "</b> sheets</span>"
       + "<span><b>" + (counts.article || 0) + "</b> articles</span>"
       + "<span><b>" + COURSES.filter(c => c.key).length + "</b> courses</span>"
-      + "</span></div>"
+      + "</span></div>";
+
+  let html = slides.length
+    ? '<div class="ln-bb" id="ln-bb">'
+      + slides.map((b, i) => slideHtml(b).replace('class="ln-bb-slide"',
+          'class="ln-bb-slide' + (i === BB_AT % slides.length ? " on" : "") + '"')).join("")
+      + (slides.length > 1
+          ? '<div class="ln-bb-dots">' + slides.map((b, i) =>
+              '<button type="button" class="ln-bb-dot' + (i === BB_AT % slides.length ? " on" : "")
+              + '" data-slide="' + i + '" aria-label="' + esc(b.kick) + '"></button>').join("") + "</div>"
+          : "")
+      + "</div>"
     : "";
 
   html +=
@@ -1040,8 +1073,45 @@ function fixShortThumbs() {
   });
 }
 
+/* Rotation. Pauses while the pointer is over it, and does not auto-advance for
+   anyone who has asked for reduced motion. */
+function wireCarousel() {
+  const bb = document.getElementById("ln-bb");
+  if (BB_TIMER) { clearInterval(BB_TIMER); BB_TIMER = null; }
+  if (!bb) return;
+  const slides = [...bb.querySelectorAll(".ln-bb-slide")];
+  const dots   = [...bb.querySelectorAll(".ln-bb-dot")];
+  if (slides.length < 2) return;
+
+  const show = n => {
+    BB_AT = (n + slides.length) % slides.length;
+    slides.forEach((sl, i) => sl.classList.toggle("on", i === BB_AT));
+    dots.forEach((d, i) => d.classList.toggle("on", i === BB_AT));
+    billboardMotion();
+  };
+  dots.forEach(d => d.onclick = e => {
+    e.stopPropagation();
+    show(Number(d.dataset.slide));
+    start();                                    // a manual pick resets the clock
+  });
+
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function start() {
+    if (BB_TIMER) clearInterval(BB_TIMER);
+    if (reduced) return;
+    BB_TIMER = setInterval(() => show(BB_AT + 1), 7000);
+  }
+  bb.addEventListener("mouseenter", () => { if (BB_TIMER) clearInterval(BB_TIMER); });
+  bb.addEventListener("mouseleave", start);
+  start();
+}
+
 function billboardMotion() {
-  const img = document.querySelector(".ln-bb-img img[data-mux]");
+  /* The ACTIVE slide's still, not simply the first on the page. */
+  const img = document.querySelector(".ln-bb-slide.on .ln-bb-img img[data-mux]");
+  document.querySelectorAll(".ln-bb-slide:not(.on) .ln-bb-img img[data-mux]").forEach(o => {
+    if (o.dataset.still) o.src = o.dataset.still;       // put the resting slides back to a still
+  });
   if (!img) return;
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   // Runs on a phone too, but the phone gets to say no: Data Saver, or a
@@ -1050,14 +1120,18 @@ function billboardMotion() {
   if (net.saveData) return;
   if (/(^|-)2g$/.test(net.effectiveType || "")) return;
   const id = img.dataset.mux;
+  if (!img.dataset.still) img.dataset.still = img.src;   // remember the still to return to
   const probe = new Image();
   probe.onload = () => { img.src = probe.src; };
   probe.src = "https://image.mux.com/" + id + "/animated.webp?width=640&start=20&end=25&fps=10";
 }
 
 function wire() {
-  const bbEl = document.querySelector(".ln-bb[data-href]");
-  if (bbEl) bbEl.onclick = e => { if (!e.target.closest("a")) location.href = bbEl.dataset.href; };
+  document.querySelectorAll(".ln-bb-slide[data-href]").forEach(sl => {
+    sl.onclick = e => { if (!e.target.closest("a") && !e.target.closest(".ln-bb-dot"))
+      location.href = sl.dataset.href; };
+  });
+  wireCarousel();
   // Anything that points at a feed post opens in place instead of navigating.
   document.querySelectorAll('a[href^="/content-feed.html?post="]').forEach(a => {
     a.addEventListener("click", e => {
