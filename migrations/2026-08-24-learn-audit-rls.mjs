@@ -73,7 +73,14 @@ const must = async query => { try { return await sql(query); }
   catch (e) { console.log("FAILED: " + e.message); process.exit(1); } };
 
 /* The membership test used by content_feed_posts, with the JWT read once per
-   statement rather than once per row. */
+   statement rather than once per row.
+
+   The two read policies are also narrowed to the authenticated role. Without
+   that, an anon caller still evaluates the policy, and reading allowed_emails
+   inside it raises "permission denied for table allowed_emails" — anon holds no
+   grant on it — so a logged-out request would fail with a 400 naming an
+   internal table instead of quietly returning nothing. Scoped to authenticated,
+   anon matches no SELECT policy at all and simply sees zero rows. */
 const MEMBER = `exists (select 1 from allowed_emails ae
                         where lower(ae.email) = (select lower(auth.jwt() ->> 'email')))`;
 const IS_OWNER = `(select lower(auth.jwt() ->> 'email')) = '${OWNER}'`;
@@ -87,7 +94,9 @@ const BEFORE = [
   `alter policy "live_events_admin_update" on live_events
      using (exists (select 1 from allowed_emails where allowed_emails.email = (select auth.jwt() ->> 'email')))
      with check (exists (select 1 from allowed_emails where allowed_emails.email = (auth.jwt() ->> 'email')))`,
+  `alter policy "Public read" on theory_sheets to public`,
   `alter policy "Public read" on theory_sheets using (true)`,
+  `alter policy "lessons_read" on lessons to public`,
   `alter policy "lessons_read" on lessons
      using ((status = 'published') or ((select lower(auth.jwt() ->> 'email')) = '${OWNER}'))`,
 ];
@@ -99,7 +108,9 @@ const AFTER = [
      with check (${IS_OWNER})`,
   `alter policy "live_events_admin_update" on live_events
      using (${IS_OWNER}) with check (${IS_OWNER})`,
+  `alter policy "Public read" on theory_sheets to authenticated`,
   `alter policy "Public read" on theory_sheets using (${MEMBER})`,
+  `alter policy "lessons_read" on lessons to authenticated`,
   `alter policy "lessons_read" on lessons
      using ((status = 'published' and ${MEMBER}) or ${IS_OWNER})`,
 ];
@@ -139,15 +150,20 @@ const NOOP = {
 const snapshot = async label => {
   const row = {};
   for (const who of ["anon", member, OWNER]) {
-    const r = await must(`select 0`).then(() => asRole(who, `select
-      (select count(*)::int from theory_sheets) sheets,
-      (select count(*)::int from lessons) lessons,
-      (select count(*)::int from weekly_focus) focuses`));
+    /* A caller refused outright reads nothing, so an error counts as zero —
+       but it is reported as "err" rather than 0, because a 400 naming an
+       internal table is not the same outcome as an empty result. */
+    const count = async t => {
+      try { return (await asRole(who, `select count(*)::int n from ${t}`))[0].n; }
+      catch { return "err"; }
+    };
     const write = async k => {
       try { return (await asRole(who, NOOP[k]))[0].n > 0 ? "YES" : "no"; }
       catch { return "no"; }
     };
-    row[who] = { ...r[0], focus: await write("focus"), event: await write("event") };
+    row[who] = { sheets: await count("theory_sheets"), lessons: await count("lessons"),
+                 focuses: await count("weekly_focus"),
+                 focus: await write("focus"), event: await write("event") };
   }
   console.log("\n" + label);
   for (const [k, v] of Object.entries(row))
@@ -182,8 +198,13 @@ if (problems.length) {
 const open = [];
 if (after[member].focus === "YES") open.push("a member can still write weekly_focus");
 if (after[member].event === "YES") open.push("a member can still write live_events");
-if (after.anon.sheets  > 0) open.push("anon can still read theory_sheets");
-if (after.anon.lessons > 0) open.push("anon can still read lessons");
+/* Zero rows is the outcome we want for anon. "err" means it is refused, but
+   refused with a 400 that names allowed_emails, which is a policy left scoped
+   to public — worth failing on rather than shipping. */
+for (const t of ["sheets", "lessons"]) {
+  if (after.anon[t] === "err") open.push(`anon gets an error reading ${t}, not an empty result`);
+  else if (after.anon[t] > 0)  open.push(`anon can still read ${t}`);
+}
 if (open.length) { console.log("\nSTILL OPEN:\n  " + open.join("\n  ")); process.exit(1); }
 
 console.log(`\nclosed: member writes to weekly_focus and live_events, anon reads of theory_sheets and lessons.
