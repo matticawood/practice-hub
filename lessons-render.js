@@ -552,9 +552,14 @@
         const notesJson = esc(JSON.stringify(b.highlight || []));
         // The head Play button sounds the highlighted keys together. Hide it with
         // noplay:true where that would be a meaningless cluster (e.g. C-D-E position).
-        const wantPlay = !!(b.highlight && b.highlight.length) && !b.noplay;
+        // Sounds every highlighted key at once, so it only makes a musical sound
+        // when exactly one is lit. Two or more is a collection - "the notes used
+        // here", a scale, a five-finger position - and sounding a collection
+        // together is a cluster, not the thing named. The keys stay clickable, and
+        // where there is a real example a play block plays it properly, in time.
+        const wantPlay = (b.highlight || []).length === 1 && !b.noplay;
         const head = (b.label || wantPlay)
-          ? `<div class="lr-kbd-head">${b.label ? `<span class="lr-kbd-label">${esc(b.label)}</span>` : ""}${wantPlay ? `<button type="button" class="lr-kbd-play" data-notes="${notesJson}"><span class="lr-play-ico">&#9654;</span> Play</button>` : ""}</div>`
+          ? `<div class="lr-kbd-head">${b.label ? `<span class="lr-kbd-label">${esc(b.label)}</span>` : ""}${wantPlay ? `<button type="button" class="lr-kbd-play" data-notes="${notesJson}"><span class="lr-play-ico">&#9654;</span><span>Hear it</span></button>` : ""}</div>`
           : "";
         return `<figure class="lr-kbd${live}">${head}${buildKeyboard(b)}${b.caption ? `<figcaption class="lr-cap">${esc(b.caption)}</figcaption>` : ""}</figure>`;
       }
@@ -915,12 +920,13 @@
     .lr-play-ico{width:23px;height:23px;flex:0 0 auto;border-radius:50%;background:rgba(255,255,255,.22);
       display:grid;place-items:center;color:#fff;font-size:.62rem;line-height:1}
     .lr-kbd{margin:18px 0}
-    .lr-kbd-head{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+    .lr-kbd-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
     .lr-kbd-label{font-weight:700;font-size:.92rem}
-    .lr-kbd-play{display:inline-flex;align-items:center;gap:7px;background:var(--c-do);border:none;
-      border-radius:999px;padding:6px 14px;font:inherit;font-size:.76rem;font-weight:700;color:#fff;cursor:pointer}
-    .lr-kbd-play:hover{background:#7a58e8}
-    .lr-kbd-play .lr-play-ico{width:16px;height:16px;font-size:.5rem}
+    .lr-kbd-play{display:flex;width:100%;align-items:center;gap:12px;text-align:left;
+      background:linear-gradient(180deg,#8b5cf6,#6d4ae0);border:none;border-radius:13px;padding:13px 17px;
+      font:inherit;font-size:.92rem;font-weight:700;color:#fff;cursor:pointer;box-shadow:0 6px 18px -9px rgba(109,74,224,.95)}
+    .lr-kbd-play:hover{background:linear-gradient(180deg,#9a6efa,#7a58e8)}
+    .lr-kbd-play:active{transform:translateY(1px)}
     .lr-kbd-keys{position:relative;width:100%;aspect-ratio:var(--kw,7) / 2.6;max-height:124px;border-radius:9px;background:linear-gradient(#2a2520,#1c1813);box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
     .lr-key{position:absolute;top:0;box-sizing:border-box}
     .lr-key-w{height:100%;background:linear-gradient(#fff,#ededf1);border:1px solid #cbc9cf;border-radius:0 0 5px 5px}
