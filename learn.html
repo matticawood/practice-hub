@@ -118,28 +118,29 @@
     color:var(--pc); box-shadow:0 18px 44px -18px color-mix(in srgb, var(--pc) 80%, transparent); }
   .ln-bb-pic svg { width:52%; height:52%; }
   /* Every other slide plays a video, so a plate is the one that just sits
-     there. A slow specular sweep gives it life without pretending to be
-     footage: it crosses once, then rests for most of the cycle, which reads as
-     light moving over a surface rather than as something blinking for
-     attention. Only the slide you are looking at runs it. */
-  .ln-bb-slide.on .ln-bb-plate::before {
-    content:""; position:absolute; inset:-30% -70%; z-index:0; pointer-events:none;
-    background:linear-gradient(102deg, transparent 44%,
-      color-mix(in srgb, var(--pc) 30%, #fff) 50%, transparent 56%);
-    opacity:0; transform:translateX(-70%);
-    animation:ln-bb-shine 9s ease-in-out infinite; }
-  @keyframes ln-bb-shine {
-    0%   { transform:translateX(-70%); opacity:0; }
-    10%  { opacity:.55; }
-    32%  { transform:translateX(70%);  opacity:0; }
-    100% { transform:translateX(70%);  opacity:0; }
+     there. The light is kept ON THE ICON rather than swept across the whole
+     plate: a band crossing the full width read as a stream of light passing
+     over the page, where a gleam contained by the tile reads as the object
+     itself catching the light. Only the slide you are looking at runs it. */
+  .ln-bb-pic { overflow:hidden; }
+  .ln-bb-slide.on .ln-bb-pic::after {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(104deg, transparent 38%, rgba(255,255,255,.34) 50%,
+      transparent 62%);
+    transform:translateX(-130%);
+    animation:ln-bb-gleam 6.5s ease-in-out infinite; }
+  @keyframes ln-bb-gleam {
+    0%   { transform:translateX(-130%); }
+    26%  { transform:translateX(130%); }
+    100% { transform:translateX(130%); }
   }
-  /* The icon catches it a beat later, so the two read as one pass of light. */
-  .ln-bb-slide.on .ln-bb-pic {
-    animation:ln-bb-lift 9s ease-in-out infinite; }
-  @keyframes ln-bb-lift {
-    0%, 12%, 100% { box-shadow:0 18px 44px -18px color-mix(in srgb, var(--pc) 80%, transparent); }
-    22%           { box-shadow:0 18px 54px -14px color-mix(in srgb, var(--pc) 100%, transparent); }
+  /* The halo swells as the gleam crosses, so the tile lifts rather than just
+     being wiped by a highlight. */
+  .ln-bb-slide.on .ln-bb-pic { animation:ln-bb-halo 6.5s ease-in-out infinite; }
+  @keyframes ln-bb-halo {
+    0%, 100% { box-shadow:0 18px 44px -18px color-mix(in srgb, var(--pc) 70%, transparent); }
+    13%      { box-shadow:0 18px 56px -12px color-mix(in srgb, var(--pc) 100%, transparent),
+                          0 0 0 5px color-mix(in srgb, var(--pc) 14%, transparent); }
   }
   /* A 16:9 still inside a very wide, short box crops from the centre and takes
      the top of the head off. Bias the crop upward so the face stays in frame. */
@@ -745,6 +746,7 @@ async function load() {
   const READ_WPM = 200, words = {};
   (sheetWords.data || []).forEach(r => { words[r.source_type + ":" + r.source_ref] = r.word_count; });
   ITEMS = [];
+  PPD_CATS = [...new Set((sheets.data || []).map(x => ppdCleanCat(x.category)))].sort();
   (sheets.data || []).forEach(s => ITEMS.push({
     type:"sheet", ctype:"theory_sheet", ref:s.id, title:s.title, topic:s.category, date:s.created_at, done:readSet.has(s.id), only:true,
     mins:Math.max(1, Math.round((words["theory_sheet:" + s.id] || 600) / READ_WPM)),
@@ -923,6 +925,12 @@ const MMT_BG = [
   ["#7c4d51","#2e1d1f","#170d0e"], ["#585481","#222033","#11101c"],
   ["#6e664a","#29271c","#14130d"], ["#4c7276","#1c2a2c","#0d1416"],
 ];
+/* The first stop of an article's gradient is its lightest, which is the colour
+   its icon and halo should take so the plate reads as one object. */
+function mmtLight(bg) {
+  const m = String(bg || "").match(/#[0-9a-f]{6}/i);
+  return m ? m[0] : "#5f6a80";
+}
 function mmtBg(slug) {
   let h = 0;
   for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0;
@@ -941,7 +949,7 @@ function card(it, o) {
     : it.bg
       ? '<span class="ln-tip" style="background:' + it.bg + '"><span>Monday Music Tips</span></span>'
       : '<span class="ln-flat" style="--tc:'
-          + (it.type === "sheet" && PPD_CAT[it.topic] ? PPD_CAT[it.topic] : T.colour)
+          + (it.type === "sheet" ? ppdCatColour(it.topic) : T.colour)
           + '">' + (MARK[it.type] || MARK.video) + "</span>";
   return '<a class="ln-c' + (it.vertical ? " ln-cv" : "") + '" href="' + esc(it.href) + '"' + (it.external ? ' target="_blank" rel="noopener"' : "")
     + '><span class="ln-th' + (it.vertical ? " ln-v" : "") + '">' + inner
@@ -1073,27 +1081,20 @@ function filtered() {
 const YT_AUTOHIDE = 4000;
 /* Where the embed is told to begin, so the opening titles are already past. */
 const YT_START = 15;
-/* A hundred and ten sheets drawn as one plate in one green look like a single
-   card repeated. Colour by category so the colour carries something: you know
-   what kind of sheet it is before you read the title. It stays inside the
-   green-through-teal band the sheet type already owns, so the row still reads
-   as PPD rather than scattering into the hues that mean video, clinic and
-   article elsewhere on the page. Neighbours differ in value as well as hue,
-   because twelve categories inside one family is a tight fit. */
-const PPD_CAT = {
-  "Harmony":              "#0e9f6e",   // the sheet green, and the largest set
-  "Technique":            "#6aa84f",
-  "Style & History":      "#3f8f7a",
-  "Expression":           "#14b8a6",
-  "Rhythm":               "#8bae46",
-  "Form & Structure":     "#0f8a76",
-  "Scales & Keys":        "#2bb673",
-  "Ear Training":         "#159fa8",
-  "Pianists & Composers": "#5aa38b",
-  "Music Fundamentals":   "#57a83c",
-  "Melody & Ornament":    "#17a2b8",
-  "Notation":             "#7f9e6b",
-};
+/* Piano Practice Daily categories take their colour from the same place the
+   Piano Practice Daily pages do: a twelve colour palette assigned by the
+   category's position in the sorted list of distinct categories, so Harmony is
+   the same colour here as on the sheet itself and in resources. Assigned by
+   sorted index rather than by hashing, so two categories cannot collide until
+   the palette wraps. Mirrors _ppdCatColor in resources.html. */
+const PPD_PALETTE = ["#b3713d","#4e9a5c","#4a7fb0","#b0529a","#a8893a","#3f9a86",
+                     "#6a64b3","#7e983e","#3f8fa0","#9558b0","#b3506a","#5a7d52"];
+let PPD_CATS = [];
+const ppdCleanCat = c => (c || "General").replace(/^category:\s*/i, "").trim() || "General";
+function ppdCatColour(cat) {
+  const i = PPD_CATS.indexOf(ppdCleanCat(cat));
+  return PPD_PALETTE[(i < 0 ? 0 : i) % PPD_PALETTE.length];
+}
 const byDate = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
 
 /* ── lightbox ───────────────────────────────────────────────────────────────
@@ -1298,7 +1299,21 @@ function render() {
       href:"/courses.html?course=" + noVid.key, mux:null, muxTime:0,
       colour:noVid.color, icon:noVid.icon };
   }
-  const fresh = everyone.filter(i => i.img).sort(byDate)[0];
+  /* A sheet or an article has no thumbnail, which used to rule it out of the
+     hero entirely: the newest thing in the library could be a Monday Music Tips
+     article and the hero would silently show the newest video instead. They
+     take a plate, the same treatment a course without a video takes. Their
+     covers are deliberately not used: the title is set into that artwork, so it
+     would appear twice with the headline over the top. */
+  const heroPlate = it => {
+    if (!it) return null;
+    if (it.type === "sheet")
+      return { colour: ppdCatColour(it.topic), icon: MARK.sheet };
+    if (it.type === "article")
+      return { colour: mmtLight(it.bg), icon: MARK.article, wash: it.bg };
+    return null;
+  };
+  const fresh = everyone.filter(i => i.img || heroPlate(i)).sort(byDate)[0];
   const lastClinic = everyone.filter(i => i.type === "clinic" && i.img).sort(byDate)[0];
   /* The hero rotates rather than showing one thing: the clinic, the newest
      piece, and whatever is most relevant to this member. One slot, three jobs,
@@ -1323,14 +1338,18 @@ function render() {
     /* A course with no video of its own gets its own plate, in its own colour,
        so it still looks like that course and not like a missing image. */
     plate: carry.mux ? null : { colour:carry.colour, icon:carry.icon } });
-  const relevant = PICKS.find(p => p.img);
+  const relevant = PICKS.find(p => p.img || heroPlate(p));
   if (relevant) slides.push({ kick:"For you",
     title:relevant.title, when:relevant.meta || "",
     blurb:relevant.topic ? "Picked because you have been working on " + relevant.topic + "."
                          : "Picked for what you have been working on.",
-    href:relevant.href, img:heroImg(relevant), yt:relevant.yt, go:"Open", mux:relevant.mux });
+    href:relevant.href, img:heroImg(relevant), yt:relevant.yt, mux:relevant.mux,
+    plate:relevant.img ? null : heroPlate(relevant),
+    go:relevant.type === "sheet" || relevant.type === "article" ? "Read it" : "Open" });
   if (fresh) slides.push({ kick:"Latest", title:fresh.title, when:fresh.meta,
-    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh), yt:fresh.yt, go:"Watch now", mux:fresh.mux });
+    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh),
+    yt:fresh.yt, mux:fresh.mux, plate:fresh.img ? null : heroPlate(fresh),
+    go:fresh.type === "sheet" || fresh.type === "article" ? "Read it" : "Watch now" });
 
   const slideHtml = b =>
       '<div class="ln-bb-slide" data-href="' + esc(b.href) + '">'
@@ -1338,8 +1357,9 @@ function render() {
           + (b.mux ? ' data-mux="' + esc(b.mux) + '"' : "")
           + (b.yt ? ' data-yt="' + esc(b.yt) + '"' : "") + "></span>"
          : b.plate ? '<span class="ln-bb-img ln-bb-plate" style="--pc:'
-              + esc(b.plate.colour || "#2563eb") + '"><span class="ln-bb-pic">'
-              + (b.plate.icon || "") + "</span></span>"
+              + esc(b.plate.colour || "#2563eb")
+              + (b.plate.wash ? ";background:" + b.plate.wash : "") + '">'
+              + '<span class="ln-bb-pic">' + (b.plate.icon || "") + "</span></span>"
          : "")
       + '<span class="ln-bb-in"><span class="ln-bb-krow">'
       + '<span class="ln-bb-k">' + esc(b.kick) + "</span>"
