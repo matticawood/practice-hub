@@ -773,6 +773,12 @@ function fmtDate(d) {
 }
 function mins(sec) { return sec ? (sec < 60 ? sec + "s" : Math.round(sec / 60) + " min") : ""; }
 async function load() {
+  /* Started first, not last. This is the slowest call the page makes and it
+     depends on nothing here - only the session, which is already attached -
+     so firing it before the rest lets it run alongside them instead of
+     queueing behind them. Left where it was, it did not even begin until
+     2,462ms, which put the reveal at 5.6s; the reveal waits for it. */
+  PICKS_READY = loadPicks();
   const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, sheetWords, vocab, tags, cmeta, mine] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
     db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
@@ -928,14 +934,9 @@ async function load() {
      written about, then what their practice shows, then what they read. */
   PICKS = []; PICK_SHORTS = [];
   PICK_WHY = ""; PICK_SUB = "";
-  /* Not awaited. picks_for reads views built with security_invoker, so under a
-     member's own role every underlying table has its policies evaluated: the
-     same call that takes 470ms with the service key takes about 4.5 SECONDS
-     from the browser, and it was being awaited before anything rendered, twice
-     over when the first returned nothing. The library does not need it to draw
-     itself and the hero already falls back to the newest of each kind, so it
-     lands afterwards and fills in. */
-  PICKS_READY = loadPicks();
+  /* picks_for is fired at the top of load(), not here, so it runs alongside
+     everything above rather than after it. The reveal waits for it, so where it
+     starts is where the page's opening time is decided. */
 
   /* topics come from the only vocabulary that is actually populated today */
   const counts = {};
@@ -2150,14 +2151,19 @@ function wire(heroChanged) {
     console.error("learn load error:", e);
     $("ln-root").innerHTML = '<div class="ln-empty">Something went wrong loading the library. Reload to try again.</div>';
   }
-  /* Both waits run together and both are capped, so the page opens on a
-     finished picture: the hero with its first frame, and the picks row
-     already in place rather than arriving a second later. Neither can hold
-     the page - whichever is slower, the cap ends it. */
+  /* Both waits run together, so the page opens on a finished picture: the hero
+     with its first frame, and the picks row already in place rather than
+     arriving a second later and shoving everything down.
+
+     The picks timeout is a failsafe, not a deadline. It is long because the
+     page should wait for the row rather than open without it - at 4s it was
+     cutting in and letting the row land afterwards, which is the thing it
+     exists to prevent. It only fires if the call has genuinely failed, and
+     then the page opens without that row rather than hanging. */
   await Promise.all([
     BB_FIRST,                          // capped at 2500ms where it is defined
     Promise.race([PICKS_READY || Promise.resolve(),
-                  new Promise(r => setTimeout(r, 4000))]),
+                  new Promise(r => setTimeout(r, 15000))]),
   ]);
   $("loading-screen").style.display = "none";
   $("app-main").style.display = "block";
