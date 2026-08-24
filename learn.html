@@ -46,6 +46,10 @@
   @media (min-width: 1025px), (orientation: landscape) and (min-width: 769px) {
     #loading-screen { left:244px; }
   }
+  .ln-stuck { text-align:center; color:#c6c6cd; font-size:.95rem; line-height:1.6; }
+  .ln-stuck p { margin:0 0 14px; }
+  .ln-stuck button { background:#f5c518; color:#241d00; border:0; border-radius:999px;
+    padding:11px 22px; font:inherit; font-weight:700; cursor:pointer; }
   .spinner { width:34px; height:34px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   #toast { position:fixed; left:50%; bottom:90px; transform:translateX(-50%) translateY(20px); background:#16161a; color:#fff;
@@ -2119,9 +2123,35 @@ function wire(heroChanged) {
 
 /* ── boot ───────────────────────────────────────────────────────────────────── */
 (async function() {
+  /* A watchdog over the whole boot. Three things here can wait forever with
+     nothing on screen: getSession() while the auth client is refreshing a
+     token, the allowed_emails lookup, and load() with its 26 queries - none of
+     them has a timeout, so one stalled request leaves the spinner up
+     indefinitely. That is not "waiting for everything to load", it is stuck,
+     and it should say so rather than spin. Cleared at the reveal. */
+  const stuck = setTimeout(() => {
+    const ls = document.getElementById("loading-screen");
+    if (!ls || ls.style.display === "none") return;
+    ls.innerHTML = '<div class="ln-stuck">'
+      + '<p>This is taking longer than it should.</p>'
+      + '<button type="button" id="ln-retry">Try again</button></div>';
+    const r = document.getElementById("ln-retry");
+    if (r) r.onclick = () => location.reload();
+  }, 20000);
+  window.__lnBootWatchdog = stuck;
+
   const { data: { session } } = await db.auth.getSession();
   if (!session) { window.location.href = "/"; return; }
   myEmail = session.user.email;
+  /* Started here, not after the header. load() needs nothing but myEmail, which
+     we now have - checked: it touches no myName, iAmOwner or avatar - and
+     everything between this point and where it used to be called is about a
+     second of setup it can run underneath instead of queue behind. Measured:
+     the first request fired at 566ms but the data batch did not start until
+     1,674ms. The rejection is captured here so an early failure cannot become
+     an unhandled rejection before the try below is reached. */
+  const DATA_READY = load().then(v => ({ ok: true, v }), e => ({ ok: false, e }));
+
   const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName = (ae && ae.name) || myEmail.split("@")[0];
   const myAvatarUrl = (ae && ae.avatar_url) || null;
@@ -2152,7 +2182,11 @@ function wire(heroChanged) {
   const sp = new URLSearchParams(location.search);
   topic = sp.get("topic") || ""; type = sp.get("type") || ""; term = sp.get("q") || "";
 
-  try { await load(); render(); }
+  try {
+    const res = await DATA_READY;
+    if (!res.ok) throw res.e;
+    render();
+  }
   catch (e) {
     console.error("learn load error:", e);
     $("ln-root").innerHTML = '<div class="ln-empty">Something went wrong loading the library. Reload to try again.</div>';
@@ -2171,6 +2205,7 @@ function wire(heroChanged) {
     Promise.race([PICKS_READY || Promise.resolve(),
                   new Promise(r => setTimeout(r, 15000))]),
   ]);
+  clearTimeout(stuck);
   $("loading-screen").style.display = "none";
   $("app-main").style.display = "block";
   $("app-header").style.display = "";
