@@ -177,6 +177,38 @@
     background:rgba(16,14,19,.55); border:1px solid color-mix(in srgb, var(--pc) 38%, transparent);
     color:var(--pc); box-shadow:0 18px 44px -18px color-mix(in srgb, var(--pc) 80%, transparent); }
   .cv-plate-ic svg { width:52%; height:52%; }
+  /* The tile catches the light, the same way Learn's plate slides do: the gleam
+     is contained BY the tile, because a band crossing the whole plate reads as
+     a stream of light passing over the page rather than the object itself
+     catching it. Only the slide you are looking at runs it. */
+  .cv-plate-ic { overflow:hidden; }
+  .cv-slide.on .cv-plate-ic::after { content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(104deg, transparent 38%, rgba(255,255,255,.34) 50%, transparent 62%);
+    transform:translateX(-130%); animation:cv-gleam 6.5s ease-in-out infinite; }
+  @keyframes cv-gleam { 0% { transform:translateX(-130%); } 26% { transform:translateX(130%); } 100% { transform:translateX(130%); } }
+  /* The halo swells as the gleam crosses, so the tile lifts rather than just
+     being wiped by a highlight. */
+  .cv-slide.on .cv-plate-ic { animation:cv-halo 6.5s ease-in-out infinite; }
+  @keyframes cv-halo {
+    0%, 100% { box-shadow:0 18px 44px -18px color-mix(in srgb, var(--pc) 70%, transparent); }
+    13%      { box-shadow:0 18px 56px -12px color-mix(in srgb, var(--pc) 100%, transparent),
+                          0 0 0 5px color-mix(in srgb, var(--pc) 14%, transparent); } }
+  @media (prefers-reduced-motion:reduce) {
+    .cv-slide.on .cv-plate-ic, .cv-slide.on .cv-plate-ic::after { animation:none; } }
+
+  /* The slide plays its own footage behind the words, muted, with no player of
+     any kind showing. Every part of mux-player's chrome is named off, not just
+     --controls: the centre play button and the spinner are the two that show
+     through. It fades up only once it reports itself playing. */
+  mux-player.cv-vid { position:absolute; inset:0; width:100%; height:100%; z-index:0;
+    pointer-events:none; opacity:0; transition:opacity .6s ease;
+    --media-object-fit:cover; --media-object-position:center;
+    --controls:none; --center-controls:none; --play-button:none;
+    --loading-indicator:none; --dialog:none; }
+  mux-player.cv-vid.ready { opacity:1; }
+  mux-player.cv-vid::part(center play button),
+  mux-player.cv-vid::part(play button),
+  mux-player.cv-vid::part(loading indicator) { display:none; }
   .cv-scrim { position:absolute; inset:0; background:linear-gradient(90deg,
     rgba(8,8,10,.95) 0%, rgba(8,8,10,.86) 34%, rgba(8,8,10,.42) 66%, rgba(8,8,10,.14) 100%); }
   .cv-in { position:absolute; left:clamp(18px,2.6vw,52px); right:clamp(18px,2.6vw,52px);
@@ -739,6 +771,57 @@ function _courseHist(state, url, push) {
 // Crossfade, dots, and an interval that pauses under the pointer. The timer is
 // held on window because a view swap throws the element away while it is still
 // running, and an interval calling into detached nodes never stops on its own.
+// The hold before a slide plays: the still lands first, so the picture is a
+// picture before it starts moving. Learn's number, so both heroes feel the same.
+const CV_HOLD = 1200;
+let _muxReady = null;
+function ensureMuxPlayer() {
+  if (_muxReady) return _muxReady;
+  if (window.customElements && customElements.get("mux-player")) return (_muxReady = Promise.resolve());
+  _muxReady = new Promise(done => {
+    const t = document.createElement("script");
+    t.src = "https://cdn.jsdelivr.net/npm/@mux/mux-player@3.12.0";
+    t.onload = done; t.onerror = done;          // a failed load just leaves the still
+    document.head.appendChild(t);
+  });
+  return _muxReady;
+}
+
+/* Only the slide you are on plays, and it plays muted, looped, with no player
+   showing and nothing clickable. A phone gets to say no: reduced motion, Data
+   Saver or a connection the browser calls 2g all stay a still. */
+function cvPlay(slide) {
+  if (!slide) return;
+  const still = slide.querySelector(".cv-bd[data-mux]");
+  if (!still || slide.querySelector(".cv-vid")) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const net = navigator.connection || {};
+  if (net.saveData || /(^|-)2g$/.test(net.effectiveType || "")) return;
+  setTimeout(() => {
+    if (!slide.classList.contains("on") || slide.querySelector(".cv-vid")) return;
+    ensureMuxPlayer().then(() => {
+      if (!slide.classList.contains("on") || slide.querySelector(".cv-vid")) return;
+      const m = document.createElement("mux-player");
+      m.className = "cv-vid";
+      m.setAttribute("playback-id", still.dataset.mux);
+      m.setAttribute("stream-type", "on-demand");
+      m.setAttribute("autoplay", "muted");
+      m.setAttribute("muted", "");
+      m.setAttribute("loop", "");
+      m.setAttribute("playsinline", "");
+      m.setAttribute("nohotkeys", "");
+      m.setAttribute("tabindex", "-1");
+      m.setAttribute("start-time", String(20));
+      m.addEventListener("playing", () => m.classList.add("ready"), { once: true });
+      // Its chrome is already off, so no state of it is wrong to show: a
+      // backstop can reveal it even if it never reports itself playing.
+      setTimeout(() => m.classList.add("ready"), 2600);
+      still.insertAdjacentElement("afterend", m);   // over the still, under the scrim
+    });
+  }, CV_HOLD);
+}
+function cvStop(slide) { slide.querySelectorAll(".cv-vid").forEach(v => v.remove()); }
+
 function wireHero(root) {
   if (window._cvTimer) { clearInterval(window._cvTimer); window._cvTimer = null; }
   const cv = root.querySelector(".cv-hero");
@@ -747,7 +830,8 @@ function wireHero(root) {
   const dots = [...cv.querySelectorAll(".cv-dot")];
   let at = 0;
   const show = i => { at = (i + slides.length) % slides.length;
-    slides.forEach((s, k) => s.classList.toggle("on", k === at));
+    slides.forEach((s, k) => { const on = k === at; s.classList.toggle("on", on);
+      if (on) cvPlay(s); else cvStop(s); });
     dots.forEach((d, k) => d.classList.toggle("on", k === at)); };
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const run = () => { if (still || slides.length < 2) return;
@@ -758,6 +842,7 @@ function wireHero(root) {
   cv.querySelectorAll("[data-open]").forEach(b => b.onclick = e => { e.stopPropagation(); renderCourse(b.dataset.open); });
   cv.addEventListener("mouseenter", () => clearInterval(window._cvTimer));
   cv.addEventListener("mouseleave", run);
+  cvPlay(slides[0]);
   run();
 }
 
@@ -877,7 +962,7 @@ function renderOverview(push) {
   function heroSlide(c, i) {
     const art = c.format === "video" && c.thumbId;
     const bd = art
-      ? `<img class="cv-bd" src="https://image.mux.com/${c.thumbId}/thumbnail.webp?width=1600&height=900&fit_mode=smartcrop&time=${c.thumbTime || 0}" alt=""${i ? ' loading="lazy"' : ""}>`
+      ? `<img class="cv-bd" data-mux="${c.thumbId}" src="https://image.mux.com/${c.thumbId}/thumbnail.webp?width=1600&height=900&fit_mode=smartcrop&time=${c.thumbTime || 0}" alt=""${i ? ' loading="lazy"' : ""}>`
       : `<div class="cv-plate"></div><div class="cv-plate-ic">${c.icon}</div>`;
     let kick, title, meta, extra = "", acts = "";
     if (c.soon) {
@@ -926,6 +1011,7 @@ function renderOverview(push) {
 
 function renderCourse(courseKey, push) {
   if (window._cvTimer) { clearInterval(window._cvTimer); window._cvTimer = null; }
+  document.querySelectorAll(".cv-vid").forEach(v => v.remove());
   const c = COURSE[courseKey];
   window._shPageDetail = "Courses · " + c.label; if (window._shPing) window._shPing();
   document.title = c.label + " · The Practice Room";
