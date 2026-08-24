@@ -2187,7 +2187,37 @@ window.addEventListener("pageshow", e => {
   }, 20000);
   window.__lnBootWatchdog = stuck;
 
-  const { data: { session } } = await db.auth.getSession();
+  /* Caught once in the wild: navigating away from a filtered tab and back left
+     the page on its loading screen with picks_for not yet issued at 9s - so the
+     boot had not even reached load() - and it only came good around 27s. No
+     auth request went out and no lock was held, so it is the client stalling
+     internally rather than the network.
+
+     It is not reproducible on demand, so rather than guess: if the session has
+     not arrived in six seconds, reload once. A fresh document clears whatever
+     the client is stuck behind. The guard means it can only do this a single
+     time per tab, so a genuine outage cannot become a reload loop - the second
+     time through it waits, and the 20s watchdog offers the retry button. */
+  performance.mark("B_scriptStart");
+  const RETRY_KEY = "ln-session-retry";
+  const _session = await Promise.race([
+    db.auth.getSession().then(r => r.data.session),
+    new Promise(r => setTimeout(() => r("__stalled__"), 6000)),
+  ]);
+  if (_session === "__stalled__") {
+    if (!sessionStorage.getItem(RETRY_KEY)) {
+      sessionStorage.setItem(RETRY_KEY, "1");
+      console.warn("learn: session stalled past 6s, reloading once");
+      location.reload();
+      return;
+    }
+    console.warn("learn: session stalled again, waiting it out");
+  }
+  sessionStorage.removeItem(RETRY_KEY);
+  const session = _session === "__stalled__"
+    ? (await db.auth.getSession()).data.session
+    : _session;
+  performance.mark("B_session");
   if (!session) { window.location.href = "/"; return; }
   myEmail = session.user.email;
   /* Started here, not after the header. load() needs nothing but myEmail, which
@@ -2197,6 +2227,7 @@ window.addEventListener("pageshow", e => {
      the first request fired at 566ms but the data batch did not start until
      1,674ms. The rejection is captured here so an early failure cannot become
      an unhandled rejection before the try below is reached. */
+  performance.mark("B_loadFired");
   const DATA_READY = load().then(v => ({ ok: true, v }), e => ({ ok: false, e }));
 
   const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
