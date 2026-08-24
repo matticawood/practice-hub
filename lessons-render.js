@@ -854,7 +854,7 @@
     /* Self-contained light tokens so the host page's theme (e.g. the dark app
        chrome) can't bleed into the lesson. Without this, --surface/--surface-2
        could resolve dark and inputs/cards render black. */
-    .lr-body{--surface:#ffffff;--surface-2:#f1f1f4;--border:#e0d5c8;--text:#1a1410;--text-muted:#8a7868;--accent:#f5c518;color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
+    .lr-body{--surface:#ffffff;--surface-2:#f4f4f7;--border:#e5e5ea;--text:#15151a;--text-muted:#6e6e7a;--accent:#f5c518;color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
     /* A lesson is read, so it is set to be read: a display face for the
        headings against the body face, a line long enough to hold a thought and
        leading loose enough to follow it, and far more space above a heading
