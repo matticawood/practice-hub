@@ -36,7 +36,10 @@ const SH_SUBNAV = {
   ],
   learn: [
     { label: "Library", href: "/learn.html" },
-    { label: "Courses", href: "/learn.html?type=course" },
+    /* The courses page, not a filter on the library: course lessons sit in a
+       sequence and are not browsable on their own, so type=course matched
+       nothing and the item led to an empty library. */
+    { label: "Courses", href: "/courses.html" },
     { label: "Videos", href: "/learn.html?type=video" },
     { label: "Clinic replays", href: "/learn.html?type=clinic" },
     { label: "Piano Practice Daily", href: "/learn.html?type=sheet" },
