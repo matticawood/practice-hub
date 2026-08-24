@@ -898,7 +898,8 @@
     .lr-play{margin:20px 0}
     .lr-play-btn{display:inline-flex;align-items:center;gap:10px;color:#fff;
       background:linear-gradient(180deg,#6d5ef0,#5b4bdd);border:none;
-      box-shadow:0 2px 10px -3px rgba(91,75,221,.65);border-radius:11px;padding:10px 16px;font:inherit;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);cursor:pointer}
+      border-radius:11px;padding:11px 17px;font:inherit;font-weight:700;font-size:.9rem;
+      color:#fff;cursor:pointer}
     .lr-play-btn:hover{background:linear-gradient(180deg,#7a6bf5,#6455e6);box-shadow:0 4px 16px -4px rgba(91,75,221,.75)}
     .lr-play-btn:active{transform:translateY(1px)}
     .lr-play-ico{color:rgba(255,255,255,.92);font-size:.8rem}
