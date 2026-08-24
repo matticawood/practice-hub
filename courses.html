@@ -165,7 +165,9 @@
      otherwise its colour as a plate with its icon; and the next action on it. */
   .cv-hero { position:relative; display:block; overflow:hidden; color:#fff;
     margin:-22px calc(clamp(18px,2.6vw,52px) * -1) 22px;
-    --cvh:clamp(20rem,26vw,25rem); height:var(--cvh); background:#17171c; }
+    --cvh:clamp(20rem,26vw,25rem); height:var(--cvh); background:#17171c;
+    /* so the settle into 16:9 when playback starts is a move, not a jump */
+    transition:height .55s cubic-bezier(.4,0,.2,1); }
   .cv-slide { position:absolute; inset:0; opacity:0; pointer-events:none; transition:opacity .6s ease; }
   .cv-slide.on { opacity:1; pointer-events:auto; }
   .cv-bd { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:50% 40%; }
@@ -252,8 +254,11 @@
     #view > .cv-hero { padding:0; margin:0 0 18px; --cvh:23rem; }
     #view > .cv-hero:first-child { margin-top:0; }
     .cv-in { left:18px; right:18px; bottom:24px; max-width:none; }
-    .cv-acts { gap:9px; }
-    .cv-acts .cv-btn { flex:1 1 100%; }
+    /* Side by side, not stacked: two rows of button ate about 70px of picture
+       for no gain, and both labels fit across a phone once they stop trying to
+       be full width. */
+    .cv-acts { gap:9px; flex-wrap:nowrap; }
+    .cv-acts .cv-btn { flex:1 1 0; min-width:0; padding:12px 10px; font-size:.86rem; white-space:nowrap; }
     /* the words sit over the picture rather than beside it, and the bottom of
        this particular picture is a keyboard - bright enough to read a ghost
        button straight off - so the scrim runs down and goes to solid. */
@@ -812,15 +817,33 @@ function cvPlay(slide) {
       m.setAttribute("nohotkeys", "");
       m.setAttribute("tabindex", "-1");
       m.setAttribute("start-time", String(20));
-      m.addEventListener("playing", () => m.classList.add("ready"), { once: true });
+      m.addEventListener("playing", () => { cvExpand(slide.closest(".cv-hero")); m.classList.add("ready"); }, { once: true });
       // Its chrome is already off, so no state of it is wrong to show: a
       // backstop can reveal it even if it never reports itself playing.
-      setTimeout(() => m.classList.add("ready"), 2600);
+      setTimeout(() => { cvExpand(slide.closest(".cv-hero")); m.classList.add("ready"); }, 2600);
       still.insertAdjacentElement("afterend", m);   // over the still, under the scrim
     });
   }, CV_HOLD);
 }
 function cvStop(slide) { slide.querySelectorAll(".cv-vid").forEach(v => v.remove()); }
+
+/* When it starts playing the hero settles into the video's own shape, so the
+   frame is 16:9 and nothing is cropped. Not on a phone: 16:9 of a 375px screen
+   is shorter than the hero already is, so it would shrink rather than grow -
+   which is why Learn skips it there too. Once tall it stays tall, so moving
+   between slides is not a series of height changes. */
+function cvExpand(hero) {
+  if (!hero || hero.dataset.tall || window.innerWidth <= 640) return;
+  const from = hero.clientHeight, to = Math.round(hero.clientWidth * 9 / 16);
+  if (to <= from + 8) return;
+  hero.dataset.tall = "1";
+  // Growing under someone who has scrolled past would shove the page down, so
+  // off-screen it happens instantly and the scroll position absorbs it.
+  const away = window.scrollY > 60;
+  if (away) hero.style.transition = "none";
+  hero.style.setProperty("--cvh", to + "px");
+  if (away) { window.scrollBy(0, to - from); requestAnimationFrame(() => { hero.style.transition = ""; }); }
+}
 
 function wireHero(root) {
   if (window._cvTimer) { clearInterval(window._cvTimer); window._cvTimer = null; }
