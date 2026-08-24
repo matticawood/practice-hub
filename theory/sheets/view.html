@@ -69,6 +69,21 @@
     .ar-overview{margin:22px 0 4px;font-size:1.17rem;line-height:1.62;color:#3a2e24;font-weight:450;border-left:3px solid var(--cc);padding-left:18px}
 
     .ar-page{animation:arIn .26s ease}
+    /* Monday Music Tips arrive as a body of HTML rather than the sections the
+       Piano Practice Daily schema builds, so the prose is styled directly. */
+    .ar-html{font-size:1.04rem;line-height:1.75;color:#3a2e24}
+    .ar-html > *:first-child{margin-top:0}
+    .ar-html p{margin:0 0 1.15em}
+    .ar-html h2{font-size:1.35rem;font-weight:750;line-height:1.25;color:var(--text);margin:2em 0 .6em;letter-spacing:-.01em}
+    .ar-html h3{font-size:1.1rem;font-weight:750;color:var(--text);margin:1.7em 0 .5em}
+    .ar-html ul,.ar-html ol{margin:0 0 1.15em;padding-left:1.3em}
+    .ar-html li{margin-bottom:.5em}
+    .ar-html a{color:#8a5a00;text-decoration:underline;text-underline-offset:2px}
+    .ar-html strong{font-weight:700;color:var(--text)}
+    .ar-html img,.ar-html iframe{max-width:100%;border-radius:12px;display:block;margin:1.4em 0}
+    .ar-html iframe{aspect-ratio:16/9;height:auto;width:100%;border:0}
+    .ar-html blockquote{margin:1.4em 0;padding:2px 0 2px 18px;border-left:3px solid var(--cc,#b45309);color:#5a4838}
+    .ar-html hr{border:0;border-top:1px solid var(--border);margin:2em 0}
     @keyframes arIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
     .ar-section{margin-top:30px}
     .ar-section:first-child{margin-top:26px}
@@ -324,9 +339,10 @@
 
   function hideLoader(){ const l=document.getElementById('ar-loader'); if(l){ l.classList.add('hide'); setTimeout(()=>{ if(l.parentNode) l.remove(); }, 420); } }
 
+  let _backTo = '../../resources.html';
   function goBack(){
-    if (document.referrer && /resources\.html|index\.html/.test(document.referrer)) { history.back(); }
-    else { window.location.href = '../../resources.html'; }
+    if (document.referrer && /resources\.html|index\.html|learn\.html/.test(document.referrer)) { history.back(); }
+    else { window.location.href = _backTo; }
   }
 
   /* ============================================================
@@ -710,7 +726,18 @@
      Load
      ============================================================ */
   async function loadSheet() {
-    const slug = new URLSearchParams(window.location.search).get('slug');
+    const params = new URLSearchParams(window.location.search);
+
+    /* Monday Music Tips read here too. The text has always been in this
+       database - mmt_articles.body_html - and the app was sending members out
+       to the public website to read something it already held, which lost the
+       reader, the back button and any record they had read it. Single page:
+       these are written as one piece, unlike a Piano Practice Daily article
+       which is authored in pages. */
+    const mmtSlug = params.get('mmt');
+    if (mmtSlug) { await loadMmt(mmtSlug); return; }
+
+    const slug = params.get('slug');
     if (!slug) { window.location.replace('../index.html'); return; }
     currentSlug = slug;
     loadNote(slug);
@@ -747,6 +774,55 @@
     document.getElementById('s-title').textContent = 'Sheet not found';
     document.getElementById('s-intro').textContent = 'This sheet has no content yet. Go back to the sheet list and regenerate it.';
     document.getElementById('s-columns').innerHTML = '<div class="col"><section><p><a href="../index.html" style="color:#111">← Back to all sheets</a></p></section></div>';
+    hideLoader();
+  }
+
+  async function loadMmt(slug) {
+    const { data } = await db.from('mmt_articles')
+      .select('title, excerpt, body_html, published_at, created_at')
+      .eq('slug', slug).eq('status', 'published').single();
+    if (!data) {
+      document.getElementById('old-root').style.display = '';
+      document.getElementById('s-title').textContent = 'Article not found';
+      document.getElementById('s-intro').textContent = 'This Monday Music Tip is not available.';
+      hideLoader();
+      return;
+    }
+    document.title = 'Monday Music Tips — ' + data.title;
+    _cc = '#b45309';                       // Monday Music Tips' own colour in Learn
+    document.body.classList.add('ar-mode');
+    const root = document.getElementById('ar-root');
+    root.style.display = '';
+    root.style.setProperty('--cc', _cc);
+    /* Save, Notes and the exports all key off a theory sheet id. Rather than
+       show controls that cannot work, the top bar carries just the way back. */
+    ['ar-save', 'ar-pdf', 'ar-png'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.display = 'none';
+    });
+    const notesBtn = document.querySelector('.ar-act[onclick="openNotes()"]');
+    if (notesBtn) notesBtn.style.display = 'none';
+    /* A tip is reached from Learn, not from the Piano Practice Daily library,
+       so the way back says so. */
+    const backLbl = document.querySelector('.ar-back .lbl');
+    if (backLbl) backLbl.textContent = 'Learn';
+    _backTo = '/learn.html';
+    const mount = document.getElementById('ar-notes-mount');
+    if (mount) mount.remove();
+
+    const words = String(data.body_html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+    const mins = Math.max(1, Math.round(words / 200));
+    const when = new Date(data.published_at || data.created_at)
+      .toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    document.getElementById('app').innerHTML =
+      '<div class="ar-eyebrow">Monday Music Tips</div>' +
+      '<h1 class="ar-title">' + esc(data.title) + '</h1>' +
+      '<div class="ar-meta"><span class="ar-meta-item"><span class="dot"></span>' + esc(when) + '</span>' +
+        '<span class="ar-meta-item">' + clockSVG() + mins + ' min read</span></div>' +
+      /* The excerpt is a machine-made truncation of the opening paragraph,
+         so printing it above the article says the same words twice and cuts
+         the second copy mid-word. The body speaks for itself. */
+      '<div class="ar-page ar-html">' + (data.body_html || '') + '</div>';
     hideLoader();
   }
 
