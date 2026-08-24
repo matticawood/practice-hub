@@ -901,7 +901,13 @@
     .lr-example{margin:22px 0;padding:0;border-radius:15px;overflow:hidden;
       background:#fafafc;border:1px solid #e6e6ee}
     .lr-example .lr-text{margin:0;padding:15px 17px 16px}.lr-example .lr-text p:last-child{margin-bottom:0}
-    .lr-example-title{margin:0;padding:10px 15px;background:#55555f;color:#fff;font-weight:700;font-size:.82rem}
+    /* An example's title is authored prose, not a label - half of them are a
+       sentence and the longest runs 84 characters - so it sets as a heading
+       inside the card. In a solid header bar they wrapped to three lines and
+       read as a paragraph someone had painted grey. */
+    .lr-example-title{margin:0;padding:15px 17px 0;background:none;color:var(--text,#15151a);
+      font-weight:700;font-size:.95rem;line-height:1.4}
+    .lr-example-title ~ .lr-text{padding-top:9px}
     .lr-example .lr-img{margin:15px 17px 0;width:calc(100% - 34px)}
     .lr-img{max-width:100%;height:auto;border-radius:10px;display:block;margin:4px 0}
     .lr-figure{margin:16px 0}.lr-figure figcaption{font-size:.8rem;color:var(--text-muted,#8a7868);margin-top:6px;text-align:center}
