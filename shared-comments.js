@@ -309,7 +309,7 @@
       <div id="tc-img-modal" onclick="if(event.target===this)_tcImgClose()">
         <button id="tc-img-modal-close" onclick="_tcImgClose()">✕</button>
         <button class="tc-img-modal-nav" id="tc-img-modal-prev" onclick="_tcImgNav(-1)">‹</button>
-        <img id="tc-img-modal-img" src="" alt="" />
+        <img id="tc-img-modal-img" alt="" />
         <button class="tc-img-modal-nav" id="tc-img-modal-next" onclick="_tcImgNav(1)">›</button>
         <div id="tc-img-modal-counter"></div>
       </div>`;
@@ -616,7 +616,7 @@
     const next=document.getElementById("tc-img-modal-next");
     const ctr=document.getElementById("tc-img-modal-counter");
     if(!img)return;
-    img.src=urls[idx]||"";
+    if(urls[idx])img.src=urls[idx];else img.removeAttribute("src");
     if(prev)prev.disabled=idx===0;
     if(next)next.disabled=idx>=urls.length-1;
     if(ctr){ctr.style.display=urls.length>1?"":"none";ctr.textContent=`${idx+1} / ${urls.length}`;}
@@ -1402,7 +1402,7 @@
     const modal=document.getElementById("tc-img-modal");
     if(modal)modal.classList.remove("open");
     document.removeEventListener("keydown",_tcImgKey);
-    setTimeout(()=>{const img=document.getElementById("tc-img-modal-img");if(img)img.src="";if(modal)modal.style.display="none";},200);
+    setTimeout(()=>{const img=document.getElementById("tc-img-modal-img");if(img)img.removeAttribute("src");if(modal)modal.style.display="none";},200);
     _imgCurrentGroup=null;
   };
   window._tcImgNav = function(dir) {
