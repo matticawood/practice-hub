@@ -890,7 +890,7 @@
     .comm-img-modal-nav:disabled { opacity: 0; pointer-events: none; }
     #comm-img-modal-prev { left: 14px; }
     #comm-img-modal-next { right: 14px; }
-    */
+
   </style>
 </head>
 <body>
@@ -899,7 +899,7 @@
 
   <main>
 <div id="focus-main" style="display:none">
-  <div class="focus-page-hdr">
+  <div class="focus-page-hdr" style="display:none">
     <div class="focus-hero">
       <div class="focus-hero-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg>
@@ -911,6 +911,7 @@
     </div>
     <button id="new-focus-btn" class="btn btn-primary" onclick="openFocusForm()" style="display:none">+ New Focus</button>
   </div>
+  <button id="fx-new" onclick="openFocusForm()" style="display:none">+ New focus</button>
 
   <!-- Admin write form -->
   <div id="focus-form-wrap" style="display:none">
@@ -968,6 +969,7 @@
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         Back
       </button>
+      <button id="fx-done-btn" class="fx-done-btn" onclick="fxToggleDone(_currentDetailId, this)">Mark as done</button>
       <div id="focus-detail-card"></div>
       <div id="focus-detail-comments"></div>
     </div>
@@ -1052,6 +1054,8 @@ let _stepCount = 0;         // for unique step IDs in form
 
   if (isAdmin) {
     document.getElementById("new-focus-btn").style.display = "";
+  { const b = document.getElementById("fx-new"); if (b && isAdmin) b.style.display = ""; }
+    document.getElementById("fx-new").style.display = "";
   }
 
   document.getElementById("focus-main").style.display = "";
@@ -1064,6 +1068,9 @@ let _stepCount = 0;         // for unique step IDs in form
 })();
 
 // ── Load focuses ──────────────────────────────────────────────────────────────
+let _doneSet = new Set();
+let _fxView = (function () { try { return localStorage.getItem("fxView") || "theme"; } catch (e) { return "theme"; } })();
+
 async function loadFocuses() {
   const list = document.getElementById("focus-list");
   list.innerHTML = '<div class="focus-empty"><div class="loading-spinner" style="margin:0 auto 12px"></div>Loading…</div>';
@@ -1083,10 +1090,13 @@ async function loadFocuses() {
   }
 
   const ids = rows.map(r => r.id);
-  const [{ data: allLikes }, { data: cmtCounts }] = await Promise.all([
+  const [{ data: allLikes }, { data: cmtCounts }, { data: doneRows }] = await Promise.all([
     db.from("weekly_focus_likes").select("focus_id,email,emoji").in("focus_id", ids),
     db.from("weekly_focus_comments").select("focus_id").in("focus_id", ids),
+    // RLS only ever returns this member's own rows, so no email filter is needed
+    db.from("weekly_focus_done").select("focus_id"),
   ]);
+  _doneSet = new Set((doneRows || []).map(r => r.focus_id));
 
   // Load reactions into shared-comments module (uses same table — share the result)
   await Comments.loadReactions(ids);
@@ -1120,11 +1130,66 @@ async function loadFocuses() {
       myEmoji,
       likers:       likersMap[r.id]   || [],
       isCurrentWeek: i === 0,
+      done:          _doneSet.has(r.id),
     };
   });
   window._likerAvatarMap = likerAvatarMap;
 
+  document.body.classList.add("fx-idx");
   renderFocusList();
+}
+
+/* ── Themes ────────────────────────────────────────────────────────────────
+   A focus is worth doing long after its week, but until now the only way to
+   find one was to remember when it came out. These are the shelves: broad
+   enough that every focus lands on one, narrow enough to mean something. */
+const FX_THEME = {
+  hands:  { name: "Hands & fingering",       c: "#b4762b",
+            ic: '<path d="M9 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M12 11V4a1.5 1.5 0 0 1 3 0v7"/><path d="M15 11V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-2.7l-2-3a1.6 1.6 0 0 1 2.6-1.8L9 16"/>' },
+  sound:  { name: "Sound & musicality",      c: "#8558d6",
+            ic: '<path d="M3 12h2l2-6 3 14 3-11 2 5h6"/>' },
+  method: { name: "How to practise",         c: "#c0405f",
+            ic: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>' },
+  read:   { name: "Understanding the music", c: "#2f8f78",
+            ic: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>' },
+};
+const FX_ORDER = ["hands", "sound", "method", "read"];
+function fxTheme(f) { return FX_THEME[f && f.theme] || FX_THEME.method; }
+function fxIcon(t)  { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + t.ic + '</svg>'; }
+
+window.fxSetView = function (v) {
+  _fxView = v;
+  document.getElementById("fx-by-theme").style.display = v === "theme" ? "" : "none";
+  document.getElementById("fx-by-week").style.display  = v === "week"  ? "" : "none";
+  document.getElementById("fx-v-theme").classList.toggle("on", v === "theme");
+  document.getElementById("fx-v-week").classList.toggle("on", v === "week");
+  try { localStorage.setItem("fxView", v); } catch (e) {}
+};
+
+/* One button, both directions, and the page updates without a reload so the
+   count in the hero and the badge on the card stay in step. */
+window.fxToggleDone = async function (focusId, btn) {
+  const f = _focuses.find(x => x.id === focusId);
+  if (!f) return;
+  const wasDone = _doneSet.has(focusId);
+  if (btn) btn.disabled = true;
+  const { error } = wasDone
+    ? await db.from("weekly_focus_done").delete().eq("email", myEmail).eq("focus_id", focusId)
+    : await db.from("weekly_focus_done").insert({ email: myEmail, focus_id: focusId });
+  if (btn) btn.disabled = false;
+  if (error) { alert("Could not save that just now."); return; }
+  if (wasDone) _doneSet.delete(focusId); else _doneSet.add(focusId);
+  f.done = !wasDone;
+  if (btn) fxPaintDone(btn, f.done);
+  const n = document.getElementById("fx-done-count");
+  if (n) n.textContent = _doneSet.size;
+  renderFocusList();
+};
+function fxPaintDone(btn, done) {
+  btn.classList.toggle("on", done);
+  btn.innerHTML = done
+    ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Done'
+    : "Mark as done";
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -1132,20 +1197,83 @@ function renderFocusList() {
   const list = document.getElementById("focus-list");
   if (!_focuses.length) return;
 
-  const [current, ...archive] = _focuses;
+  const current = _focuses[0];
+  const t = fxTheme(current);
+  const firstDate = formatFocusDate(_focuses[_focuses.length - 1].published_at);
 
-  // Current week: render fully expanded inline (no comments — click card to open full post)
-  let html = focusDetailCardHTML(current, true);
+  /* This week leads, because a weekly focus is the most time-sensitive thing
+     on the page. Everything since is shelved underneath it. */
+  let html = `
+    <div class="fx-hero" style="--c:${t.c}">
+      <div class="fx-mark">${fxIcon(t)}</div>
+      <div class="fx-hin">
+        <span class="fx-kick">This week</span>
+        <div class="fx-h1">${escHtml(current.headline)}</div>
+        <p class="fx-sub">${escHtml((current.intro || "").replace(/\s+/g, " "))}</p>
+        <div class="fx-acts">
+          <button class="fx-go" onclick="showFocusDetail('${current.id}')">Start this week</button>
+          <span class="fx-when">${(current.steps || []).length} steps &middot; ${formatFocusDate(current.published_at)}</span>
+        </div>
+      </div>
+      <div class="fx-foot">
+        <span><b>${_focuses.length}</b> focuses &middot; a new one every Monday</span>
+        <span><b id="fx-done-count">${_doneSet.size}</b> done &middot; since ${firstDate}</span>
+      </div>
+    </div>
+    <div class="fx-views">
+      <button id="fx-v-theme" class="${_fxView === "theme" ? "on" : ""}" onclick="fxSetView('theme')">By theme</button>
+      <button id="fx-v-week"  class="${_fxView === "week"  ? "on" : ""}" onclick="fxSetView('week')">By week</button>
+    </div>`;
 
-  if (archive.length) {
-    html += `<div class="focus-archive-hdr">Previous focuses</div>`;
-    archive.forEach(f => { html += focusCardHTML(f); });
-  }
+  /* By theme: what it helps with, which is how you reach for one months later. */
+  let byTheme = "";
+  FX_ORDER.forEach(key => {
+    const th = FX_THEME[key];
+    const inTheme = _focuses.filter(f => (f.theme || "method") === key);
+    if (!inTheme.length) return;
+    byTheme += `<section class="fx-sh" style="--c:${th.c}">
+      <div class="fx-sh-h"><span class="fx-sh-d"></span><h2>${th.name}</h2><span class="fx-sh-n">${inTheme.length}</span></div>
+      <div class="fx-sh-r">${inTheme.map(fxCardHTML).join("")}</div></section>`;
+  });
+
+  /* By week: the run of Mondays, which is the thing that shows there is
+     never a gap. */
+  let byWeek = "";
+  _focuses.forEach((f, i) => {
+    const th = fxTheme(f), d = new Date(f.published_at);
+    const py = i > 0 ? new Date(_focuses[i - 1].published_at).getFullYear() : null;
+    if (i === 0 || d.getFullYear() !== py) byWeek += `<div class="fx-yr">${d.getFullYear()}</div>`;
+    byWeek += `<a class="fx-wk${f.done ? " done" : ""}" style="--c:${th.c}" onclick="showFocusDetail('${f.id}')">
+      <span class="fx-wk-when">${d.getDate()} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]}</span>
+      <span class="fx-wk-node"></span>
+      <span class="fx-wk-body">
+        <span class="fx-wk-title">${escHtml(f.headline)}</span>
+        <span class="fx-wk-blurb">${escHtml((f.intro || "").replace(/\s+/g, " "))}</span>
+      </span>
+      <span class="fx-wk-meta">${th.name}</span></a>`;
+  });
+
+  html += `<div id="fx-by-theme" style="display:${_fxView === "theme" ? "" : "none"}">${byTheme}</div>`
+        + `<div id="fx-by-week"  style="display:${_fxView === "week"  ? "" : "none"}">${byWeek}</div>`;
+
   list.innerHTML = html;
-  // Stagger the cards in on first paint to match the community feed.
   list.classList.remove("feed-arrive");
   void list.offsetWidth;
   list.classList.add("feed-arrive");
+}
+
+/* The card is Courses' shape rather than the library's: a plate carries the
+   colour, the words sit under it. A focus has steps and a state, which is a
+   small course more than an article. */
+function fxCardHTML(f) {
+  const t = fxTheme(f);
+  return `<a class="fx-c${f.done ? " done" : ""}" style="--c:${t.c}" onclick="showFocusDetail('${f.id}')">
+    <span class="fx-c-pl">${fxIcon(t)}${f.done ? '<span class="fx-c-dn">Done</span>' : ""}${f.isCurrentWeek ? '<span class="fx-c-now">This week</span>' : ""}</span>
+    <span class="fx-c-b">
+      <span class="fx-c-t">${escHtml(f.headline)}</span>
+      <span class="fx-c-x">${escHtml((f.intro || "").replace(/\s+/g, " "))}</span>
+      <span class="fx-c-f"><span>${(f.steps || []).length} steps</span><span class="fx-c-go">Try it &rarr;</span></span>
+    </span></a>`;
 }
 
 // Build meta counts HTML — comment count is clickable when focusId provided
@@ -1193,7 +1321,7 @@ function focusCardHTML(f) {
   return `
     <div class="focus-card" onclick="showFocusDetail('${f.id}')" style="cursor:pointer">
       <div class="focus-card-header">
-        <span class="focus-card-label">🎯 Weekly Practice Focus</span>
+        <span class="focus-card-label">${fxTheme(f).name}</span>
         ${headerBadge}
         <span class="focus-card-date">${dateStr}</span>
         ${editBtn}
@@ -1244,14 +1372,14 @@ function focusDetailCardHTML(f, clickable) {
   return `
     <div class="focus-card" ${clickAttr}>
       <div class="focus-card-header">
-        <span class="focus-card-label">🎯 Weekly Practice Focus</span>
+        <span class="focus-card-label">${fxTheme(f).name}</span>
         ${headerBadge}
         <span class="focus-card-date">${dateStr}</span>
         ${editBtn}
       </div>
       <div class="focus-expanded" ${clickable ? 'onclick="event.stopPropagation()"' : ""}>
         <div class="focus-expanded-headline">
-          <em>This week:</em> ${escHtml(f.headline)}
+          ${f.isCurrentWeek ? '<em>This week:</em> ' : ''}${escHtml(f.headline)}
         </div>
         ${f.intro ? `<div class="focus-body-text">${(window.renderUserContent?renderUserContent(f.intro):escHtml(f.intro))}</div>` : ""}
         ${renderSteps(f.steps)}
@@ -1301,7 +1429,10 @@ function showFocusDetail(focusId, push = true) {
   if (push) { _openedInPage = true; history.pushState({ post: focusId }, "", "?post=" + focusId); }
   document.getElementById("focus-main").style.display = "none";
   document.getElementById("focus-detail").style.display = "";
+  document.body.classList.remove("fx-idx");
   document.getElementById("focus-detail-card").innerHTML = focusDetailCardHTML(f);
+  const db_ = document.getElementById("fx-done-btn");
+  if (db_) { db_.style.setProperty("--c", fxTheme(f).c); fxPaintDone(db_, _doneSet.has(focusId)); }
   document.getElementById("focus-detail-comments").innerHTML = `
     <div class="focus-detail-cmt-wrap">
       <div class="tc-comments-section">
@@ -1327,6 +1458,7 @@ function closeFocusDetail() {
   _currentDetailId = null;
   document.getElementById("focus-detail").style.display = "none";
   document.getElementById("focus-main").style.display = "";
+  document.body.classList.add("fx-idx");
   window.scrollTo({ top: 0, behavior: "instant" });
   history.replaceState({}, "", "/focus.html");
 }
@@ -1373,6 +1505,7 @@ window.addEventListener("popstate", (e) => {
   } else {
     document.getElementById("focus-detail").style.display = "none";
     document.getElementById("focus-main").style.display = "";
+    document.body.classList.add("fx-idx");
     _currentDetailId = null;
   }
 });
@@ -1398,6 +1531,7 @@ function openFocusForm() {
 
   document.getElementById("focus-form-wrap").style.display = "";
   document.getElementById("new-focus-btn").style.display = "none";
+  { const b = document.getElementById("fx-new"); if (b) b.style.display = "none"; }
   document.getElementById("focus-form-wrap").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -1454,6 +1588,7 @@ function openEditForm(focusId) {
 
   document.getElementById("focus-form-wrap").style.display = "";
   document.getElementById("new-focus-btn").style.display = "none";
+  { const b = document.getElementById("fx-new"); if (b) b.style.display = "none"; }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -1634,5 +1769,152 @@ function relativeTime(ts) {
 }
 </script>
 
+<style id="fx-css">
+    /* ══ Weekly Focus, rebuilt ═════════════════════════════════════════════
+       The index is the dark interface every other Learn section now is; a
+       focus itself stays light, because that is the thing you sit at the
+       piano and do. Same rule as the articles and the course lessons. */
+    /* The ground is the page's, not just the column's - the hero bleeds out
+       through the gutter and needs something dark to bleed onto. When a focus
+       is open the whole thing goes back to the light reading ground. */
+    /* style.css sets the warm ground on a bare `body` selector, so this needs a
+       class to outrank it rather than a later rule. The main element on this
+       page carries no id, hence the child selector. */
+    body.fx-idx, body.fx-idx > main { background:#0c0c0e; }
+    #focus-main { position:relative; --fx-bg:#0c0c0e; --fx-surface:#17171a; --fx-border:#2c2c33;
+      --fx-text:#f3f3f5; --fx-muted:#9a9aa4; --fx-gut:clamp(18px,2.6vw,52px);
+      background:#0c0c0e; color:var(--fx-text); }
+    #focus-main .focus-empty { color:var(--fx-muted); }
+
+    /* the hero: this week, on the frame the library and courses use */
+    .fx-hero { position:relative; min-height:27rem; overflow:hidden; --foot:75px;
+      margin:-22px calc(var(--fx-gut) * -1) 26px;
+      background:
+        radial-gradient(115% 105% at 0% 100%, rgba(11,11,14,.82) 0%, rgba(11,11,14,.38) 44%, transparent 70%),
+        linear-gradient(180deg, rgba(11,11,14,0) 26%, rgba(11,11,14,.42) 66%, rgba(11,11,14,.72) 100%),
+        radial-gradient(120% 150% at 84% 8%, color-mix(in srgb,var(--c) 40%, transparent), transparent 62%),
+        linear-gradient(140deg, color-mix(in srgb,var(--c) 20%, #16141c), #100e13); }
+    .fx-hin { position:absolute; left:var(--fx-gut); right:var(--fx-gut); bottom:96px;
+      max-width:min(46rem, calc(100% - 13rem)); z-index:2; }
+    .fx-kick { display:inline-flex; font-size:.63rem; font-weight:800; letter-spacing:.14em;
+      text-transform:uppercase; color:#fff; background:color-mix(in srgb,var(--c) 78%,#000);
+      border-radius:999px; padding:6px 13px; }
+    .fx-h1 { font:700 clamp(1.7rem,3.4vw,2.5rem)/1.08 Fraunces,Georgia,serif;
+      letter-spacing:-.02em; margin:14px 0 0; color:#fff;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .fx-sub { margin:10px 0 0; font-size:.95rem; line-height:1.55; color:rgba(255,255,255,.8);
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .fx-acts { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:16px; }
+    .fx-go { border:0; border-radius:999px; padding:11px 20px; font:inherit; font-weight:600;
+      font-size:.88rem; background:#fff; color:#0f0f13; cursor:pointer; }
+    .fx-when { font-size:.84rem; font-weight:600; color:rgba(255,255,255,.7); }
+    .fx-mark { position:absolute; right:9%; top:calc((100% - var(--foot)) / 2);
+      transform:translateY(-50%); z-index:1; width:6rem; aspect-ratio:1; border-radius:26px;
+      display:grid; place-items:center; background:rgba(16,14,19,.5); color:var(--c);
+      border:1px solid color-mix(in srgb,var(--c) 38%,transparent);
+      box-shadow:0 18px 44px -18px color-mix(in srgb,var(--c) 80%,transparent); }
+    .fx-mark svg { width:52%; height:52%; }
+    .fx-foot { position:absolute; left:0; right:0; bottom:0; z-index:3; display:flex;
+      align-items:center; justify-content:space-between; gap:20px;
+      padding:14px var(--fx-gut) 16px; border-top:1px solid rgba(255,255,255,.13);
+      background:linear-gradient(180deg,rgba(11,11,14,.10),rgba(11,11,14,.62));
+      font-size:.86rem; color:rgba(255,255,255,.72); }
+    .fx-foot b { color:#fff; font-weight:700; }
+    #fx-new { position:absolute; top:14px; right:24px; z-index:4; background:transparent;
+      border:1px dashed #3a3a44; color:#c6c6cd; border-radius:999px; padding:5px 12px;
+      font:inherit; font-size:.78rem; font-weight:700; cursor:pointer; }
+    #fx-new:hover { border-color:var(--fx-text); color:#fff; }
+
+    .fx-views { display:inline-flex; gap:4px; background:#131316; border:1px solid var(--fx-border);
+      border-radius:12px; padding:4px; margin:0 0 20px; }
+    .fx-views button { background:none; border:0; border-radius:9px; padding:7px 15px; font:inherit;
+      font-size:.84rem; font-weight:650; color:var(--fx-muted); cursor:pointer; }
+    .fx-views button.on { background:#26262d; color:var(--fx-text); }
+
+    /* shelves */
+    .fx-sh { margin-bottom:34px; }
+    .fx-sh-h { display:flex; align-items:center; gap:10px; margin:0 0 14px; }
+    .fx-sh-d { width:9px; height:9px; border-radius:50%; background:var(--c); }
+    .fx-sh-h h2 { margin:0; font-size:1.05rem; font-weight:800; letter-spacing:-.01em; color:var(--fx-text); }
+    .fx-sh-n { font-size:.85rem; color:var(--fx-muted); font-weight:600; }
+    .fx-sh-r { display:flex; gap:14px; overflow-x:auto; scrollbar-width:none; padding-bottom:4px;
+      -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 56px),transparent);
+      mask-image:linear-gradient(to right,#000 calc(100% - 56px),transparent); }
+    .fx-sh-r::-webkit-scrollbar { display:none; }
+
+    /* the card: a plate carries the colour, the words sit under it */
+    .fx-c { flex:0 0 clamp(260px,23vw,300px); display:flex; flex-direction:column; cursor:pointer;
+      background:var(--fx-surface); border:1px solid var(--fx-border); border-radius:16px;
+      overflow:hidden; text-decoration:none; color:var(--fx-text);
+      transition:transform .16s, border-color .16s; }
+    .fx-c:hover { transform:translateY(-3px); border-color:color-mix(in srgb,var(--c) 60%,var(--fx-border)); }
+    .fx-c-pl { position:relative; aspect-ratio:16/9; display:grid; place-items:center; color:var(--c);
+      background:radial-gradient(120% 140% at 74% 14%, color-mix(in srgb,var(--c) 46%,transparent), transparent 64%),
+                 linear-gradient(150deg, color-mix(in srgb,var(--c) 30%,#16141c), #100e13); }
+    .fx-c-pl > svg { width:34px; height:34px; padding:11px; box-sizing:content-box; border-radius:16px;
+      background:rgba(14,12,16,.66); border:1px solid color-mix(in srgb,var(--c) 40%,transparent);
+      box-shadow:0 12px 28px -14px color-mix(in srgb,var(--c) 90%,transparent); }
+    .fx-c-dn, .fx-c-now { position:absolute; top:11px; font-size:.6rem; font-weight:800;
+      letter-spacing:.06em; text-transform:uppercase; border-radius:99px; padding:3px 9px; }
+    .fx-c-dn  { left:11px;  color:#0f0f13; background:#7fd39a; }
+    .fx-c-now { right:11px; color:#0f0f13; background:#f5c518; }
+    .fx-c.done .fx-c-pl { opacity:.62; }
+    .fx-c-b { display:flex; flex-direction:column; gap:6px; padding:14px 15px 13px; flex:1; }
+    .fx-c-t { font-weight:750; font-size:.97rem; line-height:1.28; }
+    .fx-c-x { font-size:.85rem; line-height:1.5; color:var(--fx-muted);
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .fx-c-f { margin-top:auto; padding-top:11px; display:flex; justify-content:space-between;
+      align-items:center; font-size:.78rem; font-weight:650; color:var(--fx-muted); }
+    .fx-c-go { color:var(--c); font-weight:700; }
+
+    /* by week: the run of Mondays */
+    .fx-yr { font-size:.68rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase;
+      color:var(--fx-muted); margin:22px 0 10px; padding-left:calc(5.5rem + 22px); }
+    .fx-yr:first-child { margin-top:0; }
+    .fx-wk { position:relative; display:grid; grid-template-columns:5.5rem 22px minmax(0,1fr) auto;
+      align-items:start; gap:0 14px; padding:14px 16px 14px 0; cursor:pointer; border-radius:12px;
+      text-decoration:none; color:var(--fx-text); transition:background .15s; }
+    .fx-wk:hover { background:#141418; }
+    .fx-wk.done .fx-wk-title { color:var(--fx-muted); }
+    .fx-wk-when { padding-top:1px; text-align:right; font-size:.82rem; font-weight:700;
+      color:var(--fx-muted); white-space:nowrap; }
+    .fx-wk-node { position:relative; align-self:stretch; }
+    .fx-wk-node::before { content:""; position:absolute; left:50%; top:-14px; bottom:-14px; width:1px;
+      transform:translateX(-50%); background:var(--fx-border); }
+    .fx-wk-node::after { content:""; position:absolute; left:50%; top:6px; width:9px; height:9px;
+      border-radius:50%; transform:translateX(-50%); background:var(--fx-bg); border:2px solid var(--c); }
+    .fx-wk.done .fx-wk-node::after { background:var(--c); }
+    .fx-wk-body { min-width:0; display:flex; flex-direction:column; }
+    .fx-wk-title { font-weight:700; font-size:.98rem; line-height:1.3; }
+    .fx-wk-blurb { margin-top:4px; font-size:.86rem; line-height:1.5; color:var(--fx-muted);
+      display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+    .fx-wk-meta { padding-top:3px; font-size:.74rem; font-weight:700; color:var(--c); white-space:nowrap; }
+
+    /* the focus itself stays on the light ground */
+    #focus-detail { background:var(--bg); }
+    .fx-done-btn { float:right; margin:0 0 10px; display:inline-flex; align-items:center; gap:7px;
+      background:#fff; border:1.5px solid var(--border); border-radius:999px; padding:8px 16px;
+      font:inherit; font-size:.84rem; font-weight:700; color:var(--text); cursor:pointer;
+      transition:border-color .15s, background .15s; }
+    .fx-done-btn:hover { border-color:var(--c, var(--accent)); }
+    .fx-done-btn.on { background:color-mix(in srgb,#4e9a5c 12%,#fff); border-color:#5a8a6a; color:#3f7a52; }
+
+    @media (max-width:640px) {
+      .fx-hero { min-height:30rem; --foot:60px; margin:0 -16px 24px; }
+      .fx-hin { left:16px; right:16px; bottom:84px; max-width:none; }
+      .fx-mark { left:16px; right:auto; top:20px; transform:none; width:4.4rem; border-radius:18px; }
+      .fx-foot { flex-direction:column; align-items:flex-start; gap:4px; padding:10px 16px 12px; }
+      #fx-new { top:auto; bottom:96px; right:16px; }
+      .fx-sh-r { margin-right:-16px; padding-right:16px; }
+      .fx-c { flex:0 0 78vw; }
+      .fx-wk { grid-template-columns:22px minmax(0,1fr); gap:0 12px; padding:12px 4px; }
+      .fx-wk-when { grid-column:2; text-align:left; order:-1; font-size:.72rem;
+        text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px; }
+      .fx-wk-node { grid-row:1 / span 4; grid-column:1; }
+      .fx-wk-body, .fx-wk-meta { grid-column:2; }
+      .fx-wk-meta { margin-top:6px; }
+      .fx-yr { padding-left:34px; }
+    }
+</style>
 </body>
 </html>
