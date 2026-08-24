@@ -861,6 +861,7 @@
        could resolve dark and inputs/cards render black. */
     .lr-body{--surface:#ffffff;--surface-2:#f4f4f7;--border:#e5e5ea;--text:#15151a;--text-muted:#6e6e7a;--accent:#f5c518;
       --c-key:#f59e0b;--c-tip:#10b981;--c-watch:#f43f5e;--c-note:#0ea5e9;--c-do:#8b5cf6;--c-quiz:#a855f7;
+      --d-key:#b45309;--d-tip:#047857;--d-watch:#be123c;--d-note:#0369a1;--d-do:#6d28d9;--d-quiz:#7e22ce;
       color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
     /* A lesson is read, so it is set to be read: a display face for the
        headings against the body face, a line long enough to hold a thought and
@@ -885,18 +886,18 @@
        are asides in a piece of writing, so they are set like asides: a firm
        rule down the side, the label carrying the colour, and the text sitting
        on the page with everything else. Nothing to wash out. */
-    .lr-callout{--c:var(--c-note);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>');margin:22px 0;padding:0;border-radius:15px;overflow:hidden;
+    .lr-callout{--c:var(--c-note);--bar:var(--d-note);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>');margin:22px 0;padding:0;border-radius:15px;overflow:hidden;
       background:color-mix(in srgb,var(--c) 6%,#fff);border:1px solid color-mix(in srgb,var(--c) 30%,#fff)}
     .lr-callout .lr-text{margin:0;padding:15px 17px 16px}
     .lr-callout .lr-text p:last-child{margin-bottom:0}
     .lr-callout-label{display:flex;align-items:center;gap:9px;margin:0;padding:9px 14px;
-      background:var(--c);color:#fff;font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em}
+      background:var(--bar);color:#fff;font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em}
     .lr-callout-label::before{content:"";width:16px;height:16px;flex:0 0 auto;background:currentColor;
       -webkit-mask:var(--ico) center/contain no-repeat;mask:var(--ico) center/contain no-repeat}
-    .lr-callout-key{--c:var(--c-key);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>')}
-    .lr-callout-tip{--c:var(--c-tip);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>')}
-    .lr-callout-watch{--c:var(--c-watch);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>')}
-    .lr-callout-note{--c:var(--c-note);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>')}
+    .lr-callout-key{--c:var(--c-key);--bar:var(--d-key);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>')}
+    .lr-callout-tip{--c:var(--c-tip);--bar:var(--d-tip);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>')}
+    .lr-callout-watch{--c:var(--c-watch);--bar:var(--d-watch);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>')}
+    .lr-callout-note{--c:var(--c-note);--bar:var(--d-note);--ico:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>')}
     /* Same treatment: a worked example is an aside, not a card. */
     .lr-example{margin:22px 0;padding:0;border-radius:15px;overflow:hidden;
       background:#fafafc;border:1px solid #e6e6ee}
@@ -918,10 +919,10 @@
        has one obvious thing to press. */
     .lr-play{margin:14px 0}
     .lr-play-btn{display:flex;width:100%;align-items:center;gap:12px;text-align:left;color:#fff;
-      background:linear-gradient(180deg,#8b5cf6,#6d4ae0);border:none;
+      background:linear-gradient(180deg,#7c4ff0,#5f39d0);border:none;
       border-radius:13px;padding:13px 17px;font:inherit;font-weight:700;font-size:.92rem;
-      cursor:pointer;box-shadow:0 6px 18px -9px rgba(109,74,224,.95)}
-    .lr-play-btn:hover{background:linear-gradient(180deg,#9a6efa,#7a58e8)}
+      cursor:pointer;box-shadow:0 6px 18px -9px rgba(95,57,208,.95)}
+    .lr-play-btn:hover{background:linear-gradient(180deg,#8b5cf6,#6d4ae0)}
     .lr-play-btn:active{transform:translateY(1px)}
     .lr-play-ico{width:23px;height:23px;flex:0 0 auto;border-radius:50%;background:rgba(255,255,255,.22);
       display:grid;place-items:center;color:#fff;font-size:.62rem;line-height:1}
@@ -929,9 +930,9 @@
     .lr-kbd-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
     .lr-kbd-label{font-weight:700;font-size:.92rem}
     .lr-kbd-play{display:flex;width:100%;align-items:center;gap:12px;text-align:left;
-      background:linear-gradient(180deg,#8b5cf6,#6d4ae0);border:none;border-radius:13px;padding:13px 17px;
-      font:inherit;font-size:.92rem;font-weight:700;color:#fff;cursor:pointer;box-shadow:0 6px 18px -9px rgba(109,74,224,.95)}
-    .lr-kbd-play:hover{background:linear-gradient(180deg,#9a6efa,#7a58e8)}
+      background:linear-gradient(180deg,#7c4ff0,#5f39d0);border:none;border-radius:13px;padding:13px 17px;
+      font:inherit;font-size:.92rem;font-weight:700;color:#fff;cursor:pointer;box-shadow:0 6px 18px -9px rgba(95,57,208,.95)}
+    .lr-kbd-play:hover{background:linear-gradient(180deg,#8b5cf6,#6d4ae0)}
     .lr-kbd-play:active{transform:translateY(1px)}
     .lr-kbd-keys{position:relative;width:100%;aspect-ratio:var(--kw,7) / 2.6;max-height:124px;border-radius:9px;background:linear-gradient(#2a2520,#1c1813);box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
     .lr-key{position:absolute;top:0;box-sizing:border-box}
@@ -972,14 +973,14 @@
        part of the prose. */
     /* Amber rather than highlighter yellow: warm enough to feel like an
        invitation to go and play something, without the school-worksheet note. */
-    .lr-task{--c:var(--c-do);margin:22px 0;padding:0;border-radius:15px;overflow:hidden;
+    .lr-task{--c:var(--c-do);--bar:var(--d-do);margin:22px 0;padding:0;border-radius:15px;overflow:hidden;
       background:color-mix(in srgb,var(--c) 6%,#fff);border:1px solid color-mix(in srgb,var(--c) 30%,#fff)}
     .lr-task .lr-text{margin:0;padding:15px 17px 16px}.lr-task .lr-text p:last-child{margin-bottom:0}
-    .lr-task-label{display:flex;align-items:center;gap:9px;margin:0;padding:9px 14px;background:var(--c);color:#fff;
+    .lr-task-label{display:flex;align-items:center;gap:9px;margin:0;padding:9px 14px;background:var(--bar);color:#fff;
       font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em}
     .lr-task-label::before{content:"";width:16px;height:16px;flex:0 0 auto;background:currentColor;
       -webkit-mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>') center/contain no-repeat;mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>') center/contain no-repeat}
-    .lr-task-share{margin:0 17px 16px;background:var(--c);color:#fff;border:none;border-radius:10px;padding:9px 15px;font-weight:700;font-size:.82rem;cursor:pointer}
+    .lr-task-share{margin:0 17px 16px;background:var(--bar);color:#fff;border:none;border-radius:10px;padding:9px 15px;font-weight:700;font-size:.82rem;cursor:pointer}
     .lr-divider{border:none;border-top:1px solid var(--border,#e3e1e6);margin:34px 0}
     .lr-video{margin:18px 0}
     .lr-cap{font-size:.82rem;color:var(--text-muted,#8a7868);margin-top:7px;text-align:center}
@@ -1004,14 +1005,14 @@
       display:grid;place-items:center}
     .lr-opt:hover:not(:disabled){border-color:var(--c-quiz)}
     .lr-opt.lr-sel{border-color:var(--c-quiz);background:color-mix(in srgb,var(--c-quiz) 8%,#fff)}
-    .lr-opt.lr-sel::before{border-color:var(--c-quiz);background:var(--c-quiz);color:#fff}
+    .lr-opt.lr-sel::before{border-color:var(--d-quiz);background:var(--d-quiz);color:#fff}
     .lr-opt.lr-correct{border-color:var(--c-tip);background:color-mix(in srgb,var(--c-tip) 10%,#fff)}
-    .lr-opt.lr-correct::before{border-color:var(--c-tip);background:var(--c-tip);color:#fff}
+    .lr-opt.lr-correct::before{border-color:var(--d-tip);background:var(--d-tip);color:#fff}
     .lr-opt.lr-wrong{border-color:var(--c-watch);background:color-mix(in srgb,var(--c-watch) 10%,#fff)}
-    .lr-opt.lr-wrong::before{border-color:var(--c-watch);background:var(--c-watch);color:#fff}
+    .lr-opt.lr-wrong::before{border-color:var(--d-watch);background:var(--d-watch);color:#fff}
     .lr-short{display:flex;gap:8px}.lr-input{flex:1;color:var(--text,#1a1410);background:var(--surface-2,#f5f2ee);color-scheme:light;border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:9px 12px;font:inherit;font-size:.92rem}
     .lr-input.lr-correct{border-color:var(--c-tip)}.lr-input.lr-wrong{border-color:var(--c-watch)}
-    .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--c-do);color:#fff;border:none;border-radius:11px;padding:10px 17px;font-weight:700;font-size:.85rem;cursor:pointer}
+    .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--d-do);color:#fff;border:none;border-radius:11px;padding:10px 17px;font-weight:700;font-size:.85rem;cursor:pointer}
     .lr-reflect{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
     .lr-input.lr-checking{border-color:var(--c-do);background:color-mix(in srgb,var(--c-do) 7%,#fff);opacity:.75}
     .lr-q-explain{margin-top:10px;font-size:.86rem;color:var(--text-muted,#8a7868);border-top:1px dashed var(--border,#e3e1e6);padding-top:10px}
