@@ -42,7 +42,10 @@ const SH_SUBNAV = {
     { label: "Courses", href: "/courses.html" },
     { label: "Videos", href: "/learn.html?type=video" },
     { label: "Clinic replays", href: "/learn.html?type=clinic" },
-    { label: "Piano Practice Daily", href: "/learn.html?type=sheet" },
+    /* The real Piano Practice Daily page, not a filter on the library: the
+       library view has none of its functionality - the categories, the search,
+       the progress, surprise me. Same reasoning as Courses above. */
+    { label: "Piano Practice Daily", href: "/resources.html?section=ppd" },
     { label: "Weekly Focus", href: "/focus.html" },
   ],
   tools: [
