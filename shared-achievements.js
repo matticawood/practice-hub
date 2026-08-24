@@ -913,8 +913,9 @@ async function loadAchievementExtras() {
 
   // Profile photo set? (Say Cheese)
   try {
-    const { data: ae } = await db.from("allowed_emails")
-      .select("avatar_url").ilike("email", email).maybeSingle();
+    const ae = window.shMyRow
+      ? await window.shMyRow(db, email)
+      : (await db.from("allowed_emails").select("avatar_url").ilike("email", email).maybeSingle()).data;
     _achExtras.hasAvatar = !!(ae && ae.avatar_url);
   } catch { _achExtras.hasAvatar = false; }
 

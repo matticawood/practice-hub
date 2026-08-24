@@ -2133,7 +2133,7 @@ window._shMaybeShowOnboarding = async function(db, myEmail) {
   else if (forceInfo) variant = "info";
   else {
     try {
-      const { data } = await db.from("allowed_emails").select("welcome_seen_at, info_seen_at").eq("email", myEmail).maybeSingle();
+      const data = await window.shMyRow(db, myEmail);
       if (!data) return;
       if (!data.welcome_seen_at) variant = "welcome";     // new member → welcome
       else if (!data.info_seen_at) variant = "info";      // existing member → one-off info
@@ -2225,6 +2225,24 @@ window._shMaybeShowOnboarding = async function(db, myEmail) {
   bd.querySelector("#sh-w-look").addEventListener("click", close);
   bd.addEventListener("click", (e) => { if (e.target === bd) close(); });
   bd.querySelector("#sh-w-log").addEventListener("click", () => { stamp(); window.location.href = "/practice-log.html?log=1"; });
+};
+
+/* The member's own row was being fetched three times on every page load - the
+   page boot wanting name and avatar, the header wanting the seen-at stamps, and
+   the achievements module wanting the avatar again. Same row, three round
+   trips, and each one holds a PostgREST pool slot while the page is trying to
+   draw. One fetch of the union, shared and memoised per email. */
+window.shMyRow = function(db, email) {
+  if (!db || !email) return Promise.resolve(null);
+  const key = String(email).toLowerCase();
+  window.__shMyRow = window.__shMyRow || {};
+  if (!window.__shMyRow[key]) {
+    window.__shMyRow[key] = db.from("allowed_emails")
+      .select("email,name,avatar_url,welcome_seen_at,info_seen_at")
+      .ilike("email", email).maybeSingle()
+      .then(r => (r && r.data) || null, () => null);
+  }
+  return window.__shMyRow[key];
 };
 
 window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = "", avatarUrl = null }) {
@@ -2916,6 +2934,23 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
 
   // Load on init
   window._shLoadNotifs().then(() => window._shRenderNotifs());
+
+  /* Released when the page goes away. Every navigation opened two channels on
+     fixed topic names and nothing ever closed them, so the server held each
+     stale subscription until it timed out on its own. Navigate between the
+     library and its filter tabs a few times and they stack up, which is the
+     one thing here that only ever accumulates - and Realtime rate-limits joins,
+     so past a point new ones are refused rather than merely slow.
+
+     pagehide rather than beforeunload: beforeunload does not fire reliably on
+     mobile, and pagehide also covers the page being frozen into the
+     back/forward cache. */
+  if (!window.__shChannelCleanup) {
+    window.__shChannelCleanup = true;
+    window.addEventListener("pagehide", () => {
+      try { db.removeAllChannels(); } catch (e) { /* going away regardless */ }
+    });
+  }
 
   // Realtime new notification
   db.channel("sh-notifs-" + myEmail)
