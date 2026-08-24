@@ -855,22 +855,38 @@
        chrome) can't bleed into the lesson. Without this, --surface/--surface-2
        could resolve dark and inputs/cards render black. */
     .lr-body{--surface:#ffffff;--surface-2:#f1f1f4;--border:#e0d5c8;--text:#1a1410;--text-muted:#8a7868;--accent:#f5c518;color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
-    .lr-heading{font-weight:800;letter-spacing:-.01em;margin:26px 0 10px;line-height:1.25}
-    h2.lr-heading{font-size:1.3rem} h3.lr-heading{font-size:1.08rem}
-    .lr-text{font-size:1rem;margin:0 0 4px}
-    .lr-text p{margin:0 0 12px} .lr-text ul,.lr-text ol{margin:0 0 12px;padding-left:22px}
-    .lr-text li{margin:4px 0} .lr-text code{background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-size:.9em}
+    /* A lesson is read, so it is set to be read: a display face for the
+       headings against the body face, a line long enough to hold a thought and
+       leading loose enough to follow it, and far more space above a heading
+       than below it so a section reads as attached to what follows rather than
+       floating between two. */
+    .lr-heading{font-family:Fraunces,Georgia,serif;font-weight:700;letter-spacing:-.015em;
+      margin:38px 0 12px;line-height:1.2;color:var(--text,#1a1410)}
+    .lr-body > .lr-heading:first-child{margin-top:8px}
+    h2.lr-heading{font-size:1.42rem} h3.lr-heading{font-size:1.12rem;letter-spacing:-.005em}
+    .lr-text{font-size:1.02rem;line-height:1.68;margin:0 0 4px}
+    .lr-text p{margin:0 0 15px} .lr-text ul,.lr-text ol{margin:0 0 15px;padding-left:22px}
+    .lr-text li{margin:7px 0} .lr-text strong{font-weight:650;color:var(--text,#1a1410)}
+    .lr-text code{background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-size:.9em}
     .lr-tablewrap{overflow-x:auto;margin:8px 0 16px}
     .lr-table{border-collapse:collapse;width:100%;font-size:.92rem}
     .lr-table th,.lr-table td{padding:9px 13px;text-align:left;vertical-align:top;border:1px solid var(--border,#e3e1e6)}
     .lr-table th{background:var(--surface-2,#f5f2ee);font-weight:700;color:var(--text,#1a1410);white-space:nowrap}
     .lr-table td strong{color:var(--accent-dark,#9a6f12)}
-    .lr-callout{border-radius:12px;padding:14px 16px;margin:16px 0;border:1px solid var(--border,#e3e1e6);background:var(--surface,#fff)}
-    .lr-callout-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
-    .lr-callout-key{border-left:3px solid var(--accent,#f5c518)}
-    .lr-callout-watch{border-left:3px solid #d9534f}.lr-callout-watch .lr-callout-label{color:#c0392b}
-    .lr-callout-tip{border-left:3px solid #5fbf7e}.lr-callout-tip .lr-callout-label{color:#2f7d4a}
-    .lr-example{border:1px solid var(--border,#e3e1e6);border-radius:12px;padding:14px 16px;margin:16px 0;background:var(--surface,#fff)}
+    /* Tinted with their own colour rather than left white with a stripe, so a
+       warning looks different from a tip at a glance and not only on reading
+       the label. The tint is faint: it should register, not shout. */
+    .lr-callout{border-radius:12px;padding:15px 17px;margin:22px 0;border:1px solid var(--border,#e3e1e6);
+      border-left-width:3px;background:var(--surface,#fff)}
+    .lr-callout .lr-text{margin-bottom:0}.lr-callout .lr-text p:last-child{margin-bottom:0}
+    .lr-callout-label{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em;margin-bottom:7px;color:var(--accent-dark,#9a6f12)}
+    .lr-callout-key{border-left-color:var(--accent,#f5c518);background:rgba(245,197,24,.07);border-color:rgba(245,197,24,.3);border-left-color:#f5c518}
+    .lr-callout-watch{border-left-color:#d9534f;background:rgba(217,83,79,.06);border-color:rgba(217,83,79,.26);border-left-color:#d9534f}
+    .lr-callout-watch .lr-callout-label{color:#c0392b}
+    .lr-callout-tip{border-left-color:#5fbf7e;background:rgba(95,191,126,.07);border-color:rgba(95,191,126,.3);border-left-color:#5fbf7e}
+    .lr-callout-tip .lr-callout-label{color:#2f7d4a}
+    .lr-example{border:1px solid var(--border,#e3e1e6);border-radius:12px;padding:15px 17px;margin:22px 0;background:var(--surface,#fff)}
+    .lr-example .lr-text{margin-bottom:0}.lr-example .lr-text p:last-child{margin-bottom:0}
     .lr-example-title{font-weight:700;margin-bottom:8px;font-size:.92rem}
     .lr-img{max-width:100%;height:auto;border-radius:10px;display:block;margin:4px 0}
     .lr-figure{margin:16px 0}.lr-figure figcaption{font-size:.8rem;color:var(--text-muted,#8a7868);margin-top:6px;text-align:center}
@@ -918,10 +934,16 @@
     .lr-abc-out{text-align:center}
     .lr-notation svg{max-width:100%;height:auto}
     .lr-abc-err{font-size:.85rem;color:var(--text-muted,#8a7868);border:1px dashed var(--border,#e3e1e6);border-radius:8px;padding:10px}
-    .lr-task{border:1px solid var(--border,#e0d5c8);border-left:4px solid var(--accent,#f5c518);border-radius:12px;padding:14px 16px;margin:18px 0;background:var(--surface,#fff)}
+    /* A task is the one block that asks you to stop reading and go to the
+       piano, so it is the one block allowed to look like a card rather than
+       part of the prose. */
+    .lr-task{border:1px solid rgba(245,197,24,.34);border-left:4px solid var(--accent,#f5c518);
+      border-radius:12px;padding:16px 18px;margin:24px 0;background:rgba(245,197,24,.06);
+      box-shadow:0 1px 2px rgba(60,40,20,.04)}
+    .lr-task .lr-text{margin-bottom:0}.lr-task .lr-text p:last-child{margin-bottom:0}
     .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
     .lr-task-share{margin-top:10px;background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
-    .lr-divider{border:none;border-top:1px solid var(--border,#e3e1e6);margin:24px 0}
+    .lr-divider{border:none;border-top:1px solid var(--border,#e3e1e6);margin:34px 0}
     .lr-video{margin:18px 0}
     .lr-cap{font-size:.82rem;color:var(--text-muted,#8a7868);margin-top:7px;text-align:center}
     .lr-video-poster{aspect-ratio:16/9;border:1.5px dashed var(--border,#e3e1e6);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--surface-2,#f5f2ee);color:var(--text-muted,#8a7868)}
