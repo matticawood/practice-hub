@@ -880,7 +880,7 @@
       border-left-width:3px;background:var(--surface,#fff)}
     .lr-callout .lr-text{margin-bottom:0}.lr-callout .lr-text p:last-child{margin-bottom:0}
     .lr-callout-label{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em;margin-bottom:7px;color:var(--accent-dark,#9a6f12)}
-    .lr-callout-key{border-left-color:var(--accent,#f5c518);background:rgba(245,197,24,.07);border-color:rgba(245,197,24,.3);border-left-color:#f5c518}
+    .lr-callout-key{background:rgba(245,197,24,.06);border-color:rgba(245,197,24,.24);border-left-color:#eab308}
     .lr-callout-watch{border-left-color:#d9534f;background:rgba(217,83,79,.06);border-color:rgba(217,83,79,.26);border-left-color:#d9534f}
     .lr-callout-watch .lr-callout-label{color:#c0392b}
     .lr-callout-tip{border-left-color:#5fbf7e;background:rgba(95,191,126,.07);border-color:rgba(95,191,126,.3);border-left-color:#5fbf7e}
@@ -891,16 +891,22 @@
     .lr-img{max-width:100%;height:auto;border-radius:10px;display:block;margin:4px 0}
     .lr-figure{margin:16px 0}.lr-figure figcaption{font-size:.8rem;color:var(--text-muted,#8a7868);margin-top:6px;text-align:center}
     .lr-audio{margin:16px 0}.lr-audio-cap{font-size:.85rem;color:var(--text-muted,#8a7868);margin-bottom:6px}.lr-audio audio{width:100%}
-    .lr-play{margin:16px 0}
-    .lr-play-btn{display:inline-flex;align-items:center;gap:9px;background:var(--surface,#fff);border:1.5px solid var(--accent,#f5c518);border-radius:10px;padding:10px 16px;font:inherit;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);cursor:pointer}
-    .lr-play-btn:hover{background:linear-gradient(180deg,rgba(245,197,24,.12),transparent)}
+    /* Hearing the thing is the best moment in a piano lesson, and it was a
+       yellow-outlined chip indistinguishable from every other yellow box. It is
+       a filled control now, in a colour used for nothing else here, so the page
+       has one obvious thing to press. */
+    .lr-play{margin:20px 0}
+    .lr-play-btn{display:inline-flex;align-items:center;gap:10px;color:#fff;
+      background:linear-gradient(180deg,#6d5ef0,#5b4bdd);border:none;
+      box-shadow:0 2px 10px -3px rgba(91,75,221,.65);border-radius:11px;padding:10px 16px;font:inherit;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);cursor:pointer}
+    .lr-play-btn:hover{background:linear-gradient(180deg,#7a6bf5,#6455e6);box-shadow:0 4px 16px -4px rgba(91,75,221,.75)}
     .lr-play-btn:active{transform:translateY(1px)}
-    .lr-play-ico{color:var(--accent-dark,#9a6f12);font-size:.85rem}
+    .lr-play-ico{color:rgba(255,255,255,.92);font-size:.8rem}
     .lr-kbd{margin:18px 0}
     .lr-kbd-head{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
     .lr-kbd-label{font-weight:700;font-size:.92rem}
     .lr-kbd-play{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2,#f5f2ee);border:1.5px solid var(--border,#e3e1e6);border-radius:8px;padding:5px 11px;font:inherit;font-size:.8rem;font-weight:700;color:var(--text,#1a1410);cursor:pointer}
-    .lr-kbd-play:hover{border-color:var(--accent,#f5c518)}
+    .lr-kbd-play:hover{border-color:#6d5ef0;color:#5b4bdd}
     .lr-kbd-keys{position:relative;width:100%;aspect-ratio:var(--kw,7) / 2.6;max-height:124px;border-radius:9px;background:linear-gradient(#2a2520,#1c1813);box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
     .lr-key{position:absolute;top:0;box-sizing:border-box}
     .lr-key-w{height:100%;background:linear-gradient(#fff,#ededf1);border:1px solid #cbc9cf;border-radius:0 0 5px 5px}
@@ -937,12 +943,15 @@
     /* A task is the one block that asks you to stop reading and go to the
        piano, so it is the one block allowed to look like a card rather than
        part of the prose. */
-    .lr-task{border:1px solid rgba(245,197,24,.34);border-left:4px solid var(--accent,#f5c518);
-      border-radius:12px;padding:16px 18px;margin:24px 0;background:rgba(245,197,24,.06);
+    /* Amber rather than highlighter yellow: warm enough to feel like an
+       invitation to go and play something, without the school-worksheet note. */
+    .lr-task{border:1px solid rgba(217,119,6,.26);border-left:4px solid #d97706;
+      border-radius:12px;padding:16px 18px;margin:26px 0;
+      background:linear-gradient(180deg,rgba(217,119,6,.08),rgba(217,119,6,.035));
       box-shadow:0 1px 2px rgba(60,40,20,.04)}
     .lr-task .lr-text{margin-bottom:0}.lr-task .lr-text p:last-child{margin-bottom:0}
-    .lr-task-label{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;color:var(--accent-dark,#9a6f12)}
-    .lr-task-share{margin-top:10px;background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
+    .lr-task-label{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em;margin-bottom:7px;color:#b45309}
+    .lr-task-share{margin-top:12px;background:#d97706;color:#fff;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
     .lr-divider{border:none;border-top:1px solid var(--border,#e3e1e6);margin:34px 0}
     .lr-video{margin:18px 0}
     .lr-cap{font-size:.82rem;color:var(--text-muted,#8a7868);margin-top:7px;text-align:center}
