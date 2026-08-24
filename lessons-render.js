@@ -854,10 +854,7 @@
     /* Self-contained light tokens so the host page's theme (e.g. the dark app
        chrome) can't bleed into the lesson. Without this, --surface/--surface-2
        could resolve dark and inputs/cards render black. */
-    .lr-body{--surface:#ffffff;--surface-2:#faf8f3;--plate:#faf8f3;--border:#e9e4d9;--border-2:#dcd5c7;
-      --text:#1b1a17;--text-muted:#6d665a;--accent:#f5c518;--accent-ink:#8a6a0d;
-      --action:#4a3fc0;--action-hi:#5b4fd6;--tip:#2f6b52;--watch:#a8452f;
-      color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text)}
+    .lr-body{--surface:#ffffff;--surface-2:#f4f4f7;--border:#e5e5ea;--text:#15151a;--text-muted:#6e6e7a;--accent:#f5c518;color-scheme:light;max-width:680px;margin:0 auto;line-height:1.6;color:var(--text,#1a1410)}
     /* A lesson is read, so it is set to be read: a display face for the
        headings against the body face, a line long enough to hold a thought and
        leading loose enough to follow it, and far more space above a heading
@@ -866,16 +863,16 @@
     .lr-heading{font-family:Fraunces,Georgia,serif;font-weight:700;letter-spacing:-.015em;
       margin:38px 0 12px;line-height:1.2;color:var(--text,#1a1410)}
     .lr-body > .lr-heading:first-child{margin-top:8px}
-    h2.lr-heading{font-size:1.5rem} h3.lr-heading{font-size:1.14rem;letter-spacing:-.005em}
+    h2.lr-heading{font-size:1.42rem} h3.lr-heading{font-size:1.12rem;letter-spacing:-.005em}
     .lr-text{font-size:1.02rem;line-height:1.68;margin:0 0 4px}
     .lr-text p{margin:0 0 15px} .lr-text ul,.lr-text ol{margin:0 0 15px;padding-left:22px}
     .lr-text li{margin:7px 0} .lr-text strong{font-weight:650;color:var(--text,#1a1410)}
-    .lr-text code{background:var(--plate);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:.9em}
+    .lr-text code{background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-size:.9em}
     .lr-tablewrap{overflow-x:auto;margin:8px 0 16px}
     .lr-table{border-collapse:collapse;width:100%;font-size:.92rem}
     .lr-table th,.lr-table td{padding:9px 13px;text-align:left;vertical-align:top;border:1px solid var(--border,#e3e1e6)}
-    .lr-table th{background:var(--plate);font-weight:700;color:var(--text,#1a1410);white-space:nowrap}
-    .lr-table td strong{color:var(--text)}
+    .lr-table th{background:var(--surface-2,#f5f2ee);font-weight:700;color:var(--text,#1a1410);white-space:nowrap}
+    .lr-table td strong{color:var(--accent-dark,#9a6f12)}
     /* No box and no wash. A faint tint inside a faint border reads as neither
        one thing nor the other, and a page of them reads as a worksheet. These
        are asides in a piece of writing, so they are set like asides: a firm
@@ -887,9 +884,9 @@
     .lr-callout-label{font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;
       margin-bottom:6px;display:flex;align-items:center;gap:7px}
     .lr-callout-label::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
-    .lr-callout-key{border-left-color:var(--accent)}.lr-callout-key .lr-callout-label{color:var(--accent-ink)}
-    .lr-callout-watch{border-left-color:var(--watch)}.lr-callout-watch .lr-callout-label{color:var(--watch)}
-    .lr-callout-tip{border-left-color:var(--tip)}.lr-callout-tip .lr-callout-label{color:var(--tip)}
+    .lr-callout-key{border-left-color:#eab308}.lr-callout-key .lr-callout-label{color:#a16207}
+    .lr-callout-watch{border-left-color:#dc2626}.lr-callout-watch .lr-callout-label{color:#b91c1c}
+    .lr-callout-tip{border-left-color:#16a34a}.lr-callout-tip .lr-callout-label{color:#15803d}
     /* Same treatment: a worked example is an aside, not a card. */
     .lr-example{margin:26px 0;padding:2px 0 2px 18px;border-left:3px solid var(--border-2,#d7d7de);
       background:none;border-radius:0}
@@ -904,42 +901,38 @@
        has one obvious thing to press. */
     .lr-play{margin:20px 0}
     .lr-play-btn{display:inline-flex;align-items:center;gap:10px;color:#fff;
-      background:var(--action);border:none;
+      background:linear-gradient(180deg,#6d5ef0,#5b4bdd);border:none;
       border-radius:11px;padding:11px 17px;font:inherit;font-weight:700;font-size:.9rem;
       color:#fff;cursor:pointer}
-    .lr-play-btn:hover{background:var(--action-hi)}
+    .lr-play-btn:hover{background:linear-gradient(180deg,#7a6bf5,#6455e6);box-shadow:0 4px 16px -4px rgba(91,75,221,.75)}
     .lr-play-btn:active{transform:translateY(1px)}
     .lr-play-ico{color:rgba(255,255,255,.92);font-size:.8rem}
     .lr-kbd{margin:18px 0}
     .lr-kbd-head{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
     .lr-kbd-label{font-weight:700;font-size:.92rem}
     .lr-kbd-play{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2,#f5f2ee);border:1.5px solid var(--border,#e3e1e6);border-radius:8px;padding:5px 11px;font:inherit;font-size:.8rem;font-weight:700;color:var(--text,#1a1410);cursor:pointer}
-    .lr-kbd-play:hover{border-color:var(--action);color:var(--action)}
-    .lr-kbd-keys{position:relative;width:100%;aspect-ratio:var(--kw,7) / 2.6;max-height:124px;border-radius:11px;
-      background:linear-gradient(#2a2520,#1c1813);border:5px solid #1a1611;border-bottom-width:8px;
-      box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
+    .lr-kbd-play:hover{border-color:#6d5ef0;color:#5b4bdd}
+    .lr-kbd-keys{position:relative;width:100%;aspect-ratio:var(--kw,7) / 2.6;max-height:124px;border-radius:9px;background:linear-gradient(#2a2520,#1c1813);box-shadow:inset 0 3px 7px rgba(0,0,0,.4);overflow:hidden;user-select:none;touch-action:manipulation}
     .lr-key{position:absolute;top:0;box-sizing:border-box}
     .lr-key-w{height:100%;background:linear-gradient(#fff,#ededf1);border:1px solid #cbc9cf;border-radius:0 0 5px 5px}
     .lr-key-b{height:62%;background:linear-gradient(#403930,#16120d);border:1px solid #000;border-radius:0 0 4px 4px;z-index:2;box-shadow:0 2px 3px rgba(0,0,0,.4)}
-    .lr-key-w.lr-key-hi{background:linear-gradient(#ffdf85,#edb713)}
+    .lr-key-w.lr-key-hi{background:linear-gradient(#ffe9a0,#f5c518)}
     .lr-key-b.lr-key-hi{background:linear-gradient(#e0aa00,#9a7400)}
     .lr-kbd-live .lr-key{cursor:pointer}
     .lr-key-press{filter:brightness(1.22)}
-    .lr-notation{margin:22px 0;overflow-x:auto;padding:18px 16px 10px;
-      background:var(--plate);border:1px solid var(--border);border-radius:14px}
-    .lr-notation-hero{margin:14px 0;padding:20px 18px 12px;background:var(--plate);border:1px solid var(--border);border-radius:14px}
+    .lr-notation{margin:18px 0;overflow-x:auto}
+    .lr-notation-hero{margin:14px 0;padding:20px 18px 12px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
     .lr-notation-hero .lr-cap{margin-top:8px}
-    .lr-notation-mini{margin:10px 0;padding:0;background:none;border:0}
+    .lr-notation-mini{margin:10px 0}
     .lr-notation-mini .lr-abc-out{text-align:center}
     /* Pre-staff notation (First Steps): framed card, responsive SVG. */
-    .lr-prestaff{margin:14px 0 6px;padding:16px 14px 10px;background:var(--plate);border:1px solid var(--border);border-radius:14px}
+    .lr-prestaff{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
     .lr-ps-svg{display:block;width:100%;max-width:100%;height:auto}
     .lr-prestaff .lr-cap{margin-top:8px}
     /* Finger-number diagram: framed card, real hand image with number badges overlaid. */
-    .lr-hand{margin:14px 0 6px;padding:16px 14px 10px;background:var(--plate);border:1px solid var(--border);border-radius:14px}
+    .lr-hand{margin:14px 0 6px;padding:16px 14px 10px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
     .lr-hand-wrap{position:relative;max-width:460px;margin:0 auto;container-type:inline-size;aspect-ratio:3/2}
-    .lr-hand-wrap img{display:block;width:100%;height:auto;mix-blend-mode:multiply}  /* the line art ships on its own white ground; multiply drops that ground
-     onto the plate and keeps the drawn lines. */
+    .lr-hand-wrap img{display:block;width:100%;height:auto}
     .lr-fn{position:absolute;transform:translate(-50%,-50%);width:clamp(21px,6.2cqw,29px);height:clamp(21px,6.2cqw,29px);border-radius:50%;background:var(--accent,#f5c518);color:#3a2c00;font-weight:800;font-size:clamp(12px,3.4cqw,15px);line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(60,40,20,.35)}
     .lr-hand .lr-cap{margin-top:8px}
     /* Circled finger number on a keyboard key. */
@@ -957,38 +950,40 @@
        part of the prose. */
     /* Amber rather than highlighter yellow: warm enough to feel like an
        invitation to go and play something, without the school-worksheet note. */
-    .lr-task{border:1px solid var(--border);border-left:3px solid var(--action);
-      border-radius:12px;padding:16px 18px;margin:26px 0;background:var(--plate)}
+    .lr-task{border:1px solid rgba(217,119,6,.26);border-left:4px solid #d97706;
+      border-radius:12px;padding:16px 18px;margin:26px 0;
+      background:linear-gradient(180deg,rgba(217,119,6,.08),rgba(217,119,6,.035));
+      box-shadow:0 1px 2px rgba(60,40,20,.04)}
     .lr-task .lr-text{margin-bottom:0}.lr-task .lr-text p:last-child{margin-bottom:0}
-    .lr-task-label{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em;margin-bottom:7px;color:var(--action)}
-    .lr-task-share{margin-top:12px;background:var(--action);color:#fff;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
+    .lr-task-label{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em;margin-bottom:7px;color:#b45309}
+    .lr-task-share{margin-top:12px;background:#d97706;color:#fff;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
     .lr-divider{border:none;border-top:1px solid var(--border,#e3e1e6);margin:34px 0}
     .lr-video{margin:18px 0}
     .lr-cap{font-size:.82rem;color:var(--text-muted,#8a7868);margin-top:7px;text-align:center}
     .lr-video-poster{aspect-ratio:16/9;border:1.5px dashed var(--border,#e3e1e6);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--surface-2,#f5f2ee);color:var(--text-muted,#8a7868)}
-    .lr-video-badge{font-weight:800;font-size:1.05rem;color:var(--action)}
+    .lr-video-badge{font-weight:800;font-size:1.05rem;color:var(--accent-dark,#9a6f12)}
     .lr-video-id{font-size:.8rem}
     .lr-download{margin:16px 0}
-    .lr-download-btn{display:inline-flex;align-items:center;gap:9px;background:var(--plate);border:1px solid var(--border-2);border-radius:10px;padding:11px 16px;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);text-decoration:none;cursor:pointer}
-    .lr-download-btn:hover{border-color:var(--action);color:var(--action)}
-    .lr-dl-ico{font-size:1.05rem;color:var(--action)}
+    .lr-download-btn{display:inline-flex;align-items:center;gap:9px;background:var(--surface,#fff);border:1.5px solid var(--accent,#f5c518);border-radius:10px;padding:11px 16px;font-weight:700;font-size:.9rem;color:var(--text,#1a1410);text-decoration:none;cursor:pointer}
+    .lr-download-btn:hover{background:linear-gradient(180deg,rgba(245,197,24,.1),transparent)}
+    .lr-dl-ico{font-size:1.05rem;color:var(--accent-dark,#9a6f12)}
     .lr-questions,.lr-quiz{margin:18px 0}
     .lr-questions-title,.lr-quiz-title{font-weight:700;margin-bottom:10px}
-    .lr-q{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:10px 0;background:var(--plate)}
+    .lr-q{border:1px solid var(--border,#e3e1e6);border-radius:12px;padding:14px 16px;margin:10px 0;background:var(--surface,#fff)}
     .lr-q-prompt{font-weight:600;margin-bottom:10px}
     .lr-opts{display:flex;flex-direction:column;gap:8px}
     .lr-opt{text-align:left;color:var(--text,#1a1410);background:var(--surface,#fff);border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:10px 12px;font:inherit;font-size:.92rem;cursor:pointer;transition:border-color .12s,background .12s}
-    .lr-opt:hover:not(:disabled){border-color:var(--action)}
-    .lr-opt.lr-sel{border-color:var(--action);background:rgba(74,63,192,.06)}
-    .lr-opt.lr-correct{border-color:var(--tip);background:rgba(47,107,82,.07)}
-    .lr-opt.lr-wrong{border-color:var(--watch);background:rgba(168,69,47,.07)}
+    .lr-opt:hover:not(:disabled){border-color:var(--accent,#f5c518)}
+    .lr-opt.lr-sel{border-color:var(--accent,#f5c518)}
+    .lr-opt.lr-correct{border-color:#5fbf7e;background:#eaf6ee}
+    .lr-opt.lr-wrong{border-color:#d9534f;background:#fbecea}
     .lr-short{display:flex;gap:8px}.lr-input{flex:1;color:var(--text,#1a1410);background:var(--surface-2,#f5f2ee);color-scheme:light;border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:9px 12px;font:inherit;font-size:.92rem}
-    .lr-input.lr-correct{border-color:var(--tip)}.lr-input.lr-wrong{border-color:var(--watch)}
-    .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--action);color:#fff;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:.85rem;cursor:pointer}
+    .lr-input.lr-correct{border-color:#5fbf7e}.lr-input.lr-wrong{border-color:#d9534f}
+    .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:.85rem;cursor:pointer}
     .lr-reflect{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
-    .lr-input.lr-checking{border-color:var(--action);background:rgba(74,63,192,.06);opacity:.75}
+    .lr-input.lr-checking{border-color:var(--accent,#f5c518);background:rgba(245,197,24,.08);opacity:.75}
     .lr-q-explain{margin-top:10px;font-size:.86rem;color:var(--text-muted,#8a7868);border-top:1px dashed var(--border,#e3e1e6);padding-top:10px}
-    .lr-quiz-card{border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center;background:var(--plate)}
+    .lr-quiz-card{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:18px;text-align:center;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
     .lr-quiz-sub{font-size:.82rem;color:var(--text-muted,#8a7868);margin:4px 0 12px}
     .lr-quiz-result{margin-top:14px;font-size:1rem}
     `;
