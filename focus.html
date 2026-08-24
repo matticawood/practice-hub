@@ -950,7 +950,7 @@
           <option value="method">How to practise</option>
           <option value="read">Understanding the music</option>
         </select>
-        <p style="font-size:.76rem;color:var(--text-muted);margin:4px 0 0">This is how members find it months later, so it matters more than the date.</p>
+        <p id="ff-theme-note" style="font-size:.76rem;color:var(--text-muted);margin:4px 0 0">This is how members find it months later, so it matters more than the date.</p>
       </div>
 
       <div class="focus-form-field">
@@ -1502,8 +1502,96 @@ window.addEventListener("popstate", (e) => {
 // ── Admin form ────────────────────────────────────────────────────────────────
 let _editFocusId = null; // null = new post, uuid = editing existing
 
+/* ── Theme, suggested from what you wrote ──────────────────────────────────────
+   The theme is how a focus is found months later, so it should not depend on
+   remembering to set a dropdown. Each theme owns a vocabulary; the headline is
+   what the focus is ABOUT, so a word there counts six times what the same word
+   counts in the body, which mentions everything in passing.
+
+   Checked against the 18 focuses already themed by hand: it reproduces all 18.
+   That is the minimum bar rather than proof, because the vocabulary was drawn
+   from those same 18 — which is exactly why the suggestion is shown rather than
+   applied silently, and why a close call says so. Touch the dropdown yourself
+   and it stops second-guessing you for the rest of that edit. */
+const FX_VOCAB = {
+  hands: ["finger","fingers","fingering","fingerings","thumb","hand","hands",
+          "substitution","substitutions","pivot","wrist","arm","forearm","elbow",
+          "jump","jumps","leap","stretch","span","reach","geography","position",
+          "under","over","cross","crossing","independence","co-ordination","coordination"],
+  sound: ["sound","sounds","sounding","musical","musically","musicality","tone","colour","color",
+          "release","releasing","dynamic","dynamics","loud","louder","soft","softer","quiet",
+          "balance","balanced","sing","sings","singing","voicing","voiced","project",
+          "expressive","expression","phrase","phrasing","shape","shaping","listener","listeners"],
+  method:["mistake","mistakes","repeat","repeating","repetition","transition","transitions",
+          "join","joins","memory","memorise","memorised","memorize","from anywhere","start anywhere",
+          "habit","habits","routine","slowly","slow practice","chunk","chunks","group","grouping",
+          "drill","drills","strategy","approach","efficient","efficiently"],
+  read:  ["rhythm","rhythms","rhythmic","harmony","harmonies","harmonic","chord","chords",
+          "structure","structural","skeleton","texture","key signature","reading","read the",
+          "notation","score","analysis","analyse","pattern","patterns","beat","beats",
+          "timing","bar","bars","interval","intervals","scale degree","phrase structure"],
+};
+const FX_HEAD_W = 6, FX_BODY_W = 1;
+let _themeTouched = false;
+
+function fxSuggestTheme(headline, intro, steps, closing) {
+  const head = " " + String(headline || "").toLowerCase() + " ";
+  const parts = [intro, closing].concat(
+    Array.isArray(steps) ? steps.map(s => (s && (s.text || s.title)) || "") : [steps || ""]);
+  const body = " " + parts.join(" ").toLowerCase() + " ";
+  const score = {};
+  FX_ORDER.forEach(t => {
+    score[t] = 0;
+    FX_VOCAB[t].forEach(w => {
+      const re = new RegExp("(^|[^a-z])" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([^a-z]|$)", "g");
+      score[t] += (head.match(re) || []).length * FX_HEAD_W + (body.match(re) || []).length * FX_BODY_W;
+    });
+  });
+  const ranked = FX_ORDER.slice().sort((a, b) => score[b] - score[a]);
+  return { theme: score[ranked[0]] > 0 ? ranked[0] : null,
+           margin: score[ranked[0]] - score[ranked[1]] };
+}
+
+function fxRefreshThemeSuggestion() {
+  const note = document.getElementById("ff-theme-note");
+  const sel  = document.getElementById("ff-theme");
+  if (!note || !sel) return;
+  const SETTLED = "This is how members find it months later, so it matters more than the date.";
+  if (_themeTouched) { note.textContent = SETTLED; return; }
+
+  const g = fxSuggestTheme(
+    document.getElementById("ff-headline").value,
+    document.getElementById("ff-intro").value,
+    readFormSteps(),
+    document.getElementById("ff-closing").value);
+
+  if (!g.theme) { note.textContent = SETTLED; return; }
+  sel.value = g.theme;
+  const name = (FX_THEME[g.theme] || {}).name || g.theme;
+  note.textContent = g.margin >= 4
+    ? "Set to " + name + " from what you wrote. Change it if that is wrong."
+    : "Reads as " + name + ", but it is a close call — worth checking.";
+}
+
+function fxWatchThemeInputs() {
+  const form = document.getElementById("focus-form-wrap");
+  if (!form || form.dataset.themeWatch) return;
+  form.dataset.themeWatch = "1";
+  /* Delegated, so steps added after this runs are watched too. */
+  form.addEventListener("input", e => {
+    if (e.target.id === "ff-theme") return;
+    fxRefreshThemeSuggestion();
+  });
+  const sel = document.getElementById("ff-theme");
+  if (sel) sel.addEventListener("change", () => {
+    _themeTouched = true;
+    fxRefreshThemeSuggestion();
+  });
+}
+
 function openFocusForm() {
   _editFocusId = null;
+  _themeTouched = false;
   document.getElementById("focus-form-title").textContent = "New Weekly Focus";
   document.getElementById("ff-submit").textContent = "Publish & Notify Members";
   // Reset fields
@@ -1522,12 +1610,17 @@ function openFocusForm() {
   document.getElementById("focus-form-wrap").style.display = "";
   document.getElementById("new-focus-btn").style.display = "none";
   { const b = document.getElementById("fx-new"); if (b) b.style.display = "none"; }
+  fxWatchThemeInputs();
+  fxRefreshThemeSuggestion();
   document.getElementById("focus-form-wrap").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function openEditForm(focusId) {
   const f = _focuses.find(x => x.id === focusId);
   if (!f) return;
+  /* An existing focus already has a theme, chosen deliberately and possibly
+     against the suggestion. Editing the wording must never move it. */
+  _themeTouched = true;
 
   // If invoked from the detail/post view, return to the main view first — the
   // edit form lives inside #focus-main, which the detail view hides, so the
@@ -1580,6 +1673,8 @@ function openEditForm(focusId) {
   document.getElementById("focus-form-wrap").style.display = "";
   document.getElementById("new-focus-btn").style.display = "none";
   { const b = document.getElementById("fx-new"); if (b) b.style.display = "none"; }
+  fxWatchThemeInputs();
+  fxRefreshThemeSuggestion();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
