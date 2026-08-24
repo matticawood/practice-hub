@@ -794,11 +794,8 @@
       <!-- TOOLS HOME — a bare /tools.html used to open the Passage Fixer, which
            meant every tool needed its own nav entry to be reachable at all. -->
       <div id="tool-home" class="tool-panel active">
-        <div class="th-head">
-          <h2 class="th-title">Practice Tools</h2>
-          <p class="th-sub">Things you come back to rather than work through. Pick one.</p>
-        </div>
-        <div class="th-grid" id="th-grid"></div>
+        <div id="th-hero"></div>
+        <div id="th-shelves"></div>
       </div>
 
       <!-- PASSAGE GAME -->
@@ -1802,38 +1799,138 @@ const TH_LINKS = [
   { href:"/resources.html?section=glossary", name:"Glossary",       tc:"#64748b", desc:"Look up any term you meet on the page.",              ic:TH_SVG('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>') },
   { href:"/resources.html?section=key",      name:"Key Explorer",   tc:"#7c3aed", desc:"Every key, its scales and its chords.",               ic:TH_SVG('<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/>') },
 ];
-async function thRender() {
-  const grid = document.getElementById("th-grid");
-  if (!grid) return;
-  const card = (t, best) =>
-    `<${t.href ? `a href="${t.href}"` : `button type="button" data-th="${t.id}"`} class="th-card" style="--tc:${t.tc}">
-       <span class="th-top"><span class="th-ic">${t.ic}</span><span class="th-nm">${t.name}</span></span>
-       <span class="th-desc">${t.desc}</span>
-       <span class="th-stat${best ? "" : " none"}">${best || (t.tbl ? "not tried yet" : "&nbsp;")}</span>
-     </${t.href ? "a" : "button"}>`;
-  grid.innerHTML = TH_TOOLS.map(t => card(t, "")).join("") + TH_LINKS.map(t => card(t, "")).join("");
-  grid.querySelectorAll("[data-th]").forEach(b => b.onclick = () => showTool(b.dataset.th));
+/* Nine tiles in one flat grid said everything here is the same kind of thing,
+   and they are not: four are drills that keep a score, two are instruments you
+   run alongside playing, three are references you look something up in. The
+   shelves say which is which, and each shelf is a rail rather than a wrapping
+   grid so a short one does not sprawl. */
+const TH_SHELVES = [
+  { key:"drill", title:"Train your eye and ear", tc:"#10b981",
+    blurb:"Short drills that keep a score, so you can see the number move.",
+    ids:["note","chord","ear","interval"] },
+  { key:"play",  title:"While you play",         tc:"#f97316",
+    blurb:"Run these alongside the piano rather than instead of it.",
+    ids:["metro","game"] },
+  { key:"ref",   title:"Look something up",      tc:"#0369a1",
+    blurb:"For the moment a word, a key or a piece stops you mid-bar.",
+    links:true },
+];
 
-  // best scores, filled in once they arrive so the grid never waits on the network
-  const bests = await Promise.all(TH_TOOLS.map(async t => {
-    if (!t.tbl) return null;
+const thById = id => TH_TOOLS.find(t => t.id === id);
+
+function thCardHTML(t, best, pending) {
+  const open = t.href ? `<a href="${t.href}"` : `<button type="button" data-th="${t.id}"`;
+  const close = t.href ? "</a>" : "</button>";
+  const stat = best ? `<span class="th-c-stat">${best}</span>`
+    : pending ? `<span class="th-c-stat th-c-wait"></span>`
+    : t.tbl ? `<span class="th-c-stat th-c-none">not tried yet</span>`
+    : "<span></span>";
+  return `${open} class="th-c" style="--tc:${t.tc}">
+    <span class="th-c-pl">${t.ic}</span>
+    <span class="th-c-b">
+      <span class="th-c-t">${t.name}</span>
+      <span class="th-c-x">${t.desc}</span>
+      <span class="th-c-f">${stat}<span class="th-c-go">${t.href ? "Open" : "Start"}</span></span>
+    </span>
+  ${close}`;
+}
+
+function thShelvesHTML(bests, pending) {
+  return TH_SHELVES.map(s => {
+    const cards = s.links
+      ? TH_LINKS.map(t => thCardHTML(t)).join("")
+      : s.ids.map(id => {
+          const t = thById(id);
+          return t ? thCardHTML(t, bests ? bests[id] : null, pending) : "";
+        }).join("");
+    const n = s.links ? TH_LINKS.length : s.ids.length;
+    return `<section class="th-sh" style="--c:${s.tc}">
+      <div class="th-sh-h">
+        <span class="th-sh-d"></span>
+        <h2>${s.title}</h2>
+        <span class="th-sh-n">${n}</span>
+      </div>
+      <p class="th-sh-x">${s.blurb}</p>
+      <div class="th-sh-r">${cards}</div>
+    </section>`;
+  }).join("");
+}
+
+/* Deliberately NOT a hero. Learn, Piano Practice Daily and Weekly Focus open
+   with one because they are asking to be browsed. This is a workbench: you
+   arrive knowing what you want, or you want the shortest route back to the
+   drill you were doing. So the head is a band, not a poster, and the space it
+   would have taken goes to your own numbers, which are the one thing this page
+   knows that you do not. Each is a jump straight into that tool. */
+function thHeadHTML(bests) {
+  let strip;
+  if (!bests) {
+    strip = TH_TOOLS.filter(t => t.tbl).map(() => `<span class="th-n th-n-wait"></span>`).join("");
+  } else {
+    const scored = TH_TOOLS.filter(t => t.tbl && bests[t.id]);
+    strip = scored.length
+      ? scored.map(t => {
+          const n = String(bests[t.id]).replace(/[^0-9]/g, "");
+          const label = t.tbl === "passage_games" ? "passages" : "best";
+          return `<button type="button" class="th-n" data-th="${t.id}" style="--tc:${t.tc}">
+            <span class="th-n-v">${n}</span>
+            <span class="th-n-k">${label} &middot; ${t.name}</span>
+          </button>`;
+        }).join("")
+      : `<button type="button" class="th-n th-n-first" data-th="note" style="--tc:#10b981">
+           <span class="th-n-v">Start here</span>
+           <span class="th-n-k">Note Recognition is the easiest way in</span>
+         </button>`;
+  }
+  return `<div class="th-head">
+    <div class="th-head-l">
+      <h1 class="th-h1">Practice Tools</h1>
+      <p class="th-sub">Things you come back to rather than work through.</p>
+    </div>
+    <div class="th-strip">${strip}</div>
+  </div>`;
+}
+
+function thPaint(bests, pending) {
+  const head = document.getElementById("th-hero");
+  const shelves = document.getElementById("th-shelves");
+  if (!head || !shelves) return;
+  head.innerHTML = thHeadHTML(bests);
+  shelves.innerHTML = thShelvesHTML(bests, pending);
+  document.querySelectorAll("#tool-home [data-th]").forEach(b =>
+    b.onclick = () => showTool(b.dataset.th));
+}
+
+async function thRender() {
+  /* Painted twice on purpose: the shelves are drawn from static data straight
+     away, and the scores drop in when they land, so the page never waits on the
+     network to show what is here. */
+  thPaint(null, true);
+
+  const pairs = await Promise.all(TH_TOOLS.map(async t => {
+    if (!t.tbl) return [t.id, null];
     try {
       if (t.tbl === "passage_games") {
         const { count } = await db.from(t.tbl).select("id", { count: "exact", head: true }).eq("email", myEmail);
-        return count ? count + " passage" + (count === 1 ? "" : "s") + " played" : null;
+        return [t.id, count ? count + " passage" + (count === 1 ? "" : "s") + " played" : null];
       }
       const { data } = await db.from(t.tbl).select("score").eq("email", myEmail).order("score", { ascending: false }).limit(1);
-      return (data && data.length) ? "best " + data[0].score : null;
-    } catch (e) { return null; }
+      return [t.id, (data && data.length) ? "best " + data[0].score : null];
+    } catch (e) { return [t.id, null]; }
   }));
-  grid.innerHTML = TH_TOOLS.map((t, i) => card(t, bests[i])).join("") + TH_LINKS.map(t => card(t, "")).join("");
-  grid.querySelectorAll("[data-th]").forEach(b => b.onclick = () => showTool(b.dataset.th));
+  const bests = {};
+  pairs.forEach(([id, v]) => { if (v) bests[id] = v; });
+  thPaint(bests, false);
 }
 
 // ── Navigate to a tool ────────────────────────────────────────────────────────
 function showTool(id) {
   document.querySelectorAll(".tool-panel").forEach(p => p.classList.remove("active"));
   document.getElementById("tool-" + id).classList.add("active");
+  /* The home runs full width like Learn and Weekly Focus. A tool does not: the
+     metronome and the drills are a workspace and belong in the narrow framed
+     column they already have, so the width change is scoped to the home only. */
+  document.body.classList.toggle("th-open", id === "home");
   document.querySelectorAll(".msn-item").forEach(b =>
     b.classList.toggle("active", b.dataset.msnVal === id));
   if (id === "note") nrInit();
@@ -5328,5 +5425,129 @@ window.addEventListener("popstate", function () {
   if (window._shUpdateNav) window._shUpdateNav("tools");
 });
 </script>
+
+<style id="th-css">
+/* ══════════════════════════════════════════════════════════════════════════
+   Tools home — redesign
+
+   Same visual language as Learn, Piano Practice Daily and Weekly Focus (full
+   width, dark ground, shelves of cards that carry their own colour), but NOT
+   the same shape. Those pages open with a hero because they are asking to be
+   browsed. This one is a workbench: the head is a compact band and the space a
+   hero would have taken carries your own numbers instead.
+
+   Everything here is scoped to body.th-open, which showTool() sets only while
+   the home panel is up, so a tool keeps the narrow framed workspace it has.
+   ══════════════════════════════════════════════════════════════════════════ */
+body.th-open { --th-gut: clamp(18px, 2.6vw, 52px);
+  --th-surface:#17171a; --th-border:#2c2c33; --th-text:#f3f3f5; --th-muted:#9a9aa4; }
+
+/* Out of the centred, framed box the tools sit in and onto the full column the
+   other sections use. The frame stays for the tools themselves. */
+body.th-open #app-main { padding: 22px var(--th-gut) 110px; max-width: none; }
+body.th-open .tools-wrap { max-width: none; margin: 0; padding: 0;
+  background: none; border: 0; border-radius: 0; box-shadow: none; }
+
+/* ── the head band ── */
+body.th-open .th-head { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 28px; flex-wrap: wrap; margin: 0 0 30px; padding: 0 0 20px;
+  border-bottom: 1px solid var(--th-border); }
+body.th-open .th-head-l { min-width: 15rem; }
+body.th-open .th-h1 { margin: 0; color: #fff; letter-spacing: -.02em;
+  font: 700 clamp(1.55rem, 2.6vw, 2.1rem)/1.1 Fraunces, Georgia, serif; }
+body.th-open .th-sub { margin: 7px 0 0; font-size: .95rem; line-height: 1.5; color: var(--th-muted); }
+
+/* your numbers, each one a way straight back in */
+/* One row, always. Five of these wrapped 4 + 1 at a common desktop width and
+   the orphan read as a mistake; scrolling is better than an odd row. */
+body.th-open .th-strip { display: flex; gap: 10px; flex-wrap: nowrap; overflow-x: auto;
+  scrollbar-width: none; padding-top: 6px; margin-top: -6px;
+  padding-bottom: 8px; margin-bottom: -8px; max-width: 100%; }
+body.th-open .th-strip::-webkit-scrollbar { display: none; }
+body.th-open .th-n { flex: 0 0 auto; }
+body.th-open .th-n { display: flex; flex-direction: column; gap: 3px; text-align: left;
+  background: var(--th-surface); border: 1px solid var(--th-border); border-radius: 13px;
+  padding: 10px 15px 11px; font: inherit; color: var(--th-text); cursor: pointer;
+  transition: transform .16s, border-color .16s; }
+body.th-open .th-n:hover { transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--tc) 60%, var(--th-border)); }
+body.th-open .th-n:focus-visible { outline: 2px solid var(--tc); outline-offset: 3px; }
+body.th-open .th-n-v { font: 800 1.32rem/1 ui-monospace, SFMono-Regular, monospace;
+  color: var(--tc); font-variant-numeric: tabular-nums; }
+body.th-open .th-n-first .th-n-v { font-size: .98rem; font-family: inherit; font-weight: 750; }
+body.th-open .th-n-k { font-size: .73rem; font-weight: 600; color: var(--th-muted); }
+body.th-open .th-n-wait { width: 8.5rem; height: 3.1rem; border-style: dashed; cursor: default;
+  opacity: .5; animation: th-pulse 1.5s ease-in-out infinite; }
+@keyframes th-pulse { 0%,100% { opacity:.32 } 50% { opacity:.6 } }
+
+/* ── shelves ── */
+body.th-open .th-sh { margin-bottom: 34px; }
+body.th-open .th-sh-h { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; }
+body.th-open .th-sh-d { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+body.th-open .th-sh-h h2 { margin: 0; font-size: 1.05rem; font-weight: 800;
+  letter-spacing: -.01em; color: var(--th-text); }
+body.th-open .th-sh-n { font-size: .85rem; color: var(--th-muted); font-weight: 600; }
+body.th-open .th-sh-x { margin: 0 0 14px; font-size: .86rem; color: var(--th-muted); }
+/* Setting overflow-x forces overflow-y, so a card lifting on hover gets its top
+   shaved against a clip line you cannot see. The room is added inside the
+   scroll box and taken straight back off outside it: nothing moves but the clip. */
+body.th-open .th-sh-r { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none;
+  padding-top: 8px; margin-top: -8px; padding-bottom: 10px; margin-bottom: -6px;
+  /* fades the last card out rather than slicing it, so a cut edge reads as
+     "more along here" instead of as a broken layout */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent); }
+body.th-open .th-sh-r::-webkit-scrollbar { display: none; }
+
+/* ── the card: a plate carries the colour, the words sit under it ── */
+body.th-open .th-c { flex: 0 0 clamp(258px, 22vw, 300px); display: flex; flex-direction: column;
+  background: var(--th-surface); border: 1px solid var(--th-border); border-radius: 16px;
+  overflow: hidden; text-decoration: none; color: var(--th-text); cursor: pointer;
+  font: inherit; text-align: left; padding: 0;
+  transition: transform .16s, border-color .16s; }
+body.th-open .th-c:hover { transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--tc) 60%, var(--th-border)); }
+body.th-open .th-c:focus-visible { outline: 2px solid var(--tc); outline-offset: 3px; }
+/* Shorter than the 16/9 plate the content shelves use. There a plate holds a
+   real thumbnail worth looking at; here it holds an icon, and at 16/9 the tiles
+   read as articles and made the page twice as long as it needed to be. */
+body.th-open .th-c-pl { position: relative; height: 92px; display: grid; place-items: center;
+  color: var(--tc);
+  background: radial-gradient(120% 140% at 74% 14%, color-mix(in srgb, var(--tc) 46%, transparent), transparent 64%),
+              linear-gradient(150deg, color-mix(in srgb, var(--tc) 30%, #16141c), #100e13); }
+body.th-open .th-c-pl > svg { width: 28px; height: 28px; padding: 10px; box-sizing: content-box;
+  border-radius: 16px; background: rgba(14,12,16,.66);
+  border: 1px solid color-mix(in srgb, var(--tc) 40%, transparent);
+  box-shadow: 0 12px 28px -14px color-mix(in srgb, var(--tc) 90%, transparent); }
+body.th-open .th-c-b { display: flex; flex-direction: column; gap: 6px; padding: 14px 15px 13px; flex: 1; }
+body.th-open .th-c-t { font-weight: 750; font-size: .97rem; line-height: 1.28; }
+body.th-open .th-c-x { font-size: .85rem; line-height: 1.5; color: var(--th-muted); }
+body.th-open .th-c-f { margin-top: auto; padding-top: 11px; display: flex; align-items: center;
+  justify-content: space-between; font-size: .78rem; font-weight: 650; color: var(--th-muted); }
+body.th-open .th-c-stat { font: 650 .78rem/1 ui-monospace, SFMono-Regular, monospace;
+  color: var(--tc); font-variant-numeric: tabular-nums; }
+body.th-open .th-c-none { color: var(--th-muted); font-weight: 500; font-family: inherit; }
+body.th-open .th-c-wait { display: inline-block; width: 4.6rem; height: .78rem; border-radius: 4px;
+  background: var(--th-border); animation: th-pulse 1.5s ease-in-out infinite; }
+body.th-open .th-c-go { color: var(--tc); font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) {
+  body.th-open .th-c, body.th-open .th-n { transition: none; }
+  body.th-open .th-c-wait, body.th-open .th-n-wait { animation: none; }
+}
+
+@media (max-width: 720px) {
+  body.th-open #app-main { padding-left: 16px; padding-right: 16px; }
+  body.th-open .th-head { align-items: flex-start; gap: 18px; margin-bottom: 24px; }
+  body.th-open .th-strip { gap: 8px; }
+  body.th-open .th-n { padding: 8px 12px 9px; }
+  body.th-open .th-n-v { font-size: 1.14rem; }
+  /* The rails bleed to the screen edge so a card is not cut off mid-air by the
+     page gutter; the padding is given back inside the scroll box. */
+  body.th-open .th-sh-r { margin-left: -16px; margin-right: -16px;
+    padding-left: 16px; padding-right: 16px; }
+  body.th-open .th-c { flex-basis: min(78vw, 300px); }
+}
+</style>
 </body>
 </html>
