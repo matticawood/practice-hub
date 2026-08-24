@@ -45,6 +45,34 @@
      surface in a dark app does. The index keeps the darker ground. */
   body:has(.lesson-reader) { background:#1a1a1a; }   /* style.css --surface */
 
+  /* A contents rail, built from the sections the lesson already had. Length
+     stops being the problem once the whole shape is visible and you can jump
+     within it, which is what every long-form docs site does. It is built from
+     the rendered sections, so it needs nothing added to the content. */
+  .lesson-shell { display:grid; grid-template-columns:minmax(0,1fr) 232px; gap:34px;
+    align-items:start; }
+  .lesson-toc { position:sticky; top:78px; padding:2px 0 0; }
+  .lesson-toc-t { font:800 .64rem/1 Inter,sans-serif; letter-spacing:.13em; text-transform:uppercase;
+    color:#6a6a74; margin:0 0 12px; }
+  .lesson-toc a { display:block; padding:7px 0 7px 13px; border-left:2px solid #2e2e2e;
+    color:#a8a8b0; font-size:.84rem; line-height:1.35; text-decoration:none; cursor:pointer;
+    transition:color .15s, border-color .15s; }
+  .lesson-toc a:hover { color:#f0f0f0; border-left-color:#6a6a74; }
+  .lesson-toc a.on { color:#fff; border-left-color:var(--accent); font-weight:600; }
+  .lesson-toc a .n { color:#6a6a74; font-variant-numeric:tabular-nums; margin-right:7px; }
+  .lesson-toc a.on .n { color:var(--accent); }
+  /* Below 1100 there is no room beside the lesson, so it becomes a jump-to at
+     the top rather than disappearing: a long lesson needs it most on a phone. */
+  @media (max-width:1100px) {
+    .lesson-shell { display:block; }
+    .lesson-toc { position:static; margin:0 0 18px; }
+    .lesson-toc-inner { display:flex; gap:8px; overflow-x:auto; scrollbar-width:none; padding-bottom:4px; }
+    .lesson-toc-inner::-webkit-scrollbar { display:none; }
+    .lesson-toc a { flex:0 0 auto; border-left:0; border:1px solid #2e2e2e; border-radius:99px;
+      padding:7px 13px; white-space:nowrap; }
+    .lesson-toc a.on { border-color:var(--accent); background:rgba(245,197,24,.1); }
+  }
+
   /* Light and NEUTRAL, not cream. The warm palette this used to carry —
      #faf7f3 on #e0d5c8 with brown-grey text — is the same scheme taken out of
      the rest of the app for reading dirty, and left here it made the lesson the
@@ -854,6 +882,41 @@ function renderCourse(courseKey, push) {
   scrollTop();
 }
 
+/* The rail is read off the rendered sections, so a lesson that has none simply
+   does not get one and nothing has to be authored. The current section is
+   tracked with an observer rather than a scroll handler, so it costs nothing
+   while reading. */
+function buildLessonToc(body) {
+  const nav = document.getElementById("lesson-toc");
+  if (!nav) return;
+  const secs = [...body.querySelectorAll(".lr-sec")];
+  // One section is not a contents list, it is a heading.
+  if (secs.length < 3) { nav.hidden = true; return; }
+  nav.hidden = false;
+  nav.innerHTML = '<div class="lesson-toc-t">In this lesson</div><div class="lesson-toc-inner">'
+    + secs.map(sec =>
+        '<a data-go="' + sec.id + '"><span class="n">'
+        + String(sec.dataset.sec).padStart(2, "0") + "</span>"
+        + escHtml(sec.dataset.title || "") + "</a>").join("")
+    + "</div>";
+  const links = [...nav.querySelectorAll("a")];
+  links.forEach(a => a.onclick = () => {
+    const t = document.getElementById(a.dataset.go);
+    if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  const mark = id => links.forEach(a => a.classList.toggle("on", a.dataset.go === id));
+  mark(secs[0].id);
+  if (!("IntersectionObserver" in window)) return;
+  const seen = new Map();
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => seen.set(e.target.id, e.isIntersecting ? e.intersectionRatio : 0));
+    // The topmost section still on screen is the one you are reading.
+    const current = secs.find(sc => (seen.get(sc.id) || 0) > 0);
+    if (current) mark(current.id);
+  }, { rootMargin: "-70px 0px -55% 0px", threshold: [0, 0.01] });
+  secs.forEach(sc => io.observe(sc));
+}
+
 async function openLesson(id, courseKey, push) {
   const v = document.getElementById("view");
   v.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
@@ -868,7 +931,7 @@ async function openLesson(id, courseKey, push) {
   document.title = lesson.title + " · The Practice Room";
   _courseHist({ view: "lesson", lesson: id, course: lesson.course }, "/courses.html?lesson=" + encodeURIComponent(id), push);
 
-  v.innerHTML = `<div class="lesson-reader">
+  v.innerHTML = `<div class="lesson-shell"><div class="lesson-reader">
     <div class="crumbs"><a data-home>Courses</a><span class="sep">/</span><a data-course>${c.label}</a><span class="sep">/</span><span>Lesson</span></div>
     <div class="reader-head">
       <h2>${escHtml(lesson.title)}</h2>
@@ -876,13 +939,15 @@ async function openLesson(id, courseKey, push) {
       ${SHEET_MUSIC[lesson.course] ? `<a class="sheet-btn" href="${SHEET_MUSIC[lesson.course].url}" target="_blank" rel="noopener" download><span class="sheet-ico">&#x2913;</span>${escHtml(SHEET_MUSIC[lesson.course].label)}</a>` : ""}
     </div>
     <div id="lesson-body"></div>
-    <div class="complete-bar" id="complete-bar"></div></div>`;
+    <div class="complete-bar" id="complete-bar"></div></div>
+    <nav class="lesson-toc" id="lesson-toc" hidden></nav></div>`;
 
   v.querySelector("[data-home]").onclick = renderOverview;
   v.querySelector("[data-course]").onclick = () => renderCourse(lesson.course);
 
   const body = document.getElementById("lesson-body");
   body.innerHTML = LessonRender.html(lesson.blocks || []);
+  buildLessonToc(body);
   // Free-text answers: the renderer matches locally first; this only runs when
   // that fails, so a correct answer phrased differently still marks correct.
   if (LessonRender.setGrader) {

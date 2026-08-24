@@ -860,10 +860,28 @@
        leading loose enough to follow it, and far more space above a heading
        than below it so a section reads as attached to what follows rather than
        floating between two. */
+    /* A section is an object, not a gap between two paragraphs: a number, a
+       title and a boundary. This is what replaces the 186 hand-placed dividers
+       that existed because sections had no other way to show themselves. */
+    .lr-sec{margin:0 0 6px;scroll-margin-top:78px}
+    .lr-sec + .lr-sec{margin-top:46px;padding-top:2px}
+    .lr-sec-head{display:flex;align-items:baseline;gap:13px;padding-bottom:11px;margin-bottom:20px;
+      border-bottom:1px solid var(--border,#e5e5ea)}
+    .lr-sec-n{font:800 .74rem/1 Inter,system-ui,sans-serif;letter-spacing:.1em;
+      color:var(--text-faint,#9a9aa6);font-variant-numeric:tabular-nums;flex:0 0 auto}
+    .lr-sec-t{margin:0;font:700 1.34rem/1.2 Fraunces,Georgia,serif;letter-spacing:-.018em;
+      color:var(--text,#15151a)}
+    .lr-sec-body > :first-child{margin-top:0}
+    /* Dividers were standing in for section boundaries. Now that the boundaries
+       are real the rules are noise, so they are hidden rather than removed from
+       the content, which would mean editing every lesson that has one. */
+    .lr-divider{display:none}
     .lr-heading{font-family:Fraunces,Georgia,serif;font-weight:700;letter-spacing:-.015em;
       margin:38px 0 12px;line-height:1.2;color:var(--text,#1a1410)}
     .lr-body > .lr-heading:first-child{margin-top:8px}
-    h2.lr-heading{font-size:1.42rem} h3.lr-heading{font-size:1.12rem;letter-spacing:-.005em}
+    h2.lr-heading{font-size:1.42rem}
+    h3.lr-heading{font-size:1.04rem;letter-spacing:0;font-family:Inter,system-ui,sans-serif;
+      font-weight:700;margin:30px 0 8px;color:var(--text,#15151a)}
     .lr-text{font-size:1.02rem;line-height:1.68;margin:0 0 4px}
     .lr-text p{margin:0 0 15px} .lr-text ul,.lr-text ol{margin:0 0 15px;padding-left:22px}
     .lr-text li{margin:7px 0} .lr-text strong{font-weight:650;color:var(--text,#1a1410)}
@@ -921,7 +939,7 @@
     .lr-kbd-live .lr-key{cursor:pointer}
     .lr-key-press{filter:brightness(1.22)}
     .lr-notation{margin:18px 0;overflow-x:auto}
-    .lr-notation-hero{margin:14px 0;padding:20px 18px 12px;background:var(--surface,#fff);border:1px solid var(--border,#ece3d6);border-radius:14px;box-shadow:0 2px 12px -7px rgba(60,40,20,.28)}
+    .lr-notation-hero{margin:22px 0;padding:4px 0 0;background:none;border:0;border-radius:0;box-shadow:0 0 12px -7px rgba(60,40,20,.28)}
     .lr-notation-hero .lr-cap{margin-top:8px}
     .lr-notation-mini{margin:10px 0}
     .lr-notation-mini .lr-abc-out{text-align:center}
@@ -950,10 +968,10 @@
        part of the prose. */
     /* Amber rather than highlighter yellow: warm enough to feel like an
        invitation to go and play something, without the school-worksheet note. */
-    .lr-task{border:1px solid rgba(217,119,6,.26);border-left:4px solid #d97706;
-      border-radius:12px;padding:16px 18px;margin:26px 0;
-      background:linear-gradient(180deg,rgba(217,119,6,.08),rgba(217,119,6,.035));
-      box-shadow:0 1px 2px rgba(60,40,20,.04)}
+    /* The same aside shape as a callout, keeping amber for the one voice that
+       asks you to leave the page and go to the piano. */
+    .lr-task{border:0;border-left:3px solid #d97706;border-radius:0;background:none;box-shadow:none;
+      padding:2px 0 2px 18px;margin:26px 0}
     .lr-task .lr-text{margin-bottom:0}.lr-task .lr-text p:last-child{margin-bottom:0}
     .lr-task-label{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em;margin-bottom:7px;color:#b45309}
     .lr-task-share{margin-top:12px;background:#d97706;color:#fff;border:none;border-radius:9px;padding:8px 14px;font-weight:700;font-size:.82rem;cursor:pointer}
@@ -968,22 +986,33 @@
     .lr-download-btn:hover{background:linear-gradient(180deg,rgba(245,197,24,.1),transparent)}
     .lr-dl-ico{font-size:1.05rem;color:var(--accent-dark,#9a6f12)}
     .lr-questions,.lr-quiz{margin:18px 0}
-    .lr-questions-title,.lr-quiz-title{font-weight:700;margin-bottom:10px}
-    .lr-q{border:1px solid var(--border,#e3e1e6);border-radius:12px;padding:14px 16px;margin:10px 0;background:var(--surface,#fff)}
-    .lr-q-prompt{font-weight:600;margin-bottom:10px}
-    .lr-opts{display:flex;flex-direction:column;gap:8px}
-    .lr-opt{text-align:left;color:var(--text,#1a1410);background:var(--surface,#fff);border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:10px 12px;font:inherit;font-size:.92rem;cursor:pointer;transition:border-color .12s,background .12s}
-    .lr-opt:hover:not(:disabled){border-color:var(--accent,#f5c518)}
-    .lr-opt.lr-sel{border-color:var(--accent,#f5c518)}
-    .lr-opt.lr-correct{border-color:#5fbf7e;background:#eaf6ee}
-    .lr-opt.lr-wrong{border-color:#d9534f;background:#fbecea}
+    .lr-questions-title,.lr-quiz-title{font:800 .68rem/1 Inter,system-ui,sans-serif;letter-spacing:.12em;
+      text-transform:uppercase;color:var(--text-muted,#6e6e7a);margin-bottom:16px;
+      display:flex;align-items:center;gap:7px}
+    .lr-questions-title::before,.lr-quiz-title::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+    /* A question being asked, not a form being filled. The card is gone and so
+       is the card that held each option: the question is set in the lesson's own
+       voice and the options are rows that respond when chosen. This was the last
+       box on the page and the most dated thing left on it. */
+    .lr-q{border:0;border-radius:0;padding:0;margin:26px 0;background:none}
+    .lr-q + .lr-q{margin-top:30px;padding-top:26px;border-top:1px solid var(--border,#e5e5ea)}
+    .lr-q-prompt{font:700 1.04rem/1.45 Fraunces,Georgia,serif;letter-spacing:-.01em;
+      color:var(--text,#15151a);margin-bottom:14px}
+    .lr-opts{display:flex;flex-direction:column;gap:1px}
+    .lr-opt{text-align:left;color:var(--text,#15151a);background:none;border:0;border-left:2px solid var(--border,#e5e5ea);border-radius:0;padding:11px 14px;font:inherit;font-size:.95rem;transition:border-color .14s,background .14s,padding-left .14s;cursor:pointer;transition:border-color .12s,background .12s}
+    .lr-opt:hover:not(:disabled){border-left-color:var(--text-faint,#9a9aa6);background:var(--surface-2,#f4f4f7);padding-left:17px}
+    .lr-opt.lr-sel{border-left-color:#5b4bdd;border-left-width:3px;background:rgba(91,75,221,.05);font-weight:600}
+    .lr-opt.lr-correct{border-left-color:#16a34a;border-left-width:3px;background:rgba(22,163,74,.07);color:#14532d;font-weight:600}
+    .lr-opt.lr-wrong{border-left-color:#dc2626;border-left-width:3px;background:rgba(220,38,38,.06);color:#7f1d1d}
     .lr-short{display:flex;gap:8px}.lr-input{flex:1;color:var(--text,#1a1410);background:var(--surface-2,#f5f2ee);color-scheme:light;border:1.5px solid var(--border,#e3e1e6);border-radius:9px;padding:9px 12px;font:inherit;font-size:.92rem}
     .lr-input.lr-correct{border-color:#5fbf7e}.lr-input.lr-wrong{border-color:#d9534f}
-    .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--accent,#f5c518);color:#3a2c00;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:.85rem;cursor:pointer}
+    .lr-check,.lr-done,.lr-quiz-start,.lr-quiz-submit{background:var(--text,#15151a);color:#fff;border:none;border-radius:9px;padding:10px 17px;font-weight:700;font-size:.85rem;cursor:pointer}
+    .lr-check:hover,.lr-done:hover,.lr-quiz-start:hover,.lr-quiz-submit:hover{background:#2c2c34}
     .lr-reflect{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
     .lr-input.lr-checking{border-color:var(--accent,#f5c518);background:rgba(245,197,24,.08);opacity:.75}
-    .lr-q-explain{margin-top:10px;font-size:.86rem;color:var(--text-muted,#8a7868);border-top:1px dashed var(--border,#e3e1e6);padding-top:10px}
-    .lr-quiz-card{border:1.5px solid var(--accent,#f5c518);border-radius:12px;padding:18px;text-align:center;background:linear-gradient(180deg,rgba(245,197,24,.06),transparent)}
+    .lr-q-explain{margin-top:13px;font-size:.9rem;line-height:1.6;color:var(--text-muted,#6e6e7a);
+      border-top:0;border-left:2px solid var(--border,#e5e5ea);padding:2px 0 2px 14px}
+    .lr-quiz-card{border:0;border-left:3px solid var(--accent,#f5c518);border-radius:0;padding:2px 0 2px 18px;text-align:left;background:none}
     .lr-quiz-sub{font-size:.82rem;color:var(--text-muted,#8a7868);margin:4px 0 12px}
     .lr-quiz-result{margin-top:14px;font-size:1rem}
     `;
@@ -995,7 +1024,35 @@
 
   window.LessonRender = {
     setGrader: function (fn) { lrGrader = fn; },
-    html(blocks) { injectStyles(); return `<div class="lr-body">${(blocks || []).map(renderBlock).join("")}</div>`; },
+    /* Blocks arrive as a flat list, but they were WRITTEN in sections: every h2
+       heading starts one. Grouping the run that follows each heading into a real
+       section gives a lesson its spine without touching a word of the content —
+       there are already about nine headings in a typical lesson. Anything before
+       the first heading is an intro and stands on its own. */
+    html(blocks) {
+      injectStyles();
+      const list = blocks || [];
+      const parts = [];
+      let open = false, num = 0;
+      const close = () => { if (open) { parts.push("</div></section>"); open = false; } };
+      list.forEach(b => {
+        const isSection = b && b.type === "heading" && b.size !== 3;
+        if (isSection) {
+          close();
+          num++;
+          const id = "sec-" + num;
+          const title = String(b.text || "").replace(/<[^>]*>/g, "");
+          parts.push(`<section class="lr-sec" id="${id}" data-sec="${num}" data-title="${esc(title)}">`
+            + `<div class="lr-sec-head"><span class="lr-sec-n">${String(num).padStart(2, "0")}</span>`
+            + `<h2 class="lr-sec-t">${inline(b.text || "")}</h2></div><div class="lr-sec-body">`);
+          open = true;
+          return;
+        }
+        parts.push(renderBlock(b));
+      });
+      close();
+      return `<div class="lr-body">${parts.join("")}</div>`;
+    },
     init,
     injectStyles,
     mdToHtml
