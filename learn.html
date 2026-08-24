@@ -755,6 +755,10 @@ let ITEMS = [], COURSES = [], CONTINUE = [], TOPICS = [], VOCAB = [], MYSYMS = {
    recommended after it had been. */
 const CLINIC_EVENT_BY_POST = {};
 let PICKS = [], PICK_SHORTS = [], PICK_WHY = "", PICK_SUB = "";
+/* Held so the reveal can wait for it. The row is part of the page, not an
+   afterthought: letting it land after the loading screen lifts makes it drop
+   in and shove everything below it down. */
+let PICKS_READY = null;
 let BB_AT = 0, BB_TIMER = null;
 let FEED = {};                      // post id -> raw row, for the lightbox
 let topic = "", type = "", term = "", showAll = false, symptom = "", onlyEx = false;
@@ -931,7 +935,7 @@ async function load() {
      over when the first returned nothing. The library does not need it to draw
      itself and the hero already falls back to the newest of each kind, so it
      lands afterwards and fills in. */
-  loadPicks();
+  PICKS_READY = loadPicks();
 
   /* topics come from the only vocabulary that is actually populated today */
   const counts = {};
@@ -2146,7 +2150,15 @@ function wire(heroChanged) {
     console.error("learn load error:", e);
     $("ln-root").innerHTML = '<div class="ln-empty">Something went wrong loading the library. Reload to try again.</div>';
   }
-  await BB_FIRST;                       // capped, so this is never a long wait
+  /* Both waits run together and both are capped, so the page opens on a
+     finished picture: the hero with its first frame, and the picks row
+     already in place rather than arriving a second later. Neither can hold
+     the page - whichever is slower, the cap ends it. */
+  await Promise.all([
+    BB_FIRST,                          // capped at 2500ms where it is defined
+    Promise.race([PICKS_READY || Promise.resolve(),
+                  new Promise(r => setTimeout(r, 4000))]),
+  ]);
   $("loading-screen").style.display = "none";
   $("app-main").style.display = "block";
   $("app-header").style.display = "";
