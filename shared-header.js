@@ -1993,10 +1993,19 @@ function _shPalScheduleSearch(q) {
   _shPalTimer = setTimeout(function() { _shPalRemoteSearch(query, navHits); }, 180);
 }
 
+/* Where a content_feed_posts row actually belongs. The feed page was the
+   destination for every type, so a video found in search opened as a feed post
+   instead of playing in the lightbox the way it does everywhere else. A written
+   post is the only type that still calls the feed page home. */
+function _shPalContentHref(a) {
+  if (a.type === "youtube") return "/learn.html?post=" + encodeURIComponent(a.id);
+  return "/content-feed.html?post=" + a.id;
+}
+
 async function _shPalRemoteSearch(query, navHits) {
   const seq = ++_shPalSeq;
   const esc = query.replace(/[%,()]/g, " ").trim();
-  let pieces = [], ppd = [], content = [], gloss = [];
+  let pieces = [], ppd = [], content = [], gloss = [], mmt = [];
   if (_shPalDb && esc) {
     try {
       const r = await _shPalDb.from("pieces").select("id,title,composer")
@@ -2012,9 +2021,19 @@ async function _shPalRemoteSearch(query, navHits) {
       // Clinics carry a post row only so their comments share one table; the
       // clinic itself is found through Live, not through this palette.
       const r = await _shPalDb.from("content_feed_posts").select("id,title,type")
-        .neq("type", "clinic")
+        .not("type", "in", '("clinic","blog")')
         .ilike("title", "%" + esc + "%").order("published_at", { ascending: false }).limit(6);
       content = r.data || [];
+    } catch (e) {}
+    try {
+      /* Monday Music Tips come from mmt_articles, not from the blog posts that
+         announce them. 11 of those 25 announcements carry no url at all, so a
+         slug cannot be read off them; and the article is the thing being looked
+         for in any case. Learn skips type=blog for the same reason. */
+      const r = await _shPalDb.from("mmt_articles").select("slug,title")
+        .eq("status", "published")
+        .ilike("title", "%" + esc + "%").order("published_at", { ascending: false }).limit(6);
+      mmt = r.data || [];
     } catch (e) {}
     try {
       const r = await _shPalDb.from("glossary").select("term").ilike("term", "%" + esc + "%").limit(6);
@@ -2040,9 +2059,18 @@ async function _shPalRemoteSearch(query, navHits) {
     items.push({
       title: a.title || "Untitled",
       sub: sub,
-      href: "/content-feed.html?post=" + a.id,
+      href: _shPalContentHref(a),
       kind: "content",
       icon: a.type === "youtube" ? _SH_PAL_ICONS.video : _SH_PAL_ICONS.article,
+    });
+  });
+  mmt.forEach(function(a) {
+    items.push({
+      title: a.title || "Untitled",
+      sub: "Monday Music Tips",
+      href: "/theory/sheets/view.html?mmt=" + encodeURIComponent(a.slug || ""),
+      kind: "content",
+      icon: _SH_PAL_ICONS.article,
     });
   });
   gloss.forEach(function(g) {
