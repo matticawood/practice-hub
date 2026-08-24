@@ -873,21 +873,25 @@
     .lr-table th,.lr-table td{padding:9px 13px;text-align:left;vertical-align:top;border:1px solid var(--border,#e3e1e6)}
     .lr-table th{background:var(--surface-2,#f5f2ee);font-weight:700;color:var(--text,#1a1410);white-space:nowrap}
     .lr-table td strong{color:var(--accent-dark,#9a6f12)}
-    /* Tinted with their own colour rather than left white with a stripe, so a
-       warning looks different from a tip at a glance and not only on reading
-       the label. The tint is faint: it should register, not shout. */
-    .lr-callout{border-radius:12px;padding:15px 17px;margin:22px 0;border:1px solid var(--border,#e3e1e6);
-      border-left-width:3px;background:var(--surface,#fff)}
+    /* No box and no wash. A faint tint inside a faint border reads as neither
+       one thing nor the other, and a page of them reads as a worksheet. These
+       are asides in a piece of writing, so they are set like asides: a firm
+       rule down the side, the label carrying the colour, and the text sitting
+       on the page with everything else. Nothing to wash out. */
+    .lr-callout{margin:26px 0;padding:2px 0 2px 18px;border-left:3px solid var(--border,#e3e1e6);
+      background:none;border-radius:0}
     .lr-callout .lr-text{margin-bottom:0}.lr-callout .lr-text p:last-child{margin-bottom:0}
-    .lr-callout-label{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.11em;margin-bottom:7px;color:var(--accent-dark,#9a6f12)}
-    .lr-callout-key{background:rgba(245,197,24,.06);border-color:rgba(245,197,24,.24);border-left-color:#eab308}
-    .lr-callout-watch{border-left-color:#d9534f;background:rgba(217,83,79,.06);border-color:rgba(217,83,79,.26);border-left-color:#d9534f}
-    .lr-callout-watch .lr-callout-label{color:#c0392b}
-    .lr-callout-tip{border-left-color:#5fbf7e;background:rgba(95,191,126,.07);border-color:rgba(95,191,126,.3);border-left-color:#5fbf7e}
-    .lr-callout-tip .lr-callout-label{color:#2f7d4a}
-    .lr-example{border:1px solid var(--border,#e3e1e6);border-radius:12px;padding:15px 17px;margin:22px 0;background:var(--surface,#fff)}
+    .lr-callout-label{font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;
+      margin-bottom:6px;display:flex;align-items:center;gap:7px}
+    .lr-callout-label::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+    .lr-callout-key{border-left-color:#eab308}.lr-callout-key .lr-callout-label{color:#a16207}
+    .lr-callout-watch{border-left-color:#dc2626}.lr-callout-watch .lr-callout-label{color:#b91c1c}
+    .lr-callout-tip{border-left-color:#16a34a}.lr-callout-tip .lr-callout-label{color:#15803d}
+    /* Same treatment: a worked example is an aside, not a card. */
+    .lr-example{margin:26px 0;padding:2px 0 2px 18px;border-left:3px solid var(--border-2,#d7d7de);
+      background:none;border-radius:0}
     .lr-example .lr-text{margin-bottom:0}.lr-example .lr-text p:last-child{margin-bottom:0}
-    .lr-example-title{font-weight:700;margin-bottom:8px;font-size:.92rem}
+    .lr-example-title{font-weight:700;margin-bottom:7px;font-size:.92rem;color:var(--text,#15151a)}
     .lr-img{max-width:100%;height:auto;border-radius:10px;display:block;margin:4px 0}
     .lr-figure{margin:16px 0}.lr-figure figcaption{font-size:.8rem;color:var(--text-muted,#8a7868);margin-top:6px;text-align:center}
     .lr-audio{margin:16px 0}.lr-audio-cap{font-size:.85rem;color:var(--text-muted,#8a7868);margin-bottom:6px}.lr-audio audio{width:100%}
