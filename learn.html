@@ -212,15 +212,18 @@
     .ln-bb-img img { object-position:50% 20%; }
     .ln-bb-pic { right:auto; left:18px; top:auto; bottom:auto; transform:none;
       width:4.6rem; margin:22px 0 0; position:absolute; }
-    .ln-bb-in { padding:20px 18px 128px; height:100%; max-width:none; justify-content:flex-end; }
+    /* The block is anchored to the foot, so this padding is the gap above the
+       counts. It reserved 128px for a foot measuring about 77, which left the
+       text floating with dead space beneath it. */
+    .ln-bb-in { padding:20px 18px 96px; height:100%; max-width:none; justify-content:flex-end; }
     .ln-bb-krow { margin-bottom:10px; }
-    /* The desktop hero runs a 2.6:1 headline to body ratio; the phone was at
-       1.6:1, which is why it read flat next to it. The headline scales with the
-       screen rather than sitting at a fixed size, and is held to three lines so
-       a long title cannot push the button into the counts below. */
-    .ln-bb h2 { font-size:clamp(1.7rem, 8vw, 2.15rem); line-height:1.1;
-      margin-bottom:9px; display:-webkit-box; -webkit-line-clamp:3;
-      -webkit-box-orient:vertical; overflow:hidden; }
+    /* Sized to hold two lines rather than three: a headline running to three is
+       doing the blurb's job. line-height matters as much as size here, because
+       a clamped box clips at the line box, so at 1.1 the tail of a g or a y was
+       cut off; 1.2 with a little padding gives descenders their room back. */
+    .ln-bb h2 { font-size:clamp(1.45rem, 6.6vw, 1.85rem); line-height:1.2;
+      margin-bottom:9px; padding-bottom:.1em; display:-webkit-box;
+      -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
     .ln-bb p { font-size:.85rem; line-height:1.45; margin-bottom:16px;
       display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
     .ln-bb-lib { margin-top:15px; padding-top:12px; gap:11px; font-size:.75rem; }
@@ -594,7 +597,7 @@
       border-bottom:0; background:rgba(11,11,14,.62); }
     .ln-segt { top:0; bottom:0; left:0; width:50%; border-radius:0; }
     .ln-segb { border-radius:0; padding:13px 10px; }
-    .ln-bb-in { padding-bottom:132px; }
+    .ln-bb-in { padding-bottom:94px; }
     .ln-bb-dots { bottom:auto; top:14px; right:14px; }
   }
   @media (max-width:520px) {
@@ -884,29 +887,14 @@ async function load() {
      written about, then what their practice shows, then what they read. */
   PICKS = []; PICK_SHORTS = [];
   PICK_WHY = ""; PICK_SUB = "";
-  /* Issued after the batch above, not inside it. Fired in parallel with the very
-     first requests it can go out before the client has attached the session, and
-     these views return nothing to an unauthenticated caller, so the row silently
-     never appeared. */
-  let picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
-  if (!(picks.data || []).length) picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
-  let pk = (picks && picks.data) || [];
-  if (pk.length) {
-    const byHref = {};
-    ITEMS.forEach(i => { byHref[i.href] = i; });
-    PICK_SHORTS = pk.filter(r => r.fmt === "short").map(r => Object.assign({},
-      byHref[r.href] || { type:"video", title:r.title, href:r.href, meta:"" },
-      { topic:r.topic, vertical:true })).filter(Boolean);
-    pk = pk.filter(r => r.fmt !== "short");
-    PICKS = pk.map(r => Object.assign({}, byHref[r.href] || {
-      type: r.content_type === "mmt" ? "article" : r.content_type === "theory_sheet" ? "sheet"
-          : r.content_type === "lesson" ? "course" : r.content_type,
-      title: r.title, href: r.href, meta: "" }, { topic: r.topic })).filter(Boolean);
-    /* Each card names the problem it answers, so a sub-line listing them again
-       only wrapped onto two lines and said the same thing twice. */
-    PICK_WHY = "For you";
-    PICK_SUB = "";
-  }
+  /* Not awaited. picks_for reads views built with security_invoker, so under a
+     member's own role every underlying table has its policies evaluated: the
+     same call that takes 470ms with the service key takes about 4.5 SECONDS
+     from the browser, and it was being awaited before anything rendered, twice
+     over when the first returned nothing. The library does not need it to draw
+     itself and the hero already falls back to the newest of each kind, so it
+     lands afterwards and fills in. */
+  loadPicks();
 
   /* topics come from the only vocabulary that is actually populated today */
   const counts = {};
@@ -1339,6 +1327,36 @@ function wireLbDrag() {
   };
   lb.addEventListener("touchend", release, { passive: true });
   lb.addEventListener("touchcancel", release, { passive: true });
+}
+
+
+/* The row of things that might actually help, and the picked hero slides.
+   Deliberately separate from load(): see the note at its call site. */
+async function loadPicks() {
+  /* Fired after the session is attached: these views return nothing to an
+     unauthenticated caller, so issued too early the row silently never
+     appeared. */
+  let picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
+  if (!(picks.data || []).length) picks = await db.rpc("picks_for", { em: myEmail, n: 14 });
+  let pk = (picks && picks.data) || [];
+  if (pk.length) {
+    const byHref = {};
+    ITEMS.forEach(i => { byHref[i.href] = i; });
+    PICK_SHORTS = pk.filter(r => r.fmt === "short").map(r => Object.assign({},
+      byHref[r.href] || { type:"video", title:r.title, href:r.href, meta:"" },
+      { topic:r.topic, vertical:true })).filter(Boolean);
+    pk = pk.filter(r => r.fmt !== "short");
+    PICKS = pk.map(r => Object.assign({}, byHref[r.href] || {
+      type: r.content_type === "mmt" ? "article" : r.content_type === "theory_sheet" ? "sheet"
+          : r.content_type === "lesson" ? "course" : r.content_type,
+      title: r.title, href: r.href, meta: "" }, { topic: r.topic })).filter(Boolean);
+    /* Each card names the problem it answers, so a sub-line listing them again
+       only wrapped onto two lines and said the same thing twice. */
+    PICK_WHY = "For you";
+    PICK_SUB = "";
+  }
+
+  render();          // fill in what the first paint could not know
 }
 
 /* ── render ─────────────────────────────────────────────────────────────────── */
