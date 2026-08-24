@@ -3228,6 +3228,9 @@ function _resNewMemberOnly() { return window._rmIsNewMember === true; }
 // Data/mutation layer below is preserved from the original; the render layer is
 // the new _ppdnew.html design wired to real data + the real mutation functions.
 let _ppdLoaded = false;
+let _ppdPickIds = [];        // article ids picks_for returned, best first
+let _ppdHeroAt = 0;          // which hero slide is showing
+let _ppdHeroTimer = null;
 let _ppdAllSheets = [];
 let _ppdReadingMap = new Map();
 let _ppdNoteSlugs  = new Set();
@@ -3411,35 +3414,143 @@ function _ppdChipsHTML() {
 }
 
 // ── Library header (hero) ──
+/* ── Hero slides ──────────────────────────────────────────────────────────
+   The first slide is the library itself; the rest are articles picked for this
+   member. Sources in order of confidence: what picks_for returned (the same
+   engine behind For you on Learn), then unread articles in the topics they
+   already read most, then simply the newest they have not opened. The
+   fallbacks matter because only about half the articles carry symptom tags,
+   so picks_for alone leaves plenty of members with an empty carousel. */
+function _ppdHeroPicks(n) {
+  const unread = function (sh) { return sh && _ppdReadingMap.get(sh.id) !== 'read'; };
+  const byId = new Map(_ppdAllSheets.map(function (sh) { return [sh.id, sh]; }));
+  const out = [], seen = new Set();
+  const take = function (sh) {
+    if (!unread(sh) || seen.has(sh.id) || out.length >= n) return;
+    seen.add(sh.id); out.push(sh);
+  };
+
+  _ppdPickIds.forEach(function (id) { take(byId.get(id)); });
+
+  if (out.length < n) {
+    // topics they have actually spent time in, busiest first
+    const weight = new Map();
+    _ppdAllSheets.forEach(function (sh) {
+      const st = _ppdReadingMap.get(sh.id);
+      if (!st) return;
+      const cat = _ppdCleanCat(sh.category);
+      weight.set(cat, (weight.get(cat) || 0) + (st === 'read' ? 2 : 1));
+    });
+    Array.from(weight.entries()).sort(function (a, b) { return b[1] - a[1]; })
+      .forEach(function (pair) {
+        _ppdAllSheets.forEach(function (sh) {
+          if (_ppdCleanCat(sh.category) === pair[0]) take(sh);
+        });
+      });
+  }
+
+  // newest first, so a member with no history still gets something current
+  if (out.length < n) {
+    _ppdAllSheets.slice().reverse().forEach(take);
+  }
+  return out;
+}
+
 function _ppdLibHeader() {
   const cats = Array.from(new Set(_ppdAllSheets.map(function(s) { return _ppdCleanCat(s.category); }))).sort();
   const total = _ppdAllSheets.length;
   const readCount = _ppdAllSheets.filter(function(s) { return _ppdReadingMap.get(s.id) === 'read'; }).length;
   const pct = total ? Math.round(readCount / total * 100) : 0;
   const minsRead = _ppdAllSheets.filter(function(s) { return _ppdReadingMap.get(s.id) === 'read'; }).reduce(function(a, s) { return a + _ppdReadMins(s); }, 0);
-  return '<div class="ppd-hero">' +
-    // The mock hangs the library's mark as a plaque on the right of the hero
-    // rather than a badge beside the title. It is its own element so the
-    // inline icon (and the light layout that depends on it) is left alone.
-    '<div class="ppd-hero-plaque" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>' +
-    '<div class="ppd-hbtop">' +
-      '<div class="ppd-hero-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>' +
-      '<div class="ppd-hbtitle"><div class="ppd-eyebrow">Article Library</div><div class="ppd-hero-title">Piano Practice Daily</div></div>' +
-      (isOwner() ? '<a class="ppd-newsheet" href="theory/editor.html">+ New Sheet</a>' : '') +
+
+  const BOOK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>';
+
+  /* Slide one is the library: everything the hero said before the carousel
+     existed, so landing here still tells you where you are. */
+  let slides = '<div class="ppd-hslide' + (_ppdHeroAt === 0 ? ' on' : '') + '" style="--pc:#a8893a">' +
+    '<div class="ppd-hpic" aria-hidden="true">' + BOOK + '</div>' +
+    '<div class="ppd-hin">' +
+      '<div class="ppd-hbtop">' +
+        '<div class="ppd-hero-icon">' + BOOK + '</div>' +
+        '<div class="ppd-hbtitle"><div class="ppd-eyebrow">Article Library</div><div class="ppd-hero-title">Piano Practice Daily</div></div>' +
+      '</div>' +
+      '<div class="ppd-hero-sub">Deepen your understanding of music with articles on a wide range of topics.' +
+        '<span class="ppd-hero-count">' + total + ' article' + (total === 1 ? '' : 's') + ' across ' + cats.length + ' topic' + (cats.length === 1 ? '' : 's') + '. Start anywhere you like.</span></div>' +
+    '</div></div>';
+
+  const picks = _ppdHeroPicks(4);
+  picks.forEach(function (sh, i) {
+    const cat  = _ppdCleanCat(sh.category);
+    const cc   = _ppdCatColor(cat);
+    const href = 'theory/sheets/view.html?slug=' + _ppdAttr(sh.slug);
+    const reading = _ppdReadingMap.get(sh.id) === 'reading';
+    slides += '<div class="ppd-hslide' + (_ppdHeroAt === i + 1 ? ' on' : '') + '" style="--pc:' + cc + '">' +
+      '<div class="ppd-hpic" aria-hidden="true"><span class="ppd-hpic-mono">' + _ppdEsc(_ppdMono(cat)) + '</span></div>' +
+      '<div class="ppd-hin">' +
+        '<div class="ppd-hbtop"><div class="ppd-hbtitle">' +
+          '<div class="ppd-eyebrow">' + _ppdEsc(cat) + '</div>' +
+          '<div class="ppd-hero-title">' + _ppdEsc(_ppdDisplayTitle(sh.title)) + '</div>' +
+        '</div></div>' +
+        '<div class="ppd-hero-sub ppd-hero-clamp">' + _ppdEsc(_ppdIntro(sh)) + '</div>' +
+        '<div class="ppd-hacts"><a class="ppd-hgo" href="' + href + '">' +
+          (reading ? 'Keep reading' : 'Read this') + '</a>' +
+          '<span class="ppd-hwhen">' + _ppdReadMins(sh) + ' min read' +
+            (reading ? ' &middot; already started' : '') + '</span></div>' +
+      '</div></div>';
+  });
+
+  const dots = picks.length
+    ? '<div class="ppd-hdots">' +
+        Array.from({ length: picks.length + 1 }).map(function (_, i) {
+          return '<button type="button" class="ppd-hdot' + (_ppdHeroAt === i ? ' on' : '') +
+                 '" onclick="ppdHeroGo(' + i + ')" aria-label="Slide ' + (i + 1) + '"></button>';
+        }).join('') + '</div>'
+    : '';
+
+  /* The foot carries the search now. It used to sit in the first slide, and
+     the moment the carousel moved on you could not search the library you
+     were looking at. Learn puts its filter in the same place. */
+  return '<div class="ppd-hero" id="ppd-hero">' + slides + dots +
+    (isOwner() ? '<a class="ppd-newsheet" href="theory/editor.html">+ New Sheet</a>' : '') +
+    '<div class="ppd-hero-progress">' +
+      '<div class="ppd-hprog"><div class="ppd-progress-track"><div class="ppd-progress-fill" id="ppdFill" style="width:' + pct + '%"></div></div>' +
+        '<div class="ppd-progress-label"><strong id="ppdStRead">' + readCount + '</strong> of ' + total + ' read&nbsp; ·&nbsp; <strong id="ppdStMins">' + _ppdFmtMins(minsRead) + '</strong> learned</div></div>' +
+      '<div class="ppd-hero-search-row">' +
+        '<div class="ppd-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>' +
+          '<input id="ppd-search-input" placeholder="Search the library…" value="' + _ppdAttr(_ppdQuery) + '" oninput="ppdFilterSheets(this.value)"></div>' +
+        '<button type="button" class="ppd-surprise" onclick="ppdSurprise()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg><span class="ppd-surprise-txt">Surprise me</span></button>' +
+      '</div>' +
     '</div>' +
-    '<div class="ppd-hero-sub">Deepen your understanding of music with articles on a wide range of topics.' +
-      '<span class="ppd-hero-count">' + total + ' article' + (total === 1 ? '' : 's') + ' across ' + cats.length + ' topic' + (cats.length === 1 ? '' : 's') + '. Start anywhere you like.</span></div>' +
-    '<div class="ppd-hero-search-row">' +
-      '<div class="ppd-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>' +
-        '<input id="ppd-search-input" placeholder="Search the library…" value="' + _ppdAttr(_ppdQuery) + '" oninput="ppdFilterSheets(this.value)"></div>' +
-      '<button type="button" class="ppd-surprise" onclick="ppdSurprise()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg><span class="ppd-surprise-txt">Surprise me</span></button>' +
-    '</div>' +
-    '<div class="ppd-hero-progress"><div class="ppd-progress-track"><div class="ppd-progress-fill" id="ppdFill" style="width:' + pct + '%"></div></div>' +
-      '<div class="ppd-progress-label"><strong id="ppdStRead">' + readCount + '</strong> of ' + total + ' read&nbsp; ·&nbsp; <strong id="ppdStMins">' + _ppdFmtMins(minsRead) + '</strong> learned</div></div>' +
   '</div>';
   /* Continue reading is the first shelf of the content, not part of the header.
      It has to live below the tab row, and the tab row is the header's last
      child, so the shelf belongs on the other side of that boundary. */
+}
+
+/* Slides cross-fade in place rather than the hero re-rendering, so the search
+   box keeps its focus and whatever you had typed. */
+window.ppdHeroGo = function (i) {
+  const hero = document.getElementById('ppd-hero');
+  if (!hero) return;
+  const slides = hero.querySelectorAll('.ppd-hslide');
+  if (!slides.length) return;
+  _ppdHeroAt = ((i % slides.length) + slides.length) % slides.length;
+  slides.forEach(function (el, n) { el.classList.toggle('on', n === _ppdHeroAt); });
+  hero.querySelectorAll('.ppd-hdot').forEach(function (el, n) { el.classList.toggle('on', n === _ppdHeroAt); });
+  _ppdHeroStart();
+};
+function _ppdHeroStart() {
+  clearInterval(_ppdHeroTimer);
+  if (_ppdReducedMotion()) return;
+  const hero = document.getElementById('ppd-hero');
+  if (!hero || hero.querySelectorAll('.ppd-hslide').length < 2) return;
+  _ppdHeroTimer = setInterval(function () {
+    const h = document.getElementById('ppd-hero');
+    // stop once the hero is gone, and hold while someone is using the search
+    if (!h) { clearInterval(_ppdHeroTimer); return; }
+    if (h.matches(':hover') || document.activeElement === document.getElementById('ppd-search-input')) return;
+    ppdHeroGo(_ppdHeroAt + 1);
+  }, 7000);
 }
 
 // ── Library content (resume shelf + grouped grids) ──
@@ -3681,6 +3792,7 @@ function _ppdRender() {
   if (_ppdAnimCards && !_ppdReducedMotion()) { void hb.offsetWidth; hb.classList.add('anim'); }
   document.getElementById('ppd-content').innerHTML = _ppdViewContent();
   if (_ppdView === 'library' && !_ppdProgressAnimated) { _ppdProgressAnimated = true; _ppdAnimProgress(); }
+  _ppdHeroStart();
   if (_ppdView === 'mylist' && isOwner()) _ppdPopulateListDropdown();
   _ppdUpdateChipFade();
   requestAnimationFrame(_ppdSlideUnderline);
@@ -3812,11 +3924,20 @@ async function _ppdLoadSheets() {
   const results = await Promise.all([
     db.from('theory_sheets').select('*').order('created_at'),
     db.from('reading_list').select('sheet_id, status').eq('email', myEmail),
-    db.from('sheet_notes').select('sheet_slug').eq('email', myEmail)
+    db.from('sheet_notes').select('sheet_slug').eq('email', myEmail),
+    // The same engine that fills For you on Learn. Asked for 40 because it
+    // returns every kind of content and articles are a minority of them; we
+    // keep the articles and drop the rest. A failure here costs the hero its
+    // recommendations, not the page.
+    db.rpc('picks_for', { em: myEmail, n: 40 }).then(function (r) { return r; },
+                                                    function ()  { return { data: [] }; })
   ]);
   const sheetsRes  = results[0];
   const readingRes = results[1];
   const notesRes   = results[2];
+  _ppdPickIds = ((results[3] && results[3].data) || [])
+    .filter(function (r) { return r.content_type === 'theory_sheet'; })
+    .map(function (r) { return r.content_ref; });
   (readingRes.data || []).forEach(function(r) { _ppdReadingMap.set(r.sheet_id, r.status); });
   (notesRes.data   || []).forEach(function(r) { _ppdNoteSlugs.add(r.sheet_slug); });
   _ppdAllSheets = (sheetsRes.error || !sheetsRes.data) ? [] : sheetsRes.data;
@@ -5540,6 +5661,100 @@ window.addEventListener("popstate", function () {
     -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 56px),transparent);
     mask-image:linear-gradient(to right,#000 calc(100% - 56px),transparent); }
 
+  /* ══ the hero carousel ═════════════════════════════════════════════════
+     Slides stack and cross-fade in place, the way Learn's billboard does, so
+     the hero holds one height and nothing reflows underneath as it turns. Each
+     slide carries its own --pc, so the ground is the colour of whatever topic
+     is showing rather than one fixed gold. */
+  body.ppd-dark #ppd-index .ppd-hslide {
+    position:absolute; inset:0; opacity:0; pointer-events:none;
+    transition:opacity .5s ease;
+    background:
+      radial-gradient(120% 110% at 0% 100%, rgba(11,11,14,.66) 0%, rgba(11,11,14,.24) 46%, transparent 72%),
+      radial-gradient(120% 150% at 84% 8%, color-mix(in srgb,var(--pc) 40%, transparent), transparent 62%),
+      linear-gradient(140deg, color-mix(in srgb,var(--pc) 20%, #16141c), #100e13); }
+  body.ppd-dark #ppd-index .ppd-hslide.on { opacity:1; pointer-events:auto; }
+  @media (prefers-reduced-motion:reduce) {
+    body.ppd-dark #ppd-index .ppd-hslide { transition:none; } }
+  /* the words sit in the same column and at the same foot as before */
+  body.ppd-dark #ppd-index .ppd-hin {
+    position:relative; z-index:2; height:100%; max-width:38rem;
+    padding:30px var(--ppd-gut) 88px;
+    display:flex; flex-direction:column; justify-content:flex-end; }
+  /* A clamped box in a flex column still shrinks, so the three lines it had
+     reserved were squashed to one and cut through the descenders. */
+  body.ppd-dark #ppd-index .ppd-hin > * { flex:0 0 auto; }
+  /* the eyebrow belongs to the slide's topic, so it wears the slide's colour */
+  body.ppd-dark #ppd-index .ppd-hslide .ppd-eyebrow {
+    background:color-mix(in srgb,var(--pc) 78%,#000); }
+  body.ppd-dark #ppd-index .ppd-progress-track { min-width:5rem; }
+  /* An article's opening paragraph runs to eight lines. Unclamped it pushed
+     its own title up out of the frame, which is how I found out. Two lines for
+     the headline, three for the standfirst - the same ceiling Learn puts on
+     its billboard. */
+  body.ppd-dark #ppd-index .ppd-hero-title {
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden; padding-bottom:.06em; }
+  body.ppd-dark #ppd-index .ppd-hero-clamp {
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden; margin-bottom:0; }
+  body.ppd-dark #ppd-index .ppd-hin > .ppd-hero-count {
+    display:block; font-size:.86rem; color:rgba(255,255,255,.58); }
+  /* The block has to fit a 22rem frame at its shortest, so the read time sits
+     beside the button rather than taking a line of its own - measured, the
+     eyebrow was being pushed up out of the top of the hero. */
+  body.ppd-dark #ppd-index .ppd-hacts {
+    display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-top:16px; }
+  body.ppd-dark #ppd-index .ppd-hwhen {
+    font-size:.84rem; font-weight:600; color:rgba(255,255,255,.7); }
+  body.ppd-dark #ppd-index .ppd-hgo {
+    display:inline-flex; align-items:center; border-radius:999px; padding:11px 20px;
+    font-weight:600; font-size:.88rem; text-decoration:none;
+    background:#fff; color:#0f0f13; border:1px solid #fff;
+    transition:background .18s, border-color .18s; }
+  body.ppd-dark #ppd-index .ppd-hgo:hover {
+    background:color-mix(in srgb,var(--pc) 82%, #fff); border-color:transparent; color:#fff; }
+
+  /* the mark, per slide, in that slide's colour */
+  body.ppd-dark #ppd-index .ppd-hpic {
+    position:absolute; right:6%; top:50%; transform:translateY(-50%); z-index:1;
+    width:clamp(5rem,10vw,8.5rem); aspect-ratio:1; border-radius:24px;
+    display:grid; place-items:center; overflow:hidden;
+    background:rgba(16,14,19,.5);
+    border:1px solid color-mix(in srgb,var(--pc) 38%,transparent);
+    color:var(--pc); pointer-events:none;
+    animation:ppd-halo 6.5s ease-in-out infinite; }
+  body.ppd-dark #ppd-index .ppd-hpic svg { width:44%; height:44%; }
+  body.ppd-dark #ppd-index .ppd-hpic-mono {
+    font-family:Fraunces,Georgia,'Times New Roman',serif; font-weight:700;
+    font-size:clamp(2.4rem,4.4vw,3.6rem); line-height:1;
+    color:color-mix(in srgb,var(--pc) 78%, #fff); }
+  body.ppd-dark #ppd-index .ppd-hpic::after {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(104deg, transparent 38%, rgba(255,255,255,.34) 50%, transparent 62%);
+    transform:translateX(-130%); animation:ppd-gleam 6.5s ease-in-out infinite; }
+  body.ppd-dark #ppd-index .ppd-hslide:not(.on) .ppd-hpic,
+  body.ppd-dark #ppd-index .ppd-hslide:not(.on) .ppd-hpic::after { animation:none; }
+
+  body.ppd-dark #ppd-index .ppd-hdots {
+    position:absolute; right:var(--ppd-gut); bottom:104px; z-index:4; display:flex; gap:8px; }
+  body.ppd-dark #ppd-index .ppd-hdot {
+    width:8px; height:8px; padding:0; border-radius:50%; cursor:pointer;
+    border:1px solid rgba(255,255,255,.55); background:transparent; transition:.2s; }
+  body.ppd-dark #ppd-index .ppd-hdot:hover { background:rgba(255,255,255,.55); }
+  body.ppd-dark #ppd-index .ppd-hdot.on { background:#fff; border-color:#fff; transform:scale(1.15); }
+
+  /* the foot is a strip of its own: counts at one end, search at the other */
+  body.ppd-dark #ppd-index .ppd-hero-progress {
+    display:flex; align-items:center; justify-content:space-between; gap:20px;
+    flex-direction:row; }
+  body.ppd-dark #ppd-index .ppd-hprog {
+    display:flex; align-items:center; gap:12px; flex-direction:row-reverse; min-width:0; }
+  body.ppd-dark #ppd-index .ppd-hero-search-row {
+    flex:0 1 26rem; min-width:0; margin:0; }
+  body.ppd-dark #ppd-index .ppd-search input { padding-top:9px; padding-bottom:9px; }
+  body.ppd-dark #ppd-index .ppd-surprise { min-height:0; padding:9px 16px; }
+
   /* ══ Learn's billboard shape ═══════════════════════════════════════════
      Same height as Learn's hero, and because it is that tall it takes Learn's
      composition with it rather than floating the words in the middle: a fixed
@@ -5629,32 +5844,21 @@ window.addEventListener("popstate", function () {
     body.ppd-dark #ppd-index .ppd-hero-sub,
     body.ppd-dark #ppd-index .ppd-hero-search-row { max-width:none; }
 
-    /* Learn keeps its plate on a phone - moved and shrunk, never dropped - and
-       this had nothing there at all, which is what made the top feel
-       different. The full plaque does not fit beside a headline at 386px, so
-       the mark goes back where the page already has a slot for it, beside the
-       eyebrow, wearing the plaque's treatment rather than the gold tile. It
-       catches the light on the same cycle as everything else.
-
-       Stacked, not sat beside: as a flex row the mark pushed the whole title
-       block in by 64px, so the headline hung indented while the description
-       under it started at the edge. */
-    /* Learn's phone billboard: 26rem, mark pinned to the top-left corner so a
-       title running to two lines cannot ride up over it, words at the foot. */
-    body.ppd-dark #ppd-index .ppd-hero {
-      height:26rem; padding:20px 16px 84px; }
+    /* Learn keeps its plate on a phone - moved and shrunk, never dropped - so
+       the slide's mark moves to the top-left corner rather than sitting on the
+       centre line where it would land on top of the headline. The first
+       slide's inline copy goes; the mark is the mark on every slide. */
     body.ppd-dark #ppd-index .ppd-hbtop { display:block; }
-    body.ppd-dark #ppd-index .ppd-hero-icon {
-      display:flex; position:absolute; left:16px; top:20px; overflow:hidden; margin:0;
-      width:52px; height:52px; border-radius:15px;
-      background:rgba(16,14,19,.5);
-      border:1px solid color-mix(in srgb,#a8893a 38%,transparent);
-      color:#a8893a; animation:ppd-halo 6.5s ease-in-out infinite; }
-    body.ppd-dark #ppd-index .ppd-hero-icon svg { width:25px; height:25px; }
-    body.ppd-dark #ppd-index .ppd-hero-icon::after {
-      content:""; position:absolute; inset:0; pointer-events:none;
-      background:linear-gradient(104deg, transparent 38%, rgba(255,255,255,.34) 50%, transparent 62%);
-      transform:translateX(-130%); animation:ppd-gleam 6.5s ease-in-out infinite; }
+    body.ppd-dark #ppd-index .ppd-hero-icon { display:none; }
+    body.ppd-dark #ppd-index .ppd-hpic {
+      left:16px; right:auto; top:20px; transform:none;
+      width:52px; height:52px; border-radius:15px; }
+    body.ppd-dark #ppd-index .ppd-hpic svg { width:48%; height:48%; }
+    body.ppd-dark #ppd-index .ppd-hpic-mono { font-size:1.6rem; }
+    /* out of the way of the words, which sit at the foot */
+    /* in the gap on the mark's own row: below it they landed on the topic
+       pill, and top-right is where New Sheet sits */
+    body.ppd-dark #ppd-index .ppd-hdots { bottom:auto; top:38px; left:82px; right:auto; }
   }
 
   /* Search and Surprise me are pills in the mock, not rounded rectangles. */
@@ -5663,11 +5867,10 @@ window.addEventListener("popstate", function () {
   body.ppd-dark #ppd-index .ppd-search svg { left:18px; }
   body.ppd-dark #ppd-index .ppd-surprise { border-radius:999px; padding:0 20px; }
 
-  /* The foot reads numbers-then-bar, and the bar is a short indicator rather
-     than a rule running the width of the page. */
-  body.ppd-dark #ppd-index .ppd-hero-progress {
-    flex-direction:row-reverse; justify-content:space-between; }
-  body.ppd-dark #ppd-index .ppd-progress-track { flex:0 1 16rem; height:6px; }
+  /* The foot reads numbers-then-bar. The reversal lives on .ppd-hprog now -
+     the foot itself is counts at one end and search at the other, so reversing
+     the foot put the search on the wrong side. */
+  body.ppd-dark #ppd-index .ppd-progress-track { flex:0 1 11rem; height:6px; }
 
   /* Chips sit on the page in the mock. The panel behind them was a leftover of
      the header card they used to hang from. */
@@ -5871,9 +6074,15 @@ window.addEventListener("popstate", function () {
        own corners rather than a negative margin pulling it out of a padding
        box it no longer sits in. This rule set runs after the 640 block, so it
        had been quietly wiping both. */
-    body.ppd-dark #ppd-index .ppd-hero { padding:20px 16px 82px; }
+    body.ppd-dark #ppd-index .ppd-hero { height:26rem; }
+    body.ppd-dark #ppd-index .ppd-hin { padding:20px 16px 112px; }
+    /* counts and search will not share a row at 386px, so they stack, and the
+       frame clears both */
     body.ppd-dark #ppd-index .ppd-hero-progress {
-      margin:0; padding:12px 16px 14px; }
+      margin:0; padding:10px 16px 12px; flex-direction:column;
+      align-items:stretch; gap:9px; }
+    body.ppd-dark #ppd-index .ppd-hprog { justify-content:flex-start; }
+    body.ppd-dark #ppd-index .ppd-hero-search-row { flex:1 1 auto; }
     body.ppd-dark #ppd-index .ppd-chips-row {
       background:#0c0c0e; border-bottom-color:#2c2c33; }
 
@@ -5913,7 +6122,11 @@ window.addEventListener("popstate", function () {
        the line worth keeping, and a circle with an arrow in it does not tell
        you what the button does. Both come back, and the button stays on the
        row beside the search rather than taking one of its own. */
-    body.ppd-dark #ppd-index .ppd-hero-sub { display:block; font-size:.88rem; }
+    /* Not a blanket display:block - that was overriding the -webkit-box the
+       clamp needs, so on a phone an article's whole opening paragraph ran down
+       the hero. */
+    body.ppd-dark #ppd-index .ppd-hero-sub { font-size:.88rem; }
+    body.ppd-dark #ppd-index .ppd-hero-sub:not(.ppd-hero-clamp) { display:block; }
     body.ppd-dark #ppd-index .ppd-hero-search-row { flex-wrap:nowrap; gap:8px; }
     body.ppd-dark #ppd-index .ppd-search { flex:1 1 auto; min-width:0; }
     body.ppd-dark #ppd-index .ppd-surprise {
