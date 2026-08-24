@@ -1057,15 +1057,29 @@ function swapView() {
   }, 180);
 }
 
+/* What each rail could still show, and how it should draw it, so scrolling to
+   the end of one can extend it. Everything is already in memory, so this costs
+   a render rather than a request. */
+const RAIL_MORE = {};
+let RAIL_SEQ = 0;
+
 function row(title, sub, items, opts) {
   if (!items.length) return "";
   const o = opts || {};
+  /* `all` is the full set this row was sliced from. Held against a key on the
+     rail so scrolling to the end can take the next slice. */
+  let more = "";
+  if (o.all && o.all.length > items.length) {
+    const key = "r" + (++RAIL_SEQ);
+    RAIL_MORE[key] = { all:o.all, opts:o };
+    more = ' data-more="' + key + '" data-shown="' + items.length + '"';
+  }
   return '<section class="ln-row"><div class="ln-rh"><h2>' + esc(title) + "</h2>"
     + (sub ? '<span class="ln-rs">' + esc(sub) + "</span>" : "")
     + (o.seeAll ? '<button class="ln-all" type="button" data-see="' + esc(o.seeAll) + '">See all</button>' : "")
     + '</div><div class="' + (items.length <= 4 && !o.vertical && !o.rail ? "ln-grid" : "ln-rail")
     + (o.big ? " ln-big" : "")
-    + (o.vertical ? " ln-vrail" : "") + (o.course ? " ln-crail" : "") + '">'
+    + (o.vertical ? " ln-vrail" : "") + (o.course ? " ln-crail" : "") + '"' + more + '>'
     + items.map(it => o.course ? courseCard(it) : card(it, o)).join("") + "</div></section>";
 }
 
@@ -1328,6 +1342,32 @@ function addLbDragZone() {
   z.className = "ln-lb-dragzone";
   z.setAttribute("aria-hidden", "true");
   media.appendChild(z);
+}
+
+/* A rail that has more behind it grows as you reach the end of it, rather than
+   stopping at an arbitrary fourteen. Everything is already in memory, so this
+   is a render and not a request, and it fires a screen ahead so the cards are
+   there before the scroll arrives at them. */
+function wireRailGrowth() {
+  document.querySelectorAll(".ln-rail[data-more]").forEach(rail => {
+    if (rail.dataset.wired) return;
+    rail.dataset.wired = "1";
+    const grow = () => {
+      const spec = RAIL_MORE[rail.dataset.more];
+      if (!spec) return;
+      const shown = Number(rail.dataset.shown || 0);
+      if (shown >= spec.all.length) return;
+      if (rail.scrollLeft + rail.clientWidth < rail.scrollWidth - rail.clientWidth) return;
+      const next = spec.all.slice(shown, shown + 12);
+      if (!next.length) return;
+      rail.insertAdjacentHTML("beforeend",
+        next.map(it => spec.opts.course ? courseCard(it) : card(it, spec.opts)).join(""));
+      rail.dataset.shown = String(shown + next.length);
+      fixShortThumbs();                       // the new cards need their stills too
+    };
+    rail.addEventListener("scroll", grow, { passive: true });
+    grow();                                   // a wide screen may already be at the end
+  });
 }
 
 function wireLbDrag() {
@@ -1686,7 +1726,8 @@ function render() {
          exclusives. Filtering it to exclusives would make it a worse answer to
          its own question. */
       if (!onlyEx && PICKS.length >= 3)
-        html += row(PICK_WHY, PICK_SUB, PICKS.slice(0, 12), { rail:true, big:true, showTopic:true });
+        html += row(PICK_WHY, PICK_SUB, PICKS.slice(0, 12),
+          { rail:true, big:true, showTopic:true, all:PICKS });
     }
 
     /* For you and Recently added are both about the whole library rather than
@@ -1694,8 +1735,13 @@ function render() {
     if (!onlyEx) {
       const weekAgo = Date.now() - 8 * 86400000;
       const recent = flat.filter(i => i.date && new Date(i.date).getTime() > weekAgo);
-      if (recent.length >= 4) html += row("New this week", "", take(i => recent.includes(i), 12), {});
-      else html += row("Recently added", "", take(() => true, 12), {});
+      if (recent.length >= 4) {
+        const r = recent.slice().sort(byDate);
+        html += row("New this week", "", r.slice(0, 12), { rail:true, all:r });
+      } else {
+        const r = flat.slice().sort(byDate);
+        html += row("Recently added", "", r.slice(0, 12), { rail:true, all:r });
+      }
     }
     /* Courses are members-only in their entirety, so the row is the same in
        both views and holds the place it holds on the full page. */
@@ -1703,16 +1749,25 @@ function render() {
                 onlyEx ? COURSES.filter(c => c.key).reduce((a, c) => a + (c.n || 0), 0)
                          + " lessons across " + COURSES.filter(c => c.key).length + " courses"
                        : "courses", COURSES, { course:true });
-    html += row("Clinic replays", (counts.clinic || 0) + " sessions", category(i => i.type === "clinic", 12), { seeAll:"clinic" });
-    html += row("Videos", (counts.video || 0) + " on the channel", category(i => i.type === "video", 14), { seeAll:"video" });
+    const allClinics = flat.filter(i => i.type === "clinic").sort(byDate);
+    html += row("Clinic replays", (counts.clinic || 0) + " sessions", allClinics.slice(0, 12),
+      { seeAll:"clinic", all:allClinics });
+    const allVideos = flat.filter(i => i.type === "video").sort(byDate);
+    html += row("Videos", (counts.video || 0) + " on the channel", allVideos.slice(0, 14),
+      { seeAll:"video", all:allVideos });
     // Topic rows are deliberately absent. A topic like pedalling should gather a
     // video, an article, a Monday Music Tip and a short, and only Piano Practice
     // Daily carries a category today, so a "topic" row here would in fact be a
     // Piano Practice Daily row wearing a topic's name. They return with tagging.
-    html += row("Piano Practice Daily", (counts.sheet || 0) + " sheets", category(i => i.type === "sheet", 14), { seeAll:"sheet" });
-    html += row("Monday Music Tips", (counts.article || 0) + " articles", category(i => i.type === "article", 14), { seeAll:"article" });
-    const shorts = pool.filter(i => i.vertical).sort(byDate).slice(0, 24);
-    html += row("Shorts", "a minute or two each", shorts, { vertical:true });
+    const allSheets = flat.filter(i => i.type === "sheet").sort(byDate);
+    html += row("Piano Practice Daily", (counts.sheet || 0) + " sheets", allSheets.slice(0, 14),
+      { seeAll:"sheet", all:allSheets });
+    const allArticles = flat.filter(i => i.type === "article").sort(byDate);
+    html += row("Monday Music Tips", (counts.article || 0) + " articles", allArticles.slice(0, 14),
+      { seeAll:"article", all:allArticles });
+    const allShorts = pool.filter(i => i.vertical).sort(byDate);
+    html += row("Shorts", "a minute or two each", allShorts.slice(0, 24),
+      { vertical:true, all:allShorts });
     html += everything(pool);
   }
 
@@ -1739,6 +1794,7 @@ function render() {
   }
   rows.innerHTML = html;
   wire(heroChanged);
+  wireRailGrowth();
   fixShortThumbs();
   if (heroChanged) billboardMotion();
 }
