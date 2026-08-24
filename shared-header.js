@@ -2299,6 +2299,16 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // where multiple sections share the same URL (practice-log.html).
   const basePage = activePage;
   function _resolveSection() {
+    /* Piano Practice Daily is served by resources.html but belongs to Learn -
+       that is where its menu item lives. Without this the page announced itself
+       as Tools, which threw the sidebar to the wrong section, and since nothing
+       in the Tools submenu matched the URL the highlight fell back to that
+       submenu's first item: Practice Tools. */
+    if (basePage === "tools"
+        && _normPath(location.pathname) === "/resources"
+        && new URLSearchParams(location.search).get("section") === "ppd") {
+      return "learn";
+    }
     if (basePage === "hub") {
       const goto = new URLSearchParams(location.search).get("goto") || "";
       const hash = location.hash.replace("#", "");
