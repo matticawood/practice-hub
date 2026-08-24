@@ -1325,11 +1325,34 @@ function render() {
     : u.replace(/width=\d+/, "width=1600").replace(/height=\d+/, "height=900");
   const heroImg = it => !it ? "" : (it.yt
     ? "https://i.ytimg.com/vi/" + it.yt + "/maxresdefault.jpg" : bigStill(it.img));
+  /* Six slides, the same six for everyone: the clinic, the course, a video
+     picked for you, the newest video, a Monday Music Tips article and a Piano
+     Practice Daily sheet. Every content type gets a place rather than competing
+     for one, which is what used to leave sheets and articles out of the hero
+     altogether whenever a video outranked them.
+     Each is a recommendation where the engine has one and the most recent of
+     that type where it does not, so the carousel is the same shape for a member
+     it knows nothing about as for one it knows well. */
   const slides = [];
+  const used = new Set();
+  const pickOf = t => PICKS.find(p => p.type === t && !used.has(p.href) && (p.img || heroPlate(p)));
+  const newestOf = t => everyone.filter(i => i.type === t && !used.has(i.href) && (i.img || heroPlate(i)))
+    .sort(byDate)[0];
+  const take = it => { if (it) used.add(it.href); return it; };
+  const ctaFor = it => it.type === "sheet" || it.type === "article" ? "Read it" : "Watch now";
+  const mediaOf = it => ({ img:heroImg(it), yt:it.yt, mux:it.mux,
+                           plate:it.img ? null : heroPlate(it) });
+
+  // 1. the clinic
   if (soon) slides.push({ kick:"Next live clinic", title:soon.t, when:soon.m,
     blurb:"A live session working through one topic. It becomes a replay here afterwards.",
     href:soon.href, img:heroImg(lastClinic || fresh), go:"RSVP", mux:(lastClinic || {}).mux,
     go2:lastClinic ? { label:"Watch the last one", href:lastClinic.href } : null });
+  else if (lastClinic) slides.push({ kick:"Latest clinic replay", title:lastClinic.title,
+    when:lastClinic.meta, blurb:"An hour working through one topic, with the questions answered.",
+    href:lastClinic.href, ...mediaOf(lastClinic), go:"Watch now" });
+
+  // 2. the course
   if (carry) slides.push({ kick:"Pick up where you left off", title:carry.t, when:carry.m,
     blurb:"You are part way through this one.", href:carry.href, go:"Continue",
     img: carry.mux ? "https://image.mux.com/" + carry.mux
@@ -1338,18 +1361,42 @@ function render() {
     /* A course with no video of its own gets its own plate, in its own colour,
        so it still looks like that course and not like a missing image. */
     plate: carry.mux ? null : { colour:carry.colour, icon:carry.icon } });
-  const relevant = PICKS.find(p => p.img || heroPlate(p));
-  if (relevant) slides.push({ kick:"For you",
-    title:relevant.title, when:relevant.meta || "",
-    blurb:relevant.topic ? "Picked because you have been working on " + relevant.topic + "."
-                         : "Picked for what you have been working on.",
-    href:relevant.href, img:heroImg(relevant), yt:relevant.yt, mux:relevant.mux,
-    plate:relevant.img ? null : heroPlate(relevant),
-    go:relevant.type === "sheet" || relevant.type === "article" ? "Read it" : "Open" });
-  if (fresh) slides.push({ kick:"Latest", title:fresh.title, when:fresh.meta,
-    blurb:"The newest thing in the library.", href:fresh.href, img:heroImg(fresh),
-    yt:fresh.yt, mux:fresh.mux, plate:fresh.img ? null : heroPlate(fresh),
-    go:fresh.type === "sheet" || fresh.type === "article" ? "Read it" : "Watch now" });
+  else {
+    /* Nothing started yet, so the course slot offers one rather than going
+       missing: this is the answer to "where do I begin". */
+    const c0 = COURSES.find(c => c.key);
+    if (c0) slides.push({ kick:"Start a course", title:c0.label, when:(c0.n || 0) + " lessons",
+      blurb:c0.blurb || "Start at the beginning and work through it.",
+      href:"/courses.html?course=" + c0.key, go:"Start",
+      img: c0.thumbId ? "https://image.mux.com/" + c0.thumbId
+          + "/thumbnail.webp?width=1600&height=900&fit_mode=smartcrop&time=" + (c0.thumbTime || 0) : "",
+      mux: c0.thumbId || null,
+      plate: c0.thumbId ? null : { colour:c0.color, icon:c0.icon } });
+  }
+
+  // 3-6. one of each kind: picked where we can, newest where we cannot
+  const forYou = take(pickOf("video") || newestOf("video"));
+  if (forYou) slides.push({ kick:"For you", title:forYou.title, when:forYou.meta || "",
+    blurb:forYou.topic ? "Picked because you have been working on " + forYou.topic + "."
+                       : "Picked for what you have been working on.",
+    href:forYou.href, ...mediaOf(forYou), go:"Watch now" });
+
+  const newest = take(newestOf("video"));
+  if (newest) slides.push({ kick:"Latest", title:newest.title, when:newest.meta,
+    blurb:"The newest thing in the library.", href:newest.href,
+    ...mediaOf(newest), go:"Watch now" });
+
+  const tip = take(pickOf("article") || newestOf("article"));
+  if (tip) slides.push({ kick:"Monday Music Tips", title:tip.title, when:tip.meta || "",
+    blurb:tip.topic ? "Picked because you have been working on " + tip.topic + "."
+                    : "A short read on how playing actually works.",
+    href:tip.href, ...mediaOf(tip), go:"Read it" });
+
+  const ppd = take(pickOf("sheet") || newestOf("sheet"));
+  if (ppd) slides.push({ kick:"Piano Practice Daily", title:ppd.title, when:ppd.meta || "",
+    blurb:ppd.topic ? "Picked because you have been working on " + ppd.topic + "."
+                    : "One idea, worked through properly.",
+    href:ppd.href, ...mediaOf(ppd), go:"Read it" });
 
   const slideHtml = b =>
       '<div class="ln-bb-slide" data-href="' + esc(b.href) + '">'
