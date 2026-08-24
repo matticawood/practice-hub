@@ -250,16 +250,31 @@
   @keyframes ln-lb-up   { from { transform:translateY(100%); } to { transform:none; } }
   @keyframes ln-lb-down { from { transform:none; } to { transform:translateY(100%); } }
   @keyframes ln-lb-fade { from { opacity:0; } to { opacity:1; } }
-  .ln-lb.open { animation:ln-lb-fade .18s ease-out; }
-  .ln-lb.open .ln-lb-in { animation:ln-lb-up .28s cubic-bezier(.22,.61,.36,1); }
-  .ln-lb.closing .ln-lb-in { animation:ln-lb-down .2s ease-in forwards; }
+  @keyframes ln-lb-unfade { from { opacity:1; } to { opacity:0; } }
+  .ln-lb.open { animation:ln-lb-fade .24s ease-out; }
+  .ln-lb.open .ln-lb-in { animation:ln-lb-up .38s cubic-bezier(.22,.61,.36,1); }
+  /* The backdrop leaves WITH the panel. It used to stay at full strength until
+     the panel had finished sliding away and was then switched off, which is the
+     black screen that appeared for a moment after every dismiss. */
+  .ln-lb.closing { animation:ln-lb-unfade .3s ease forwards; }
+  .ln-lb.closing .ln-lb-in { animation:ln-lb-down .3s cubic-bezier(.4,0,.7,.35) forwards; }
+  /* A panel already moved by a finger carries on from where it is: running the
+     keyframe would snap it back to the top first. */
+  .ln-lb.closing.ln-lb-dragged .ln-lb-in { animation:none; }
   @media (prefers-reduced-motion: reduce) {
-    .ln-lb.open, .ln-lb.open .ln-lb-in, .ln-lb.closing .ln-lb-in { animation:none; }
+    .ln-lb.open, .ln-lb.open .ln-lb-in, .ln-lb.closing, .ln-lb.closing .ln-lb-in { animation:none; }
   }
   .ln-lb-in { max-width:min(1040px,100%); margin:0 auto; position:relative; padding-top:46px; }
   /* Only a phone gets the handle: a mouse has the cross and the Escape key. */
-  .ln-lb-grab { display:none; }
+  .ln-lb-grab, .ln-lb-dragzone { display:none; }
   @media (max-width:640px) {
+    /* The player keeps its own touches, being a frame from another origin, so a
+       swipe starting on the video never reaches this page. A transparent strip
+       across the top of it belongs to us instead: enough to start a dismiss
+       from the video, shallow enough to leave the picture and the controls
+       under it alone. */
+    .ln-lb-dragzone { display:block; position:absolute; left:0; right:0; top:0;
+      height:72px; z-index:4; touch-action:none; background:transparent; }
     .ln-lb-grab { display:block; height:26px; flex:0 0 auto; position:relative;
       touch-action:none; }
     .ln-lb-grab::before { content:""; position:absolute; left:50%; top:9px;
@@ -1281,7 +1296,7 @@ function closePost(fromPop) {
 
   const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const done = () => {
-    lb.classList.remove("open", "closing");
+    lb.classList.remove("open", "closing", "ln-lb-dragged");
     const inner = lb.querySelector(".ln-lb-in");
     if (inner) { inner.style.transition = ""; inner.style.transform = ""; }
     lb.style.background = "";
@@ -1290,7 +1305,7 @@ function closePost(fromPop) {
   };
   if (reduced) return done();
   lb.classList.add("closing");
-  setTimeout(done, 200);                          // matches ln-lb-down
+  setTimeout(done, 310);                          // matches ln-lb-down
 }
 
 /* Drag down to dismiss, the way a sheet behaves everywhere else on a phone.
@@ -1309,6 +1324,13 @@ function wireLbDrag() {
      its own touches, so the gesture never reaches this page at all. The bar
      sits above the media, is always draggable, and says the panel can be
      pulled away. Dragging the white panel below still works too. */
+  const media = inner.querySelector(".ln-lb-media");
+  if (media && !media.querySelector(".ln-lb-dragzone")) {
+    const z = document.createElement("div");
+    z.className = "ln-lb-dragzone";
+    z.setAttribute("aria-hidden", "true");
+    media.appendChild(z);
+  }
   let grab = inner.querySelector(".ln-lb-grab");
   if (!grab) {
     grab = document.createElement("div");
@@ -1322,7 +1344,7 @@ function wireLbDrag() {
   const start = e => {
     if (!LB_OPEN || e.touches.length !== 1) return;
     // Anywhere below the top of the scroller is reading, not dismissing.
-    if (lb.scrollTop > 0 && !e.target.closest(".ln-lb-grab")) return;
+    if (lb.scrollTop > 0 && !e.target.closest(".ln-lb-grab, .ln-lb-dragzone")) return;
     const t = e.touches[0];
     y0 = t.clientY; x0 = t.clientX; dy = 0; t0 = Date.now();
     live = true; decided = false;
@@ -1351,12 +1373,20 @@ function wireLbDrag() {
     if (!live) return;
     const wasDragging = decided;
     live = false; decided = false;
-    inner.style.transition = "transform .22s ease";
     lb.style.background = "";
-    inner.style.transform = "";
-    if (!wasDragging) return;
+    if (!wasDragging) { inner.style.transform = ""; return; }
     const quick = Date.now() - t0 < 300 && dy > 60;
-    if (dy > window.innerHeight * 0.22 || quick) closePost();
+    if (dy > window.innerHeight * 0.22 || quick) {
+      /* Carries on from where the finger left it rather than snapping back to
+         the top and then playing the close animation. */
+      lb.classList.add("ln-lb-dragged");
+      inner.style.transition = "transform .26s cubic-bezier(.4,0,.7,.35)";
+      inner.style.transform = "translateY(100%)";
+      closePost();
+    } else {
+      inner.style.transition = "transform .22s ease";
+      inner.style.transform = "";                 // not far enough, settle back
+    }
   };
 
   lb.addEventListener("touchstart", start, { passive: true });
