@@ -3928,7 +3928,9 @@ function ppdInit() {
   _ppdViewingListEmail = myEmail;
   if (!_ppdLoaded) {
     _ppdLoaded = true;
-    _ppdLoadSheets();
+    // The boot waits on this before taking the spinner down, so landing on PPD
+    // does not show an empty page while the sheets are still in flight.
+    window.__ppdReady = _ppdLoadSheets();
     _ppdLoadInbox();
     return;
   }
@@ -5306,13 +5308,21 @@ function _revealLibraryAdmin() {
 
   _revealLibraryAdmin();
 
-  document.getElementById("loading-screen").style.display = "none";
-  document.getElementById("app-main").style.display = "block";
-  document.getElementById("app-header").style.display = "";
-
   // Handle ?section= query param to deep-link to a section
   const sp = new URLSearchParams(window.location.search);
   const section = sp.get("section") || "";
+
+  /* Every other section paints what it has and fills in; PPD renders nothing
+     until its sheets arrive, so taking the spinner down first showed an empty
+     page. It waits for the data here. The 8s backstop means a slow or failed
+     query still gives you the page rather than a spinner forever. */
+  const hideLoader = function () {
+    const el = document.getElementById("loading-screen");
+    if (el) el.style.display = "none";
+  };
+  if (section !== "ppd") hideLoader();
+  document.getElementById("app-main").style.display = "block";
+  document.getElementById("app-header").style.display = "";
   const pieceParam = sp.get("piece") || "";
   if (pieceParam) {
     switchSection("library");                          // deep link straight to a piece (command palette)
@@ -5329,6 +5339,12 @@ function _revealLibraryAdmin() {
     switchSection("glossary");                       // deep link to a glossary term
   } else if (section === "ppd" || section === "glossary" || section === "key") {
     switchSection(section);
+    if (section === "ppd") {
+      Promise.race([
+        Promise.resolve(window.__ppdReady).catch(function () {}),
+        new Promise(function (r) { setTimeout(r, 8000); })
+      ]).then(hideLoader);
+    }
   } else {
     switchSection("library");
   }
@@ -5769,41 +5785,48 @@ window.addEventListener("popstate", function () {
      for the warm ground: on the dark one the band is a white strip and the
      rail loses its rounding. All three are put back here. */
   @media (max-width:560px) {
+    /* One gutter for the whole page, on the one element every shelf sits in,
+       rather than a margin on each. 16px, and the hero matches it so the title
+       lines up with the headings below. */
+    body.ppd-dark #ppd-index #ppd-content { padding:0 16px; }
     body.ppd-dark #ppd-index .ppd-headcard { margin:0 0 22px; }
-    body.ppd-dark #ppd-index .ppd-hero { padding:22px 18px 0; }
+    body.ppd-dark #ppd-index .ppd-hero { padding:22px 16px 0; }
     /* the foot cancels the hero's side padding, so it tracks it down too */
     body.ppd-dark #ppd-index .ppd-hero-progress {
-      margin:20px -18px 0; padding:12px 18px 14px; }
+      margin:20px -16px 0; padding:12px 16px 14px; }
     body.ppd-dark #ppd-index .ppd-chips-row {
       background:#0c0c0e; border-bottom-color:#2c2c33; }
-    /* The page's own mobile pass strips these to flush full-width rows with a
+
+    /* The scrollers keep the left gutter and run off the right edge, which is
+       what tells you they scroll. */
+    body.ppd-dark #ppd-index .ppd-rail,
+    body.ppd-dark #ppd-index .ppd-chips,
+    body.ppd-dark #ppd-index .ppd-resume-row { margin-right:-16px; padding-right:16px; }
+
+    /* A rail was showing one card at 78vw pinned to the left edge with a strip
+       of the next one beside it: neither a full card nor two. One card at a
+       time means one card wide. */
+    body.ppd-dark #ppd-index .ppd-rail > .ppd-card {
+      flex:0 0 100%;
+      border:1px solid color-mix(in srgb, var(--cc) 30%, #2c2c33);
+      border-radius:13px; }
+    body.ppd-dark #ppd-index .ppd-resume-inhero { padding:0; }
+    body.ppd-dark #ppd-index .ppd-resume-inhero .ppd-resume-card,
+    body.ppd-dark #ppd-index .ppd-resume-inhero .ppd-resume-row.ppd-multi .ppd-resume-card {
+      width:100%; }
+    body.ppd-dark #ppd-index .ppd-resume-row {
+      -webkit-mask-image:none; mask-image:none; }
+
+    /* The page's own mobile pass strips cards to flush full-width rows with a
        hairline between them, which was written for the warm ground. On the
        dark one that hairline barely reads, so My List became one long stack
        with nothing separating the entries. They stay cards. */
-    body.ppd-dark #ppd-index .ppd-grid { gap:12px; padding:0 16px; }
+    body.ppd-dark #ppd-index .ppd-grid { gap:12px; padding:0; }
     body.ppd-dark #ppd-index .ppd-grid > .ppd-card {
       border:1px solid color-mix(in srgb, var(--cc) 30%, #2c2c33);
-      border-radius:16px; }
+      border-radius:16px; max-width:none; }
     body.ppd-dark #ppd-index .ppd-grid > .ppd-card:hover {
       border-color:color-mix(in srgb, var(--cc) 55%, #2c2c33); }
-    body.ppd-dark #ppd-index .ppd-vhead,
-    body.ppd-dark #ppd-index .ppd-seg,
-    body.ppd-dark #ppd-index .ppd-viewing-bar,
-    body.ppd-dark #ppd-index .ppd-notes { margin-left:16px; margin-right:16px; }
-    /* a rail card is a card, not a row - it keeps its edge */
-    body.ppd-dark #ppd-index .ppd-rail > .ppd-card {
-      border:1px solid color-mix(in srgb, var(--cc) 30%, #2c2c33);
-      border-radius:13px; }
-    body.ppd-dark #ppd-index .ppd-resume-row {
-      -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);
-      mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent); }
-    /* left inset only, matching the chip band; the row scrolls off the right */
-    body.ppd-dark #ppd-index .ppd-resume-inhero { padding:0 0 0 16px; }
-    /* the desktop width above outranks the page's own mobile rule, so hand the
-       phone widths back: one card fills the screen, several peek so the swipe
-       is obvious */
-    body.ppd-dark #ppd-index .ppd-resume-inhero .ppd-resume-card { width:100%; }
-    body.ppd-dark #ppd-index .ppd-resume-inhero .ppd-resume-row.ppd-multi .ppd-resume-card { width:86%; }
   }
 </style>
 </body>
