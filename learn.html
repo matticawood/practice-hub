@@ -257,6 +257,15 @@
     .ln-lb.open, .ln-lb.open .ln-lb-in, .ln-lb.closing .ln-lb-in { animation:none; }
   }
   .ln-lb-in { max-width:min(1040px,100%); margin:0 auto; position:relative; padding-top:46px; }
+  /* Only a phone gets the handle: a mouse has the cross and the Escape key. */
+  .ln-lb-grab { display:none; }
+  @media (max-width:640px) {
+    .ln-lb-grab { display:block; height:26px; flex:0 0 auto; position:relative;
+      touch-action:none; }
+    .ln-lb-grab::before { content:""; position:absolute; left:50%; top:9px;
+      transform:translateX(-50%); width:38px; height:4px; border-radius:99px;
+      background:rgba(255,255,255,.5); }
+  }
   /* Above the media, not on it: sitting over the player covered YouTube's own
      captions and settings buttons. Out of the flow so it cannot shorten it. */
   .ln-lb-close { position:absolute; top:0; right:0; z-index:3;
@@ -1294,39 +1303,64 @@ function wireLbDrag() {
   const inner = lb && lb.querySelector(".ln-lb-in");
   if (!lb || !inner || lb.dataset.drag) return;
   lb.dataset.drag = "1";
-  let y0 = 0, x0 = 0, dy = 0, t0 = 0, live = false;
 
-  lb.addEventListener("touchstart", e => {
+  /* A handle, because most of the top of this panel is the video, and a video
+     is the one place a drag cannot start: a cross-origin YouTube frame keeps
+     its own touches, so the gesture never reaches this page at all. The bar
+     sits above the media, is always draggable, and says the panel can be
+     pulled away. Dragging the white panel below still works too. */
+  let grab = inner.querySelector(".ln-lb-grab");
+  if (!grab) {
+    grab = document.createElement("div");
+    grab.className = "ln-lb-grab";
+    grab.setAttribute("aria-hidden", "true");
+    inner.insertBefore(grab, inner.firstChild);
+  }
+
+  let y0 = 0, x0 = 0, dy = 0, t0 = 0, live = false, decided = false;
+
+  const start = e => {
     if (!LB_OPEN || e.touches.length !== 1) return;
-    if (lb.scrollTop > 0) return;                 // reading further down, not dismissing
+    // Anywhere below the top of the scroller is reading, not dismissing.
+    if (lb.scrollTop > 0 && !e.target.closest(".ln-lb-grab")) return;
     const t = e.touches[0];
-    y0 = t.clientY; x0 = t.clientX; dy = 0; t0 = Date.now(); live = true;
-  }, { passive: true });
+    y0 = t.clientY; x0 = t.clientX; dy = 0; t0 = Date.now();
+    live = true; decided = false;
+  };
 
-  lb.addEventListener("touchmove", e => {
+  const move = e => {
     if (!live || e.touches.length !== 1) return;
     const t = e.touches[0];
     const dx = t.clientX - x0;
     dy = t.clientY - y0;
-    if (dy <= 0 || Math.abs(dx) > Math.abs(dy)) { live = false; inner.style.transform = ""; return; }
+    if (!decided) {
+      if (Math.abs(dy) < 6 && Math.abs(dx) < 6) return;      // not a gesture yet
+      if (dy <= 0 || Math.abs(dx) > Math.abs(dy)) { live = false; return; }
+      decided = true;
+    }
+    /* Not passive, so the browser can be told to stop scrolling and rubber
+       banding underneath: without this it fights the transform and the panel
+       appears not to move at all. */
+    if (e.cancelable) e.preventDefault();
     inner.style.transition = "none";
     inner.style.transform = "translateY(" + dy + "px)";
     lb.style.background = "rgba(11,11,14," + Math.max(0.3, 0.92 - dy / 900) + ")";
-  }, { passive: true });
+  };
 
   const release = () => {
     if (!live) return;
-    live = false;
-    const quick = Date.now() - t0 < 300 && dy > 60;
-    inner.style.transition = "transform .2s ease";
+    const wasDragging = decided;
+    live = false; decided = false;
+    inner.style.transition = "transform .22s ease";
     lb.style.background = "";
-    if (dy > window.innerHeight * 0.25 || quick) {
-      inner.style.transform = "";
-      closePost();
-    } else {
-      inner.style.transform = "";                 // snap back
-    }
+    inner.style.transform = "";
+    if (!wasDragging) return;
+    const quick = Date.now() - t0 < 300 && dy > 60;
+    if (dy > window.innerHeight * 0.22 || quick) closePost();
   };
+
+  lb.addEventListener("touchstart", start, { passive: true });
+  lb.addEventListener("touchmove", move, { passive: false });
   lb.addEventListener("touchend", release, { passive: true });
   lb.addEventListener("touchcancel", release, { passive: true });
 }
