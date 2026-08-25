@@ -2791,13 +2791,6 @@ function setBPMFromRange(v) {
   if (metroRunning) { stopMetro(); startMetro(); }
 }
 
-/* One swing per beat, so a full there-and-back is two. The arm reads the same
-   number the clicks do rather than being animated at a guessed speed. */
-function updateMetroSwing() {
-  const panel = document.getElementById("tool-metro");
-  if (panel) panel.style.setProperty("--beat", (60 / metroBPM) + "s");
-}
-
 function updateBPMDisplay() {
   /* The big number and the field used to be two elements saying the same thing.
      They are one now, so the display write is only there for anything still
@@ -2814,7 +2807,6 @@ function updateBPMDisplay() {
   }
   const term = document.getElementById("metro-term");
   if (term) term.textContent = metroTerm(metroBPM);
-  updateMetroSwing();
 }
 
 function tapTempo() {
@@ -2895,6 +2887,8 @@ function stopMetro() {
   if (disc) disc.className = "metro-disc";
   document.querySelectorAll(".metro-disc-pip").forEach(function(p) { p.className = "metro-disc-pip"; });
   document.querySelectorAll(".metro-beat-dot").forEach(function(d) { d.className = "metro-beat-dot"; });
+  const arm = document.querySelector(".metro-arm");
+  if (arm) { arm.style.transition = "transform .5s ease-out"; arm.style.transform = ""; }
   const btn = document.getElementById("metro-start-btn");
   btn.textContent = "Start"; btn.className = "metro-start-btn stopped";
   document.body.classList.remove("metro-running");
@@ -2981,11 +2975,28 @@ function scheduleClickClave(accent, time) {
   });
 }
 
+/* Which side the arm is heading for. Flipped by the beat, not by a timer of
+   its own. */
+var metroSwingDir = -1;
+
 function flashBeat(beat) {
   // Horizontal beat bar — the visible indicator.
   document.querySelectorAll(".metro-beat-dot").forEach(function(d, i) {
     d.className = "metro-beat-dot" + (i === beat ? (beat === 0 ? " accent-lit" : " lit") : "");
   });
+  /* The arm ticks at the ends of its swing, so it leaves for the far side ON
+     the beat and arrives exactly as the next one sounds. It used to be a CSS
+     animation started when the class went on the body - a second clock with its
+     own phase, running against a scheduler that queues its clicks on the audio
+     clock, so the arm agreed with the click only by accident and drifted from
+     it after that. This IS the click: the same callback, one transition per
+     beat, the duration read from the tempo it was scheduled at. */
+  var arm = document.querySelector(".metro-arm");
+  if (arm) {
+    metroSwingDir = -metroSwingDir;
+    arm.style.transition = "transform " + (60 / metroBPM) + "s ease-in-out";
+    arm.style.transform  = "rotate(" + (metroSwingDir * 15) + "deg)";
+  }
   setTimeout(function() {
     const dot = document.getElementById("bdot-" + beat);
     if (dot) dot.className = "metro-beat-dot";
@@ -8002,17 +8013,13 @@ body.tool-full #tool-metro .metro-arm line { stroke: #6e6b7c; stroke-width: 3;
   stroke-linecap: round; }
 body.tool-full #tool-metro .metro-weight { fill: #4a4753; }
 body.tool-full #tool-metro .metro-pivot { fill: #3a3844; }
-body.metro-running #tool-metro .metro-arm { transition: none;
-  animation: metroSwing var(--beat, .75s) ease-in-out infinite alternate; }
 body.metro-running #tool-metro .metro-arm line { stroke: #a7a3b6; }
 body.metro-running #tool-metro .metro-weight {
   fill: color-mix(in srgb, var(--tc) 72%, #fff); }
-@keyframes metroSwing {
-  from { transform: rotate(-15deg); }
-  to   { transform: rotate(15deg); }
-}
+/* The swing is set per beat from the scheduler, so stilling it is a matter of
+   refusing the transition rather than cancelling an animation. */
 @media (prefers-reduced-motion: reduce) {
-  body.metro-running #tool-metro .metro-arm { animation: none; }
+  body.tool-full #tool-metro .metro-arm { transition: none !important; }
 }
 
 /* The reading. The number is the field: click it and type a tempo you know. */
@@ -8025,7 +8032,11 @@ body.tool-full #tool-metro .metro-mark-note-wrap svg { height: 100%; width: auto
 body.tool-full #tool-metro .metro-mark-eq { font-size: clamp(1.5rem,3vw,2.2rem);
   font-weight: 200; color: #77748a; }
 body.tool-full #tool-metro .metro-bpm-input { width: auto; min-width: 0;
-  field-sizing: content; max-width: 5ch; margin: 0; padding: 0 2px;
+  field-sizing: content; max-width: 5ch; margin: 0;
+  /* The right padding is the letter-spacing back. Negative tracking is applied
+     AFTER the last glyph as well as between them, so the field measures itself
+     .05em short of its own last digit and shaves it. */
+  padding: 0 .06em 0 2px;
   background: none; border: 0; border-bottom: 2px solid transparent;
   border-radius: 0; text-align: center; color: #f4f3f8;
   font-weight: 900;
