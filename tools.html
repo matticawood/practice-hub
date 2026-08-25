@@ -1879,7 +1879,7 @@ function thScoreHTML(t, best, pending) {
 }
 
 function thTileHTML(t, best, pending) {
-  return `<button type="button" class="th-t" data-th="${t.id}" style="--tc:${t.tc}">
+  return `<button type="button" class="th-t" data-th="${t.id}" data-tc="${t.tc}" style="--tc:${t.tc}">
     <span class="th-t-art">${TH_ART[t.id] || ""}</span>
     <span class="th-t-in">
       ${thScoreHTML(t, best, pending)}
@@ -1912,7 +1912,7 @@ function thBodyHTML(bests, pending) {
         <p>For the moment a word, a key or a piece stops you mid-bar.</p>
       </div>
       <div class="th-refs">${TH_LINKS.map(t => `
-        <a class="th-r" href="${t.href}" style="--tc:${t.tc}">
+        <a class="th-r" href="${t.href}" data-tc="${t.tc}" style="--tc:${t.tc}">
           <span class="th-r-ic">${t.ic}</span>
           <span class="th-r-b"><span class="th-r-nm">${t.name}</span><span class="th-r-dx">${t.desc}</span></span>
           <svg class="th-r-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
@@ -1933,115 +1933,65 @@ function thAgo(iso) {
   return "over a year ago";
 }
 
-/* ── The billboard ────────────────────────────────────────────────────────────
-   Learn's hero is not a picture, it is a rotating billboard where each still
-   slide's plate catches a gleam while its halo swells in sync, and only the
-   slide you are looking at runs it. That motion is what reads as premium, so
-   this is the same machinery pointed at the tools: one slide per tool, its
-   engraved motif on a plate in its own colour, the tool you last played first.
+/* ── The room ─────────────────────────────────────────────────────────────────
+   No banner. A mode-select screen in a game almost never carries one: the modes
+   ARE the screen, the title is a small label, and the vertical space goes to
+   the choices rather than to a poster announcing the page's own name. What
+   those screens do instead is treat the whole background as one ambient space
+   that responds to what you are pointing at.
 
-   Deliberately the same numbers as Learn - 6.5s for the gleam, 7s dwell, hover
-   pauses, reduced motion stops it - so the two pages feel like one product
-   rather than two takes on the same idea. */
-const TH_KICK = { note: "Train your eye and ear", chord: "Train your eye and ear",
-                  ear: "Train your eye and ear", interval: "Train your eye and ear",
-                  metro: "While you play", game: "While you play" };
-
-function thSlideHTML(t, best, at, first) {
-  const kick = first ? "Pick up where you left off" : (TH_KICK[t.id] || "Practice tools");
-  const unit = t.tbl === "passage_games" ? "passages played" : "your best";
-  const when = best ? `<b>${best}</b> ${unit}${at ? ` &middot; ${thAgo(at)}` : ""}`
-             : t.tbl ? "Not played yet"
-             : "Always here when you need it";
-  return `<div class="th-bb-slide" data-th="${t.id}" style="--pc:${t.tc}">
-    <span class="th-bb-plate"><span class="th-bb-pic">${TH_ART[t.id] || ""}</span></span>
-    <span class="th-bb-in">
-      <span class="th-bb-krow">
-        <span class="th-bb-k">${kick}</span>
-        <span class="th-bb-when">${when}</span>
-      </span>
-      <h2>${t.name}</h2>
-      <p>${t.desc}</p>
-      <span class="th-bb-acts">
-        <button type="button" class="th-bb-go" data-th="${t.id}">${t.tbl ? "Start" : "Open"}</button>
-        <button type="button" class="th-bb-go2" data-thjump="1">All tools</button>
-      </span>
-    </span>
-  </div>`;
-}
-
-function thFootHTML(bests) {
-  const scored = TH_TOOLS.filter(t => t.tbl && bests && bests[t.id]);
-  if (!bests) return `<span class="th-bb-stat">&nbsp;</span>`;
+   So: the page label is a quiet line, and the ground under everything takes its
+   colour from the tool under the cursor — green over Note Recognition, pink
+   over Chord Ear Training — settling back to whatever you last played when you
+   are not pointing at anything. Same visual language as Learn, the opposite
+   structure. Learn is a shelf with a billboard over it; this is a room that
+   lights up around you. */
+function thHeadHTML(bests, last) {
+  const scoredIds = TH_TOOLS.filter(t => t.tbl);
+  const scored = bests ? scoredIds.filter(t => bests[t.id]) : [];
   const top = scored.filter(t => t.tbl !== "passage_games")
     .map(t => ({ t, n: parseInt(bests[t.id], 10) || 0 }))
     .sort((a, b) => b.n - a.n)[0];
-  return `<span class="th-bb-stat"><b>${TH_TOOLS.length}</b> tools</span>` +
-    `<span class="th-bb-stat"><b>${scored.length}</b> with a score</span>` +
-    (top ? `<span class="th-bb-stat">best <b>${top.n}</b> on ${top.t.name}</span>` : "") +
-    `<span class="th-bb-stat"><b>${TH_LINKS.length}</b> references</span>`;
-}
 
-function thHeadHTML(bests, last) {
-  /* The tool you were last in leads; the rest keep their listed order. */
-  const order = TH_TOOLS.slice();
-  if (last) {
-    const i = order.findIndex(t => t.id === last.id);
-    if (i > 0) order.unshift(order.splice(i, 1)[0]);
+  const bits = [];
+  if (bests) {
+    bits.push(`<span><b>${TH_TOOLS.length}</b> tools</span>`);
+    if (top) bits.push(`<span>best <b>${top.n}</b> on ${top.t.name}</span>`);
+    if (last && thById(last.id))
+      bits.push(`<span>last here <b>${thAgo(last.at)}</b></span>`);
   }
-  const slides = order.map((t, i) =>
-    thSlideHTML(t, bests ? bests[t.id] : null,
-                last && last.id === t.id ? last.at : null, bests && i === 0));
-
-  return `<div class="th-bb" id="th-bb">
-    ${slides.map((h, i) => i === 0 ? h.replace('class="th-bb-slide"', 'class="th-bb-slide on"') : h).join("")}
-    <div class="th-bb-dots">${order.map((t, i) =>
-      `<button type="button" class="th-bb-dot${i === 0 ? " on" : ""}" data-slide="${i}" aria-label="${t.name}"></button>`).join("")}</div>
-    <div class="th-bb-foot">${thFootHTML(bests)}</div>
+  return `<div class="th-label">
+    <span class="th-label-t">Practice Tools</span>
+    <span class="th-label-s">${bits.join("")}</span>
   </div>`;
 }
 
-let TH_BB_TIMER = null, TH_BB_AT = 0;
-function thWireBillboard() {
-  const bb = document.getElementById("th-bb");
-  if (TH_BB_TIMER) { clearInterval(TH_BB_TIMER); TH_BB_TIMER = null; }
-  if (!bb) return;
-  const slides = [...bb.querySelectorAll(".th-bb-slide")];
-  const dots   = [...bb.querySelectorAll(".th-bb-dot")];
+/* The ground's colour. It is a registered custom property, which is what lets
+   the gradients under everything interpolate from one tool's colour to the
+   next instead of snapping. */
+const TH_ROOM_REST = "#5d6478";
+function thRoom(colour) {
+  const home = document.getElementById("tool-home");
+  if (home) home.style.setProperty("--room", colour || TH_ROOM_REST);
+}
 
-  /* A slide is a button in everything but name: the whole thing starts its
-     tool, except the two controls that have their own jobs. */
-  slides.forEach(sl => sl.onclick = e => {
-    if (e.target.closest("[data-thjump]")) return;
-    showTool(sl.dataset.th);
-  });
-  bb.querySelectorAll("[data-thjump]").forEach(b => b.onclick = e => {
-    e.stopPropagation();
-    const g = document.querySelector("#th-shelves .th-g");
-    if (g) g.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
+function thWireRoom(last) {
+  const home = document.getElementById("tool-home");
+  if (!home) return;
+  /* At rest the room sits in the colour of whatever you last played, so the
+     page is already about you before you touch anything. */
+  const restTool = last && thById(last.id);
+  const rest = restTool ? restTool.tc : TH_ROOM_REST;
+  home.dataset.rest = rest;
+  thRoom(rest);
 
-  if (slides.length < 2) return;
-  const show = n => {
-    TH_BB_AT = (n + slides.length) % slides.length;
-    slides.forEach((sl, i) => sl.classList.toggle("on", i === TH_BB_AT));
-    dots.forEach((d, i) => d.classList.toggle("on", i === TH_BB_AT));
-  };
-  dots.forEach(d => d.onclick = e => {
-    e.stopPropagation();
-    show(Number(d.dataset.slide));
-    start();                                    // a manual pick resets the clock
+  home.querySelectorAll("[data-tc]").forEach(el => {
+    el.addEventListener("pointerenter", () => thRoom(el.dataset.tc));
+    el.addEventListener("focus", () => thRoom(el.dataset.tc));
   });
-
-  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  function start() {
-    if (TH_BB_TIMER) clearInterval(TH_BB_TIMER);
-    if (reduced) return;
-    TH_BB_TIMER = setInterval(() => show(TH_BB_AT + 1), 7000);
-  }
-  bb.addEventListener("mouseenter", () => { if (TH_BB_TIMER) clearInterval(TH_BB_TIMER); });
-  bb.addEventListener("mouseleave", start);
-  start();
+  /* One listener on the way out rather than one per tile, so moving between two
+     tiles does not flicker back through the resting colour on the way. */
+  home.addEventListener("pointerleave", () => thRoom(home.dataset.rest));
 }
 
 function thPaint(bests, last, pending) {
@@ -2052,7 +2002,7 @@ function thPaint(bests, last, pending) {
   body.innerHTML = thBodyHTML(bests, pending);
   document.querySelectorAll("#tool-home [data-th]").forEach(b =>
     b.onclick = () => showTool(b.dataset.th));
-  thWireBillboard();
+  thWireRoom(last);
 }
 
 async function thRender() {
@@ -5611,157 +5561,92 @@ body.th-open #app-main { padding: 0 var(--th-gut) 110px; max-width: none; }
 body.th-open .tools-wrap { max-width: none; margin: 0; padding: 0;
   background: none; border: 0; border-radius: 0; box-shadow: none; }
 
-/* The room itself: a cool floor with the light falling from the top left, so
-   the tiles read as objects standing in a space rather than swatches on paper. */
 /* A container, so the columns below key off the width this page actually has
-   rather than the viewport's. The sidebar takes 272px of it, so a viewport
-   media query counts space that is not there and the columns overflow. */
-/* No padding above: the head band bleeds to the top edge, and 26px of page
-   ground above it was showing as a gap under the site header.
-   A container, so the columns below key off the width this page actually has
    rather than the viewport's. The sidebar takes 272px of it, so a viewport
    media query counts space that is not there and the columns overflow. */
 body.th-open #tool-home { position: relative;
   container-type: inline-size; container-name: thome; }
-body.th-open #tool-home::before { content: ""; position: fixed; inset: 0; z-index: -1;
+
+/* ── the room ────────────────────────────────────────────────────────────────
+   No banner. The ground under the whole page is one space that takes its colour
+   from the tool you are pointing at, and rests in the colour of whatever you
+   last played. Learn is a shelf with a billboard over it; this is a room that
+   lights up around you. Same palette, same type, opposite structure.
+
+   --room is registered rather than a plain variable, which is the whole trick:
+   a registered <color> interpolates, so the gradients built out of it slide
+   from one tool's colour to the next instead of snapping. */
+@property --room {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #5d6478;
+}
+
+body.th-open #tool-home { --room: #5d6478; transition: --room .55s ease; }
+
+/* Two layers. The first is the colour, which moves with the cursor; the second
+   drifts on its own so the room is never completely still. Both are fixed, so
+   the light stays put while the page scrolls through it. */
+body.th-open #tool-home::before { content: ""; position: fixed; inset: 0; z-index: -2;
   background:
-    radial-gradient(80% 55% at 12% -8%, rgba(88,104,140,.16), transparent 62%),
-    radial-gradient(70% 50% at 96% 4%, rgba(120,80,150,.10), transparent 60%),
+    radial-gradient(68% 52% at 16% -6%, color-mix(in srgb, var(--room) 34%, transparent), transparent 64%),
+    radial-gradient(56% 46% at 92% 6%, color-mix(in srgb, var(--room) 20%, transparent), transparent 62%),
+    radial-gradient(90% 70% at 50% 118%, color-mix(in srgb, var(--room) 14%, transparent), transparent 66%),
     #08080a; }
-
-/* ── the billboard ───────────────────────────────────────────────────────────
-   Learn's hero, pointed at the tools. Same height, same bleed, same three-pass
-   scrim, same plate-gleam-and-halo at the same 6.5s, same dot row, same 7s
-   dwell with hover pausing it — because the point is that the two pages feel
-   like one product, not two designs that happen to share a colour scheme.
-
-   What differs is what is on the plate. Learn puts a photograph or a playing
-   video there; this puts the tool's own engraving, which is the material this
-   page is actually made of. */
-body.th-open .th-bb { position: relative; display: block; overflow: hidden;
-  margin: 0 calc(var(--th-gut) * -1) 20px;
-  --bbh: clamp(22rem, 30vw, 30rem); height: var(--bbh);
-  background: #17171c; color: #fff; }
-
-body.th-open .th-bb-slide { position: absolute; inset: 0; opacity: 0; pointer-events: none;
-  transition: opacity .5s ease; cursor: pointer; }
-body.th-open .th-bb-slide.on { opacity: 1; pointer-events: auto; }
-@media (prefers-reduced-motion: reduce) { body.th-open .th-bb-slide { transition: none; } }
-
-body.th-open .th-bb-plate { position: absolute; inset: 0;
-  background:
-    radial-gradient(120% 140% at 76% 16%, color-mix(in srgb, var(--pc) 40%, transparent), transparent 62%),
-    linear-gradient(140deg, color-mix(in srgb, var(--pc) 24%, #17131a), #100e12); }
-
-/* Three passes, as Learn's: up from the foot where the text sits, across from
-   the left behind the text column, and a corner wash where the two meet. */
-body.th-open .th-bb-plate::after { content: ""; position: absolute; inset: 0; z-index: 1;
-  background:
-    radial-gradient(120% 110% at 0% 100%, rgba(11,11,14,.85) 0%, rgba(11,11,14,.35) 45%, transparent 70%),
-    linear-gradient(180deg, rgba(11,11,14,0) 28%, rgba(11,11,14,.55) 70%, rgba(11,11,14,.86) 100%),
-    linear-gradient(90deg, rgba(11,11,14,.95) 0%, rgba(11,11,14,.86) 40%, rgba(11,11,14,.44) 72%, rgba(11,11,14,.16) 100%); }
-
-/* The plate holding the engraving. Wider than Learn's square because a stave
-   is about three times as wide as it is tall and a square frame would shrink
-   it to nothing. */
-body.th-open .th-bb-pic { position: absolute; right: 6%; top: 50%; transform: translateY(-50%);
-  width: clamp(15rem, 30vw, 26rem); padding: clamp(14px, 2vw, 26px);
-  border-radius: 24px; overflow: hidden; color: #fff;
-  background: rgba(18,15,22,.55); border: 1px solid color-mix(in srgb, var(--pc) 38%, transparent);
-  box-shadow: 0 18px 44px -18px color-mix(in srgb, var(--pc) 80%, transparent); }
-body.th-open .th-bb-pic svg { width: 100%; height: auto; display: block; }
-
-/* The light is kept ON THE PLATE rather than swept across the whole hero: a
-   band crossing the full width reads as a stream of light passing over the
-   page, where a gleam contained by the plate reads as the object itself
-   catching it. Only the slide you are looking at runs it. */
-body.th-open .th-bb-slide.on .th-bb-pic::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(104deg, transparent 38%, rgba(255,255,255,.34) 50%, transparent 62%);
-  transform: translateX(-130%);
-  animation: th-bb-gleam 6.5s ease-in-out infinite; }
-@keyframes th-bb-gleam {
-  0%   { transform: translateX(-130%); }
-  26%  { transform: translateX(130%); }
-  100% { transform: translateX(130%); }
-}
-/* The halo swells as the gleam crosses, so the plate lifts rather than just
-   being wiped by a highlight. */
-body.th-open .th-bb-slide.on .th-bb-pic { animation: th-bb-halo 6.5s ease-in-out infinite; }
-@keyframes th-bb-halo {
-  0%, 100% { box-shadow: 0 18px 44px -18px color-mix(in srgb, var(--pc) 70%, transparent); }
-  13%      { box-shadow: 0 18px 56px -12px color-mix(in srgb, var(--pc) 100%, transparent),
-                         0 0 0 5px color-mix(in srgb, var(--pc) 14%, transparent); }
-}
-@media (prefers-reduced-motion: reduce) {
-  body.th-open .th-bb-slide.on .th-bb-pic,
-  body.th-open .th-bb-slide.on .th-bb-pic::after { animation: none; }
+/* inset:0, and the drift is done by moving the gradient rather than by
+   transforming the layer. A fixed element sized beyond the viewport still
+   counts toward scrollWidth, and -12% here was putting 60px of horizontal
+   overflow on the page. */
+body.th-open #tool-home::after { content: ""; position: fixed; inset: 0; z-index: -1;
+  pointer-events: none; opacity: .5;
+  background: radial-gradient(46% 42% at 30% 22%, color-mix(in srgb, var(--room) 16%, transparent), transparent 70%);
+  background-repeat: no-repeat; background-size: 160% 160%;
+  animation: th-breathe 26s ease-in-out infinite alternate; }
+@keyframes th-breathe {
+  from { background-position: 18% 24%; background-size: 150% 150%; }
+  to   { background-position: 46% 52%; background-size: 176% 176%; }
 }
 
-body.th-open .th-bb-in { position: relative; z-index: 2; height: 100%;
-  padding: 38px var(--th-gut) 96px; max-width: 38rem;
-  display: flex; flex-direction: column; justify-content: flex-end; }
-body.th-open .th-bb-krow { display: flex; align-items: center; gap: 12px;
-  flex-wrap: wrap; margin-bottom: 16px; }
-body.th-open .th-bb-k { display: inline-flex; align-items: center;
-  font: 700 .72rem/1 var(--sans, inherit); letter-spacing: .14em; text-transform: uppercase;
-  color: #0f0f13; background: var(--pc); border-radius: 999px; padding: 7px 12px; }
-body.th-open .th-bb-when { font: 600 .84rem/1 var(--sans, inherit); color: rgba(255,255,255,.82); }
-body.th-open .th-bb-when b { color: #fff; font-weight: 800;
-  font-family: ui-monospace, SFMono-Regular, monospace; font-variant-numeric: tabular-nums; }
-body.th-open .th-bb h2 { margin: 0 0 12px; color: #fff; letter-spacing: -.022em;
-  font: 600 clamp(1.7rem, 3.05vw, 2.15rem)/1.14 Fraunces, Georgia, serif; text-wrap: balance; }
-body.th-open .th-bb p { margin: 0 0 22px; font-size: .97rem; line-height: 1.55;
-  color: rgba(255,255,255,.8); max-width: 34rem; }
-body.th-open .th-bb-acts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-body.th-open .th-bb-go, body.th-open .th-bb-go2 {
-  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
-  border-radius: 999px; padding: 11px 20px; font: 600 .88rem/1 var(--sans, inherit);
-  letter-spacing: .01em; transition: background .18s, border-color .18s; }
-body.th-open .th-bb-go { background: #fff; color: #0f0f13; border: 1px solid #fff; }
-body.th-open .th-bb-go:hover { background: var(--pc); border-color: var(--pc); color: #0f0f13; }
-body.th-open .th-bb-go2 { background: rgba(255,255,255,.09); color: #fff;
-  border: 1px solid rgba(255,255,255,.42); }
-body.th-open .th-bb-go2:hover { background: rgba(255,255,255,.18); border-color: #fff; }
-
-body.th-open .th-bb-dots { position: absolute; right: clamp(16px,2.4vw,34px); bottom: 80px;
-  z-index: 4; display: flex; gap: 8px; }
-body.th-open .th-bb-dot { width: 8px; height: 8px; padding: 0; border-radius: 50%;
-  cursor: pointer; border: 1px solid rgba(255,255,255,.55); background: transparent;
-  transition: .2s; }
-body.th-open .th-bb-dot:hover { background: rgba(255,255,255,.55); }
-body.th-open .th-bb-dot.on { background: #fff; border-color: #fff; transform: scale(1.15); }
-
-/* A strip along the foot, outside the text column, the way Learn's is. */
-body.th-open .th-bb-foot { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-  padding: 14px var(--th-gut) 16px;
-  border-top: 1px solid rgba(255,255,255,.13);
-  background: linear-gradient(180deg, rgba(11,11,14,.10), rgba(11,11,14,.62));
-  font: 500 .8rem/1 var(--sans, inherit); color: rgba(255,255,255,.62); }
-body.th-open .th-bb-stat b { color: rgba(255,255,255,.92); font-weight: 700;
+/* ── the label ──
+   A screen label, not a headline. It says where you are and gets out of the
+   way; everything below it is the actual page. */
+body.th-open .th-label { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  padding: 30px 0 26px; }
+body.th-open .th-label-t { font: 800 .74rem/1 ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: .24em; text-transform: uppercase; color: #fff; }
+body.th-open .th-label-s { display: flex; gap: 16px; flex-wrap: wrap;
+  font-size: .82rem; color: var(--th-dim); }
+body.th-open .th-label-s b { color: #dcdce4; font-weight: 700;
   font-variant-numeric: tabular-nums; }
 
 /* ── groups ── */
-body.th-open .th-g { margin-bottom: 46px; }
-/* Learn's own section heads are a bare bold line - "For you" - and nothing
-   else, because the richness on that page comes from the cards, not from
-   chrome around them. I had put rules and dots and counts on these, which is
-   more decoration than the benchmark uses, not less. Back to plain. */
+body.th-open .th-g { margin-bottom: 44px; }
+/* Learn's own section heads are a bare bold line and nothing else, because the
+   richness there comes from the cards rather than from chrome around them. */
 body.th-open .th-g-h { margin: 0 0 14px; }
 body.th-open .th-g-r { display: flex; align-items: baseline; gap: 12px; }
 body.th-open .th-g-h h2 { margin: 0; flex: 0 0 auto; color: var(--th-ink);
   font: 700 1.12rem/1.2 var(--sans, inherit); letter-spacing: -.01em; }
 body.th-open .th-g-rule { display: none; }
 body.th-open .th-g-n { flex: 0 0 auto; font-size: .82rem; font-weight: 500; color: var(--th-dim); }
-body.th-open .th-g-h p { margin: 6px 0 0; font-size: .87rem;
-  line-height: 1.5; color: var(--th-dim); max-width: 52ch; }
+body.th-open .th-g-h p { margin: 6px 0 0; font-size: .87rem; line-height: 1.5;
+  color: var(--th-dim); max-width: 52ch; }
 
-/* A grid, not a rail. Four drills sit two-up and go four-up when there is room;
-   the pair below is always two-up. Nothing scrolls sideways. */
 body.th-open .th-g-b { display: grid; gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
-@container thome (min-width: 1300px) { body.th-open .th-g-drill .th-g-b { grid-template-columns: repeat(4, minmax(0,1fr)); } }
+/* Four drills must never fall into three columns: auto-fit did exactly that at
+   a common width and left the fourth stranded on a row of its own. One, two or
+   four — the counts that divide into four. */
+body.th-open .th-g-drill .th-g-b { grid-template-columns: minmax(0,1fr); }
+@container thome (min-width: 620px)  { body.th-open .th-g-drill .th-g-b { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+@container thome (min-width: 1240px) { body.th-open .th-g-drill .th-g-b { grid-template-columns: repeat(4, minmax(0,1fr)); } }
+
+/* Pointing at one tool steps the others back, so the row has a focus rather
+   than nine things shouting at once. */
+body.th-open .th-g-b:hover .th-t:not(:hover),
+body.th-open .th-refs:hover .th-r:not(:hover) { opacity: .52; }
+body.th-open .th-t, body.th-open .th-r { transition: transform .22s cubic-bezier(.2,.7,.3,1),
+  border-color .22s, box-shadow .22s, opacity .22s, background .22s; }
 
 /* ── the console ── */
 body.th-open .th-t { position: relative; overflow: hidden; isolation: isolate;
@@ -5775,7 +5660,7 @@ body.th-open .th-t { position: relative; overflow: hidden; isolation: isolate;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.06),
               0 22px 46px -26px rgba(0,0,0,.9);
   transition: transform .22s cubic-bezier(.2,.7,.3,1), border-color .22s, box-shadow .22s; }
-body.th-open .th-t:hover { transform: translateY(-4px);
+body.th-open .th-t:hover { transform: translateY(-5px) scale(1.012); z-index: 1;
   border-color: color-mix(in srgb, var(--tc) 62%, var(--th-line));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.09),
               0 30px 60px -26px rgba(0,0,0,.95),
@@ -5861,9 +5746,8 @@ body.th-open .th-r-dx { font-size: .8rem; color: var(--th-dim);
 body.th-open .th-r-go { width: 16px; height: 16px; flex: 0 0 auto; color: var(--th-dim); }
 
 @media (prefers-reduced-motion: reduce) {
-  body.th-open .th-top-art { animation: none; }
-  body.th-open .th-res, body.th-open .th-res-go svg { transition: none; }
-  body.th-open .th-res:hover { transform: none; }
+  body.th-open #tool-home { transition: none; }
+  body.th-open #tool-home::after { animation: none; }
   body.th-open .th-t, body.th-open .th-t-art, body.th-open .th-t-cta, body.th-open .th-r { transition: none; }
   body.th-open .th-t:hover { transform: none; }
   body.th-open .th-t-wait { animation: none; }
@@ -5873,17 +5757,11 @@ body.th-open .th-r-go { width: 16px; height: 16px; flex: 0 0 auto; color: var(--
 @media (max-width: 720px) {
   body.th-open #app-main { padding-left: 16px; padding-right: 16px; }
   body.th-open #tool-home { padding-top: 18px; }
-  body.th-open .th-bb { margin: 0 -16px 22px; --bbh: 27rem; }
-  body.th-open .th-bb-in { padding: 20px 16px 92px; max-width: none; }
-  /* No room beside the words, so the plate sits above them rather than to the
-     side, and the scrim leans vertical to match. */
-  body.th-open .th-bb-pic { right: auto; left: 16px; top: 16px; transform: none;
-    width: calc(100% - 32px); padding: 14px; border-radius: 18px; }
-  body.th-open .th-bb-plate::after {
-    background: linear-gradient(180deg, rgba(11,11,14,.25) 0%, rgba(11,11,14,.72) 46%, rgba(11,11,14,.93) 78%); }
-  body.th-open .th-bb-dots { bottom: auto; top: 14px; right: 14px; }
-  body.th-open .th-bb-foot { gap: 12px; font-size: .74rem; padding: 12px 16px 14px; }
+  body.th-open .th-label { padding: 22px 0 20px; gap: 10px; }
   body.th-open .th-g-h h2 { font-size: 1.05rem; }
+  /* Touch has no hover, so nothing should be dimmed waiting for one. */
+  body.th-open .th-g-b:hover .th-t:not(:hover),
+  body.th-open .th-refs:hover .th-r:not(:hover) { opacity: 1; }
   body.th-open .th-g { margin-bottom: 34px; }
   body.th-open .th-g-b { grid-template-columns: 1fr; gap: 13px; }
   body.th-open .th-t { min-height: 190px; padding: 17px; border-radius: 18px; }
