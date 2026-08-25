@@ -39,11 +39,14 @@ const sym  = at(2.6);
 const mg   = (n) => `\\musicglyph #"${n}"`;
 
 const CHIPS = {
-  /* The clef step. Mixed asks for both, so it shows both, set close enough to
-     read as one symbol rather than two. */
+  /* The clef step. Mixed asks for both, so it shows both, close enough together
+     to read as one symbol. The bass clef is raised to sit level with the treble:
+     anchored at their own reference lines the two are correctly placed but not
+     optically centred on each other, and next to a clef half again its height
+     the bass one simply reads as having slipped down. */
   treble: clef(2.5, mg("clefs.G")),
   bass:   clef(2.7, mg("clefs.F")),
-  mixed:  clef(5.7, `\\concat { ${mg("clefs.G")} \\hspace #0.35 ${mg("clefs.F")} }`),
+  mixed:  clef(5.7, `\\concat { ${mg("clefs.G")} \\hspace #0.35 \\raise #1.45 ${mg("clefs.F")} }`),
 
   /* The mode step: a note to name, or a key signature to read it in. */
   note:   sym(2.88, `\\note {8} #1`),
