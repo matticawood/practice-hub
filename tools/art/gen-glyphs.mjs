@@ -116,6 +116,13 @@ const CHIPS = {
   cinv:     chordChip("<g' b' e''>1"),
   cspread:  chordChip("<e' b' g''>1"),
 
+  /* The tool's own icon: a stack of three noteheads, no stave and no clef. A
+     chord is what it is because of the stacking, so that is all the icon needs. */
+  ctriadicon: { m: `\\score { \\new Staff \\with {
+                  \\remove "Staff_symbol_engraver" \\remove "Time_signature_engraver"
+                  \\remove "Bar_engraver" \\remove "Clef_engraver" }
+                { \\cadenzaOn <e' g' b'>1 } \\layout { indent = 0 ragged-right = ##t } }` },
+
   /* The accidentals step: the two it adds, or the sign for neither. */
   sharp:   { m: `\\concat { ${mg("accidentals.sharp")} \\hspace #0.5 ${mg("accidentals.flat")} }` },
   natural: { m: mg("accidentals.natural") },
