@@ -2349,17 +2349,37 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // basePage is what the page declared; _resolveSection re-detects for pages
   // where multiple sections share the same URL (practice-log.html).
   const basePage = activePage;
-  function _resolveSection() {
-    /* Piano Practice Daily is served by resources.html but belongs to Learn -
-       that is where its menu item lives. Without this the page announced itself
-       as Tools, which threw the sidebar to the wrong section, and since nothing
-       in the Tools submenu matched the URL the highlight fell back to that
-       submenu's first item: Practice Tools. */
-    if (basePage === "tools"
-        && _normPath(location.pathname) === "/resources"
-        && new URLSearchParams(location.search).get("section") === "ppd") {
-      return "learn";
+  /* Which section owns this URL, answered by the menus themselves: if a
+     sub-nav item points exactly here - same path, same params - then this page
+     belongs to that section, whatever file happens to serve it.
+
+     resources.html is the case that needs it. Four menu items across THREE
+     sections are served by that one file: Pieces Library and Glossary and Key
+     Explorer under Tools, Piano Practice Daily under Learn, My Pieces under
+     Hub. The page could only declare one of them, so every other route into it
+     announced itself as Tools - the sidebar jumped sections, and since nothing
+     in the Tools submenu matched the URL the highlight fell back to that
+     submenu's first item, Practice Tools. Which is exactly what you get today
+     following Hub > My Pieces.
+
+     There was already a hand-written exception for Piano Practice Daily. This
+     is that exception made general, so the next item served by a shared file
+     does not need a third one. The params are compared exactly, which is what
+     keeps ?lib=collection off the plain /resources.html item. */
+  function _sectionOwningUrl() {
+    const keys = Object.keys(SH_SUBNAV);
+    for (let i = 0; i < keys.length; i++) {
+      const items = SH_SUBNAV[keys[i]] || [];
+      for (let j = 0; j < items.length; j++) {
+        if (_pillIsActive(items[j].href)) return keys[i];
+      }
     }
+    return null;
+  }
+
+  function _resolveSection() {
+    const owner = _sectionOwningUrl();
+    if (owner) return owner;
     if (basePage === "hub") {
       const goto = new URLSearchParams(location.search).get("goto") || "";
       const hash = location.hash.replace("#", "");
