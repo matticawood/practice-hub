@@ -2266,6 +2266,36 @@ function thFeatureHTML(t, best, at) {
   </button>`;
 }
 
+/* Where the last pick is kept between visits, so the card can be right on the
+   first paint instead of right on the second. */
+const TH_FEAT_KEY = "rm_tools_feature_v1";
+function thRecallFeature() {
+  try {
+    const v = JSON.parse(localStorage.getItem(TH_FEAT_KEY) || "null");
+    return v && v.id && thById(v.id) ? v : null;
+  } catch (e) { return null; }
+}
+function thRememberFeature(t, best, at) {
+  try {
+    if (!t) return;
+    localStorage.setItem(TH_FEAT_KEY, JSON.stringify({ id: t.id, best: best || null, at: at || null }));
+  } catch (e) {}
+}
+
+/* The same card with nothing written in it. It holds the exact height the real
+   one does, so when the answer lands it fills in rather than pushing the page
+   around. */
+function thFeatureWaitHTML() {
+  return `<div class="th-feat th-feat-wait" aria-hidden="true">
+    <span class="th-feat-in">
+      <span class="th-feat-k">&nbsp;</span>
+      <span class="th-feat-nm">&nbsp;</span>
+      <span class="th-feat-dx">&nbsp;</span>
+      <span class="th-feat-f"><span class="th-feat-go">&nbsp;</span></span>
+    </span>
+  </div>`;
+}
+
 function thHeadHTML(bests, last) {
   const scoredIds = TH_TOOLS.filter(t => t.tbl);
   const scored = bests ? scoredIds.filter(t => bests[t.id]) : [];
@@ -2300,12 +2330,32 @@ function thHeadHTML(bests, last) {
        when they land. */
     for (let i = 0; i < 4; i++) cells.push(null);
   }
-  /* Before the numbers land there is nothing to choose from, so the feature
-     holds the shape with the first tool rather than flashing an empty box. */
-  const featTool = (last && thById(last.id)) || TH_TOOLS[0];
-  const feature = thFeatureHTML(featTool,
-    bests ? bests[featTool.id] : null,
-    last && last.id === featTool.id ? last.at : null);
+  /* The pick belongs to your history, and history is two network reads away.
+     Holding the shape with TH_TOOLS[0] filled that gap by NAMING A TOOL - so
+     the first thing the page said was "start here, Note Recognition", and a
+     moment later it changed its mind. Announcing the wrong answer confidently
+     is worse than not answering yet.
+
+     So: your last pick is remembered locally and painted straight away, which
+     is the right answer almost every time and costs no wait at all. With
+     nothing remembered - a first visit, a new device - the card holds its own
+     shape and says nothing until it knows. */
+  let featTool = last && thById(last.id);
+  let featBest = featTool && bests ? bests[featTool.id] : null;
+  let featAt   = featTool && last ? last.at : null;
+  if (!featTool && !bests) {
+    const remembered = thRecallFeature();
+    if (remembered) {
+      featTool = thById(remembered.id);
+      featBest = remembered.best || null;
+      featAt   = remembered.at || null;
+    }
+  }
+  if (!featTool && bests) featTool = TH_TOOLS[0];
+  if (bests) thRememberFeature(featTool, featBest, featAt);
+  const feature = featTool
+    ? thFeatureHTML(featTool, featBest, featAt)
+    : thFeatureWaitHTML();
 
   return feature + `<div class="th-bar">${cells.map(c => c
     ? `<div class="th-st"><span class="th-st-v">${c[0]}</span>` +
@@ -6861,6 +6911,21 @@ body.th-open .th-feat { position: relative; display: block; width: 100%;
   background:
     radial-gradient(105% 130% at 82% 8%, color-mix(in srgb, var(--tc) 42%, transparent), transparent 62%),
     linear-gradient(148deg, color-mix(in srgb, var(--tc) 20%, #14141a), #0b0b0f 72%); }
+
+/* The card with nothing in it yet: the room's own ground rather than a tool's
+   colour, because it does not know which tool it is holding. Same height, so
+   the answer fills it in rather than pushing the page. */
+body.th-open .th-feat-wait { cursor: default;
+  background: linear-gradient(148deg, #16161c, #0b0b0f 72%); }
+body.th-open .th-feat-wait .th-feat-nm,
+body.th-open .th-feat-wait .th-feat-dx,
+body.th-open .th-feat-wait .th-feat-k,
+body.th-open .th-feat-wait .th-feat-go { background: rgba(255,255,255,.045);
+  border-radius: 8px; color: transparent; }
+body.th-open .th-feat-wait .th-feat-nm { width: 12ch; }
+body.th-open .th-feat-wait .th-feat-dx { width: 26ch; max-width: 100%; }
+body.th-open .th-feat-wait .th-feat-k  { width: 9ch; }
+body.th-open .th-feat-wait .th-feat-go { width: 7ch; border: 0; }
 
 /* The vertical placement is kept OUT of the transform and expressed through
    --shift, which hover is the only thing allowed to change. When both lived in
