@@ -1,4 +1,25 @@
-<!-- MOCK. Not wired to anything: no game logic, no data, no routing.
+/* build-mock.mjs — writes mock-note.html into the repo for the dev alias.
+   A mock only: no game logic, no data, nothing wired to the real tool. */
+import { readFileSync, writeFileSync } from "node:fs";
+
+const DIR = "/private/tmp/claude-501/-Users-matthewcawood-Piano-Practice-Daily/0e598060-a03f-4468-bf26-d021661a7bf9/scratchpad/ly";
+const N = JSON.parse(readFileSync(DIR + "/notes.json", "utf8"));
+
+const KEYS = [
+  // one octave and a bit, white keys with the blacks placed between them
+  { n: "C", b: true }, { n: "D", b: true }, { n: "E", b: false },
+  { n: "F", b: true }, { n: "G", b: true }, { n: "A", b: true }, { n: "B", b: false },
+  { n: "C", b: true }, { n: "D", b: true }, { n: "E", b: false },
+  { n: "F", b: true }, { n: "G", b: true }, { n: "A", b: true }, { n: "B", b: false },
+];
+
+/* The octave a key sits in, so a phone can show one and a desktop two without
+   the markup changing. */
+const piano = KEYS.map((k, i) =>
+  `<button class="k" data-oct="${i < 7 ? 1 : 2}"><span>${k.n}</span>${k.b ? '<i class="kb"></i>' : ""}</button>`
+).join("");
+
+const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routing.
      Deployed to the dev alias only so the layout can be judged on a real screen
      and a real phone before the tool itself is touched. -->
 <meta charset="utf-8">
@@ -179,9 +200,9 @@
   <div class="paper">
     <span class="askk">Treble &middot; sharps and flats</span>
     <span class="streak"><b>&#9679;&#9679;&#9679;</b> 3 in a row</span>
-    <svg aria-hidden="true" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.2" viewBox="0.0000 -0.0240 11.8100 7.3500"> <g transform="translate(0.0000, 5.7760)"> <line stroke-linejoin="round" stroke-linecap="round" stroke-width="0.1000" stroke="currentColor" x1="0.0500" y1="0" x2="11.8100" y2="0"/> </g> <g transform="translate(0.0000, 4.7760)"> <line stroke-linejoin="round" stroke-linecap="round" stroke-width="0.1000" stroke="currentColor" x1="0.0500" y1="0" x2="11.8100" y2="0"/> </g> <g transform="translate(0.0000, 3.7760)"> <line stroke-linejoin="round" stroke-linecap="round" stroke-width="0.1000" stroke="currentColor" x1="0.0500" y1="0" x2="11.8100" y2="0"/> </g> <g transform="translate(0.0000, 2.7760)"> <line stroke-linejoin="round" stroke-linecap="round" stroke-width="0.1000" stroke="currentColor" x1="0.0500" y1="0" x2="11.8100" y2="0"/> </g> <g transform="translate(0.0000, 1.7760)"> <line stroke-linejoin="round" stroke-linecap="round" stroke-width="0.1000" stroke="currentColor" x1="0.0500" y1="0" x2="11.8100" y2="0"/> </g> <g transform="translate(4.3500, 1.7760)"> <path transform="scale(0.0040, -0.0040)" d="M0 119c0 8 5 15 13 18l46 17v158c0 10 8 19 18 19s19 -9 19 -19v-145l83 31v158c0 10 9 19 19 19s18 -9 18 -19v-145l32 12c2 1 5 1 7 1c11 0 20 -9 20 -20v-60c0 -8 -5 -16 -13 -19l-46 -16v-160l32 11c2 1 5 1 7 1c11 0 20 -9 20 -20v-60c0 -8 -5 -15 -13 -18l-46 -17 v-158c0 -10 -8 -19 -18 -19s-19 9 -19 19v145l-83 -31v-158c0 -10 -9 -19 -19 -19s-18 9 -18 19v145l-32 -12c-2 -1 -5 -1 -7 -1c-11 0 -20 9 -20 20v60c0 8 5 16 13 19l46 16v160l-32 -11c-2 -1 -5 -1 -7 -1c-11 0 -20 9 -20 20v60zM179 95l-83 -30v-160l83 30v160z" fill="currentColor"/> </g> <a style="color:inherit;" xlink:href="textedit:///private/tmp/claude-501/-Users-matthewcawood-Piano-Practice-Daily/0e598060-a03f-4468-bf26-d021661a7bf9/scratchpad/ly/n_treble-fs5.ly:16:2:3"> <g transform="translate(5.8000, 1.7760)"> <path transform="scale(0.0040, -0.0040)" d="M347 -26c0 102 -89 139 -133 139c-23 0 -70 -10 -70 -89c0 -91 76 -136 132 -136c22 0 71 8 71 86zM245 136c144 0 246 -65 246 -136s-102 -136 -246 -136s-245 65 -245 136s101 136 245 136z" fill="currentColor"/> </g> </a> <g transform="translate(0.8000, 4.7760)"> <path transform="scale(0.0040, -0.0040)" d="M266 -635h-6c-108 0 -195 88 -195 197c0 58 53 103 112 103c54 0 95 -47 95 -103c0 -52 -43 -95 -95 -95c-11 0 -21 2 -31 6c26 -39 68 -65 117 -65h4zM401 151c19 -89 48 -242 60 -354c76 27 112 94 112 163c0 89 -60 179 -172 191zM74 28c0 -112 98 -247 278 -247 c21 0 44 2 68 6c-7 64 -29 203 -63 364c-79 -8 -124 -61 -124 -119c0 -44 25 -91 81 -123c5 -5 7 -10 7 -15c0 -11 -10 -22 -22 -22c-15 0 -126 62 -126 187c0 88 58 174 160 197c-14 58 -29 117 -46 175c-107 -121 -213 -243 -213 -403zM357 1194c28 0 143 -206 143 -361 c0 -143 -86 -255 -180 -364c21 -68 39 -138 56 -207c5 0 10 1 14 1c155 0 255 -129 255 -262c0 -113 -74 -212 -180 -245c3 -35 5 -70 5 -105c0 -19 -1 -39 -2 -58c-7 -119 -88 -225 -202 -228l1 43c93 2 153 92 159 191c1 18 2 37 2 55c0 31 -1 61 -4 92 c-28 -5 -55 -8 -80 -8c-239 0 -342 217 -342 374c0 177 131 306 248 441c-29 96 -52 170 -52 346c0 189 144 295 159 295zM247 782c0 -55 12 -115 35 -190c82 100 147 202 147 326c0 40 -6 82 -21 127c-49 -24 -161 -97 -161 -263z" fill="currentColor"/> </g> <a style="color:inherit;" xlink:href="textedit:///private/tmp/claude-501/-Users-matthewcawood-Piano-Practice-Daily/0e598060-a03f-4468-bf26-d021661a7bf9/scratchpad/ly/n_treble-fs5.ly:14:15:16"> </a> </svg>
+    ${N["treble-fs5"]}
   </div>
-  <div class="keys-bed"><div class="keys"><button class="k" data-oct="1"><span>C</span><i class="kb"></i></button><button class="k" data-oct="1"><span>D</span><i class="kb"></i></button><button class="k" data-oct="1"><span>E</span></button><button class="k" data-oct="1"><span>F</span><i class="kb"></i></button><button class="k" data-oct="1"><span>G</span><i class="kb"></i></button><button class="k" data-oct="1"><span>A</span><i class="kb"></i></button><button class="k" data-oct="1"><span>B</span></button><button class="k" data-oct="2"><span>C</span><i class="kb"></i></button><button class="k" data-oct="2"><span>D</span><i class="kb"></i></button><button class="k" data-oct="2"><span>E</span></button><button class="k" data-oct="2"><span>F</span><i class="kb"></i></button><button class="k" data-oct="2"><span>G</span><i class="kb"></i></button><button class="k" data-oct="2"><span>A</span><i class="kb"></i></button><button class="k" data-oct="2"><span>B</span></button></div></div>
+  <div class="keys-bed"><div class="keys">${piano}</div></div>
 </div>
 
 <div class="screen" id="s-set">
@@ -252,3 +273,7 @@
     k.onclick = function(){ k.classList.add("hit"); setTimeout(function(){ k.classList.remove("hit"); }, 180); };
   });
 </script>
+`;
+
+writeFileSync("/Users/matthewcawood/The Practice Room Database/mock-note.html", html);
+console.log("wrote mock-note.html", (html.length / 1024).toFixed(1) + "kB");
