@@ -24,9 +24,19 @@
 
 // ── Sub-nav data ──────────────────────────────────────────────────────────────
 const SH_SUBNAV = {
+  /* "hub" is the internal key and stays one, because it is written into page
+     declarations, analytics and saved URLs. What the member reads is Practice:
+     a hub is a container, and every product has one; Practice is the thing they
+     came to do, and it is the room's own word. */
   hub: [
     { label: "Dashboard", href: "/practice-log.html" },
-    { label: "My Pieces", href: "/resources.html?lib=collection" },
+    /* The whole library, not just the collection. Choosing what to play next is
+       practice - which is why it sits here rather than in Tools, where it read
+       as a utility, or in Learn, where it would have claimed to be something
+       Matthew wrote. Its own three tabs - All Pieces, Books, My Collection -
+       are inside the page, so this costs the menu nothing: it is the slot "My
+       Pieces" already had. */
+    { label: "Pieces", href: "/resources.html" },
     { label: "Stats", href: "/practice-log.html?goto=stats" },
     { label: "Goals", href: "/practice-log.html?goto=goals" },
     { label: "Roadmap", href: "/practice-log.html?goto=roadmap" },
@@ -48,9 +58,14 @@ const SH_SUBNAV = {
     { label: "Piano Practice Daily", href: "/resources.html?section=ppd" },
     { label: "Weekly Focus", href: "/focus.html" },
   ],
+  /* What is left is what the word actually means: things you operate. The six
+     tools, and the two lookups you reach for mid-practice. "All Tools" rather
+     than "Practice Tools", which was a label doing no work once the section
+     next door is called Practice - and rather than "Tools Library", because
+     this app already has a Pieces Library and a Learn library, and a library is
+     a catalogue you search, not six things you can see at once. */
   tools: [
-    { label: "Practice Tools", href: "/tools.html" },
-    { label: "Pieces Library", href: "/resources.html" },
+    { label: "All Tools", href: "/tools.html" },
     { label: "Glossary", href: "/resources.html?section=glossary" },
     { label: "Key Explorer", href: "/resources.html?section=key" },
   ],
@@ -1109,7 +1124,7 @@ function _shBuildChrome() {
         <h1>The Practice Room</h1>
       </div>
       <nav class="sh-primary-nav" aria-label="Primary">
-          <a class="sh-tab" data-page="hub" href="/practice-log.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Hub</a>
+          <a class="sh-tab" data-page="hub" href="/practice-log.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Practice</a>
           <a class="sh-tab" data-page="learn" href="/learn.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.2 2.7 2.5 6 2.5s6-1.3 6-2.5v-5"/></svg>Learn</a>
           <a class="sh-tab" data-page="tools" href="/tools.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>Tools</a>
           <a class="sh-tab" data-page="community" href="/community.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Community</a>
@@ -1192,7 +1207,7 @@ function _shBuildChrome() {
   };
 ;
   const _sbSections = [
-    { key: "hub", label: "Hub", href: "/practice-log.html" },
+    { key: "hub", label: "Practice", href: "/practice-log.html" },
     { key: "learn", label: "Learn", href: "/learn.html" },
     { key: "tools", label: "Tools", href: "/tools.html" },
     { key: "community", label: "Community", href: "/community.html" },
@@ -1220,7 +1235,7 @@ function _shBuildChrome() {
   bottomBar.innerHTML = `
     <a class="sh-mob-tab" data-page="hub" href="/practice-log.html">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-      <span>Hub</span>
+      <span>Practice</span>
     </a>
     <a class="sh-mob-tab" data-page="learn" href="/learn.html">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.2 2.7 2.5 6 2.5s6-1.3 6-2.5v-5"/></svg>
@@ -1435,13 +1450,13 @@ window.closeNotifPanel  = window._shCloseNotif;
 // sorted by last_seen DESC). Auto-refreshes every 30s while open.
 const _SH_PAGE_LABELS = {
   "/":                    "Home",
-  "/practice-log.html":   "Hub",
+  "/practice-log.html":   "Practice",
   "/community.html":      "Community",
   "/chat.html":           "Chat",
   "/learn.html":          "Learn",
   "/courses.html":        "Courses",
   "/resources.html":      "Resources",
-  "/tools.html":          "Practice Tools",
+  "/tools.html":          "All Tools",
   "/focus.html":          "Weekly Focus",
   "/content-feed.html":   "Content Feed",
   "/events.html":         "Live Clinics",
@@ -1457,10 +1472,10 @@ const _SH_PAGE_LABELS = {
 // Friendly labels for the Hub's internal sub-views (reported via window._shPageDetail
 // as a #fragment, since they switch without changing the URL).
 const _SH_HUB_LABELS = {
-  dashboard: "Hub · Dashboard", stats: "Hub · Stats", goals: "Hub · Goals",
-  roadmap: "Hub · Roadmap", history: "Hub · History", leaderboard: "Hub · Leaderboard",
-  achievements: "Hub · Achievements", community: "Hub · Community", log: "Hub · Practice Log",
-  library: "Library", theory: "Theory", tools: "Practice Tools", feedback: "Feedback",
+  dashboard: "Practice · Dashboard", stats: "Practice · Stats", goals: "Practice · Goals",
+  roadmap: "Practice · Roadmap", history: "Practice · History", leaderboard: "Practice · Leaderboard",
+  achievements: "Practice · Achievements", community: "Practice · Community", log: "Practice · Practice Log",
+  library: "Library", theory: "Theory", tools: "All Tools", feedback: "Feedback",
 };
 function _shPageLabel(path) {
   if (!path) return "";
@@ -2383,10 +2398,15 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     if (basePage === "hub") {
       const goto = new URLSearchParams(location.search).get("goto") || "";
       const hash = location.hash.replace("#", "");
-      // The library, glossary, key explorer and the drills all live under Learn
-      // now, so a Hub URL pointing at any of them highlights Learn.
-      if (["glossary", "key", "library", "theory", "game", "metro", "note"].includes(goto)
-          || ["library", "theory"].includes(hash)) {
+      /* Old Hub URLs that point at something which has since moved out of the
+         Hub. The glossary, the key explorer and the drills are Tools.
+
+         "library" is NOT in this list any more: the pieces library moved INTO
+         Practice, so a Hub URL asking for it is already in the right section
+         and saying "tools" would send it back out again. It falls through to
+         hub, which is what it now is. */
+      if (["glossary", "key", "theory", "game", "metro", "note"].includes(goto)
+          || hash === "theory") {
         return "tools";
       }
     }
@@ -2525,7 +2545,14 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       // Every param a sub-nav link can vary by must be compared here. A link that
       // varies by an uncompared param matches every sibling, which lights the
       // whole row up at once.
-      const SUBNAV_PARAMS = ["goto", "filter", "tab", "section", "type", "topic", "q", "lib"];
+      /* `lib` is deliberately NOT here. It used to be, because Hub's old "My
+         Pieces" item pointed at ?lib=collection and had to be told apart from
+         the plain library link next to it. Nothing in the menus varies by it
+         now, and comparing it would mean /resources.html?lib=collection - the
+         library's own Collection tab - matched no menu item at all and fell
+         through to whichever section the FILE declares. Which is the bug this
+         whole thread started with. */
+      const SUBNAV_PARAMS = ["goto", "filter", "tab", "section", "type", "topic", "q"];
       return SUBNAV_PARAMS.every(k => (u.searchParams.get(k) || "") === (p.get(k) || "")) &&
              (u.hash || "") === (location.hash || "");
     } catch(e) { return false; }
