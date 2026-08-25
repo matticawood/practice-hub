@@ -45,6 +45,28 @@ const mg = (n) => `\\musicglyph #"${n}"`;
 const MIXED_MAG  = 1.575;   /* bass to 0.66 of the treble clef's INK height */
 const MIXED_RAISE = 1.91;   /* levels their ink centres, measured on the page */
 
+/* Fixed stave width from the paper's line-width, notes centred by a skip at
+   each end. The shared frame is applied after engraving - see RANGE_GROUP. */
+const rangeChip = (music) => ({
+  group: "range",
+  m: `\\score { \\new Staff \\with {
+        \\remove "Time_signature_engraver" \\remove "Bar_engraver"
+        %% The clef is HIDDEN, not removed. Removing the engraver takes the
+        %% clef's POSITIONING with it, so the staff falls back to a neutral
+        %% middle C and pitches that should sit on ledger lines land in the
+        %% spaces instead - the ledger card had no ledger lines on it.
+        \\override Clef.stencil = ##f
+        \\override Clef.X-extent = #'(0 . 0) }
+      { \\clef treble \\override Staff.Stem.transparent = ##t s4 ${music} s4 }
+      \\layout { indent = 0
+        \\context { \\Score
+          %% Two notes plus the skips did not fit the fixed line-width, so the
+          %% music broke onto a SECOND system and the crop caught both staves
+          %% stacked - which is why the shared frame came out three times the
+          %% height of a stave and drew all three of them tiny.
+          \\override NonMusicalPaperColumn.line-break-permission = ##f } } }`,
+});
+
 const CHIPS = {
   /* The clef step. */
   treble: { m: mg("clefs.G") },
@@ -55,22 +77,43 @@ const CHIPS = {
                `\\raise #${MIXED_RAISE} \\magnify #${MIXED_MAG} ${mg("clefs.F")} }` },
 
   /* The mode step: a note to name, or a key signature to read it in. */
-  note:   { m: `\\note {8} #1` },
+  /* Engraved, not the \note markup: that composes a notehead, a stem and a
+     flag as three pieces of markup, and at icon size the join reads as a gap -
+     the note looked like it had lost its stem. A real staffless note is one
+     drawing. */
+  note:   { m: `\\score { \\new Staff \\with {
+                  \\remove "Staff_symbol_engraver" \\remove "Time_signature_engraver"
+                  \\remove "Bar_engraver" \\remove "Clef_engraver" }
+                { \\cadenzaOn \\stemUp b'8 } \\layout { indent = 0 ragged-right = ##t } }` },
   keysig: { m: `\\concat { \\raise #1.4 ${mg("accidentals.sharp")} \\hspace #0.3 ` +
                 `\\raise #0.1 ${mg("accidentals.sharp")} \\hspace #0.3 ` +
                 `\\raise #1.8 ${mg("accidentals.sharp")} }` },
+
+  /* The range step. These three ARE about the stave, so unlike the others they
+     show one - no clef, because which clef is the question one row above.
+
+     They are the only chips built to a FIXED FRAME rather than cropped to their
+     own ink. A crop sizes each drawing by its own contents, so the single-note
+     stave came out drawn larger than the one carrying notes above and below,
+     and the three could not be compared - which is the whole job of that row.
+     One line-width and one box means one stave, at one size, three times.
+     A skip either side centres whatever sits between them. */
+  rstave:  rangeChip("b'1"),
+  rledger: rangeChip("a''1 c'1"),
+  rfull:   rangeChip("b'1 a''1"),
 
   /* The accidentals step: the two it adds, or the sign for neither. */
   sharp:   { m: `\\concat { ${mg("accidentals.sharp")} \\hspace #0.5 ${mg("accidentals.flat")} }` },
   natural: { m: mg("accidentals.natural") },
 };
 
-const out = {};
+const out = {}, boxes = {}, groups = {};
 for (const [id, chip] of Object.entries(CHIPS)) {
   const f = join(DIR, "gl_" + id + ".ly");
   writeFileSync(f, `\\version "2.24.0"
 \\header { tagline = ##f }
-\\paper { indent = 0 oddFooterMarkup = ##f oddHeaderMarkup = ##f
+\\paper { indent = 0 line-width = 22\\mm ragged-right = ##f
+         oddFooterMarkup = ##f oddHeaderMarkup = ##f
          bookTitleMarkup = ##f scoreTitleMarkup = ##f }
 \\markup { ${chip.m} }
 `);
@@ -80,15 +123,38 @@ for (const [id, chip] of Object.entries(CHIPS)) {
     .replace(/<\?xml[^>]*\?>\s*/g, "")
     .replace(/<!DOCTYPE[^>]*>\s*/g, "")
     .replace(/<style[\s\S]*?<\/style>\s*/g, "")
-    .replace(/\s(width|height)="[^"]*"/g, "")
+    /* Strip width/height from the <svg> TAG ONLY, so css can size it. Run over
+       the whole document this also stripped them from every <rect> - and
+       LilyPond draws ledger lines as rects, so they were rendering zero by zero
+       and the ledger card silently had no ledger lines on it. */
+    .replace(/<svg\b[^>]*>/, (tag) => tag.replace(/\s(width|height)="[^"]*"/g, ""))
     .replace(/<svg /, '<svg aria-hidden="true" preserveAspectRatio="xMidYMid meet" ')
     .replace(/\s+/g, " ")
     .trim();
 
   const vb = (svg.match(/viewBox="([^"]*)"/) || [])[1].split(" ").map(Number);
   out[id] = svg;
+  boxes[id] = vb;
+  if (chip.group) (groups[chip.group] = groups[chip.group] || []).push(id);
   console.log(`${id.padEnd(9)} ${String(svg.length).padStart(5)}B  ` +
     `crop ${vb[2].toFixed(2)} x ${vb[3].toFixed(2)}`);
+}
+
+/* A grouped set shares ONE frame: the union of the members' own crops. They are
+   engraved in the same coordinates - same stave, same width, same origin - so
+   the union aligns them exactly, and rendering the group at one height then
+   draws one stave at one size in all of them. Cropping each to its own ink
+   would instead size each drawing by its contents, which is what made the
+   single-note stave come out larger than the one carrying notes above and
+   below - and comparing them is the entire job of that row. */
+for (const [name, ids] of Object.entries(groups)) {
+  const x0 = Math.min(...ids.map((i) => boxes[i][0]));
+  const y0 = Math.min(...ids.map((i) => boxes[i][1]));
+  const x1 = Math.max(...ids.map((i) => boxes[i][0] + boxes[i][2]));
+  const y1 = Math.max(...ids.map((i) => boxes[i][1] + boxes[i][3]));
+  const box = [x0, y0, x1 - x0, y1 - y0].map((n) => n.toFixed(4)).join(" ");
+  ids.forEach((i) => { out[i] = out[i].replace(/viewBox="[^"]*"/, `viewBox="${box}"`); });
+  console.log(`\ngroup ${name}: ${ids.join(", ")} share ${(x1-x0).toFixed(2)} x ${(y1-y0).toFixed(2)}`);
 }
 
 writeFileSync(join(DIR, "glyphs.json"), JSON.stringify(out, null, 1));
