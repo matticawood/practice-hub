@@ -2181,6 +2181,11 @@ function showTool(id) {
   const _t = thById(id);
   panel.style.setProperty("--tc", _t ? _t.tc : "#f5c518");
   document.body.classList.remove("nr-playing");
+  /* Note Recognition is a full-screen tool throughout - setup, playing and
+     results - not just for the minute the clock runs. nr-playing is the
+     narrower thing on top of it: the fixed frame that pins the keyboard to the
+     bottom edge while a round is going. */
+  document.body.classList.toggle("nr-full", id === "note");
   /* Its engraving sits behind the header, as it does on the tile. */
   const _art = panel.querySelector(".tool-header-art");
   if (_art) _art.innerHTML = (_t && TH_ART[id]) ? TH_ART[id] : "";
@@ -3715,10 +3720,22 @@ function nrDrawNote(note) {
    needs to reach both edges while keeping its proportions — a real piano gets
    wider by having more keys, not by having wider ones. Chosen to keep a white
    key roughly between 55 and 85px, which is comfortable to hit at either end. */
+/* The SAME query the shared header uses to decide whether to show the sidebar
+   or the bottom tab bar. The keyboard has to change at exactly that moment: on
+   the phone layout the bottom bar appears and the content gets wider as the
+   sidebar goes, so thresholds of my own invention had the keys jumping to MORE
+   octaves at the point the screen got smaller. Tied to the app's own
+   breakpoint, the two always move together. */
+const NR_DESKTOP_Q = "(min-width: 1025px), (orientation: landscape) and (min-width: 769px)";
+function nrIsDesktopChrome() {
+  return window.matchMedia ? window.matchMedia(NR_DESKTOP_Q).matches : window.innerWidth >= 1025;
+}
 function nrOctaveCount() {
-  const w = document.getElementById("nr-piano");
-  const px = (w && w.clientWidth) || window.innerWidth;
-  if (px < 620)  return 1;
+  /* Phone layout: one octave, whatever the width. Fourteen keys under a thumb
+     is 28px each; seven is twice that. */
+  if (!nrIsDesktopChrome()) return 1;
+  const el = document.getElementById("nr-piano");
+  const px = (el && el.clientWidth) || window.innerWidth;
   if (px < 1080) return 2;
   if (px < 1560) return 3;
   return 4;
@@ -3782,22 +3799,41 @@ function nrFitFrame() {
   const scr = document.getElementById("nr-screen-playing");
   if (!scr) return;
   const top = Math.max(0, Math.round(scr.getBoundingClientRect().top));
+  /* offsetParent is ALWAYS null for a position:fixed element, and the tab bar
+     is fixed - so testing it that way reported the bar as hidden even while it
+     was on screen, and its height was never taken off. The keyboard then ran
+     under it on a phone. Measure the box instead. */
   const bar = document.getElementById("sh-mob-bottom-bar");
-  const bot = bar && bar.offsetParent !== null ? Math.round(bar.getBoundingClientRect().height) : 0;
+  const barR = bar ? bar.getBoundingClientRect() : null;
+  const barOn = !!(bar && barR.height > 0 && getComputedStyle(bar).display !== "none"
+                   && getComputedStyle(bar).visibility !== "hidden");
+  const bot = barOn ? Math.round(barR.height) : 0;
   document.body.style.setProperty("--nr-chrome", (top + bot) + "px");
 }
 
 /* Rebuild when the width crosses an octave boundary, so a rotated phone or a
    dragged window gets the right number of keys rather than stretched ones. */
 let _nrOct = null;
-window.addEventListener("resize", function() {
+function nrOnResize() {
   if (nrPhase !== "playing") return;
+  /* The frame first: crossing the breakpoint swaps the sidebar for the bottom
+     tab bar, and the keyboard has to come up above it in the same pass. */
   nrFitFrame();
   const n = nrOctaveCount();
   if (n === _nrOct) return;
   _nrOct = n;
   nrBuildPiano();
-});
+}
+window.addEventListener("resize", nrOnResize);
+window.addEventListener("orientationchange", nrOnResize);
+/* And on the breakpoint itself, which fires even when a resize does not - a
+   rotation that keeps the same width, for one. */
+if (window.matchMedia) {
+  const _mq = window.matchMedia(NR_DESKTOP_Q);
+  const _onMq = function() { if (nrPhase === "playing") { nrFitFrame(); _nrOct = nrOctaveCount(); nrBuildPiano(); } };
+  if (_mq.addEventListener) _mq.addEventListener("change", _onMq);
+  else if (_mq.addListener) _mq.addListener(_onMq);
+}
 
 function nrAnswer(keyEl, noteName) {
   if (nrLocked || !nrCurrent || nrPhase !== "playing") return;
@@ -6312,11 +6348,51 @@ body.th-open .th-r-form:focus-within { border-color: color-mix(in srgb, var(--tc
    taking everything between that and the keys, and the keyboard on the bottom
    edge. The class is set by nrStartWithCountdown and dropped on the way out,
    so nothing else about the tools page changes. */
-body.nr-playing main#app-main { padding: 0 !important; max-width: none; }
-body.nr-playing .tools-wrap { max-width: none; margin: 0; padding: 0;
+/* Out of the framed column for the whole tool, not only while a round runs. */
+body.nr-full main#app-main { padding: 0 !important; max-width: none; }
+body.nr-full .tools-wrap { max-width: none; margin: 0; padding: 0;
   background: none; border: 0; border-radius: 0; box-shadow: none; }
-body.nr-playing #tool-note .tool-header,
-body.nr-playing #nr-sidebar { display: none; }
+body.nr-full #nr-sidebar { display: none; }
+/* The header is the setup page's own title block; the playing frame has its
+   clock instead and does not want it. */
+body.nr-playing #tool-note .tool-header { display: none; }
+
+/* ══ setup, full screen ════════════════════════════════════════════════════
+   The page you land on. Same world as the game it starts: the room's ground,
+   the tool's colour, its engraving behind the title, and enough room for the
+   choices to be read rather than squinted at in a narrow column. */
+body.nr-full #tool-note .tool-header { margin: 0; padding: clamp(26px,5vh,54px) var(--nr-gut) clamp(22px,4vh,38px);
+  border-bottom: 1px solid color-mix(in srgb, var(--tc) 18%, rgba(255,255,255,.07)); }
+body.nr-full { --nr-gut: clamp(18px,4vw,60px); }
+body.nr-full #tool-note .tool-header-icon { width: 54px; height: 54px; border-radius: 15px; }
+body.nr-full #tool-note .tool-header-icon svg { width: 27px; height: 27px; }
+body.nr-full #tool-note .tool-header-title { font-size: clamp(1.9rem,4.4vw,3rem); }
+body.nr-full #tool-note .tool-header-sub { font-size: 1rem; margin-top: 8px; }
+/* Clear of the title and inside the band. At 84% of a tall header the stave
+   was wider than the header and its top was being sliced by the overflow clip. */
+body.nr-full #tool-note .tool-header-art { height: 52%; right: 2%; opacity: .2; }
+
+body.nr-full #nr-screen-setup { padding: clamp(22px,4vh,40px) var(--nr-gut) 110px; }
+body.nr-full #nr-screen-setup .nr-steps-bar { margin: 0 0 clamp(20px,4vh,34px); justify-content: flex-start; }
+body.nr-full .nr-step-heading { font-size: .72rem; letter-spacing: .18em; margin-bottom: 14px; }
+body.nr-full .nr-option-grid { display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); max-width: 68rem; }
+body.nr-full .nr-option-card { min-height: 0; padding: 22px 20px; text-align: left;
+  align-items: flex-start; justify-content: flex-start; gap: 10px; border-radius: 16px; }
+body.nr-full .nr-option-card-title { font: 700 1.12rem/1.2 Fraunces, Georgia, serif; }
+body.nr-full .nr-option-card-desc { font-size: .88rem; }
+body.nr-full .nr-option-icon { margin-bottom: 2px; }
+body.nr-full .nr-wiz-nav { margin-top: clamp(26px,5vh,44px); max-width: 68rem;
+  display: flex; gap: 12px; align-items: center; }
+body.nr-full .nr-wiz-next { flex: 0 0 auto; padding: 16px 34px; font-size: 1rem; }
+body.nr-full .nr-wiz-back { flex: 0 0 auto; }
+
+/* results, in the same frame */
+body.nr-full #nr-screen-results { padding: clamp(26px,5vh,54px) var(--nr-gut) 110px;
+  max-width: 60rem; margin: 0 auto; text-align: center; }
+body.nr-full .nr-results-card { background: none; border: 0; box-shadow: none; padding: 0; }
+body.nr-full .nr-results-num { font-size: clamp(5rem,15vw,9rem); }
+body.nr-full .nr-play-again { width: auto; margin: 28px auto 0; display: inline-flex; }
 
 body.nr-playing #nr-screen-playing { height: calc(100dvh - var(--nr-chrome, 62px)); overflow: hidden; }
 @supports not (height: 100dvh) {
