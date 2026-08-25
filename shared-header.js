@@ -37,12 +37,14 @@ const SH_SUBNAV = {
        are inside the page, so this costs the menu nothing: it is the slot "My
        Pieces" already had. */
     { label: "Pieces", href: "/resources.html" },
-    { label: "Stats", href: "/practice-log.html?goto=stats" },
     { label: "Goals", href: "/practice-log.html?goto=goals" },
     { label: "Roadmap", href: "/practice-log.html?goto=roadmap" },
-    { label: "History", href: "/practice-log.html?goto=history" },
-    { label: "Leaderboard", href: "/practice-log.html?goto=leaderboard" },
-    { label: "Achievements", href: "/practice-log.html?goto=achievements" },
+    /* Stats, History, Ranks and Achievements answer one question - how is it
+       going - and they held four of this menu's eight slots between them, which
+       flattened the two that are opened daily. They are one destination now,
+       and a tab bar on the page moves between them. Nothing was removed: every
+       one of them is still a click away, and every other route in still works. */
+    { label: "Progress", href: "/practice-log.html?goto=stats" },
   ],
   learn: [
     { label: "Library", href: "/learn.html" },
@@ -2553,8 +2555,20 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
          through to whichever section the FILE declares. Which is the bug this
          whole thread started with. */
       const SUBNAV_PARAMS = ["goto", "filter", "tab", "section", "type", "topic", "q"];
-      return SUBNAV_PARAMS.every(k => (u.searchParams.get(k) || "") === (p.get(k) || "")) &&
-             (u.hash || "") === (location.hash || "");
+      /* One menu item can stand for several views of one page. Progress points
+         at ?goto=stats, but History, Ranks and Achievements are the same
+         destination reached through its tab bar - so without this, opening
+         History would match no item at all and the highlight would fall to the
+         section's FIRST item, lighting Dashboard while you are looking at
+         History. Declared once here rather than discovered later. */
+      const GROUPS = { goto: { stats: ["stats", "history", "leaderboard", "achievements"] } };
+      return SUBNAV_PARAMS.every(function (k) {
+        const want = u.searchParams.get(k) || "";
+        const got  = p.get(k) || "";
+        if (want === got) return true;
+        const group = GROUPS[k] && GROUPS[k][want];
+        return !!group && group.indexOf(got) > -1;
+      }) && (u.hash || "") === (location.hash || "");
     } catch(e) { return false; }
   }
 
