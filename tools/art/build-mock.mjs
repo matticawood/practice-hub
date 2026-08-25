@@ -106,6 +106,7 @@ const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routi
   .keys { --n:14; --white-len:92;
     position:relative; display:flex; width:100%;
     aspect-ratio: calc(var(--n) * 23.5) / var(--white-len);
+    container-type:inline-size;   /* so the labels can size off the keyboard */
     background:#0c0c10; }
   /* On --white-len: the two ratios that make it read as a piano are held
      exactly - a black key is 58% of a white one's width and 62% of its length -
@@ -133,8 +134,17 @@ const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routi
 
   .k { position:relative; flex:0 0 calc(100% / var(--n)); min-width:0; border:0; cursor:pointer;
     background:linear-gradient(180deg,#fdfdfb,#e6e4dd);
-    border-right:1px solid #b9b6ad; display:flex; align-items:flex-end; justify-content:center;
-    padding-bottom:4%; font:650 clamp(.6rem,1.1vw,.8rem)/1 var(--sans); color:#6d6a61; }
+    border-right:1px solid #b9b6ad; padding:0; color:#6d6a61; }
+  /* The label is placed against the key, not packed into it. padding-bottom in
+     % resolves against the CONTAINING BLOCK'S WIDTH, so 4% was 4% of the whole
+     keyboard - the letters sat a fixed distance up whatever the key height was,
+     and jumped whenever the octave count changed. bottom:6% on an absolutely
+     placed label is 6% of the KEY'S HEIGHT, which is what it should always have
+     been. And the size comes off the keyboard in cqw divided by the number of
+     keys, so it tracks the key rather than the window: at 1.1vw the letters
+     stayed the same size while the keys got narrower. */
+  .k span { position:absolute; left:0; right:0; bottom:6%; text-align:center;
+    font:650 calc(17cqw / var(--n))/1 var(--sans); }
   .k:last-child { border-right:0; }
   .k:active, .k.hit { background:linear-gradient(180deg,#d8f5e8,#a9e6cd); color:#0d5d43; }
   /* Sized off the white key it sits between, so the two never drift: 58% of a
@@ -200,7 +210,7 @@ const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routi
     /* 3 and 4 are already hidden above; kept explicit so the phone rule reads
        on its own. */
     .k[data-oct="3"], .k[data-oct="4"] { display:none; }
-    .k span { font-size:.72rem; }
+
   }
 </style>
 
