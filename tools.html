@@ -3062,6 +3062,47 @@ function nrWizGoTo(step) {
   var mHelpTab = document.getElementById("nr-mstab-help");
   if (mHelpTab) mHelpTab.style.display = (step === 4 && nrMode === "key") ? "" : "none";
   if (mHelpTab && mHelpTab.style.display === "none") nrShowMobileTab("lb");
+
+  nrSyncOnePage();
+}
+
+/* ── one page, not four ───────────────────────────────────────────────────────
+   Four steps to set up a sixty second drill is three taps of paging before you
+   play, and on a full screen each step left most of the page empty. The steps
+   are independent choices, so they are all shown at once: the settings ARE the
+   page, and the page fills because there is enough on it.
+
+   The wizard machinery is left alone rather than unpicked - the picks still
+   call through nrWizGoTo, which still tracks a current step and still runs the
+   accidentals-or-key swap. This just makes every step visible and turns the one
+   button into Start, so nothing downstream has to know the difference. */
+function nrSyncOnePage() {
+  if (!document.body.classList.contains("nr-full")) return;
+  [1,2,3,4].forEach(function(n) {
+    var el = document.getElementById("nr-wiz-" + n);
+    if (el) el.classList.add("active");
+  });
+  /* Step 3 swaps between accidentals and a key picker depending on the mode.
+     With every step on screen at once that has to be right whatever the wizard
+     thinks the current step is, not only while standing on step 3. */
+  var isKey  = nrMode === "key";
+  var accDiv = document.getElementById("nr-wiz-acc");
+  var keyDiv = document.getElementById("nr-wiz-key");
+  var head   = document.getElementById("nr-wiz-3-head");
+  if (accDiv) accDiv.style.display = isKey ? "none" : "";
+  if (keyDiv) keyDiv.style.display = isKey ? "" : "none";
+  if (head)   head.textContent     = isKey ? "Choose a key" : "Accidentals";
+  if (isKey)  nrBuildKeyPicker();
+
+  var back = document.getElementById("nr-wiz-back");
+  var next = document.getElementById("nr-wiz-next");
+  if (back) back.style.display = "none";
+  if (next) { next.textContent = "Start"; next.onclick = nrStartWithCountdown; }
+
+  var mobileLb = document.getElementById("nr-lb-setup");
+  if (mobileLb) mobileLb.style.display = "";
+  var mHelpTab = document.getElementById("nr-mstab-help");
+  if (mHelpTab) mHelpTab.style.display = nrMode === "key" ? "" : "none";
 }
 
 function nrWizNext() { nrWizGoTo(Math.min(4, nrWizStep + 1)); }
@@ -3072,6 +3113,11 @@ function nrWizPickMode(mode) {
   document.querySelectorAll(".nr-option-card[data-mode]").forEach(function(b) {
     b.classList.toggle("active", b.dataset.mode === mode);
   });
+  /* With every setting on one page the third section has to follow the mode
+     immediately - accidentals for Normal, a key picker for Key Signature. In
+     the wizard that swap happened on the way INTO step 3, which never comes
+     when there are no steps to walk. */
+  nrSyncOnePage();
 }
 
 function nrWizPickClef(clef) {
@@ -6374,7 +6420,9 @@ body.th-open .th-r-form:focus-within { border-color: color-mix(in srgb, var(--tc
 body.nr-full main#app-main { padding: 0 !important; max-width: none; }
 body.nr-full .tools-wrap { max-width: none; margin: 0; padding: 0;
   background: none; border: 0; border-radius: 0; box-shadow: none; }
-body.nr-full #nr-sidebar { display: none; }
+/* The desktop board is what fills the second column on the setup page; it is
+   the game's own sidebar, not the app's. Hidden during a round. */
+body.nr-playing #nr-sidebar { display: none; }
 /* The two that were still holding the game in a column.
 
    .nr-main is capped at 520px below a 900px viewport, which is what snapped the
@@ -6419,17 +6467,37 @@ body.nr-full #tool-note .tool-header-sub { font-size: 1rem; margin-top: 8px; }
    was wider than the header and its top was being sliced by the overflow clip. */
 body.nr-full #tool-note .tool-header-art { height: 52%; right: 2%; opacity: .2; }
 
-body.nr-full #nr-screen-setup { padding: clamp(22px,4vh,40px) var(--nr-gut) 110px; }
-body.nr-full #nr-screen-setup .nr-steps-bar { margin: 0 0 clamp(20px,4vh,34px); justify-content: flex-start; }
+/* Every setting on one page, in a column that fills the screen: the choices
+   stacked down the left, the board that shows what you are aiming at down the
+   right where there is room for it. */
+body.nr-full #nr-screen-setup { padding: clamp(22px,4vh,40px) var(--nr-gut) 40px;
+  display: grid; gap: clamp(22px,4vw,52px); align-content: start;
+  grid-template-columns: minmax(0,1fr); }
+@media (min-width: 1080px) {
+  /* The board is taken out of the flow rather than given a grid cell. In the
+     grid it sat in row one, so row one grew to the board's 400px and left a
+     gap under the first section - and spanning rows to avoid that is what
+     produced the ninety-nine implicit rows and a six-thousand-pixel page. Out
+     of flow it can be as tall as it likes without touching the settings. */
+  body.nr-full #nr-screen-setup { display: block; position: relative;
+    padding-right: calc(20rem + clamp(22px,4vw,52px)); }
+  body.nr-full #nr-screen-setup > .nr-lb { position: absolute;
+    top: 0; right: 0; width: 20rem; margin: 0; }
+}
+/* All four steps at once, each one a section of the same page. */
+body.nr-full .nr-wiz-step { display: block; margin-bottom: clamp(20px,3.4vh,32px); }
+/* The step dots and Back have nothing to count or go back to now. */
+body.nr-full #nr-screen-setup .nr-steps-bar,
+body.nr-full .nr-wiz-back { display: none; }
 body.nr-full .nr-step-heading { font-size: .72rem; letter-spacing: .18em; margin-bottom: 14px; }
 body.nr-full .nr-option-grid { display: grid; gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); max-width: 68rem; }
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 body.nr-full .nr-option-card { min-height: 0; padding: 22px 20px; text-align: left;
   align-items: flex-start; justify-content: flex-start; gap: 10px; border-radius: 16px; }
 body.nr-full .nr-option-card-title { font: 700 1.12rem/1.2 Fraunces, Georgia, serif; }
 body.nr-full .nr-option-card-desc { font-size: .88rem; }
 body.nr-full .nr-option-icon { margin-bottom: 2px; }
-body.nr-full .nr-wiz-nav { margin-top: clamp(26px,5vh,44px); max-width: 68rem;
+body.nr-full .nr-wiz-nav { margin-top: clamp(8px,2vh,18px);
   display: flex; gap: 12px; align-items: center; }
 /* Neither stretches: they are a pair of controls, not a segmented bar. Back
    first, because that is where you came from — which is the DOM order, so no
