@@ -624,6 +624,10 @@
     .nr-white-key:hover:not(:disabled) { background: #d8d8d8; }
     .nr-white-key:active:not(:disabled) { background: #c8c8c8; }
     .nr-white-key.nr-correct { background: #4ade80 !important; }
+    /* Not "wrong" and not "the answer" - "this is the one it meant". An outline
+       rather than a fill, so it never competes with the key just pressed. */
+    .nr-white-key.nr-octave, .nr-black-key.nr-octave {
+      box-shadow: inset 0 0 0 3px #4ade80; }
     .nr-white-key.nr-wrong   { background: #f87171 !important; }
     .nr-black-key { position: absolute; top: 0; width: 11%; height: 62%; background: linear-gradient(to bottom, #2a2a2a, #111); border-radius: 0 0 4px 4px; border: 1px solid #000; z-index: 2; box-shadow: 0 3px 6px rgba(0,0,0,.5); }
     .nr-black-btn { cursor: pointer; pointer-events: all; -webkit-tap-highlight-color: transparent; }
@@ -2775,6 +2779,7 @@ const NR_BASS_FLAT = [
   { name:"Bb", y:27, ledgers:[], stemUp:false, acc:"b", key:"A#" },
 ];
 const NR_BLACK_NOTES = ["C#","D#","F#","G#","A#"];
+const NR_SEMI = { C:0, "C#":1, D:2, "D#":3, E:4, F:5, "F#":6, G:7, "G#":8, A:9, "A#":10, B:11 };
 const NR_BLACK_POS   = [1, 2, 4, 5, 6];
 
 // ── Key Signature Data ──────────────────────────────────────────────────────
@@ -3372,7 +3377,7 @@ function nrNextNote() {
   nrDrawClef(pick.clef);
   nrDrawNote(pick);
   document.querySelectorAll("#nr-piano .nr-white-key, #nr-piano .nr-black-key")
-    .forEach(function(k) { k.classList.remove("nr-correct","nr-wrong"); });
+    .forEach(function(k) { k.classList.remove("nr-correct","nr-wrong","nr-octave"); });
 }
 
 async function nrSaveScore() {
@@ -3865,12 +3870,45 @@ function nrOctaveCount() {
   return 4;
 }
 
+/* Which real octave the leftmost C stands for. The keyboard used to be N
+   anonymous copies of C to B, so no key had a pitch and nothing could point at
+   the RIGHT F among four of them. Anchored on the middle of what the current
+   settings can actually ask, the visible keys cover the pool as closely as the
+   screen allows. */
+function nrKeyboardStartOctave(octaves) {
+  var lo = Infinity, hi = -Infinity;
+  nrGetPool().forEach(function (p) {
+    var m = _sndNoteMidi(p.name, p.acc, p.y, p.clef);
+    if (m == null) return;
+    if (m < lo) lo = m;
+    if (m > hi) hi = m;
+  });
+  if (!isFinite(lo)) return 3;
+  return Math.round(((lo + hi) / 2 - octaves * 6) / 12) - 1;
+}
+
+/* The key the question actually names. Falls back to the letter when that pitch
+   is off the end of a narrow keyboard - which is no worse than before, and on a
+   one octave screen there is only one of each letter anyway. */
+function nrTrueKeyEl() {
+  if (!nrCurrent) return null;
+  var m = null;
+  try { m = _sndNoteMidi(nrCurrent.name, nrCurrent.acc, nrCurrent.y, nrCurrent.clef); } catch (e) {}
+  var el = m == null ? null : document.querySelector('#nr-piano [data-midi="' + m + '"]');
+  if (!el) {
+    var pk = nrCurrent.key !== undefined ? nrCurrent.key : nrCurrent.name;
+    el = document.querySelector('#nr-piano [data-note="' + pk + '"]');
+  }
+  return el;
+}
+
 function nrBuildPiano() {
   const piano = document.getElementById("nr-piano");
   if (!piano) return;
   piano.innerHTML = "";
 
-  const octaves = nrOctaveCount();
+  const octaves  = nrOctaveCount();
+  const startOct = nrKeyboardStartOctave(octaves);
   const whites  = 7 * octaves;
   /* One number drives the whole keyboard: --n, the number of white keys. The
      CSS derives the key width, the black key's width and length, and the
@@ -3882,6 +3920,7 @@ function nrBuildPiano() {
       const key = document.createElement("button");
       key.className    = "nr-white-key";
       key.dataset.note = note;
+      key.dataset.midi = (startOct + o + 1) * 12 + NR_SEMI[note];
       key.setAttribute("aria-label", note + " key");
       key.addEventListener("click", function() { nrAnswer(key, note); });
       piano.appendChild(key);
@@ -3900,6 +3939,7 @@ function nrBuildPiano() {
         const key = document.createElement("button");
         key.className    = "nr-black-key nr-black-btn";
         key.dataset.note = bNote;
+        key.dataset.midi = (startOct + o + 1) * 12 + NR_SEMI[bNote];
         key.style.left   = left;
         key.setAttribute("aria-label", bNote + " key");
         key.addEventListener("click", function() { nrAnswer(key, bNote); });
@@ -3955,16 +3995,30 @@ function nrAnswer(keyEl, noteName) {
   const pianoKey = nrCurrent.key !== undefined ? nrCurrent.key : nrCurrent.name;
   const correct  = noteName === pianoKey;
 
+  /* Any F counts, whichever octave it is in. That is deliberate: the drill is
+     naming the note, and if the octave had to match, the same game would be
+     harder on a four octave desktop than on a one octave phone - with one
+     shared leaderboard, that is unfair rather than instructive.
+     But the keyboard should not imply a distinction it ignores, so the key the
+     question actually meant is always shown. */
+  const trueKey = nrTrueKeyEl();
+
   if (correct) {
     nrGameScore++;
     const scoreEl = document.getElementById("nr-score-num");
     if (scoreEl) scoreEl.textContent = nrGameScore;
     keyEl.classList.add("nr-correct");
+    /* Right letter, another octave: marked so the register registers, without
+       calling a correct answer wrong. */
+    if (trueKey && trueKey !== keyEl) trueKey.classList.add("nr-octave");
     nrShowFeedback("✓", "correct");
     setTimeout(nrNextNote, 280);
   } else {
     keyEl.classList.add("nr-wrong");
-    const correctKey = document.querySelector("#nr-piano [data-note=\"" + pianoKey + "\"]");
+    /* This used to be the FIRST key with that letter, which on a multi octave
+       keyboard is usually the wrong one - so the single moment the game teaches
+       anything pointed at the wrong key. */
+    const correctKey = trueKey;
     if (correctKey) setTimeout(function() { correctKey.classList.add("nr-correct"); }, 100);
     var accSym = nrCurrent.acc === "#" ? "♯" : nrCurrent.acc === "b" ? "♭" : nrCurrent.acc === "n" ? "♮" : nrCurrent.acc === "x" ? "𝄪" : "";
     nrShowFeedback("✗ " + nrCurrent.name + accSym, "wrong");
@@ -6740,6 +6794,11 @@ body.nr-full .nr-wiz-nav { margin-top: clamp(18px,3vh,28px); padding-top: 20px;
    reversing. (I had row-reverse here, which put Next on the left.) */
 body.nr-full .nr-wiz-nav { justify-content: flex-start; gap: 10px; }
 body.nr-full .nr-wiz-next { flex: 0 0 auto; padding: 16px 34px; font-size: 1rem; }
+/* The board above it and every option card are 16px. A pill was the only shape
+   on the screen that was not, and next to the board it shares a width with,
+   that read as a different kind of thing. The panel id is in the selector
+   because the rule it has to beat carries one. */
+body.nr-full #panel-tools .nr-wiz-next { border-radius: 16px; }
 body.nr-full .nr-wiz-back { flex: 0 0 auto; padding: 16px 26px; font-size: 1rem; }
 
 /* results, in the same frame */
