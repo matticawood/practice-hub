@@ -1282,16 +1282,21 @@
                 <div class="nr-option-grid">
                   <button class="nr-option-card active" data-mode="free" onclick="crWizPickMode('free')">
                     <div class="nr-option-icon"><svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32"><path d="M12 3v10.55A4 4 0 1 0 14 17V5h4V3h-6zm-2 16a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg></div>
-                    <div class="nr-option-card-title">Free</div>
-                    <div class="nr-option-card-desc">All roots &amp; qualities</div>
+                    <div class="nr-option-card-title">Normal</div>
+                    <div class="nr-option-card-desc">Any chords</div>
                   </button>
                   <button class="nr-option-card" data-mode="key" onclick="crWizPickMode('key')">
                     <div class="nr-option-icon-clef" id="cr-icon-keysig"></div>
-                    <div class="nr-option-card-title">In Key</div>
-                    <div class="nr-option-card-desc">Diatonic chords from a chosen key</div>
+                    <div class="nr-option-card-title">Key Signature</div>
+                    <div class="nr-option-card-desc">Chords in a key</div>
                   </button>
                 </div>
-                <div id="cr-key-picker-wrap" style="display:none; margin-top:12px">
+              </div>
+
+              <!-- Key: its own row, directly under the mode that asks for it -->
+              <div class="nr-wiz-step" id="cr-wiz-key" style="display:none">
+                <div class="nr-step-heading">Key</div>
+                <div id="cr-key-picker-wrap">
                   <div id="cr-key-picker" class="nr-key-picker-wrap"></div>
                 </div>
               </div>
@@ -1359,7 +1364,9 @@
               <!-- The board for the variant being set up, and Start beneath it. -->
               <div class="nr-side-col">
               <div class="nr-lb nr-mobile-lb" id="cr-lb-setup">
-                <div class="nr-lb-head">Top Scores</div>
+                <div class="nr-sidebar-tabs">
+                  <button class="nr-stab active" type="button">Leaderboard</button>
+                </div>
                 <div id="cr-lb-setup-rows"><div class="nr-lb-empty">Loading&hellip;</div></div>
               </div>
 
@@ -1427,7 +1434,9 @@
               </div>
               <!-- Mobile-only leaderboard -->
               <div class="nr-lb nr-mobile-lb" id="cr-lb-results">
-                <div class="nr-lb-head">Top Scores</div>
+                <div class="nr-sidebar-tabs">
+                  <button class="nr-stab active" type="button">Leaderboard</button>
+                </div>
                 <div id="cr-lb-results-rows"><div class="nr-lb-empty">Loading&hellip;</div></div>
               </div>
             </div><!-- /cr-screen-results -->
@@ -4795,6 +4804,11 @@ function crSyncOnePage() {
   var next = document.getElementById("cr-wiz-next");
   if (back) back.style.display = "none";
   if (next) { next.textContent = "Start"; next.onclick = crStartWithCountdown; }
+  var keyRow = document.getElementById("cr-wiz-key");
+  if (keyRow) {
+    keyRow.style.display = crMode === "key" ? "" : "none";
+    if (crMode === "key") crInitKeyPicker();
+  }
   var lb = document.getElementById("cr-lb-setup");
   if (lb) { lb.style.display = ""; crLoadLeaderboard("cr-lb-setup-rows"); }
 }
@@ -4823,8 +4837,6 @@ function crWizPickMode(mode) {
   crMode = mode;
   document.querySelectorAll("#cr-wiz-4 .nr-option-card").forEach(c =>
     c.classList.toggle("active", c.dataset.mode === mode));
-  const kp = document.getElementById("cr-key-picker-wrap");
-  if (kp) kp.style.display = mode === "key" ? "" : "none";
   crSyncOnePage();
 }
 function crPickKey(keyId) {
@@ -5129,10 +5141,26 @@ async function toolsCheckAchievements() {
   }
 }
 
+/* Which board you are looking at. It is filtered per variant exactly as Note
+   Recognition's is - tier, clef, mode and key - so it says so, in the same
+   place and the same words. */
+function crBoardLabel() {
+  const fam  = crFamily === "seventh" ? "7ths" : "Triads";
+  const pos  = crPosition === "root" ? "Root" : crPosition === "inv" ? "Inversions" : "Spread";
+  const clef = crClef === "mixed" ? "Mixed" : crClef === "bass" ? "Bass" : "Treble";
+  const parts = [fam, pos, clef];
+  if (crMode === "key") {
+    const k = NR_KEYS.find(x => x.id === crKeyId);
+    parts.push(k ? k.label : crKeyId);
+  }
+  return '<div class="nr-lb-format-label">' + parts.join(" · ") + ' · Top 10</div>';
+}
+
 async function crLoadLeaderboard(rowsElId) {
   const el = document.getElementById(rowsElId);
   if (!el) return;
-  el.innerHTML='<div class="nr-lb-empty">Loading…</div>';
+  const cap = crBoardLabel();
+  el.innerHTML = cap + '<div class="nr-lb-empty">Loading…</div>';
   try {
     // Filter server-side so the 500-row limit applies to THIS board, not the global top
     // scores (a sparse board would otherwise be truncated below the cutoff and show empty).
@@ -5141,16 +5169,16 @@ async function crLoadLeaderboard(rowsElId) {
       .eq("tier",crGetTier()).eq("clef",crClef).eq("mode",crMode);
     if (crMode==="key") q = q.eq("key_signature",crKeyId);
     const {data,error} = await q.order("score",{ascending:false}).limit(500);
-    if (error||!data){el.innerHTML='<div class="nr-lb-empty">Unable to load</div>'; return;}
+    if (error||!data){el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>'; return;}
     const best={};
     data.forEach(r=>{if(!best[r.email]||r.score>best[r.email].score)best[r.email]=r;});
     const rows=Object.values(best).sort((a,b)=>b.score-a.score).slice(0,10);
-    if(!rows.length){el.innerHTML='<div class="nr-lb-empty">No scores yet. Be first!</div>'; return;}
-    el.innerHTML=rows.map((r,i)=>{
+    if(!rows.length){el.innerHTML=cap+'<div class="nr-lb-empty">No scores yet. Be first!</div>'; return;}
+    el.innerHTML=cap+rows.map((r,i)=>{
       const mine=r.email===myEmail.toLowerCase();
       return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||r.email.split("@")[0])}</span><span class="nr-lb-score">${r.score}</span></div>`;
     }).join("");
-  } catch(e){el.innerHTML='<div class="nr-lb-empty">Unable to load</div>';}
+  } catch(e){el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>';}
 }
 
 // ═══ CHORD EAR TRAINING (et) ════════════════════════════════════════════════
