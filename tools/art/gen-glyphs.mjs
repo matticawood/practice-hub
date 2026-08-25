@@ -57,6 +57,7 @@ const stackChip = (group) => (music) =>
    tool's page. */
 const chordChip = stackChip("chord");
 const earChip   = stackChip("ear");
+const ivChip    = stackChip("interval");
 
 const rangeChip = (music) => ({
   group: "range",
@@ -137,6 +138,26 @@ const CHIPS = {
   eexts:   earChip("<c' e' g' d''>"),
   equal:   earChip("<c' e' g'>"),
   eexact:  earChip("<cis' eis' gis'>"),
+
+  /* INTERVAL TRAINING, which works both by eye and by ear.
+     The first row is that difference drawn: the same interval on a stave, and
+     the same interval with the stave taken away - notes with no page is what
+     working by ear looks like.
+     The detail row climbs in specificity: a bare interval to name by number, a
+     third beside a fifth for the two families that carry perfect and major, and
+     an altered one whose flat is the whole point of naming the quality.
+     The last row is the one distinction notation makes better than words:
+     stacked, or one after the other. */
+  iread:   ivChip("<c' g'>"),
+  ilisten: { group: "interval", m: `\\score { \\new Staff \\with {
+                \\remove "Staff_symbol_engraver" \\remove "Time_signature_engraver"
+                \\remove "Bar_engraver" \\remove "Clef_engraver" }
+              { \\cadenzaOn <c' g'>1 } \\layout { indent = 0 ragged-right = ##t } }` },
+  inum:    ivChip("<c' g'>"),
+  ipm:     ivChip("<c' e'>1 <c' g'>"),
+  ifull:   ivChip("<c' ges'>"),
+  iharm:   ivChip("<c' g'>"),
+  imel:    ivChip("c'1 g'"),
 
   /* The tool's own icon: a stack of three noteheads, no stave and no clef. A
      chord is what it is because of the stacking, so that is all the icon needs. */
