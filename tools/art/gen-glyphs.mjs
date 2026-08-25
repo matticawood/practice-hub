@@ -149,7 +149,7 @@ const CHIPS = {
      The last row is the one distinction notation makes better than words:
      stacked, or one after the other. */
   iread:   ivChip("<c' g'>"),
-  ilisten: { group: "interval", m: `\\score { \\new Staff \\with {
+  ilisten: { m: `\\score { \\new Staff \\with {
                 \\remove "Staff_symbol_engraver" \\remove "Time_signature_engraver"
                 \\remove "Bar_engraver" \\remove "Clef_engraver" }
               { \\cadenzaOn <c' g'>1 } \\layout { indent = 0 ragged-right = ##t } }` },
