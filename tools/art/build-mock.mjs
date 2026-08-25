@@ -5,18 +5,20 @@ import { readFileSync, writeFileSync } from "node:fs";
 const DIR = "/private/tmp/claude-501/-Users-matthewcawood-Piano-Practice-Daily/0e598060-a03f-4468-bf26-d021661a7bf9/scratchpad/ly";
 const N = JSON.parse(readFileSync(DIR + "/notes.json", "utf8"));
 
-const KEYS = [
-  // one octave and a bit, white keys with the blacks placed between them
-  { n: "C", b: true }, { n: "D", b: true }, { n: "E", b: false },
-  { n: "F", b: true }, { n: "G", b: true }, { n: "A", b: true }, { n: "B", b: false },
+/* Four octaves in the markup. How many of them are SHOWN depends on how much
+   room there is — a wider screen reveals more of the keyboard rather than
+   stretching the keys, which is how a real piano behaves and the only way to
+   fill the width without the proportions moving. */
+const OCTAVE = [
   { n: "C", b: true }, { n: "D", b: true }, { n: "E", b: false },
   { n: "F", b: true }, { n: "G", b: true }, { n: "A", b: true }, { n: "B", b: false },
 ];
+const KEYS = [1, 2, 3, 4].flatMap(o => OCTAVE.map(k => ({ ...k, o })));
 
 /* The octave a key sits in, so a phone can show one and a desktop two without
    the markup changing. */
-const piano = KEYS.map((k, i) =>
-  `<button class="k" data-oct="${i < 7 ? 1 : 2}"><span>${k.n}</span>${k.b ? '<i class="kb"></i>' : ""}</button>`
+const piano = KEYS.map(k =>
+  `<button class="k" data-oct="${k.o}"><span>${k.n}</span>${k.b ? '<i class="kb"></i>' : ""}</button>`
 ).join("");
 
 const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routing.
@@ -102,7 +104,7 @@ const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routi
      --n is how many white keys are showing. It is the only thing that changes
      between a phone and a desktop. */
   .keys { --n:14; --white-len:92;
-    position:relative; display:flex; width:min(100%, 64rem); margin:0 auto;
+    position:relative; display:flex; width:100%;
     aspect-ratio: calc(var(--n) * 23.5) / var(--white-len);
     background:#0c0c10; }
   /* On --white-len: the two ratios that make it read as a piano are held
@@ -112,11 +114,22 @@ const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routi
      is a shortening, chosen once, and it scales with everything else rather
      than being clamped later: a max-height on top of an explicit width would
      break the ratio, which is the bug this is replacing. */
-  /* On a wide screen it centres rather than stretching: a keyboard is an
-     object with a size, and past a point more width would only make the keys
-     wrong. The ground either side is the room, which is the point of it. */
   .keys-bed { width:100%; background:#0c0c10;
     box-shadow:inset 0 1px 0 rgba(255,255,255,.06); }
+
+  /* How much keyboard is showing. The keys never change shape between these —
+     only how many of them there are — so the piano stays a piano and still
+     reaches both edges. Chosen to keep a white key between about 55 and 80px
+     wide, which is comfortable to hit at either end. */
+  .k[data-oct="3"], .k[data-oct="4"] { display:none; }
+  @media (min-width:1100px) {
+    .keys { --n:21; }
+    .k[data-oct="3"] { display:flex; }
+  }
+  @media (min-width:1550px) {
+    .keys { --n:28; }
+    .k[data-oct="4"] { display:flex; }
+  }
 
   .k { position:relative; flex:0 0 calc(100% / var(--n)); min-width:0; border:0; cursor:pointer;
     background:linear-gradient(180deg,#fdfdfb,#e6e4dd);
@@ -184,6 +197,9 @@ const html = `<!-- MOCK. Not wired to anything: no game logic, no data, no routi
        either way because everything is derived from --n. */
     .keys { --n:7; width:100%; }
     .k[data-oct="2"] { display:none; }
+    /* 3 and 4 are already hidden above; kept explicit so the phone rule reads
+       on its own. */
+    .k[data-oct="3"], .k[data-oct="4"] { display:none; }
     .k span { font-size:.72rem; }
   }
 </style>
