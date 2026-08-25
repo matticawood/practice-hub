@@ -47,6 +47,10 @@ const MIXED_RAISE = 1.91;   /* levels their ink centres, measured on the page */
 
 /* Fixed stave width from the paper's line-width, notes centred by a skip at
    each end. The shared frame is applied after engraving - see RANGE_GROUP. */
+/* Same construction as a range chip, in its own group so the chord shapes are
+   sized against each other rather than against a stave with one note on it. */
+const chordChip = (music) => Object.assign(rangeChip(music), { group: "chord" });
+
 const rangeChip = (music) => ({
   group: "range",
   m: `\\score { \\new Staff \\with {
@@ -101,6 +105,16 @@ const CHIPS = {
   rstave:  rangeChip("b'1"),
   rledger: rangeChip("a''1 c'1"),
   rfull:   rangeChip("b'1 a''1"),
+
+  /* CHORD RECOGNITION. Its first two rows are both about the shape of a stack,
+     so all five are one set at one stave size: three notes against four, and
+     then the same three notes rearranged. No clef - which clef is its own row,
+     as it is in Note Recognition. */
+  ctriad:   chordChip("<e' g' b'>1"),
+  cseventh: chordChip("<e' g' b' d''>1"),
+  croot:    chordChip("<e' g' b'>1"),
+  cinv:     chordChip("<g' b' e''>1"),
+  cspread:  chordChip("<e' b' g''>1"),
 
   /* The accidentals step: the two it adds, or the sign for neither. */
   sharp:   { m: `\\concat { ${mg("accidentals.sharp")} \\hspace #0.5 ${mg("accidentals.flat")} }` },
