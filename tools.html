@@ -1953,17 +1953,33 @@ function thHeadHTML(bests, last) {
     .map(t => ({ t, n: parseInt(bests[t.id], 10) || 0 }))
     .sort((a, b) => b.n - a.n)[0];
 
-  const bits = [];
+  /* No page title. The sidebar says "Practice Tools" twice already, so a
+     heading here is repeating the navigation back at you; the numbers are the
+     only thing this strip knows that you do not. It reads as a profile bar
+     rather than a sentence, and its figures take the room's colour, so it
+     lights up with whatever you are pointing at. */
+  const cells = [];
   if (bests) {
-    bits.push(`<span><b>${TH_TOOLS.length}</b> tools</span>`);
-    if (top) bits.push(`<span>best <b>${top.n}</b> on ${top.t.name}</span>`);
-    if (last && thById(last.id))
-      bits.push(`<span>last here <b>${thAgo(last.at)}</b></span>`);
+    cells.push([TH_TOOLS.length, "tools here"]);
+    cells.push([scored.length, `of ${scoredIds.length} played`]);
+    if (top) cells.push([top.n, `best &middot; ${top.t.name}`]);
+    if (last && thById(last.id)) {
+      const d = (Date.now() - new Date(last.at).getTime()) / 86400000;
+      const [n, u] = d < 1 ? [0, "days since you were here"]
+        : d < 21  ? [Math.round(d), "days since you were here"]
+        : d < 90  ? [Math.round(d / 7), "weeks since you were here"]
+        : [Math.round(d / 30), "months since you were here"];
+      cells.push([n, u]);
+    }
+  } else {
+    /* Kept the same shape while the numbers are in flight, so nothing jumps
+       when they land. */
+    for (let i = 0; i < 4; i++) cells.push(null);
   }
-  return `<div class="th-label">
-    <span class="th-label-t">Practice Tools</span>
-    <span class="th-label-s">${bits.join("")}</span>
-  </div>`;
+  return `<div class="th-bar">${cells.map(c => c
+    ? `<div class="th-st"><span class="th-st-v">${c[0]}</span><span class="th-st-k">${c[1]}</span></div>`
+    : `<div class="th-st th-st-wait"><span class="th-st-v">&nbsp;</span><span class="th-st-k">&nbsp;</span></div>`
+  ).join("")}</div>`;
 }
 
 /* The ground's colour. It is a registered custom property, which is what lets
@@ -1971,8 +1987,9 @@ function thHeadHTML(bests, last) {
    next instead of snapping. */
 const TH_ROOM_REST = "#5d6478";
 function thRoom(colour) {
-  const home = document.getElementById("tool-home");
-  if (home) home.style.setProperty("--room", colour || TH_ROOM_REST);
+  /* Set on body, which is where the ground lives — see the note by
+     body.th-open::before for why it cannot hang off #tool-home. */
+  document.body.style.setProperty("--room", colour || TH_ROOM_REST);
 }
 
 function thWireRoom(last) {
@@ -5582,12 +5599,18 @@ body.th-open #tool-home { position: relative;
   initial-value: #5d6478;
 }
 
-body.th-open #tool-home { --room: #5d6478; transition: --room .55s ease; }
+/* The ground hangs off BODY, not off #tool-home. #tool-home carries
+   container-type: inline-size for the column queries, and that applies layout
+   containment — which makes it a containing block for position:fixed
+   descendants. The ground was therefore being clipped to the content column
+   instead of covering the viewport, which is why it stopped short of the right
+   edge. Body is not a container, so fixed means fixed. */
+body.th-open { --room: #5d6478; transition: --room .55s ease; }
 
 /* Two layers. The first is the colour, which moves with the cursor; the second
    drifts on its own so the room is never completely still. Both are fixed, so
    the light stays put while the page scrolls through it. */
-body.th-open #tool-home::before { content: ""; position: fixed; inset: 0; z-index: -2;
+body.th-open::before { content: ""; position: fixed; inset: 0; z-index: -2;
   background:
     radial-gradient(68% 52% at 16% -6%, color-mix(in srgb, var(--room) 34%, transparent), transparent 64%),
     radial-gradient(56% 46% at 92% 6%, color-mix(in srgb, var(--room) 20%, transparent), transparent 62%),
@@ -5597,7 +5620,7 @@ body.th-open #tool-home::before { content: ""; position: fixed; inset: 0; z-inde
    transforming the layer. A fixed element sized beyond the viewport still
    counts toward scrollWidth, and -12% here was putting 60px of horizontal
    overflow on the page. */
-body.th-open #tool-home::after { content: ""; position: fixed; inset: 0; z-index: -1;
+body.th-open::after { content: ""; position: fixed; inset: 0; z-index: -1;
   pointer-events: none; opacity: .5;
   background: radial-gradient(46% 42% at 30% 22%, color-mix(in srgb, var(--room) 16%, transparent), transparent 70%);
   background-repeat: no-repeat; background-size: 160% 160%;
@@ -5607,17 +5630,28 @@ body.th-open #tool-home::after { content: ""; position: fixed; inset: 0; z-index
   to   { background-position: 46% 52%; background-size: 176% 176%; }
 }
 
-/* ── the label ──
-   A screen label, not a headline. It says where you are and gets out of the
-   way; everything below it is the actual page. */
-body.th-open .th-label { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
-  padding: 30px 0 26px; }
-body.th-open .th-label-t { font: 800 .74rem/1 ui-monospace, SFMono-Regular, monospace;
-  letter-spacing: .24em; text-transform: uppercase; color: #fff; }
-body.th-open .th-label-s { display: flex; gap: 16px; flex-wrap: wrap;
-  font-size: .82rem; color: var(--th-dim); }
-body.th-open .th-label-s b { color: #dcdce4; font-weight: 700;
-  font-variant-numeric: tabular-nums; }
+/* ── the bar ──
+   A profile bar, not a heading. Figures set large in mono, their labels small
+   and tracked underneath, divided by hairlines. The figures take the room's
+   colour, so the strip lights up with whatever you are pointing at and the top
+   of the page belongs to the same object as the ground. */
+body.th-open .th-bar { display: flex; flex-wrap: wrap; margin: 0 0 34px;
+  border-top: 1px solid rgba(255,255,255,.09);
+  border-bottom: 1px solid rgba(255,255,255,.09); }
+body.th-open .th-st { flex: 1 1 11rem; min-width: 0; padding: 18px 22px 17px;
+  display: flex; flex-direction: column; gap: 5px;
+  border-left: 1px solid rgba(255,255,255,.07); }
+body.th-open .th-st:first-child { border-left: 0; padding-left: 0; }
+body.th-open .th-st-v { font: 700 1.9rem/1 ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--room) 62%, #ffffff);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--room) 45%, transparent); }
+body.th-open .th-st-k { font: 650 .68rem/1.3 ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--th-dim); }
+body.th-open .th-st-wait .th-st-v { width: 3.2rem; border-radius: 6px;
+  background: rgba(255,255,255,.07); animation: th-pulse 1.5s ease-in-out infinite; }
+body.th-open .th-st-wait .th-st-k { width: 6.5rem; height: .68rem; border-radius: 4px;
+  background: rgba(255,255,255,.05); animation: th-pulse 1.5s ease-in-out infinite; }
 
 /* ── groups ── */
 body.th-open .th-g { margin-bottom: 44px; }
@@ -5746,8 +5780,8 @@ body.th-open .th-r-dx { font-size: .8rem; color: var(--th-dim);
 body.th-open .th-r-go { width: 16px; height: 16px; flex: 0 0 auto; color: var(--th-dim); }
 
 @media (prefers-reduced-motion: reduce) {
-  body.th-open #tool-home { transition: none; }
-  body.th-open #tool-home::after { animation: none; }
+  body.th-open { transition: none; }
+  body.th-open::after { animation: none; }
   body.th-open .th-t, body.th-open .th-t-art, body.th-open .th-t-cta, body.th-open .th-r { transition: none; }
   body.th-open .th-t:hover { transform: none; }
   body.th-open .th-t-wait { animation: none; }
@@ -5757,7 +5791,10 @@ body.th-open .th-r-go { width: 16px; height: 16px; flex: 0 0 auto; color: var(--
 @media (max-width: 720px) {
   body.th-open #app-main { padding-left: 16px; padding-right: 16px; }
   body.th-open #tool-home { padding-top: 18px; }
-  body.th-open .th-label { padding: 22px 0 20px; gap: 10px; }
+  body.th-open .th-bar { margin-bottom: 26px; }
+  body.th-open .th-st { flex-basis: 50%; padding: 13px 14px 12px; }
+  body.th-open .th-st:nth-child(odd) { border-left: 0; padding-left: 0; }
+  body.th-open .th-st-v { font-size: 1.45rem; }
   body.th-open .th-g-h h2 { font-size: 1.05rem; }
   /* Touch has no hover, so nothing should be dimmed waiting for one. */
   body.th-open .th-g-b:hover .th-t:not(:hover),
