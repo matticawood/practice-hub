@@ -2869,10 +2869,27 @@ let nrTimerInt    = null;
 let nrGameScore   = 0;
 let nrGameTotal   = 0;
 
-function nrInit() { nrDressIcons(); nrShowSetup(); }
+function nrInit() { nrDressIcons(); nrSyncTabbar(); nrShowSetup(); }
+
+/* How much of the foot of the screen the app's bottom bar already owns, so the
+   sticky Start can sit exactly on top of it rather than under it or floating
+   above a gap. Measured, because the bar has its own breakpoints and its own
+   safe-area padding. */
+function nrSyncTabbar() {
+  var b = document.getElementById("sh-mob-bottom-bar");
+  var h = (b && getComputedStyle(b).display !== "none")
+    ? Math.round(b.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty("--nr-tabbar", h + "px");
+}
+window.addEventListener("resize", nrSyncTabbar);
 
 function nrShowSetup() {
   clearInterval(nrTimerInt);
+  /* Leaving during the countdown would otherwise strand the overlay mid-fade,
+     invisible and still on the stack. */
+  var _cd = document.getElementById("nr-countdown");
+  if (_cd) { _cd.style.display = "none"; _cd.style.opacity = "";
+             _cd.style.transition = ""; _cd.style.pointerEvents = ""; }
   nrPhase = "setup";
   document.getElementById("nr-screen-setup").style.display    = "";
   document.getElementById("nr-screen-playing").style.display  = "none";
@@ -2925,27 +2942,43 @@ function nrStartWithCountdown() {
   overlay.style.display = "flex";
   showCount(count);
 
+  /* "Go!" IS the start. It used to be another tick of the countdown: the word
+     appeared, and for a full second after it the overlay still covered the
+     screen and nrPhase was not yet "playing", so nrAnswer returned early on
+     every tap. You were told to go and then nothing you pressed counted. Now
+     the round begins on the same frame the word appears, and the overlay fades
+     out over it with pointer-events off so it cannot swallow the first tap. */
   const cd = setInterval(function() {
     count--;
-    if (count < 0) {
-      clearInterval(cd);
+    if (count > 0) { showCount(count); return; }
+    clearInterval(cd);
+    showCount(0);
+    nrBeginRound();
+    overlay.style.pointerEvents = "none";
+    overlay.style.transition    = "opacity .28s ease-out";
+    overlay.style.opacity       = "0";
+    setTimeout(function() {
       overlay.style.display = "none";
-      // Begin game
-      nrPhase     = "playing";
-      nrGameScore = 0;
-      nrGameTotal = 0;
-      nrTimeLeft  = 60;
-      nrLocked    = false;
-      nrUpdateTimer();
-      nrNextNote();
-      nrTimerInt = setInterval(function() {
-        nrTimeLeft--;
-        nrUpdateTimer();
-        if (nrTimeLeft <= 0) { clearInterval(nrTimerInt); nrEndGame(); }
-      }, 1000);
-    } else {
-      showCount(count);
-    }
+      overlay.style.opacity = "";
+      overlay.style.transition = "";
+      overlay.style.pointerEvents = "";
+    }, 300);
+  }, 1000);
+}
+
+function nrBeginRound() {
+  nrPhase     = "playing";
+  nrGameScore = 0;
+  nrGameTotal = 0;
+  nrTimeLeft  = 60;
+  nrLocked    = false;
+  nrUpdateTimer();
+  nrNextNote();
+  clearInterval(nrTimerInt);
+  nrTimerInt = setInterval(function() {
+    nrTimeLeft--;
+    nrUpdateTimer();
+    if (nrTimeLeft <= 0) { clearInterval(nrTimerInt); nrEndGame(); }
   }, 1000);
 }
 
@@ -6681,7 +6714,26 @@ body.nr-full .nr-side-col { display: contents; }
        grid's 22px gap; adding its own margin, padding and rule on top of that
        was counting the same separation three times. The gap alone is enough,
        and Start is a solid white block that needs no rule to be found. */
-    margin-top: 0; padding-top: 0; border-top: 0; }
+    margin-top: 0; padding-top: 0; border-top: 0;
+    /* In one column Start sits after four rows of settings, which on a 950px
+       screen puts it at 1002px: past the fold, so the only way to begin was to
+       scroll to the bottom. Sticky pins it to the foot of the screen while the
+       settings scroll under it, and it releases into its own place once you
+       reach it. The scrim keeps it legible over whatever it is floating on. */
+    position: sticky; z-index: 5; bottom: var(--nr-tabbar, 0px);
+    margin-left: calc(var(--nr-gut) * -1); margin-right: calc(var(--nr-gut) * -1);
+    padding: 14px var(--nr-gut);
+    /* A bar, not a gradient. A scrim faded to solid part way down and cut
+       across whatever card it was floating over; a solid ground with a hairline
+       reads as chrome, which is what it is while it is pinned. */
+    background: #0b0b0e;
+    border-top: 1px solid rgba(255,255,255,.07); }
+  /* And room to scroll past it, so the last row is never stuck underneath. */
+  body.nr-full #nr-screen-setup { padding-bottom: 92px; }
+  /* The app's own bottom bar is cleared by --nr-tabbar, which is MEASURED
+     rather than assumed: it appears on its own breakpoints and carries a safe
+     area inset, so a hardcoded 60px is right on one device and wrong on the
+     next. */
   body.nr-full #nr-screen-setup .nr-wiz-next { width: 100%; justify-content: center; }
 }
 @media (min-width: 1100px) {
