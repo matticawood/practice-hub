@@ -49,7 +49,14 @@ const MIXED_RAISE = 1.91;   /* levels their ink centres, measured on the page */
    each end. The shared frame is applied after engraving - see RANGE_GROUP. */
 /* Same construction as a range chip, in its own group so the chord shapes are
    sized against each other rather than against a stave with one note on it. */
-const chordChip = (music) => Object.assign(rangeChip(music), { group: "chord" });
+const stackChip = (group) => (music) =>
+  Object.assign(rangeChip(music + "1"), { group });
+/* One group per TOOL. Sized against each other is the point, but only within the
+   row they are compared in - folding Ear Training's chords into Chord
+   Recognition's group grew the shared frame and shrank every stave on the other
+   tool's page. */
+const chordChip = stackChip("chord");
+const earChip   = stackChip("ear");
 
 const rangeChip = (music) => ({
   group: "range",
@@ -110,11 +117,26 @@ const CHIPS = {
      so all five are one set at one stave size: three notes against four, and
      then the same three notes rearranged. No clef - which clef is its own row,
      as it is in Note Recognition. */
-  ctriad:   chordChip("<e' g' b'>1"),
-  cseventh: chordChip("<e' g' b' d''>1"),
-  croot:    chordChip("<e' g' b'>1"),
-  cinv:     chordChip("<g' b' e''>1"),
-  cspread:  chordChip("<e' b' g''>1"),
+  ctriad:   chordChip("<e' g' b'>"),
+  cseventh: chordChip("<e' g' b' d''>"),
+  croot:    chordChip("<e' g' b'>"),
+  cinv:     chordChip("<g' b' e''>"),
+  cspread:  chordChip("<e' b' g''>"),
+
+  /* CHORD EAR TRAINING. One characteristic chord from each set rather than a
+     count of notes: Major/Minor and Triads both hold three-note chords, so a
+     stack of three would have drawn the same picture twice. An augmented triad
+     belongs to the fuller triad set and not to the other, a dominant 7th is the
+     sevenths, an add9 is the extensions - each is read instantly by anyone who
+     would be choosing between them.
+     The answer row is the same chord twice, once plain and once with its root
+     pinned by accidentals: naming the quality, against naming the exact chord. */
+  emajmin: earChip("<c' e' g'>"),
+  etriads: earChip("<c' e' gis'>"),
+  esevs:   earChip("<c' e' g' bes'>"),
+  eexts:   earChip("<c' e' g' d''>"),
+  equal:   earChip("<c' e' g'>"),
+  eexact:  earChip("<cis' eis' gis'>"),
 
   /* The tool's own icon: a stack of three noteheads, no stave and no clef. A
      chord is what it is because of the stacking, so that is all the icon needs. */
