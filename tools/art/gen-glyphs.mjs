@@ -3,20 +3,22 @@
  * Engraved, because if it is notation LilyPond sets it. Each card shows the one
  * symbol its question is about and nothing else: a clef where the question is
  * which clef, a key signature where it is which mode, accidentals where it is
- * whether to include them. Anything more is a symbol to read past.
+ * whether to include them.
  *
- * THE SIZING. Every glyph is padded to the SAME BOX before cropping. Cropping
- * trims to ink, so a box smaller than the ink gets expanded and a box larger
- * than it is kept - glyphs that overflowed ended up in a different frame from
- * ones that fitted, and no per-glyph pixel height could reconcile them, because
- * the frames themselves disagreed. That was the bug behind clefs that were
- * every size but the right one. One frame nothing overflows, and a single css
- * height renders the whole set at its true proportions: a bass clef comes out
- * around half the height of a treble clef because it is.
+ * EACH GLYPH IS CROPPED TO ITS OWN INK, and that is the point. A music glyph is
+ * anchored at its reference line - a treble clef at the G line, a bass clef at
+ * the F line, an accidental at the note it alters - so glyphs padded to a
+ * shared frame come out sitting at wildly different heights inside it: the bass
+ * clef low, the treble high, the accidentals up in the top corner. Cropped to
+ * ink, every viewBox IS the symbol, so setting one height renders them all the
+ * same size and centring the box centres the symbol.
  *
- * The build prints each viewBox. Heights must all match; if one does not, its
- * ink has outgrown BOX_Y and the frame needs raising. Never answer a mismatch
- * with a per-glyph pixel value.
+ * The trade: LilyPond's true proportions are dropped. A bass clef really is
+ * about half the height of a treble clef, and here it is not. As icons they
+ * want to look like a set; on a stave they would want the real thing.
+ *
+ * The build prints each viewBox. There is nothing to keep in sync now - the
+ * numbers are just the shapes, and the css sizes them.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -26,48 +28,37 @@ const DIR = process.env.LY_DIR ||
   "/private/tmp/claude-501/-Users-matthewcawood-Piano-Practice-Daily/0e598060-a03f-4468-bf26-d021661a7bf9/scratchpad/ly";
 mkdirSync(DIR, { recursive: true });
 
-/* Deep enough for a treble clef, which overhangs everything else here. Width is
-   per-glyph, because a pair of clefs is legitimately wider than one. */
-const BOX_Y = "#'(-4.3 . 4.3)";
-
-const at = (size) => (w, m) => ({ w, body: `\\override #'(font-size . ${size}) { ${m} }` });
-/* A clef is drawn far larger than an accidental, so the two families are set at
-   sizes that put them in the same frame. Within each, the proportions are
-   LilyPond's own. */
-const clef = at(-1.0);
-const sym  = at(2.6);
-const mg   = (n) => `\\musicglyph #"${n}"`;
+const mg = (n) => `\\musicglyph #"${n}"`;
 
 const CHIPS = {
-  /* The clef step. Mixed asks for both, so it shows both, close enough together
-     to read as one symbol. The bass clef is raised to sit level with the treble:
-     anchored at their own reference lines the two are correctly placed but not
-     optically centred on each other, and next to a clef half again its height
-     the bass one simply reads as having slipped down. */
-  treble: clef(2.5, mg("clefs.G")),
-  bass:   clef(2.7, mg("clefs.F")),
-  mixed:  clef(5.7, `\\concat { ${mg("clefs.G")} \\hspace #0.35 \\raise #1.45 ${mg("clefs.F")} }`),
+  /* The clef step. Mixed asks for both, so it shows both - and since the two
+     single cards are rendered at the same height as each other, the pair has to
+     be too, or the bass clef inside Mixed would not match the one on the Bass
+     card. \magnify brings it to the treble clef's height; \raise then levels
+     their centres, which the reference lines they are anchored at do not. */
+  treble: mg("clefs.G"),
+  bass:   mg("clefs.F"),
+  mixed:  `\\concat { ${mg("clefs.G")} \\hspace #1.4 \\raise #2.7 \\magnify #2.1 ${mg("clefs.F")} }`,
 
   /* The mode step: a note to name, or a key signature to read it in. */
-  note:   sym(2.88, `\\note {8} #1`),
-  keysig: sym(5.4, `\\concat { \\raise #1.4 ${mg("accidentals.sharp")} \\hspace #0.3 ` +
-                   `\\raise #0.1 ${mg("accidentals.sharp")} \\hspace #0.3 ` +
-                   `\\raise #1.8 ${mg("accidentals.sharp")} }`),
+  note:   `\\note {8} #1`,
+  keysig: `\\concat { \\raise #1.4 ${mg("accidentals.sharp")} \\hspace #0.3 ` +
+          `\\raise #0.1 ${mg("accidentals.sharp")} \\hspace #0.3 ` +
+          `\\raise #1.8 ${mg("accidentals.sharp")} }`,
 
   /* The accidentals step: the two it adds, or the sign for neither. */
-  sharp:   sym(3.9, `\\concat { ${mg("accidentals.sharp")} \\hspace #0.5 ${mg("accidentals.flat")} }`),
-  natural: sym(1.9, mg("accidentals.natural")),
+  sharp:   `\\concat { ${mg("accidentals.sharp")} \\hspace #0.5 ${mg("accidentals.flat")} }`,
+  natural: mg("accidentals.natural"),
 };
 
 const out = {};
-let refH = null;
-for (const [id, chip] of Object.entries(CHIPS)) {
+for (const [id, body] of Object.entries(CHIPS)) {
   const f = join(DIR, "gl_" + id + ".ly");
   writeFileSync(f, `\\version "2.24.0"
 \\header { tagline = ##f }
 \\paper { indent = 0 oddFooterMarkup = ##f oddHeaderMarkup = ##f
          bookTitleMarkup = ##f scoreTitleMarkup = ##f }
-\\markup { \\pad-to-box #'(-0.1 . ${chip.w}) ${BOX_Y} { ${chip.body} } }
+\\markup { ${body} }
 `);
   execFileSync("lilypond", ["-dbackend=svg", "-dcrop", "-o", join(DIR, "gl_" + id), f], { stdio: "pipe" });
   let svg = readFileSync(join(DIR, "gl_" + id + ".cropped.svg"), "utf8");
@@ -81,13 +72,10 @@ for (const [id, chip] of Object.entries(CHIPS)) {
     .trim();
   out[id] = svg;
   const vb = (svg.match(/viewBox="([^"]*)"/) || [])[1].split(" ").map(Number);
-  if (refH === null) refH = vb[3];
-  const bad  = Math.abs(vb[3] - refH) > 0.01 ? "  <-- HEIGHT DIFFERS, raise BOX_Y" : "";
-  const over = Math.abs(vb[2] - (chip.w + 0.1)) > 0.01 ? `  <-- ink wider than w, use ${(vb[2] - 0.1).toFixed(2)}` : "";
   console.log(`${id.padEnd(9)} ${String(svg.length).padStart(5)}B  ` +
-    `w ${vb[2].toFixed(2)}  h ${vb[3].toFixed(2)}${bad}${over}`);
+    `w ${vb[2].toFixed(2)}  h ${vb[3].toFixed(2)}  aspect ${(vb[2] / vb[3]).toFixed(2)}`);
 }
 
 writeFileSync(join(DIR, "glyphs.json"), JSON.stringify(out, null, 1));
-console.log(`\n${Object.keys(out).length} chips, ` +
+console.log(`\n${Object.keys(out).length} glyphs, ` +
   `${(Object.values(out).reduce((n, s) => n + s.length, 0) / 1024).toFixed(1)}kB`);
