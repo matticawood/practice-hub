@@ -130,8 +130,13 @@ const SH_SUBNAV = {
 
     /* ── Desktop left sidebar (professional dashboard layout) ── */
     #sh-sidebar { display: none; }
+    /* Published as a variable so a page can bleed something out under the
+       sidebar - the content rails do - without hardcoding 244 in three
+       stylesheets and without having to repeat this breakpoint. It is 0 wherever
+       the sidebar is not shown, so the same expression works on a phone. */
+    body { --sh-sb-w: 0px; }
     @media (min-width: 1025px), (orientation: landscape) and (min-width: 769px) {
-      body { padding-left: 244px; }
+      body { padding-left: 244px; --sh-sb-w: 244px; }
       #sh-sidebar {
         display: flex; flex-direction: column;
         position: fixed; top: 0; left: 0; bottom: 0; width: 244px; z-index: 320;
