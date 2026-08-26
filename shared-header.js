@@ -97,7 +97,14 @@ const SH_SUBNAV = {
     body.tools-mode              { --sh-hdr: #06080f; }
 
     /* ── Header ── */
-    #app-header { position: relative; z-index: 300; background: #141414; border-bottom: 1px solid var(--accent, #f5c518); padding: 0 !important; }
+    /* No gold rule under the header. It was drawing a hard line between the
+       header and the sub-nav directly below it, so two bars of the same colour
+       read as two pieces of furniture stacked on each other rather than as one
+       piece of chrome. Without it they are one block, and nav state is still
+       marked the way it is everywhere else in the app: a gold indicator on the
+       active item. This shows on desktop too, where the header sits over the
+       page rather than over a sub-nav. */
+    #app-header { position: relative; z-index: 300; background: #141414; border-bottom: 0; padding: 0 !important; }
     /* Header content shares the same centered container width as page content,
        so the logo lines up with the content's left edge and the account cluster
        with its right edge. */
@@ -298,7 +305,11 @@ const SH_SUBNAV = {
         position: sticky;
         top: 0;
         left: 0; right: 0;
-        height: 54px;
+        /* 44px, not 54. The bar was half again as tall as it needed to be and
+           that height was the single biggest piece of space above the fold on
+           every page. 44 is Apple's minimum tap target, so the row is as
+           compact as it can be without the tabs becoming harder to hit. */
+        height: 44px;
         background: #141414;
         border-bottom: 1px solid #2a2a2a;
         z-index: 200;
@@ -361,7 +372,7 @@ const SH_SUBNAV = {
         align-items: center;
         flex: 0 0 auto;
         /* the whole bar height, so the indicator sits on the bar's own bottom
-           edge and the tap target is 54px rather than the text's own box */
+           edge and the tap target is the full 44px rather than the text's box */
         min-height: 100%;
         padding: 0 2px;
         margin-bottom: -1px;
@@ -383,7 +394,7 @@ const SH_SUBNAV = {
          gutter is 22 and whose body text is larger. Portrait only - a landscape
          phone is 700-odd wide and 390 tall, and a 60px bar would eat it. */
       @media (orientation: portrait) and (min-width: 700px) and (max-width: 1024px) {
-        #sh-mob-subnav { height: 60px; }
+        #sh-mob-subnav { height: 50px; }
         .sh-mob-subnav-scroll { padding: 0 22px; gap: 26px; }
         .sh-mob-pill { font-size: 0.92rem; }
       }
