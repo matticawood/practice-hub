@@ -9736,6 +9736,7 @@
     .fb-reply-delete-btn:hover { color: #e74c3c; }
     .fb-empty { text-align: center; padding: 48px 20px; color: #444; font-size: 0.88rem; }
   </style>
+  <script src="/course-catalogue.js"></script>
 </head>
 <body>
 
@@ -11818,7 +11819,7 @@ async function loadData() {
 
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
-      const [nr, cr, pg, er, uc, thL, thP, it, fsL, lypL] = await Promise.all([
+      const [nr, cr, pg, er, uc, thL, thP, it, fsL, lypL, allL] = await Promise.all([
         db.from("note_game_scores").select("score, attempts, created_at, clef, accidentals, key_signature, range").eq("email", viewingEmail),
         db.from("chord_game_scores").select("score, attempts, created_at, tier, clef, mode, key_signature").eq("email", viewingEmail),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
@@ -11828,7 +11829,12 @@ async function loadData() {
         db.from("lesson_progress").select("lesson_id, completed, completed_at").eq("email", viewingEmail).eq("completed", true),
         db.from("interval_game_scores").select("score, attempts, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase()),
         db.from("lessons").select("id, status, title, sort_order").eq("course", "first-steps"),
-        db.from("lessons").select("id, status, title, sort_order").eq("course", "learn-your-first-piece")
+        db.from("lessons").select("id, status, title, sort_order").eq("course", "learn-your-first-piece"),
+        // Every course in the catalogue, so the dashboard can tell which a
+        // member has started, finished, or not touched. One query rather than
+        // one per course, and it reads the shared catalogue for its keys.
+        db.from("lessons").select("id, course, status")
+          .in("course", (window.PR_COURSES || []).map(c => c.key))
       ]);
       const byTime = a => (a || []).slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       _insightTrainers = {
@@ -11905,6 +11911,19 @@ async function loadData() {
       // Absolute Beginner Course progress, for the dashboard "Start here" card:
       // total = lessons in the course, live = any published (gates real visibility),
       // done = how many the member has completed.
+      // Totals and completions for every course, keyed by course.
+      {
+        const _doneIds = new Set((thP.data || []).map(p => p.lesson_id));
+        _courseStats = {};
+        (allL.data || [])
+          .filter(l => !l.status || l.status === "published")
+          .forEach(l => {
+            const st = _courseStats[l.course] || (_courseStats[l.course] = { total: 0, done: 0 });
+            st.total++;
+            if (_doneIds.has(l.id)) st.done++;
+          });
+      }
+
       const _fsAll = fsL.data || [];
       const _fsIds = new Set(_fsAll.map(l => l.id));
       _fsCourse = { total: _fsAll.length, live: _fsAll.some(l => l.status === "published"),
@@ -11933,7 +11952,7 @@ async function loadData() {
       try { if (typeof _renderDailyCard === 'function') _renderDailyCard(); } catch (_) {}
       try { if (typeof _renderCoursesCard === 'function') _renderCoursesCard(); } catch (_) {}
       try { if (typeof _renderNextMoveCard === 'function') _renderNextMoveCard(); } catch (_) {}
-    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _goalCollectionTiers = null; _goalCollectionIds = null; _dormantCustomPieces = null; _fsCourse = null; _lypCourse = null; /* _goalAllPieces kept — loaded separately */ }
+    } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _courseStats = null; _goalCollectionTiers = null; _goalCollectionIds = null; _dormantCustomPieces = null; _fsCourse = null; _lypCourse = null; /* _goalAllPieces kept — loaded separately */ }
 
     // Custom-piece completion status by title (RLS-safe RPC so it also works when
     // the owner views another member — a direct user_collections read would be
@@ -16014,6 +16033,7 @@ let _goalPieceTiers = null;     // difficulties of the member's completed pieces
 let _goalCollectionTiers = null;// difficulties of every piece in the collection (any status)
 let _goalCollectionIds = null;  // Set of piece_ids already in the member's collection
 let _goalAllPieces = null;      // library pieces (id,title,composer,difficulty,kind) for recs
+let _courseStats = null;      // { courseKey: { total, done } } for every catalogue course
 let _goalTheory = null;         // { totals:{level:n}, done:{level:n} } published theory lessons
 let _nextTheoryLesson = null;   // { id, title } the next uncompleted published theory lesson
 let _lastTheoryLesson = null;   // { id, title } the theory lesson completed TODAY (for the done card)
@@ -16880,43 +16900,60 @@ function _dailyBeginnerObjective(stageIdx) {
 function _renderCoursesCard() {
   const el = document.getElementById('dash-courses-card');
   if (!el) return;
-  const BOOK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>';
-  const NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M9 18V5l12-2v13"/><path d="M9 9l12-2"/></svg>';
-  const tiles = [];
-  const mk = (label, color, icon, done, tot, next, courseKey) => {
-    if (!tot) return;
-    const pct = Math.round(done / tot * 100);
-    const cta = done === 0 ? 'Start' : (done >= tot ? 'Revisit' : 'Continue');
-    const href = next ? `/courses.html?lesson=${encodeURIComponent(next.id)}` : `/courses.html?course=${courseKey}`;
-    // With no next lesson there is nothing to name, and "28 of 28 lessons done"
-    // sat directly above "28/28 lessons" saying the same thing twice.
-    const sub = next ? `Lesson ${next.num}: ${escHtml(next.title)}`
-                     : (done >= tot ? 'Every lesson done' : `${done} of ${tot} lessons done`);
-    tiles.push(`<a class="dcourse" style="--ccol:${color}" href="${href}">
+
+  // WHICH COURSES BELONG HERE
+  // Two kinds: the ones a member is part-way through, and the ones meant for
+  // where they are that they have not started. A finished course is not
+  // something to continue, and a course three levels above them is not
+  // something to start, so neither earns a place on a page about now.
+  // `levels` comes from the shared catalogue rather than being read out of the
+  // audience wording, which is a sentence written for a human.
+  const cat = (window.PR_COURSES || []).filter(c => !c.soon);
+  const lvl = (() => {
+    try { return _rmLevelFor('total', _rmTrackMinutes().total / 60).idx + 1; }
+    catch (e) { return 1; }
+  })();
+
+  const NEXT = { theory: _nextTheoryLesson, 'first-steps': _nextFsLesson, 'learn-your-first-piece': _nextLypLesson };
+  const rows = cat
+    .map(c => ({ c, st: (_courseStats && _courseStats[c.key]) || { total: 0, done: 0 } }))
+    .filter(x => x.st.total > 0)
+    .map(x => Object.assign(x, {
+      state: x.st.done === 0 ? 'new' : (x.st.done >= x.st.total ? 'done' : 'wip')
+    }))
+    .filter(x => x.state === 'wip' || (x.state === 'new' && (x.c.levels || []).includes(lvl)))
+    .sort((a, b) => (a.state === 'wip' ? 0 : 1) - (b.state === 'wip' ? 0 : 1));
+
+  const tiles = rows.map(({ c, st, state }) => {
+    const pct  = Math.round(st.done / st.total * 100);
+    const cta  = state === 'new' ? 'Start' : 'Continue';
+    const next = NEXT[c.key];
+    const href = (state === 'wip' && next)
+      ? `/courses.html?lesson=${encodeURIComponent(next.id)}`
+      : `/courses.html?course=${encodeURIComponent(c.key)}`;
+    // A course you are in the middle of is named by where you are in it. One you
+    // have not started is named by what it is for, which is the thing that
+    // decides whether to begin.
+    const sub = (state === 'wip' && next)
+      ? `Lesson ${next.num}: ${escHtml(next.title)}`
+      : escHtml(c.blurb || '');
+    const icon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${c.icon || ''}</svg>`;
+    return `<a class="dcourse" style="--ccol:${c.color || '#10b981'}" href="${href}">
       <span class="dcourse-ic">${icon}</span>
       <span class="dcourse-body">
-        <span class="dcourse-top"><span class="dcourse-name">${escHtml(label)}</span><span class="dcourse-cta">${cta} &rarr;</span></span>
+        <span class="dcourse-top"><span class="dcourse-name">${escHtml(c.label)}</span><span class="dcourse-cta">${cta} &rarr;</span></span>
         <span class="dcourse-sub">${sub}</span>
         <span class="dcourse-bar"><i style="width:${pct}%"></i></span>
-        <span class="dcourse-count">${done}/${tot} lessons</span>
+        <span class="dcourse-count">${st.done}/${st.total} lessons</span>
       </span>
-    </a>`);
-  };
-  // Music Theory (all published levels combined).
-  if (_goalTheory && _goalTheory.totals) {
-    const tot = Object.values(_goalTheory.totals).reduce((a, b) => a + b, 0);
-    const done = Object.values(_goalTheory.done || {}).reduce((a, b) => a + b, 0);
-    mk('Music Theory', '#10b981', BOOK, done, tot, _nextTheoryLesson, 'theory');
-  }
-  // The Absolute Beginner Course (only when its lessons are live).
-  if (_fsCourse && _fsCourse.live && _fsCourse.total > 0) {
-    mk('The Absolute Beginner Course', '#8b5cf6', NOTE, _fsCourse.done, _fsCourse.total, _nextFsLesson, 'first-steps');
-  }
+    </a>`;
+  });
+
   el.innerHTML = tiles.length
     ? `<div class="dcourse-list">${tiles.join('')}</div>
        <a href="/courses.html" class="dash-card-article-link" style="margin-top:13px;display:inline-block">Browse all courses &rarr;</a>`
-    : `<div style="color:var(--text-muted);font-size:.86rem;line-height:1.5">Nothing started yet. The courses take you from your first note to reading, theory and playing by ear.</div>
-       <a href="/courses.html" class="dash-card-article-link" style="margin-top:13px;display:inline-block">Browse all courses &rarr;</a>`;
+    : `<div style="color:var(--text-muted);font-size:.86rem;line-height:1.5">Nothing to pick up right now. The Learn tab has every course, from your first note to reading, theory and playing by ear.</div>
+       <a href="/courses.html" class="dash-card-article-link" style="margin-top:13px;display:inline-block">Open Learn &rarr;</a>`;
 }
 // The member's own calendar day, not the viewer's. On your own dashboard the device
 // clock IS your clock (and it follows you when you travel). When the owner reviews
