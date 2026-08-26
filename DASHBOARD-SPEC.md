@@ -1,4 +1,4 @@
-# Dashboard — the fixed spec
+# Dashboard, the fixed spec
 
 The reference for the redesign. Facts come from Matthew and are not negotiable.
 Findings come from research and are not to be discarded when a fact corrects a
@@ -18,26 +18,26 @@ in the app.
 The dashboard is **not a directory of the app**. The reduction from the live
 page was deliberate: the nav already reaches Tools, Learn, Live and Community.
 
-## 2 · How the app actually works — FACTS
+## 2 · How the app actually works, FACTS
 
-- **Overall level** — 8 stages, by TOTAL HOURS practised.
+- **Overall level**, 8 stages, by TOTAL HOURS practised.
   `[0, 50, 150, 350, 700, 1200, 2000, 3500]`
   First Steps, Beginner, Foundations, Intermediate, Confident, Advanced,
   Performer, Artist.
-- **Four areas** — Repertoire, Technique, Sight-reading, Musicianship.
+- **Four areas**, Repertoire, Technique, Sight-reading, Musicianship.
   Each has its OWN independent level, also by hours logged in that area.
   They are **long-term and cumulative. They are not daily and they do not
   close.** Their purpose is **comparison**: to let a member spot a weakness in
   their playing or their practice strategy. An area can sit a stage behind the
   overall level.
-- **Today's tasks** — five: a piece, sight-reading, scales, theory, and one
+- **Today's tasks**, five: a piece, sight-reading, scales, theory, and one
   practice tool. Pieces, scales and sight-reading are the substantial work;
   theory and the tools take negligible time.
   Tasks are **specific suggestions**. Area bars are **general**. A member can
   fill the Musicianship bar by doing theory their own way, or log a quick
   session with no piece named. The task is one route into the bar, never its
   definition.
-- **Objectives** — ~16 per level, each tagged to an area. Unordered. Members
+- **Objectives**, ~16 per level, each tagged to an area. Unordered. Members
   chip at MANY in parallel over roughly 100 hours, in their own order and at
   their own priority. There is no "next one".
   Their purpose is **direction**: they tell a member what to aim for at this
@@ -52,7 +52,7 @@ distance to the next level, the statue, the ladder, Log practice, then the
 streak with its week strip, then the weekly goal. On both phone and desktop.
 Everything from Today downwards is the open problem.
 
-## 4 · Research findings — KEEP THESE
+## 4 · Research findings, KEEP THESE
 
 | Finding | Source | What it governs |
 |---|---|---|
@@ -60,9 +60,9 @@ Everything from Today downwards is the open problem.
 | A dark canvas makes coloured data read as content, not decoration | WHOOP | Why dark suits this page: the area colours, ladder and statue are the substance. |
 | One instant read, then the trend, then the detail | WHOOP, Oura | The page has three layers, not one flat column. |
 | A multidimensional score stops you neglecting a dimension | Apple rings | Why four areas exist at all. |
-| Closure drives behaviour; and three dimensions render as ONE compact comparative glyph | Apple rings | **Form only.** The four areas want a single compact comparative shape. It does NOT mean making them daily — that was my error, and it contradicts §2. |
+| Closure drives behaviour; and three dimensions render as ONE compact comparative glyph | Apple rings | **Form only.** The four areas want a single compact comparative shape. It does NOT mean making them daily, that was my error, and it contradicts §2. |
 | Progress sits ON the object you act on | Duolingo | Suggestion and its area belong together visually. |
-| Home is consumed with minimal cognitive processing; 3 daily quests | Duolingo | Today's five must be light — one line each, not a paragraph and two chips. |
+| Home is consumed with minimal cognitive processing; 3 daily quests | Duolingo | Today's five must be light, one line each, not a paragraph and two chips. |
 | Motivation rises with proximity to a goal | Goal-gradient | Headline the DISTANCE, not the level name. |
 | Autonomy, competence, relatedness | SDT | Relatedness is why the activity feed earns a place. |
 | Streaks and ranking run on introjected regulation | SDT | Present them, never weaponise them. |
@@ -94,7 +94,7 @@ from Matthew looking at Progress:
 > Each section is visually distinct in form while keeping the same visual
 > language, which makes it easy to follow.
 
-Every section takes the form its data actually needs — a trend wants a chart, a
+Every section takes the form its data actually needs, a trend wants a chart, a
 habit wants a heat map, discrete facts want a figure grid, a breakdown wants
 ranked bars, a comparison wants columns on one shared scale, a journey wants a
 spine. They cohere because the type, the colour, the spacing and the rules
@@ -118,7 +118,7 @@ answer is "a row with a bar" for the fourth time on one page, it is wrong.
 Before proposing any element, and before presenting any change:
 
 1. **Does it matter functionally?** Does it change what the member does, or
-   what they know? If not, it goes — and the second question never arises.
+   what they know? If not, it goes, and the second question never arises.
 2. **Does it work in place?** Render it and look at it in context, not at the
    argument for it in prose.
 
@@ -132,7 +132,7 @@ ladder on Pieces (measured nothing), the box drawn around the tick (a decision
 made visible that was not a decision) and every glow on the page.
 
 Corollary: a rule that needs an exception in the same breath is a rule not
-believed. "Width is weight, not minutes — except the lesson" was that.
+believed. "Width is weight, not minutes, except the lesson" was that.
 
 ## 6 · Open
 
