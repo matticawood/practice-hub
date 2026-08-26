@@ -338,11 +338,20 @@ const SH_SUBNAV = {
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
       }
-      /* The fade says "there is more to the right". Only true when there is:
-         set from JS, which is the only thing that can measure it. */
-      .sh-mob-subnav-scroll.sh-scrollable {
+      /* The fade says "there is more this way", so it belongs on whichever
+         side that is true of, and on neither at rest. Set from JS, which is the
+         only thing that can measure it. */
+      .sh-mob-subnav-scroll.sh-fade-r {
         -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
         mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
+      }
+      .sh-mob-subnav-scroll.sh-fade-l {
+        -webkit-mask-image: linear-gradient(to right, transparent 0, #000 26px, #000 100%);
+        mask-image: linear-gradient(to right, transparent 0, #000 26px, #000 100%);
+      }
+      .sh-mob-subnav-scroll.sh-fade-l.sh-fade-r {
+        -webkit-mask-image: linear-gradient(to right, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
+        mask-image: linear-gradient(to right, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
       }
       /* Left-aligned by default. A row that scrolls and a row that fills both
          start at the same margin and reach the same edge, so moving between
@@ -381,7 +390,7 @@ const SH_SUBNAV = {
         white-space: nowrap;
         transition: background .15s, color .15s, transform .12s;
         -webkit-tap-highlight-color: transparent;
-        min-height: 40px;
+        min-height: 44px;
       }
       /* On a phone the rows are tight enough that a few px of padding decides
          whether five pills fit the screen or hang a third of one off the edge.
@@ -2732,6 +2741,23 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     const share = pills.length ? room / pills.length : Infinity;
     sc.classList.toggle("sh-labelwidth", share < SH_FIXED_TAB_MIN);
     sc.classList.toggle("sh-scrollable", sc.scrollWidth - sc.clientWidth > 2);
+    _shSyncSubnavEdges(sc);
+    if (!sc._shEdgeBound) {
+      sc._shEdgeBound = true;
+      sc.addEventListener("scroll", function () {
+        if (sc._shEdgeTick) return;
+        sc._shEdgeTick = requestAnimationFrame(function () {
+          sc._shEdgeTick = 0; _shSyncSubnavEdges(sc);
+        });
+      }, { passive: true });
+    }
+  }
+
+  function _shSyncSubnavEdges(sc) {
+    const left  = sc.scrollLeft > 2;
+    const right = sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 2;
+    sc.classList.toggle("sh-fade-l", left);
+    sc.classList.toggle("sh-fade-r", right);
   }
   window._shSyncSubnavFade = _shSyncSubnavFade;
   (function () {
