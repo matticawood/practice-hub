@@ -349,6 +349,13 @@ const SH_SUBNAV = {
          sections does not change where the nav begins. Centring is added back
          only above 720px - see the block after this one. */
       .sh-mob-subnav-scroll { justify-content: flex-start; }
+      /* Material's two tab modes. FIXED is the default above: equal widths,
+         filling the bar. SCROLLING tabs are sized by their label instead, and
+         the switch between them is a floor on how narrow an equal tab may get -
+         96px in the spec, which is also roughly Apple's "don't force equal
+         widths onto labels of very different lengths". Set from JS, which is
+         the only thing that can divide the bar by the number of pills. */
+      .sh-mob-subnav-scroll.sh-labelwidth .sh-mob-pill { flex: 0 0 auto; }
       .sh-mob-subnav-scroll::-webkit-scrollbar { display: none; }
       .sh-mob-pill {
         display: inline-flex;
@@ -384,12 +391,6 @@ const SH_SUBNAV = {
       @media (max-width: 560px) {
         .sh-mob-subnav-scroll { padding: 0 12px; gap: 7px; }
         .sh-mob-pill { padding: 10px 12px; }
-        /* One notch tighter, applied only when it is the difference between
-           fitting and hanging a sliver of the last pill off the edge - the
-           worst state there is, clipped but with almost nothing to drag.
-           Set from JS, which is the only thing that can tell. */
-        .sh-mob-subnav-scroll.sh-snug { padding: 0 10px; gap: 5px; }
-        .sh-mob-subnav-scroll.sh-snug .sh-mob-pill { padding: 10px 9px; }
       }
       .sh-mob-subnav-scroll.sh-has-right .sh-mob-pill { flex: 0 0 auto; max-width: none; }
       .sh-mob-subnav-scroll.sh-has-right { justify-content: flex-start; }
@@ -2701,20 +2702,36 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
      both the edge fade and the pills' willingness to grow hang off the answer.
      Re-asked on resize and rotation, and once more after web fonts land, since
      they change every pill's width. */
+  /* Material Design gives tabs two modes and one number to choose between them.
+     FIXED tabs are equal width - the bar divided by the count - and are for a
+     small, settled set. SCROLLING tabs are sized by the length of their own
+     label, for a longer or variable set. The rule for which: never let an equal
+     tab fall below 96px; under that, go scrolling. Apple says the same thing
+     from the other side - segments are equal width, at most five on an iPhone,
+     and equal widths look wrong when the labels are very different lengths,
+     which is exactly what a too-small equal share means.
+
+     So: divide the bar by the number of pills. At 96 or more they share it
+     equally and fill it. Below that they take their labels' widths and the row
+     scrolls, which on a phone is Practice, Community and Learn - five and six
+     items are past what fits - while Tools and Live, with three and two, stay
+     equal. On iPad every share clears 96, so every row is equal there.
+
+     The fade stays tied to real overflow, which is a separate question: a row
+     can be label-width and still fit. */
+  var SH_FIXED_TAB_MIN = 96;
   function _shSyncSubnavFade() {
     const sc = document.querySelector("#sh-mob-subnav .sh-mob-subnav-scroll");
     if (!sc) return;
-    const over = function () { return sc.scrollWidth - sc.clientWidth > 2; };
-    sc.classList.remove("sh-snug");
-    if (over()) {
-      /* Near-misses are the bad case: five pills on a 414px phone overflow by
-         14px, which clips the last one and gives you almost nothing to drag.
-         Try one notch tighter, and keep it only if it actually closes the gap -
-         otherwise the row genuinely does not fit and should just scroll. */
-      sc.classList.add("sh-snug");
-      if (over()) sc.classList.remove("sh-snug");
-    }
-    sc.classList.toggle("sh-scrollable", over());
+    const pills = sc.querySelectorAll(".sh-mob-pill");
+    const cs = getComputedStyle(sc);
+    const gap = parseFloat(cs.columnGap || cs.gap) || 0;
+    const room = sc.clientWidth
+      - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      - gap * Math.max(0, pills.length - 1);
+    const share = pills.length ? room / pills.length : Infinity;
+    sc.classList.toggle("sh-labelwidth", share < SH_FIXED_TAB_MIN);
+    sc.classList.toggle("sh-scrollable", sc.scrollWidth - sc.clientWidth > 2);
   }
   window._shSyncSubnavFade = _shSyncSubnavFade;
   (function () {
