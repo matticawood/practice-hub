@@ -331,10 +331,12 @@ const SH_SUBNAV = {
         height: 100%;
         overflow-x: auto;
         overflow-y: hidden;
-        /* 292px of labels plus four gaps plus the margins is what decides
-           whether Practice fits a 390px phone. At 16/22 it missed by 22. */
-        padding: 0 14px;
-        gap: 18px;
+        /* The left edge lines up with the page's own gutter, so the first
+           tab and the card beneath it share an edge. 290px of labels plus four
+           16px gaps plus the margins is 386, so Practice still fits a 390px
+           phone; Learn's six never will and scrolls. */
+        padding: 0 16px;
+        gap: 16px;
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
       }
@@ -375,6 +377,15 @@ const SH_SUBNAV = {
         white-space: nowrap;
         transition: color .15s, border-color .15s, opacity .12s;
         -webkit-tap-highlight-color: transparent;
+      }
+      /* An iPad in portrait gets this row too, and it was wearing the
+         phone's measurements: 13px type in a 54px bar on an 834px screen whose
+         gutter is 22 and whose body text is larger. Portrait only - a landscape
+         phone is 700-odd wide and 390 tall, and a 60px bar would eat it. */
+      @media (orientation: portrait) and (min-width: 700px) and (max-width: 1024px) {
+        #sh-mob-subnav { height: 60px; }
+        .sh-mob-subnav-scroll { padding: 0 22px; gap: 26px; }
+        .sh-mob-pill { font-size: 0.92rem; }
       }
       .sh-mob-pill:active { opacity: .55; }
       .sh-mob-pill.active {
