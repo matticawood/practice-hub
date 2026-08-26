@@ -229,6 +229,16 @@ const SH_SUBNAV = {
       .sh-primary-nav { display: none; }
       .sh-hdr-left { flex: 1; gap: 0; }
     }
+    /* On a phone the header and the sub-nav are one piece of chrome, so the
+       brand row should not sit in 13px of air above and below: that gap was
+       what still read as a separation between the two rows once the gold rule
+       came off. 8px keeps the controls comfortable and brings the tabs up
+       under the wordmark. Desktop keeps its 13px, where the header stands on
+       its own over the page. */
+    @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
+      .sh-hdr-inner { padding-top: 8px; padding-bottom: 8px; }
+    }
+
     /* Squeeze zone: hide the wordmark on smaller laptops so the nav always fits
        (search label also collapses to an icon at <=1100px below). */
     @media (min-width: 769px) and (max-width: 991px) {
