@@ -337,15 +337,24 @@ const SH_SUBNAV = {
         gap: 8px;
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
-        /* Fade the right edge to signal there are more pills to scroll to. */
+      }
+      /* The fade says "there is more to the right". Only true when there is:
+         set from JS, which is the only thing that can measure it. */
+      .sh-mob-subnav-scroll.sh-scrollable {
         -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
         mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
       }
+      /* Nothing to scroll to, and a leftover pill or two of slack: centre it
+         rather than leaving it all stacked on one side. */
+      .sh-mob-subnav-scroll:not(.sh-scrollable) { justify-content: center; }
       .sh-mob-subnav-scroll::-webkit-scrollbar { display: none; }
       .sh-mob-pill {
         display: inline-flex;
         align-items: center;
-        flex-shrink: 0;
+        justify-content: center;
+        flex: 1 1 auto;
+        min-width: max-content;
+        max-width: 220px;
         padding: 10px 15px;
         border-radius: 10px;
         font-size: 0.78rem;
@@ -358,6 +367,8 @@ const SH_SUBNAV = {
         -webkit-tap-highlight-color: transparent;
         min-height: 40px;
       }
+      .sh-mob-subnav-scroll.sh-has-right .sh-mob-pill { flex: 0 0 auto; max-width: none; }
+      .sh-mob-subnav-scroll.sh-has-right { justify-content: flex-start; }
       .sh-mob-pill:active { transform: scale(.96); }
       .sh-mob-pill.active {
         background: #f5c518;
@@ -2632,13 +2643,33 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       window._shSubnavRightNode.style.marginLeft = "auto";
       window._shSubnavRightNode.style.alignSelf = "center";
       scForExtra.appendChild(window._shSubnavRightNode);
+      scForExtra.classList.add("sh-has-right");
     }
     // Auto-scroll the active pill into view within the horizontal scroller
     // (manual scrollLeft, not scrollIntoView — that can scroll the whole page).
     const act = subNav.querySelector(".sh-mob-pill.active");
     const sc = subNav.querySelector(".sh-mob-subnav-scroll");
     if (act && sc) sc.scrollLeft = act.offsetLeft - (sc.clientWidth / 2) + (act.offsetWidth / 2);
+    _shSyncSubnavFade();
   }
+
+  /* Whether the row actually overflows is the one thing CSS cannot ask, and
+     both the edge fade and the pills' willingness to grow hang off the answer.
+     Re-asked on resize and rotation, and once more after web fonts land, since
+     they change every pill's width. */
+  function _shSyncSubnavFade() {
+    const sc = document.querySelector("#sh-mob-subnav .sh-mob-subnav-scroll");
+    if (!sc) return;
+    sc.classList.toggle("sh-scrollable", sc.scrollWidth - sc.clientWidth > 2);
+  }
+  window._shSyncSubnavFade = _shSyncSubnavFade;
+  (function () {
+    let t;
+    const again = function () { clearTimeout(t); t = setTimeout(_shSyncSubnavFade, 120); };
+    window.addEventListener("resize", again);
+    window.addEventListener("orientationchange", again);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(_shSyncSubnavFade);
+  })();
 
   _updateNav(activePage);
 
