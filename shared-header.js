@@ -97,6 +97,18 @@ const SH_SUBNAV = {
     body.tools-mode              { --sh-hdr: #06080f; }
 
     /* ── Header ── */
+    /* The area behind the notch takes the canvas colour, and the canvas takes
+       its colour from html - or, if html has none, from body. Neither had one
+       at first paint, so it was white until JS added body.hub-mode and that
+       background propagated up, which is why it flicked to black once the page
+       was touched. The header is #141414 on every page, so the canvas is that
+       from the first frame and the notch never flashes.
+
+       (The theme-color meta is still gold, which is what colours the browser
+       chrome on Android and in the installed PWA. That is a separate choice and
+       is left alone.) */
+    html { background: #141414; }
+
     /* No gold rule under the header. It was drawing a hard line between the
        header and the sub-nav directly below it, so two bars of the same colour
        read as two pieces of furniture stacked on each other rather than as one
@@ -1197,14 +1209,19 @@ function _shBuildChrome() {
       </nav>
       <div class="header-user">
         <span id="header-email" style="display:none"></span>
+        <!-- Presence is owner-only, so it sits at the head of the row rather
+             than among the controls every member has. Interleaved, it shifted
+             search, chat, bell and avatar out of the positions members
+             actually see, which made the owner's header a poor guide to
+             everyone else's. -->
+        <button id="presence-btn" onclick="window._shTogglePresence()" title="Online members" aria-label="Online members">
+          <span class="presence-dot"></span>
+          <span class="presence-count">0</span>
+        </button>
         <button id="sh-search-btn" onclick="window._shOpenPalette()" title="Search (⌘K / Ctrl-K)" aria-label="Search">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <span class="sh-search-label">Search</span>
           <kbd class="sh-search-kbd">⌘K</kbd>
-        </button>
-        <button id="presence-btn" onclick="window._shTogglePresence()" title="Online members" aria-label="Online members">
-          <span class="presence-dot"></span>
-          <span class="presence-count">0</span>
         </button>
         <a class="btn btn-ghost btn-sm btn-bell" id="header-chat-btn"
           href="/chat.html" title="Chat" aria-label="Chat" style="display:none;text-decoration:none">
