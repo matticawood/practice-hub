@@ -86,6 +86,33 @@ Everything from Today downwards is the open problem.
 7. No mono. Figures in Fraunces, labels in the sans.
 8. One rule per chapter, none between rows.
 
+## 5a · Vary the instrument, not the language
+
+The single most useful principle to come out of the section mock, and it came
+from Matthew looking at Progress:
+
+> Each section is visually distinct in form while keeping the same visual
+> language, which makes it easy to follow.
+
+Every section takes the form its data actually needs — a trend wants a chart, a
+habit wants a heat map, discrete facts want a figure grid, a breakdown wants
+ranked bars, a comparison wants columns on one shared scale, a journey wants a
+spine. They cohere because the type, the colour, the spacing and the rules
+never change.
+
+Two failure modes, and I have committed both:
+
+- **Varying the language.** Light grounds, different card systems, borrowed
+  treatments. This destroys coherence and is what made the early dashboards
+  look like different products bolted together.
+- **Repeating one form.** Rows, rows, rows, with hierarchy attempted through
+  size alone. This is what made every version read as a mess: a page of
+  identical rows gives the eye no landmarks, so it cannot be navigated or
+  remembered.
+
+Test for any section: *what is this data, and what instrument shows it?* If the
+answer is "a row with a bar" for the fourth time on one page, it is wrong.
+
 ## 6 · Open
 
 - How many objectives to show, and chosen how, given there is no "next one"
