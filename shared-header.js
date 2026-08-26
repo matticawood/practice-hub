@@ -327,20 +327,44 @@ const SH_SUBNAV = {
         border-bottom: 1px solid #2a2a2a;
         z-index: 200;
       }
+      /* ── Underlined tabs, the same control the desktop row above and the
+         bottom bar already are ────────────────────────────────────────────
+         These were filled pills, and a filled pill is the wrong shape for a row
+         that sometimes has to scroll. Seen side by side the sections did not
+         read as one component: Practice five narrow pills with the last sliced
+         through a word, Tools three fat ones, Live two enormous ones - because
+         a filled shape has to decide how wide it is, and every answer to that
+         (label width, equal share, capped) gives a different answer per
+         section. A sliced pill looks broken. A sliced WORD reads as more to
+         come, which is the whole point of a scrolling row.
+
+         A tab sized by its own label has none of that problem. Every section's
+         tabs match each other and every other section's, whether the row fits
+         or scrolls, on a phone or an iPad, and left-aligned with space to the
+         right is simply what this control looks like - it is what the desktop
+         row directly above already does.
+
+         It also settles the question underneath all of it: this app marks nav
+         state with a gold indicator bar in both directions already, above the
+         icon in the bottom bar and under the label on desktop. The pill was the
+         only place that did not. ── */
       .sh-mob-subnav-scroll {
         display: flex;
-        align-items: center;
+        align-items: stretch;
+        justify-content: flex-start;
         height: 100%;
         overflow-x: auto;
         overflow-y: hidden;
+        /* 292px of labels plus four gaps plus the margins is what decides
+           whether Practice fits a 390px phone. At 16/22 it missed by 22. */
         padding: 0 14px;
-        gap: 8px;
+        gap: 18px;
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
       }
-      /* The fade says "there is more this way", so it belongs on whichever
-         side that is true of, and on neither at rest. Set from JS, which is the
-         only thing that can measure it. */
+      /* The fade says "there is more this way", so it belongs on whichever side
+         that is true of, and on neither at rest. Set from JS, the only thing
+         that can measure it. */
       .sh-mob-subnav-scroll.sh-fade-r {
         -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
         mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
@@ -353,83 +377,37 @@ const SH_SUBNAV = {
         -webkit-mask-image: linear-gradient(to right, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
         mask-image: linear-gradient(to right, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
       }
-      /* Left-aligned by default. A row that scrolls and a row that fills both
-         start at the same margin and reach the same edge, so moving between
-         sections does not change where the nav begins. Centring is added back
-         only above 720px - see the block after this one. */
-      .sh-mob-subnav-scroll { justify-content: flex-start; }
-      /* Material's two tab modes. FIXED is the default above: equal widths,
-         filling the bar. SCROLLING tabs are sized by their label instead, and
-         the switch between them is a floor on how narrow an equal tab may get -
-         96px in the spec, which is also roughly Apple's "don't force equal
-         widths onto labels of very different lengths". Set from JS, which is
-         the only thing that can divide the bar by the number of pills. */
-      .sh-mob-subnav-scroll.sh-labelwidth .sh-mob-pill { flex: 0 0 auto; }
       .sh-mob-subnav-scroll::-webkit-scrollbar { display: none; }
       .sh-mob-pill {
         display: inline-flex;
         align-items: center;
-        justify-content: center;
-        /* Basis zero, not auto. Growing from auto adds the SAME number of px to
-           every pill, so they keep their natural differences and the row reads
-           as five different-sized buttons. From zero they SHARE the row, so
-           they come out equal - which is what the cap was accidentally doing on
-           iPad, where every pill hits 156 and they all match.
-           min-width:max-content still holds the floor, so a label too long for
-           its equal share keeps its own width instead of being squeezed, and a
-           row that cannot fit still refuses to shrink and scrolls. */
-        flex: 1 1 0;
-        min-width: max-content;
-        padding: 10px 15px;
-        border-radius: 10px;
-        font-size: 0.78rem;
+        flex: 0 0 auto;
+        /* the whole bar height, so the indicator sits on the bar's own bottom
+           edge and the tap target is 54px rather than the text's own box */
+        min-height: 100%;
+        padding: 0 2px;
+        margin-bottom: -1px;
+        border: none;
+        border-radius: 0;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        font-size: 0.82rem;
         font-weight: 600;
-        color: #aaa;
-        background: #252525;
+        letter-spacing: 0;
+        color: #9a9a9a;
         text-decoration: none;
         white-space: nowrap;
-        transition: background .15s, color .15s, transform .12s;
+        transition: color .15s, border-color .15s, opacity .12s;
         -webkit-tap-highlight-color: transparent;
-        min-height: 44px;
       }
-      /* On a phone the rows are tight enough that a few px of padding decides
-         whether five pills fit the screen or hang a third of one off the edge.
-         Practice measures 463px wide at the roomier setting and 425 here, which
-         is the difference between overflowing a large phone by a hair - the
-         worst of both, clipped but barely draggable - and simply fitting. */
-      @media (max-width: 560px) {
-        .sh-mob-subnav-scroll { padding: 0 12px; gap: 7px; }
-        .sh-mob-pill { padding: 10px 12px; }
-      }
-      .sh-mob-subnav-scroll.sh-has-right .sh-mob-pill { flex: 0 0 auto; max-width: none; }
-      .sh-mob-subnav-scroll.sh-has-right { justify-content: flex-start; }
-      .sh-mob-pill:active { transform: scale(.96); }
+      .sh-mob-pill:active { opacity: .55; }
       .sh-mob-pill.active {
-        background: #f5c518;
-        color: #1a1410;
-        font-weight: 800;
+        color: #fff;
+        font-weight: 700;
+        border-bottom-color: var(--accent, #f5c518);
       }
     }
 
-    /* ── Tablet portrait: nothing ever scrolls, so everything can centre ────
-       The widest row in the whole app is Learn at 670px. Above 720 every
-       section fits, which means the centred state is the ONLY state at these
-       widths - no section centres while its neighbour scrolls. Below 720 some
-       rows fit and some do not, so there they all stay left-aligned and the two
-       states read the same.
-
-       The cap belongs here for the same reason: it only bites where there is
-       slack. 156px is the longest label in the nav ("One-to-one lessons"), so
-       no pill is ever wider than the widest thing the nav has to say - which is
-       what stops the two-item Live row becoming two slabs with a five-letter
-       word floating in each. min-width:max-content still wins over it, so a
-       longer label is never squeezed. ── */
-    @media (min-width: 720px) and (max-width: 768px),
-           (orientation: portrait) and (min-width: 720px) and (max-width: 1024px) {
-      .sh-mob-pill { max-width: 156px; }
-      .sh-mob-subnav-scroll:not(.sh-scrollable) { justify-content: center; }
-      .sh-mob-subnav-scroll.sh-has-right { justify-content: flex-start; }
-    }
 
     /* ── Notif overlay + panel ── */
     .sh-notif-overlay {
@@ -2711,35 +2689,12 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
      both the edge fade and the pills' willingness to grow hang off the answer.
      Re-asked on resize and rotation, and once more after web fonts land, since
      they change every pill's width. */
-  /* Material Design gives tabs two modes and one number to choose between them.
-     FIXED tabs are equal width - the bar divided by the count - and are for a
-     small, settled set. SCROLLING tabs are sized by the length of their own
-     label, for a longer or variable set. The rule for which: never let an equal
-     tab fall below 96px; under that, go scrolling. Apple says the same thing
-     from the other side - segments are equal width, at most five on an iPhone,
-     and equal widths look wrong when the labels are very different lengths,
-     which is exactly what a too-small equal share means.
-
-     So: divide the bar by the number of pills. At 96 or more they share it
-     equally and fill it. Below that they take their labels' widths and the row
-     scrolls, which on a phone is Practice, Community and Learn - five and six
-     items are past what fits - while Tools and Live, with three and two, stay
-     equal. On iPad every share clears 96, so every row is equal there.
-
-     The fade stays tied to real overflow, which is a separate question: a row
-     can be label-width and still fit. */
-  var SH_FIXED_TAB_MIN = 96;
+  /* Tabs are sized by their own labels, so there is no width to decide and
+     nothing to measure but this: does the row overflow, and therefore is there
+     anything to fade. */
   function _shSyncSubnavFade() {
     const sc = document.querySelector("#sh-mob-subnav .sh-mob-subnav-scroll");
     if (!sc) return;
-    const pills = sc.querySelectorAll(".sh-mob-pill");
-    const cs = getComputedStyle(sc);
-    const gap = parseFloat(cs.columnGap || cs.gap) || 0;
-    const room = sc.clientWidth
-      - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
-      - gap * Math.max(0, pills.length - 1);
-    const share = pills.length ? room / pills.length : Infinity;
-    sc.classList.toggle("sh-labelwidth", share < SH_FIXED_TAB_MIN);
     sc.classList.toggle("sh-scrollable", sc.scrollWidth - sc.clientWidth > 2);
     _shSyncSubnavEdges(sc);
     if (!sc._shEdgeBound) {
@@ -2759,6 +2714,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     sc.classList.toggle("sh-fade-l", left);
     sc.classList.toggle("sh-fade-r", right);
   }
+
   window._shSyncSubnavFade = _shSyncSubnavFade;
   (function () {
     let t;
