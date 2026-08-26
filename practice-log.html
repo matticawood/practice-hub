@@ -13092,6 +13092,29 @@ function rmToggleScene(on) {
   window.scrollTo(0, 0);
 }
 
+// Opening a tab from inside the page swaps a screen's worth of content in one
+// go, and the gap between the tap and the new panel painting reads as a stall.
+// This is the page's own loading cover, held over the hand-off and lifted on the
+// frame after the new panel has laid out, with a short floor so it cannot
+// strobe. It changes nothing about what the tab does.
+function _dashGoTab(tab) {
+  const cover = document.getElementById('app-boot');
+  if (!cover) { switchMainLbTab(tab); return; }
+  // The switch itself is synchronous and must never sit behind a frame callback:
+  // rAF does not fire in a backgrounded tab, and the tab has to change either
+  // way. The cover sits above everything, so it is painted in the same frame as
+  // the new panel and covers its layout. Lifting it is the only part that waits.
+  cover.classList.remove('gone');
+  switchMainLbTab(tab);
+  const lift = () => cover.classList.add('gone');
+  const ceiling = setTimeout(lift, 900);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    clearTimeout(ceiling);
+    setTimeout(lift, 200);
+  }));
+}
+window._dashGoTab = _dashGoTab;
+
 function switchMainLbTab(main, fromHistory) {
   /* The dashboard is one white surface on a phone; every other panel here is
      still cards on the beige. The surface has to run to the bottom of the
@@ -13151,6 +13174,14 @@ function switchMainLbTab(main, fromHistory) {
     progTabs.querySelectorAll(".lb-subtab").forEach(function (b) {
       b.classList.toggle("active", b.dataset.prog === main);
     });
+  }
+  // The shared header's pill row only re-highlights on its own click. A tab
+  // opened from inside the page (the heat map, a card) left the pill on
+  // whichever tab you came from. History, Ranks and Achievements are reached
+  // through the Progress pill, so they highlight it rather than nothing.
+  if (window._shHighlightHubTab) {
+    const PILL = { history: 'stats', leaderboard: 'stats', achievements: 'stats' };
+    try { window._shHighlightHubTab(PILL[main] || main); } catch (e) {}
   }
   // Keep dropdown in sync
   const dd = document.getElementById('tab-dd-log');
@@ -13673,7 +13704,7 @@ async function renderDashboard() {
     // Every day goes to the same place. Only the days with a session used to
     // respond, with nothing to say which, so five of the seven were dead to
     // the touch and looked identical to the two that were not.
-    const clickable = `onclick="switchMainLbTab('history')" style="cursor:pointer"`;
+    const clickable = `onclick="_dashGoTab('history')" style="cursor:pointer"`;
     calHTML += `<div class="dash-chain-cell${c.isToday?' today':''}${has?' has-session':''}${chainL}${chainR}" data-level="${lvl}" title="${mins?mins+' min':''}" ${clickable}><span class="dash-chain-dow">${c.dow}</span><span class="dash-chain-dot"></span></div>`;
   });
   calHTML += `</div>`;
