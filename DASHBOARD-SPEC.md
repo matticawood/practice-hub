@@ -113,6 +113,27 @@ Two failure modes, and I have committed both:
 Test for any section: *what is this data, and what instrument shows it?* If the
 answer is "a row with a bar" for the fourth time on one page, it is wrong.
 
+## 5b · The two questions, in order
+
+Before proposing any element, and before presenting any change:
+
+1. **Does it matter functionally?** Does it change what the member does, or
+   what they know? If not, it goes — and the second question never arises.
+2. **Does it work in place?** Render it and look at it in context, not at the
+   argument for it in prose.
+
+Arguing a third thing instead of these two is how bad elements get built. The
+theory lesson's duration was defended on whether the number was TRUE, which is
+neither question: knowing a lesson takes four minutes does not change whether
+you do it, and one figure in a set of five reads as an error.
+
+The same pair would have caught the pips (duplicated "1 of 5"), the progress
+ladder on Pieces (measured nothing), the box drawn around the tick (a decision
+made visible that was not a decision) and every glow on the page.
+
+Corollary: a rule that needs an exception in the same breath is a rule not
+believed. "Width is weight, not minutes — except the lesson" was that.
+
 ## 6 · Open
 
 - How many objectives to show, and chosen how, given there is no "next one"
