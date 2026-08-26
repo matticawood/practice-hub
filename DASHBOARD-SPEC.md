@@ -136,6 +136,12 @@ believed. "Width is weight, not minutes, except the lesson" was that.
 
 ## 6 · Open
 
+- **Achievements presentation.** They now live on Progress, but how they are
+  shown is not right yet, on Progress or in the room feed. Needs its own pass.
+- **The room's length.** With posts interleaved it will grow. Cap it at about
+  five combined items on the dashboard and let the full feed carry the rest,
+  or it quietly becomes the longest thing on the page.
+
 - How many objectives to show, and chosen how, given there is no "next one"
   and members work on many at once.
 - Whether the desktop puts the day's five and the direction side by side.
