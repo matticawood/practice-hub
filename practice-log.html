@@ -5261,6 +5261,18 @@
       }
       body.lb-dash #dashboard-content .feed-text,
       body.lb-dash #dashboard-content .feed-body{ color:#b7b4bd !important; }
+
+      /* Post rows in the merged feed. They were drawn for a light card, so the
+         author's name came through nearly black on this ground. */
+      body.lb-dash #dashboard-content .dfm-item{
+        padding-left:var(--dgut) !important; padding-right:var(--dgut) !important;
+        background:transparent !important; border-color:var(--dline) !important;
+        text-decoration:none !important;
+      }
+      body.lb-dash #dashboard-content .dfm-title{ color:var(--dink) !important; font-weight:700 !important; }
+      body.lb-dash #dashboard-content .dfm-post-snip{ color:#b7b4bd !important; }
+      body.lb-dash #dashboard-content .dfm-meta{ color:var(--ddim) !important; }
+      body.lb-dash #dashboard-content .dfm-thumb{ background:rgba(255,255,255,.05) !important; }
       /* the achievement inside a feed line: a chip on the ground, not a white card */
       body.lb-dash #dashboard-content .feed-ach-badge{
         background:rgba(255,255,255,.04) !important; border:1px solid var(--dline) !important;
@@ -13816,6 +13828,11 @@ async function renderDashboard() {
     <div class="dash-band-head">Community</div>
     <div class="dash-card db-activity" id="dash-activity-card" style="overflow:hidden;padding:0;min-height:360px;display:flex;flex-direction:column">
         <div class="dfm-head"><span class="dfm-head-ic" style="--ccol:#0d9488"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>Activity</div>
+        <!-- The posts renderer fills this, and _dashMergeFeeds moves its rows
+             into the activity feed above, interleaved by time. Hidden because
+             the two are one feed now: what the room has been doing, whether
+             that was practising or posting. -->
+        <div id="dash-posts-preview" style="display:none"></div>
         <div id="dash-feed-preview" style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">
           <div style="color:var(--text-muted);font-size:.8rem;padding:12px 16px">Loading…</div>
         </div>
@@ -14138,7 +14155,7 @@ async function renderDashboard() {
           const thumb = t
             ? `<span class="dfm-thumb">${t.src ? `<img src="${escHtml(t.src)}" alt="" loading="lazy" onerror="this.style.display='none'"/>` : ""}${t.video ? playIc : ""}</span>`
             : _dashStylThumb(["question", "discussion", "win", "resource"].includes(p.type) ? p.type : "post");
-          return `<a class="dfm-item" href="/community.html" style="align-items:flex-start">
+          return `<a class="dfm-item" data-ts="${p.created_at}" href="/community.html" style="align-items:flex-start">
             ${thumb}
             <span class="dfm-body">
               <span class="dfm-title" style="-webkit-line-clamp:1">${name}<span class="dfm-postbadge">${escHtml(badge)}</span></span>
@@ -14151,6 +14168,10 @@ async function renderDashboard() {
         postsEl.innerHTML =
           `<div class="dash-feed-scrollwrap" style="position:relative;flex:1;min-height:0"><div class="dash-feed-scroll" style="position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch">${rowsHTML}</div></div>` +
           `<div style="padding:8px 16px 12px;flex-shrink:0;border-top:1px solid var(--border)"><a class="dash-card-article-link" href="/community.html" style="text-decoration:none">See all posts →</a></div>`;
+        // Merge here, where the rows actually exist. The dashboard's own tidy
+        // pass gives up after a couple of seconds and this query often lands
+        // after that, which is why nothing was being merged.
+        try { _dashMergeFeeds(); } catch (e) {}
       }
     }
   } catch(e) { /* posts unavailable */ }
@@ -16897,6 +16918,29 @@ function _dailyBeginnerObjective(stageIdx) {
 }
 // Learn → Courses card: the member's in-app courses (Music Theory, Absolute Beginner)
 // with live progress and a Continue/Start deep-link into the next lesson.
+// ── One feed ────────────────────────────────────────────────────────────────
+// Activity and posts were two feeds answering one question: what has the room
+// been doing. Read side by side a member had to check both to know, and the
+// same person appeared in each. Both renderers still build their own rows -
+// nothing about how either is produced has changed - and this puts them in one
+// list in time order.
+function _dashMergeFeeds() {
+  const scroll = document.querySelector('#dash-feed-preview .dash-feed-scroll');
+  const posts  = document.getElementById('dash-posts-preview');
+  if (!scroll || !posts) return false;
+  const postRows = [...posts.querySelectorAll('.dfm-item')];
+  if (!postRows.length) return false;
+
+  postRows.forEach(r => scroll.appendChild(r));
+  const ts = n => Date.parse(n.getAttribute('data-ts') || '') || 0;
+  [...scroll.children]
+    .filter(n => n.matches('.feed-item, .dfm-item'))
+    .sort((a, b) => ts(b) - ts(a))
+    .forEach(n => scroll.appendChild(n));
+  posts.innerHTML = '';
+  return true;
+}
+
 function _renderCoursesCard() {
   const el = document.getElementById('dash-courses-card');
   if (!el) return;
@@ -20801,7 +20845,7 @@ function feedItemHTML(group) {
     sentenceHTML = `<div class="feed-text"><strong style="color:${colour.fg}">${escHtml(name)}</strong> <span style="color:var(--text-muted)">was active</span></div>`;
   }
 
-  return `<div class="feed-item">
+  return `<div class="feed-item" data-ts="${new Date(group.latestTime).toISOString()}">
     ${_feedAvatarHTML(group.email, name)}
     <div class="feed-body">
       ${leadVerbLine}
