@@ -285,37 +285,13 @@ const SH_SUBNAV = {
     #sh-mob-subnav {
       display: none;
     }
-    /* ── Desktop: secondary nav as light underlined page tabs (GitHub/Stripe style).
-       Built from the page's own theme variables so it adapts to light AND dark pages. ── */
-    @media (min-width: 1025px), (orientation: landscape) and (min-width: 769px) {
-      #sh-mob-subnav {
-        display: block;
-        background: transparent;
-        margin: 0;
-      }
-      #sh-mob-subnav:empty { display: none; }
-      .sh-mob-subnav-scroll {
-        display: flex; flex-wrap: wrap; align-items: stretch;
-        gap: 26px;
-        max-width: 1400px; margin: 0 auto; padding: 0 28px;
-        border-bottom: 1px solid var(--border, #e3e1e6);
-      }
-      .sh-mob-pill {
-        display: inline-flex; align-items: center;
-        padding: 13px 1px; margin-bottom: -1px;
-        border-radius: 0; border: none;
-        border-bottom: 2px solid transparent;
-        font-size: 0.86rem; font-weight: 600; letter-spacing: 0;
-        color: var(--text-muted, #8a7868); background: transparent;
-        text-decoration: none; white-space: nowrap;
-        transition: color .15s, border-color .15s;
-      }
-      .sh-mob-pill:hover:not(.active) { color: var(--text, #1a1410); }
-      .sh-mob-pill.active {
-        color: var(--text, #1a1410); font-weight: 700;
-        border-bottom-color: var(--accent, #f5c518);
-      }
-    }
+    /* No horizontal sub-nav on desktop or in landscape: sub-pages live in the
+       sidebar accordion there, and the sidebar block above hides this bar with
+       !important. A block styling it as underlined tabs used to sit here and
+       could never render - thirty lines that had not applied since the sidebar
+       landed. If the row is ever wanted on desktop, the hide in the sidebar
+       block is what has to go first. */
+
     @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #sh-mob-subnav {
         display: block;
@@ -2675,7 +2651,6 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
       window._shSubnavRightNode.style.marginLeft = "auto";
       window._shSubnavRightNode.style.alignSelf = "center";
       scForExtra.appendChild(window._shSubnavRightNode);
-      scForExtra.classList.add("sh-has-right");
     }
     // Auto-scroll the active pill into view within the horizontal scroller
     // (manual scrollLeft, not scrollIntoView — that can scroll the whole page).
