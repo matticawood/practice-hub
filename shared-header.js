@@ -236,7 +236,19 @@ const SH_SUBNAV = {
        under the wordmark. Desktop keeps its 13px, where the header stands on
        its own over the page. */
     @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
-      .sh-hdr-inner { padding-top: 8px; padding-bottom: 8px; }
+      .sh-hdr-inner { padding-top: 6px; padding-bottom: 6px; }
+      /* One height for every control in the row. They had drifted to three:
+         chat, bell and avatar at 30, search at 33, the presence pill at 35 -
+         so the row was as tall as its tallest item and the three that agreed
+         sat in a bar sized for the one that did not. 30 is what the majority
+         already were, so the row loses 5px and the controls finally line up. */
+      #app-header .header-user { align-items: center; }
+      #app-header .header-user > button,
+      #app-header .header-user > .sh-avatar-wrap,
+      #app-header #sh-search-btn,
+      #app-header #presence-btn { height: 30px; min-height: 30px; }
+      #app-header #sh-search-btn { width: 30px; padding: 6px; }
+      #app-header #presence-btn { padding: 0 11px; }
     }
 
     /* Squeeze zone: hide the wordmark on smaller laptops so the nav always fits
