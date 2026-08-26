@@ -4956,6 +4956,23 @@
       body.lb-dash .history-community-section{ background:#0b0b0e !important; }
       body.lb-dash .dash-band-head{ background:transparent !important; color:#c6c4cc; }
 
+      /* The page's greys are warm, tuned for a cream ground: --text-muted is
+         #8a7868, a brown. On this ground it reads muddy rather than quiet,
+         which is what the course sub-lines and the feed timestamps were doing.
+         Remapped for this tab only, so everything inheriting them comes right
+         at once rather than one element at a time. */
+      body.lb-dash{
+        --text-muted:#93939e;
+        --text-dim:#7e7b88;
+        --border:rgba(255,255,255,.11);
+        --surface:transparent;
+        --surface-2:rgba(255,255,255,.04);
+      }
+
+      /* "Activity" with its icon was a title for a section the chapter heading
+         above it already names, and it sat off the gutter besides. */
+      body.lb-dash #dashboard-content .dfm-head{ display:none !important; }
+
       /* The page ends where the bar begins. main carried 20px of bottom padding
          and the feed card 14px of its own trailing space, so the last line -
          "View full feed" - stopped 33px short of the bar with nothing in the
@@ -6176,6 +6193,17 @@
     }
 
     /* Loading overlay for data */
+    /* The boot cover: the page's own ground over the half-built dashboard,
+       with the same spinner the page already uses. */
+    #dashboard-content { position: relative; }
+    .dash-boot {
+      position: absolute; inset: 0; z-index: 5;
+      display: flex; align-items: center; justify-content: center;
+      background: #0b0b0e;
+      transition: opacity .25s ease;
+    }
+    .dash-boot.gone { opacity: 0; pointer-events: none; }
+
     /* Body always fills the viewport, so the html background never shows below
        it. During load the dashboard's ground and html's are two different
        darks - #0f0f0f before the tab class lands, #141414 behind it for the
@@ -13753,6 +13781,45 @@ async function renderDashboard() {
       </div>
 
   `;
+
+  // ── Hold the spinner until the page is actually built ──────────────────
+  // The template lands in one go, but the parts that fill it do not: the
+  // standing block, the day's tasks, the courses and the feed each arrive on
+  // their own schedule, and until they do a member watches headings appear over
+  // empty space with "Loading..." in two of them. The spinner covers that,
+  // matching the ground so nothing shows through, and lifts when the last of
+  // them has arrived - or after eight seconds, so a slow fetch cannot leave the
+  // page hidden behind it.
+  (function holdBoot() {
+    const host = el;
+    if (!host || host.querySelector('.dash-boot')) return;
+    const boot = document.createElement('div');
+    boot.className = 'dash-boot';
+    boot.innerHTML = '<div class="loading-spinner"></div>';
+    host.appendChild(boot);
+
+    const ready = () => {
+      const txt = n => (n ? n.textContent || '' : '');
+      const courses = host.querySelector('#dash-courses-card');
+      const feed    = host.querySelector('#dash-feed-preview');
+      return host.querySelector('.path-hero')
+          && host.querySelector('.dday-card')
+          && courses && !/loading/i.test(txt(courses))
+          && feed    && !/loading/i.test(txt(feed));
+    };
+
+    const t0 = Date.now();
+    const tick = () => {
+      if (!boot.isConnected) return;
+      if (ready() || Date.now() - t0 > 8000) {
+        boot.classList.add('gone');
+        setTimeout(() => boot.remove(), 260);
+        return;
+      }
+      setTimeout(tick, 120);
+    };
+    setTimeout(tick, 120);
+  })();
 
   // Your Journey card. It fills #path-headline for the stage; the objectives
   // half of it is no longer placed on this page (see the template above), so
