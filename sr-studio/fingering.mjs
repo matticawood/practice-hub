@@ -41,10 +41,13 @@ export function fingerFixedPosition(notes, hand, tonicPc, mode, lowPitch){
   const degOf = m => { for(const off of [0,-1,1]){ const p=m+off, rel=(((p-tpc)%12)+12)%12, i=SC.indexOf(rel);
       if(i>=0) return Math.floor((p-tpc)/12)*7 + i; } return null; };
   const outer = n => Array.isArray(n.m) ? (hand==='rh'?Math.max(...n.m):Math.min(...n.m)) : n.m;  // the OUTER note (RH top / LH bottom) — matches resolveHandFingers, which derives the chord's partner finger from it
-  // the position's lowest degree: the placement the composer chose (lowPitch), else — as a graceful fallback when the
-  // placement wasn't threaded — the lowest note actually played (still one consistent frame, never the DP's guess).
-  let lowDeg = lowPitch!=null ? degOf(lowPitch) : null;
-  if(lowDeg==null){ let mn=Infinity; notes.forEach(n=>{ if(!n.rest){ const d=degOf(outer(n)); if(d!=null && d<mn) mn=d; } }); lowDeg = mn===Infinity?null:mn; }
+  // the position's lowest degree = the lowest note the hand ACTUALLY PLAYS. The outer anchoring finger (RH thumb / LH
+  // little finger) sits on a real sounding note, never on an unplayed window floor — a hand placed a degree below its
+  // own line would strand the anchor finger and open the piece on 2/4 (a note the composer never wrote there). lowPitch
+  // (the composer's placement) is a fallback only when the hand plays nothing at all. A placed hand is fingered where
+  // its notes are, the way a pianist sets the thumb/pinky on the lowest key they touch.
+  let mn=Infinity; notes.forEach(n=>{ if(!n.rest){ const d=degOf(outer(n)); if(d!=null && d<mn) mn=d; } });
+  let lowDeg = mn!==Infinity ? mn : (lowPitch!=null ? degOf(lowPitch) : null);
   const fings = new Array(notes.length).fill(null); const print = new Set(); let first=-1;
   notes.forEach((n,i)=>{ if(n.rest) return;
     const g = degOf(outer(n));
@@ -615,6 +618,58 @@ export function fingerHand(notes, hand, scalePcs){
         if(hi-lo<=4) for(let x=a;x<=b;x++){ const d=Math.round(R[x].deg); seq[x] = hand==='rh' ? (d-lo)+1 : (hi-d)+1; }
       }
       a=k; } }
+  }
+
+  // ---- FRAME CONSISTENCY + LEGATO NO-SLIDE [pianist: a still hand is one finger per key; legato does not slide] ----
+  // The forward gesture pass fingers each little gesture (a turn, a step, a reversal) somewhat on its own, so a
+  // positional line that never leaves one hand can still get a key fingered two ways (the wobble) or a same-finger STEP
+  // (a legato slide the leap-repair above, which only fires on a 3rd+, never catches). Enforce the two pianistic
+  // truths the pass misses: (1) a pitch recurring while the hand has NOT repositioned keeps its finger; (2) two
+  // different connected notes do not share a finger in legato, except the idiomatic slide OFF a black key onto a white.
+  // A rest, or the line leaving the five-finger reach, is a genuine reposition where a pitch MAY change finger — those
+  // are left alone. Hill-climb by a local fault count, so a change is kept only when it removes a slide/jam/thumb-fault
+  // without adding one — a good gesture fingering is never disturbed. [criteria-passing → stays in]
+  if(_cfg.frameHold!==false){
+    const conn = k => k>0 && R[k].i===R[k-1].i+1;
+    const slideAt = k => { if(!conn(k)||seq[k]==null||seq[k-1]==null) return false; const d=Math.abs(R[k].p-R[k-1].p);
+      if(!(seq[k]===seq[k-1] && d>0 && d<=2)) return false;
+      return !(isBlack(R[k-1].p) && !isBlack(R[k].p)); };            // a slide UNLESS off a black key onto the adjacent white
+    const jamAt = k => { if(!conn(k)||seq[k]==null||seq[k-1]==null) return false; const d=Math.abs(R[k].p-R[k-1].p), df=Math.abs(seq[k]-seq[k-1]);
+      return d>=3 && d<=4 && (df===0 || (df===1 && Math.max(seq[k],seq[k-1])>=4)); };
+    const badThumb = k => { if(!conn(k)||seq[k]==null||seq[k-1]==null) return false;   // the thumb landing ABOVE mid-turn (no scalar continuation up)
+      if(!(seq[k]===1 && R[k].p>R[k-1].p && seq[k-1]>1)) return false;
+      const nx = k<N-1 && R[k+1].i===R[k].i+1 ? R[k+1].p : null; return nx==null || nx<=R[k].p; };
+    const localFaults = (lo,hi) => { let n=0; for(let k=Math.max(1,lo);k<=Math.min(N-1,hi);k++){ if(slideAt(k))n+=3; if(jamAt(k))n+=2; if(badThumb(k))n+=2; } return n; };
+    // (1) CONSISTENCY — unify a recurring pitch across a window the hand did not reposition through.
+    const REACH = 8;   // a hand covers ~a sixth in a stretch; a wider excursion between two occurrences IS a reposition
+    for(let pass=0; pass<4; pass++){ let changed=false;
+      for(let a=0;a<N;a++){ if(R[a].chord||seq[a]==null) continue;
+        for(let b=a+1; b<N; b++){
+          if(R[b].i!==R[b-1].i+1) break;                             // a rest between → a new frame; stop pairing
+          if(R[b].chord||seq[b]==null) continue;
+          if(R[b].p!==R[a].p) continue;                              // want the SAME pitch…
+          if(seq[a]===seq[b]) continue;                              // …fingered differently
+          let mn=R[a].p,mx=R[a].p; for(let k=a;k<=b;k++){ mn=Math.min(mn,R[k].p); mx=Math.max(mx,R[k].p); }
+          if(mx-mn>REACH) break;                                     // the line left the reach → the hand repositioned
+          const occ = []; for(let k=a;k<=b;k++) if(!R[k].chord && R[k].p===R[a].p) occ.push(k);
+          const before = localFaults(a, b+1);
+          let done=false;
+          for(const c of [seq[a], seq[b]]){                          // try each side's finger as the common one for the whole window
+            const save = occ.map(k=>seq[k]); occ.forEach(k=>seq[k]=c);
+            if(localFaults(a, b+1) <= before && occ.every(k=>seq[k]>=1&&seq[k]<=5)){ changed=true; done=true; break; }
+            occ.forEach((k,ix)=>seq[k]=save[ix]);
+          }
+          if(done) break;
+        } }
+      if(!changed) break;
+    }
+    // (2) NO-SLIDE — any residual same-finger STEP (incl. white→black) takes an ADJACENT finger so the notes join.
+    for(let k=1;k<N;k++){ if(!slideAt(k)) continue;
+      const up = R[k].p>R[k-1].p, dir = hand==='rh' ? (up?1:-1) : (up?-1:1);   // a step toward the pinky wants the next finger out
+      let cand = seq[k-1]+dir;
+      if(cand<1||cand>5||cand===seq[k-1]) cand = seq[k]+ (dir);
+      if(cand>=1&&cand<=5&&cand!==seq[k-1]) seq[k]=cand;
+    }
   }
 
   for(let k=0;k<N;k++) fings[R[k].i]=seq[k];

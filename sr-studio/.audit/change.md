@@ -1,33 +1,42 @@
 ## PREMISE-CHALLENGE
-- What is a composer doing when they set a phrase's contour against its available range? Using the room they have. A small
-  hand (a five-finger box, a fifth) is used WHOLE — the line spans valley to peak, all five fingers. A wide range needn't
-  reach its extremes every piece — the line shapes WITHIN it, peaking a little below the top, starting/ending off the edges.
-- Should the range-awareness of the contour exist at all? Yes — it is real: a composer genuinely fills a small hand more
-  fully than a wide compass. What is WRONG is HOW it is applied: `narrowBox = (hi-lo)<=8` is a hard threshold that FLIPS the
-  peak/valley fractions (peakF 1.0↔0.94, startF 0-0.12 ↔ 0.12-0.34, endF 0-0.14 ↔ 0.08-0.33) at a cutoff. A 9-semitone range
-  behaves nothing like an 8-semitone one under it, though musically they are almost identical. That is the bimodal-box /
-  bad-ruler antipattern the memory warns of.
-- Alternatives:
-  * Keep the threshold. REJECTED: it is exactly the flip-at-a-cutoff fault.
-  * Remove range-awareness (fixed contour fractions). REJECTED: it is a genuine musical distinction (fill a small hand, shape
-    within a wide one); dropping it loses real shaping.
-  * CHOSEN: make the "how fully to use the range" a CONTINUOUS `fill` factor — ≈1 at a five-finger span, easing to ≈0 as the
-    range widens — that interpolates the same peak/start/end fractions. Same endpoints as before, no cliff between them.
+- What is a composer ACTUALLY doing when the harmony tonicises another key (an applied / secondary dominant)? Leaning
+  the WHOLE texture, melody included, into the tonicised key for that moment. The applied chord is a splash of the new
+  key's colour; the tune outlines it and connects with steps drawn from THAT key's scale. A composer does NOT keep
+  running home-key figures through it — the home key's notes contradict the applied chord's chromatic tones (a C
+  natural against an F#-major chord that wants C#), which is exactly the roleless clash found.
+- Should this even be fixed at the DECORATION, or is it the wrong place? Consider removing the applied dominant
+  entirely (drop g4 tonicisation): REJECTED — the tonicisation is a real, wanted g4 colour, correctly built and
+  resolved in the harmony; the fault is that the MELODY does not lean with it. Consider fixing it by a clash-detector
+  that nudges any note that clashes with the chord: REJECTED — that is result-chasing (avoid the symptom), not the
+  thinking; it would "fix" a note without the melody actually belonging to the tonicised key. The right place is the
+  melody's own pitch-world: over an applied chord it must reason against the TONICISED key, the way it already reasons
+  chord tones against the chord in force.
+- Why this wins: it makes the decoration a real step in the harmony that is actually sounding, so the note has a
+  genuine role BY CONSTRUCTION, rather than a home-key note patched after the fact.
 
 ## COMPOSER-CHECK
-- The decision: how far the contour reaches toward its range's extremes (peak, valley, start, end).
-- How a composer reasons it: by how much room there is — a five-finger box is filled whole, a wide compass is shaped within;
-  and this is a matter of DEGREE (a slightly wider range is shaped slightly less to its edges), not a switch.
-- Refute it: is `fill` a proxy/threshold in disguise? No — it is a continuous function of the actual range `hi-lo` (fill =
-  clamp((15-(hi-lo))/7,0,1)): a fifth → fill≈1 (reach the extremes), widening → fill eases to 0 (shape within). No cutoff
-  flips the shape; the fractions move smoothly. The per-piece random spread (variety) is preserved and also scales.
-- Verdict: EMERGENT — the contour's ambition falls out continuously from the available range, not a binary box.
+- The decision: which pitch a melodic decoration (a passing / neighbour connector) takes over an applied (secondary-
+  dominant) chord.
+- How a composer reasons it: the melody has leaned into the tonicised key, so (a) it tends to OUTLINE the applied
+  chord — a brief chromatic colour is stated, not run through — and (b) any connecting step it does take is a step in
+  the TONICISED key's scale (which carries the applied chord's chromatic tones), so the connector belongs to the
+  harmony sounding now. Over a plain diatonic chord nothing changes — the prevailing scale IS the home scale there.
+- Refute it: is this a rule / threshold? No — the outline is a weighted LEAN (chord-tone decorations preferred over
+  the applied colour, passing/neighbour still reachable), and the scale is simply the prevailing one read from the
+  chord (home for a diatonic chord, tonicised for an applied one) — the same "relate to the harmony in force" the
+  chord-tone pass already uses, extended to the connector. What it does NOT handle, honestly: it fixes the connector's
+  PITCH-WORLD, not a strong note leapt to over the applied chord by the contour (a separate melodic-contour concern),
+  and it assumes the tonicised key's mode = the target chord's quality (true for the diatonic targets this machine
+  tonicises). Those are real and left for the contour pass / accepted for now.
+- Verdict: EMERGENT. The scale is read from the chord in force (its `sec`/`of` identity → the tonicised key), not a
+  constant stamped on the side; the outline lean falls out of the chord being a brief applied colour.
 
 ## EMERGENCE
-Derives from the actual pitch range `hi-lo`: a continuous `fill` (1 at a five-finger span, 0 at a wide compass) scales the
-peak fraction (reach the top vs just below) and the start/end fractions (from the edges vs off them). Read from the material.
+The decoration's pitch-world derives from the harmony in force: for an applied dominant, the tonicised key's scale
+(computed from the chord's target degree and that target's quality), which contains the applied chord's own chromatic
+tones; for a diatonic chord, the home scale. Read from the material (the chord), never a side value.
 
 ## PREFERENCE
-Still a per-piece weighted spread (the random start/end within a fill-scaled band) — a small hand LEANS to spanning the box,
-a wide range LEANS to shaping within, both with genuine variety; and the scaling is smooth, so no two near-equal ranges are
-shaped categorically differently.
+A weighted lean: over the applied chord the melody leans to outlining chord tones, but a passing/neighbour step is
+still reachable — drawn now from the tonicised scale so it belongs. Over every diatonic chord the behaviour is
+unchanged (home scale). No wall: a composer can still step chromatically through an applied chord, and does here.

@@ -668,24 +668,34 @@ export function composeMelody({ plan, tonic, mode, barU, beatLen, nbars, range, 
   }
 
   // 3. PASS B — decorations: fill each weak note between two skeleton notes by ROLE (passing / neighbour / arpeggio).
+  // A decoration is a step in the scale THE HARMONY IS SOUNDING. Over an applied (secondary-dominant) chord the melody
+  //   has leaned into the TONICISED key, so its connecting step comes from THAT key's scale (which carries the applied
+  //   chord's chromatic tones) — a home-key step there contradicts the chord (a C natural against an F#-major chord).
+  //   Over a diatonic chord the prevailing scale IS the home scale, unchanged. [composer: relate the note to the harmony NOW]
+  const homeScalePcs = scalePCsOf(mode, tonic);
+  const tonicisedScalePcs = ev => { const of = ((ev.of % 7) + 7) % 7, xRootPc = (((scalePitch(tonic, mode, of)) % 12) + 12) % 12, xMode = DIATONIC[mode][of].q === 'maj' ? 'maj' : 'min'; return SCALE[xMode].map(s => (xRootPc + s) % 12); };
   for (let i = 0; i < notes.length; i++) {
     const n = notes[i]; if (n.strong) continue;
     let a = null; for (let k = i - 1; k >= 0; k--) if (notes[k].m != null) { a = notes[k].m; break; }
     let c = null; for (let k = i + 1; k < notes.length; k++) if (notes[k].m != null) { c = notes[k].m; break; }
-    const pcs = chordPCs(tonic, mode, chordAt(n.t));
+    const ev = chordAt(n.t), pcs = chordPCs(tonic, mode, ev);
+    const applied = !!(ev.sec && ev.of != null);   // an applied dominant: the harmony has tonicised another key
     if (a == null) { n.m = nearestPC(pcs, Math.round(contourAt(n.t)), lo, hi); continue; }   // a leading weak note follows the SAME contour as the rest of the line (not a separate fixed arch)
     if (c == null) c = a;
     const gap = c - a;
-    const scalePcs = scalePCsOf(mode, tonic);
-    const diatStep = dir => { for (let d = 1; d <= 2; d++) { const q = a + dir * d; if (scalePcs.includes((((q) % 12) + 12) % 12)) return q; } return null; };  // nearest IN-KEY step
+    const scalePcs = applied ? tonicisedScalePcs(ev) : homeScalePcs;   // the prevailing scale, read from the chord in force
+    const diatStep = dir => { for (let d = 1; d <= 2; d++) { const q = a + dir * d; if (scalePcs.includes((((q) % 12) + 12) % 12)) return q; } return null; };  // nearest step IN THE PREVAILING SCALE
     let choices = {};
     const dw = FIGDEC[figure] || FIGDEC.mixed;   // the character's decoration bias (conjunct steps, arpeggiated skips, playful neighbours)
-    // PASSING [T]: gap is a 3rd → the DIATONIC step between fills it (E→G passes through F, not F#).
-    if (Math.abs(gap) === 3 || Math.abs(gap) === 4) { const mid = nearestPC(scalePcs, (a + c) / 2, Math.min(a, c), Math.max(a, c)); if (mid != null && mid !== a && mid !== c) choices[mid] = (choices[mid] || 0) + 4 * dw.passing; }
-    // NEIGHBOUR [T]: a repeated skeleton tone → step away and back, on a DIATONIC step (upper or lower).
-    if (gap === 0) { const up = diatStep(1), dn = diatStep(-1); if (up != null) choices[up] = (choices[up] || 0) + 2 * dw.neighbour; if (dn != null) choices[dn] = (choices[dn] || 0) + 2 * dw.neighbour; }
-    // ARPEGGIO [P]: otherwise move through a chord tone toward c (a leap decorated as a chord skip).
-    { const ct = nearestPC(pcs, (a + c) / 2, Math.min(a, c), Math.max(a, c)); if (ct != null && ct !== a && ct !== c) choices[ct] = (choices[ct] || 0) + 3 * dw.arp; }
+    // over an applied chord the melody OUTLINES the brief chromatic colour — a lean toward chord-tone (arp) decorations,
+    //   the scale connector still reachable but drawn from the tonicised scale so it too belongs. [P — outline the colour]
+    const wStep = applied ? 0.5 : 1, wArp = applied ? 2.2 : 1;
+    // PASSING [T]: gap is a 3rd → the step between fills it, in the PREVAILING scale (E→G through F; over F# major, A#→C# through B).
+    if (Math.abs(gap) === 3 || Math.abs(gap) === 4) { const mid = nearestPC(scalePcs, (a + c) / 2, Math.min(a, c), Math.max(a, c)); if (mid != null && mid !== a && mid !== c) choices[mid] = (choices[mid] || 0) + 4 * dw.passing * wStep; }
+    // NEIGHBOUR [T]: a repeated skeleton tone → step away and back, on a step of the PREVAILING scale (upper or lower).
+    if (gap === 0) { const up = diatStep(1), dn = diatStep(-1); if (up != null) choices[up] = (choices[up] || 0) + 2 * dw.neighbour * wStep; if (dn != null) choices[dn] = (choices[dn] || 0) + 2 * dw.neighbour * wStep; }
+    // ARPEGGIO [P]: otherwise move through a chord tone toward c (a leap decorated as a chord skip) — the outline of the harmony in force.
+    { const ct = nearestPC(pcs, (a + c) / 2, Math.min(a, c), Math.max(a, c)); if (ct != null && ct !== a && ct !== c) choices[ct] = (choices[ct] || 0) + 3 * dw.arp * wArp; }
     // a decoration must stay inside the register window (the grade's hand) — drop any choice out of [lo,hi].
     for (const k of Object.keys(choices)) if (+k < lo || +k > hi) delete choices[k];
     delete choices[a]; if (c !== a) delete choices[c];             // a decoration MOVES — it is a connecting note, so it never restates EITHER the note it comes from OR the note it goes to (landing on the successor is the pre-echo stutter that made higher-grade lines read static)
@@ -762,7 +772,8 @@ const tp = nearestPC([(((tonic % 12) + 12) % 12)], approachFrom, lo, hi); if (tp
       const n = placed[i], pc = pcOf(n.m); if (pc !== nat6 && pc !== rai6) continue;
       const cp = chordPCs(tonic, mode, chordAt(n.t)).map(x => (((x - tpc) % 12) + 12) % 12);
       let deg;
-      if (cp.includes(nat6)) deg = nat6;                                 // HARMONIC: the chord carries ^6 (VI, iv, ii°) → natural
+      if (cp.includes(nat6)) deg = nat6;                                 // HARMONIC: the chord carries the natural ^6 (VI, iv, ii°) → natural
+      else if (cp.includes(rai6)) deg = rai6;                            // HARMONIC: the chord carries the RAISED ^6 — an applied dominant leaning into another key (F# in V/V=B major) → the chord's own spelling wins, symmetric with the ^7 branch above (a chord tone follows the harmony in force, home or tonicised)
       else { const nx = placed[i + 1]; deg = (nx && raised7.has(i + 1) && nx.m > n.m) ? rai6 : nat6; }   // MELODIC: melodic-minor ascending (raise ^6 into a raised ^7). A DESCENDING ^7→^6→^5 stays NATURAL — that is the harmonic-minor scale, idiomatic; raising it to #^6 both mis-smooths an idiomatic figure AND cross-relates with the bass's natural ^6.
       setPc(n, deg);
     }
@@ -1131,16 +1142,40 @@ export function composeBass({ plan, tonic, mode, barU, nbars, range, melody = nu
     //   next root does not sound until the next downbeat, so the line keeps moving all bar and the downbeat leaps onto it).
     //   Turns only at the range edge. A repeated root walks down and the downbeat steps back up. This is continuous motion,
     //   never a drone — the essence of a walking bass.
-    // a walking bass needs ROOM to walk: the roots sit low in the bass register, so heading down hits the floor after one
-    //   step and the line wobbles on a neighbour (E-D-E) instead of walking. If the preferred direction is boxed against
-    //   an edge, walk the roomy way — a composer boxed at the bottom walks UP, not a semitone wobble. [P]
-    const buildWalk = (cur, dir0) => {
-      let idx = idxOf(cur), dir = dir0;
-      const need = Math.max(1, nbeats - 1), roomUp = (ladder.length - 1) - idx, roomDown = idx;
-      if (dir > 0 && roomUp < need && roomDown >= need) dir = -1;
-      else if (dir < 0 && roomDown < need && roomUp >= need) dir = 1;
-      const line = [cur];   // beat 0 = the TRUE chord bass — may be chromatic (a minor V's raised leading tone); never snap it onto the diatonic ladder (that would flatten ^7 and cross-relate with the tune)
-      for (let k = 1; k < nbeats; k++) { let ni = idx + dir; if (ni < 0 || ni >= ladder.length) { dir = -dir; ni = idx + dir; } idx = ni; line.push(ladder[idx]); }
+    // A walking bass is a COUNTER-LINE, not a blind scale: each beat steps TOWARD the next structural root (the line's
+    //   goal, the pull growing as the downbeat nears so the walk arrives in time), and among the diatonic steps that
+    //   serve that direction it takes the one that SINGS AGAINST THE TUNE — consonant on the beat (a m2/M7/tritone
+    //   against the melody is the harshness a composer voices around), and moving CONTRARY / oblique to the tune so the
+    //   two outer voices stay independent. This is the same two-part counterpoint the structural bass already uses,
+    //   brought INTO the walk. Each step is a weighted choice among the reachable neighbours — a clash is scored low but
+    //   never zero (a genuinely boxed walk still moves), contrary motion is a lean not a law. Boxed at the ladder edge,
+    //   the only available neighbour is taken (the roomy way falls out — no wobble). [P — how a composer voices a walk]
+    const buildWalk = (cur, nextRoot, bt) => {
+      let idx = idxOf(cur); const line = [cur];   // beat 0 = the TRUE chord bass — may be chromatic (a minor V's raised ^7); never snapped to the ladder
+      const goalIdx = idxOf(nextRoot);
+      for (let k = 1; k < nbeats; k++) {
+        const t = bt + k * beatLen, mel = melAt(t), melPrev = melAt(t - beatLen);
+        const cands = []; for (const d of [-1, 1]) { const ni = idx + d; if (ni >= 0 && ni < ladder.length) cands.push(ni); }
+        if (!cands.length) cands.push(idx);
+        const toward = Math.sign(goalIdx - idx);
+        const wt = ni => {
+          let w = 1;
+          if (toward !== 0) w *= (Math.sign(ni - idx) === toward) ? (1 + 1.4 * (k / nbeats)) : (1 - 0.5 * (k / nbeats));   // head to the root, pull growing toward the downbeat
+          const p = ladder[ni];
+          if (mel != null) {
+            const iv = (((mel - p) % 12) + 12) % 12;
+            // consonant on the beat (3rds/6ths/5th/octave) sings; a m2/M7/tritone is the harsh clash a composer voices
+            //   AROUND even at the cost of the goal (scored so low the goal-pull cannot buy it, yet never zero — a walk
+            //   boxed to only-clashing steps still moves); a M2/m7/P4 is a milder weak-beat passing dissonance, dispreferred
+            //   but idiomatic in a walk, so only lightly damped.
+            w *= (iv === 1 || iv === 11 || iv === 6) ? 0.04 : (iv === 2 || iv === 10 || iv === 5) ? 0.55 : 1.3;
+            if (melPrev != null) { const mM = Math.sign(mel - melPrev), bM = Math.sign(p - ladder[idx]); if (mM && bM) w *= (mM !== bM) ? 1.4 : 0.7; }   // contrary/oblique, not parallel
+          }
+          return Math.max(0.02, w);   // never zero — the only reachable step is still taken
+        };
+        const wmap = {}; cands.forEach((ni, i) => { wmap[i] = wt(ni); });
+        idx = cands[+pick(wmap, rnd)]; line.push(ladder[idx]);
+      }
       return line;
     };
     // an ARPEGGIATED walk: a SKIP-based line up through the bar's chord tones — a walking bass mixes steps and skips, so
@@ -1155,13 +1190,13 @@ export function composeBass({ plan, tonic, mode, barU, nbars, range, melody = nu
     const barLine = {}, recent = [];
     for (const bStr in barLow) {
       const b = +bStr, cur = barLow[b], nxt = (b + 1) in barLow ? barLow[b + 1] : cur;
-      const dir0 = nxt > cur ? 1 : nxt < cur ? -1 : -1;
-      let line = buildWalk(cur, dir0);
-      // a walking bass DEVELOPS — it never restates a recent bar verbatim. If this bar's scalar run would byte-duplicate a
-      //   recent bar (the deterministic walk over a repeated root), vary the PATH: walk the other way if there's room,
-      //   else arpeggiate the chord (a skip-based walk) — a composer walks a prolonged harmony differently each time. [P]
+      let line = buildWalk(cur, nxt, b * barU);
+      // a walking bass DEVELOPS — it never restates a recent bar verbatim. If this bar's walk would byte-duplicate a
+      //   recent bar, vary the PATH: a fresh weighted walk toward the same goal (the counter-line reasoning is stochastic,
+      //   so it differs), else arpeggiate the chord (a skip-based walk) — a composer walks a prolonged harmony differently
+      //   each time. [P]
       if (recent.includes(line.join(','))) {
-        const alt = buildWalk(cur, -dir0);
+        const alt = buildWalk(cur, nxt, b * barU);
         if (!recent.includes(alt.join(','))) line = alt;
         else { const arp = buildArp(cur, barPcs[b]); if (!recent.includes(arp.join(','))) line = arp; }
       }

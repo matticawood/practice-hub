@@ -288,7 +288,7 @@ export function generateCompose(grade, opts = {}) {
     _pos: fixed ? { rhLo: melLo, lhLo: melLo - 12 } : null,
     _prog: prog, _prog2: prog.map(() => null),
     _char: chr.id, _texture: texture, _compose: true,
-    _events: plan.events.map(e => ({ deg: e.deg, q: e.q, fn: e.fn, start: e.start, dur: e.dur, bassDeg: e.bassDeg, sec: !!e.sec, is64: !!e.is64 })),  // for the composer-likeness audit (strip before persisting)
+    _events: plan.events.map(e => ({ deg: e.deg, q: e.q, fn: e.fn, start: e.start, dur: e.dur, bassDeg: e.bassDeg, sec: !!e.sec, of: e.of, is64: !!e.is64 })),  // for the composer-likeness audit (strip before persisting)
     _cadences: (plan.cadences || []).map(c => ({ bar: c.bar, type: c.type })),
   };
   dress(ex, chr, drama);
