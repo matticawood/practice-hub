@@ -344,9 +344,11 @@ const SH_SUBNAV = {
         -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
         mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
       }
-      /* Nothing to scroll to, and a leftover pill or two of slack: centre it
-         rather than leaving it all stacked on one side. */
-      .sh-mob-subnav-scroll:not(.sh-scrollable) { justify-content: center; }
+      /* Left-aligned by default. A row that scrolls and a row that fills both
+         start at the same margin and reach the same edge, so moving between
+         sections does not change where the nav begins. Centring is added back
+         only above 720px - see the block after this one. */
+      .sh-mob-subnav-scroll { justify-content: flex-start; }
       .sh-mob-subnav-scroll::-webkit-scrollbar { display: none; }
       .sh-mob-pill {
         display: inline-flex;
@@ -354,7 +356,6 @@ const SH_SUBNAV = {
         justify-content: center;
         flex: 1 1 auto;
         min-width: max-content;
-        max-width: 220px;
         padding: 10px 15px;
         border-radius: 10px;
         font-size: 0.78rem;
@@ -367,6 +368,21 @@ const SH_SUBNAV = {
         -webkit-tap-highlight-color: transparent;
         min-height: 40px;
       }
+      /* On a phone the rows are tight enough that a few px of padding decides
+         whether five pills fit the screen or hang a third of one off the edge.
+         Practice measures 463px wide at the roomier setting and 425 here, which
+         is the difference between overflowing a large phone by a hair - the
+         worst of both, clipped but barely draggable - and simply fitting. */
+      @media (max-width: 560px) {
+        .sh-mob-subnav-scroll { padding: 0 12px; gap: 7px; }
+        .sh-mob-pill { padding: 10px 12px; }
+        /* One notch tighter, applied only when it is the difference between
+           fitting and hanging a sliver of the last pill off the edge - the
+           worst state there is, clipped but with almost nothing to drag.
+           Set from JS, which is the only thing that can tell. */
+        .sh-mob-subnav-scroll.sh-snug { padding: 0 10px; gap: 5px; }
+        .sh-mob-subnav-scroll.sh-snug .sh-mob-pill { padding: 10px 9px; }
+      }
       .sh-mob-subnav-scroll.sh-has-right .sh-mob-pill { flex: 0 0 auto; max-width: none; }
       .sh-mob-subnav-scroll.sh-has-right { justify-content: flex-start; }
       .sh-mob-pill:active { transform: scale(.96); }
@@ -375,6 +391,26 @@ const SH_SUBNAV = {
         color: #1a1410;
         font-weight: 800;
       }
+    }
+
+    /* ── Tablet portrait: nothing ever scrolls, so everything can centre ────
+       The widest row in the whole app is Learn at 670px. Above 720 every
+       section fits, which means the centred state is the ONLY state at these
+       widths - no section centres while its neighbour scrolls. Below 720 some
+       rows fit and some do not, so there they all stay left-aligned and the two
+       states read the same.
+
+       The cap belongs here for the same reason: it only bites where there is
+       slack. 156px is the longest label in the nav ("One-to-one lessons"), so
+       no pill is ever wider than the widest thing the nav has to say - which is
+       what stops the two-item Live row becoming two slabs with a five-letter
+       word floating in each. min-width:max-content still wins over it, so a
+       longer label is never squeezed. ── */
+    @media (min-width: 720px) and (max-width: 768px),
+           (orientation: portrait) and (min-width: 720px) and (max-width: 1024px) {
+      .sh-mob-pill { max-width: 156px; }
+      .sh-mob-subnav-scroll:not(.sh-scrollable) { justify-content: center; }
+      .sh-mob-subnav-scroll.sh-has-right { justify-content: flex-start; }
     }
 
     /* ── Notif overlay + panel ── */
@@ -2660,7 +2696,17 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   function _shSyncSubnavFade() {
     const sc = document.querySelector("#sh-mob-subnav .sh-mob-subnav-scroll");
     if (!sc) return;
-    sc.classList.toggle("sh-scrollable", sc.scrollWidth - sc.clientWidth > 2);
+    const over = function () { return sc.scrollWidth - sc.clientWidth > 2; };
+    sc.classList.remove("sh-snug");
+    if (over()) {
+      /* Near-misses are the bad case: five pills on a 414px phone overflow by
+         14px, which clips the last one and gives you almost nothing to drag.
+         Try one notch tighter, and keep it only if it actually closes the gap -
+         otherwise the row genuinely does not fit and should just scroll. */
+      sc.classList.add("sh-snug");
+      if (over()) sc.classList.remove("sh-snug");
+    }
+    sc.classList.toggle("sh-scrollable", over());
   }
   window._shSyncSubnavFade = _shSyncSubnavFade;
   (function () {
