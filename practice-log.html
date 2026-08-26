@@ -4930,12 +4930,27 @@
            viewport instead, anchored so 390px is identical to the mock and
            everything grows in proportion above it. */
         --dgut:clamp(20px, 5.13vw, 26px);
-        --dink:#f4f4f6; --ddim:#93939e; --ddim2:#7e7b88; --dline:#26262e;
+        /* Learn's palette, sampled from it rather than guessed: a near-black
+           ground with STRUCTURE IN TRANSLUCENT WHITE. A solid grey rule sits ON
+           a surface; a white rule at 10% sits IN it, and keeps working if the
+           ground behind it ever changes. Learn's own numbers: rules .13, a
+           control's edge .42 over a .09 fill, text .62 / .8 / .9. */
+        --dink:#f4f4f6; --ddim:#93939e; --ddim2:#7e7b88;
+        --dline:rgba(255,255,255,.11);
+        --dedge:rgba(255,255,255,.34);   /* a control's edge */
+        --dfill:rgba(255,255,255,.07);   /* a control's ground */
         position:relative; isolation:isolate;
         --rep:#c9962f; --tec:#6366f1; --sig:#10b981; --mus:#a855f7;
       }
       /* the light in the room: gold where you stand, a cool cast at the top
          right, fixed behind everything so it does not travel with the scroll */
+      /* held back while the stage's own button is on screen */
+      body.lb-dash.dash-fab-hide #log-fab{
+        opacity:0 !important; transform:translateY(8px) scale(.96) !important;
+        pointer-events:none !important;
+      }
+      body.lb-dash #log-fab{ transition:opacity .18s, transform .18s; }
+
       body.lb-dash #dashboard-content::before{
         content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
         background:
@@ -4989,10 +5004,13 @@
          Today section sits 20px narrower than the stage above it on both sides. */
       body.lb-dash #dashboard-content .dsess{ padding:4px 0 0; }
       body.lb-dash #dashboard-content .dsess-b{ display:flex; gap:3px; height:34px; }
+      /* Colour the way Learn delivers it: the hue mixed INTO near-black, not
+         floated on it at low alpha. Mixed into transparent it washes out over
+         the ground; mixed into #12121a it stays the area's own colour. */
       body.lb-dash #dashboard-content .dsess-b span{
         border-radius:4px; position:relative;
-        border:1px solid color-mix(in srgb, var(--c) 55%, transparent);
-        background:color-mix(in srgb, var(--c) 16%, transparent);
+        border:1px solid color-mix(in srgb, var(--c) 42%, #12121a);
+        background:color-mix(in srgb, var(--c) 22%, #12121a);
       }
       body.lb-dash #dashboard-content .dsess-b span.done{ background:var(--c); border-color:var(--c); }
       body.lb-dash #dashboard-content .dsess-b span.done::after{
@@ -5043,16 +5061,25 @@
         grid-column:2; grid-row:2; display:flex !important; gap:14px;
         margin:7px 0 0 !important; padding:0 !important; border:0 !important;
       }
+      /* Learn's secondary button: a translucent white fill inside a white
+         edge, which is what makes that page read as clean rather than as
+         outlined text on black. */
       body.lb-dash #dashboard-content .dday-detail-btn,
       body.lb-dash #dashboard-content .dday-swap{
-        font:600 .76rem/1 inherit !important; color:#8f8c98 !important;
-        background:none !important; border:0 !important; padding:0 !important;
+        display:inline-flex !important; align-items:center; gap:5px;
+        font:600 .76rem/1 inherit !important; color:rgba(255,255,255,.82) !important;
+        background:var(--dfill) !important; border:1px solid var(--dedge) !important;
+        border-radius:20px !important; padding:8px 12px !important;
+      }
+      body.lb-dash #dashboard-content .dday-detail-btn:active,
+      body.lb-dash #dashboard-content .dday-swap:active{
+        background:rgba(255,255,255,.16) !important; border-color:#fff !important;
       }
       body.lb-dash #dashboard-content .dday-swap svg{ width:12px; height:12px; }
       /* the check sits in its own column, where the eye ends */
       body.lb-dash #dashboard-content .dday-card-check{
         grid-column:3; grid-row:1; flex:none !important; width:20px; height:20px; margin-top:1px;
-        border-radius:6px; border:1.5px solid #4a4a54; background:transparent !important;
+        border-radius:6px; border:1px solid var(--dedge); background:var(--dfill) !important;
         display:flex !important; align-items:center; justify-content:center;
       }
       body.lb-dash #dashboard-content .dday-card-check svg{ width:11px; height:11px; opacity:0; }
@@ -17091,6 +17118,48 @@ function _renderDailyCard() {
   // the app cannot keep and a target the member can fail, since a beginner on
   // fifteen minutes a day and someone on two hours cannot share one.
   try { _dashSessionShape(el); } catch (e) {}
+
+  // ── The floating button defers to the one in the stage ──────────────────
+  // Two Log Practice buttons on screen at once is one too many, and the
+  // header's is the one that carries the argument: the act sitting next to the
+  // thing it moves. So the floating one stays out of the way until that has
+  // scrolled off, which is also when a member actually needs it again.
+  // Dashboard only - every other page keeps the floating button as it is.
+  try {
+    const _top = document.querySelector('.dash-stage .dash-log');
+    if (_top) {
+      // A scroll listener rather than IntersectionObserver: the observer is set
+      // up while the dashboard is still being written and never delivered a
+      // callback here, so the button never came back. This is measured on every
+      // scroll, so there is no first-call to miss.
+      // Set on the element rather than through a class: the class landed on the
+      // body correctly and the rule was in the sheet with !important, and the
+      // button still computed opacity 1 - so the cascade was being lost
+      // somewhere it was not worth another hour to find. This cannot be
+      // overridden and reads the same way.
+      // Look both elements up inside the handler. renderDashboard runs more
+      // than once, and a closure over the button measures a node that has since
+      // been replaced - a detached element reports bottom 0, so the button
+      // never hid however far you scrolled.
+      const sync = () => {
+        const t = document.querySelector('.dash-stage .dash-log');
+        const _fabEl = document.getElementById('log-fab');
+        if (!t || !_fabEl) return;
+        const hide = t.getBoundingClientRect().bottom > 0
+                     && document.body.classList.contains('lb-dash');
+        document.body.classList.toggle('dash-fab-hide', hide);
+        _fabEl.style.transition = 'opacity .18s, transform .18s';
+        _fabEl.style.opacity = hide ? '0' : '';
+        _fabEl.style.transform = hide ? 'translateY(8px) scale(.96)' : '';
+        _fabEl.style.pointerEvents = hide ? 'none' : '';
+      };
+      if (window._dashFabSync) window.removeEventListener('scroll', window._dashFabSync);
+      window._dashFabSync = sync;
+      window.addEventListener('scroll', sync, { passive: true });
+      sync();
+    }
+  } catch (e) {}
+
 
   // Right-edge fade cue: show only when there's more to the right (not at the end,
   // not when everything fits). Re-checked on scroll and window resize.
