@@ -354,7 +354,15 @@ const SH_SUBNAV = {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        flex: 1 1 auto;
+        /* Basis zero, not auto. Growing from auto adds the SAME number of px to
+           every pill, so they keep their natural differences and the row reads
+           as five different-sized buttons. From zero they SHARE the row, so
+           they come out equal - which is what the cap was accidentally doing on
+           iPad, where every pill hits 156 and they all match.
+           min-width:max-content still holds the floor, so a label too long for
+           its equal share keeps its own width instead of being squeezed, and a
+           row that cannot fit still refuses to shrink and scrolls. */
+        flex: 1 1 0;
         min-width: max-content;
         padding: 10px 15px;
         border-radius: 10px;
