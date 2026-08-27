@@ -12307,11 +12307,20 @@ async function loadData() {
   // — it survives in history.state across a reload — instead of snapping back to Home.
   const _hasDeepLink = /[?&](goto|log)=/.test(location.search) || location.hash.length > 1;
   const _restoredTab = (!_hasDeepLink && history.state && history.state.hubTab) || null;
-  switchMainLbTab((_picked && _picked !== 'dashboard') ? _picked : (_restoredTab || 'dashboard'));
-  renderSessions(true);
-  renderLeaderboard();
-  loadWeeklyGoal();
-  loadPieceGoals();
+  /* A ?goto= link used to land on the dashboard and get moved to the asked-for
+     tab 50ms later by the deep-link router, which meant the dashboard was built
+     in full - all of it - for someone who never asked to see it. Read the link
+     here and land on it first time. */
+  const _GOTO_TAB = { stats:1, goals:1, roadmap:1, history:1, leaderboard:1, achievements:1 };
+  const _gotoTab = (new URLSearchParams(location.search).get('goto') || '').trim();
+  switchMainLbTab(
+    (_gotoTab && _GOTO_TAB[_gotoTab]) ? _gotoTab
+      : (_picked && _picked !== 'dashboard') ? _picked
+      : (_restoredTab || 'dashboard'));
+  /* Every one of these builds a tab nobody is looking at yet, and
+     switchMainLbTab already runs each of them the moment its tab is opened.
+     Rendering them here as well was the same work done twice, once into a
+     hidden panel. */
   syncRequestedPieces();
   try { _maybeStartPathTour(); } catch (e) {}   // first-run guided tour (new members / ?tour=1)
 
@@ -12558,8 +12567,10 @@ async function loadData() {
       }
     } catch (e) { /* share icons fill in later */ }
 
-    // Refresh anything already on screen that uses the secondary data.
-    try { renderSessions(true); } catch (e) {}
+    // Refresh anything already on screen that uses the secondary data. History
+    // is only refreshed if it has been built: this used to be what built it, for
+    // everyone, whichever tab they had asked for.
+    try { if (window._histRendered) renderSessions(true); } catch (e) {}
     try { _renderJourneyCard(); } catch (e) {}
     try { renderPiecesTidyCard(); } catch (e) {}
     try {
@@ -13577,6 +13588,31 @@ function switchMainLbTab(main, fromHistory) {
   if (main === "achievements") { renderAchievements(); }
   if (main === "roadmap")      { if (typeof renderRoadmap === "function") renderRoadmap(); }
   if (main === "community")    { renderCommunityFeed(); }
+  /* History used to be built at boot for everyone; it builds when it is asked
+     for now, once. */
+  if (main === "history" && !window._histRendered) { window._histRendered = 1; renderSessions(true); }
+
+  /* THE COVER BELONGS TO THE PANEL YOU LANDED ON.
+     It used to be lifted from inside renderDashboard, so a link straight to any
+     other tab had nothing to lift it and sat behind the 9-second fallback -
+     which is most of why the roadmap felt slow. The first panel of the session
+     lifts it when it has actually drawn something. */
+  if (!window._bootHeld) {
+    window._bootHeld = 1;
+    const _panelId = { dashboard:"lb-panel-dashboard", stats:"lb-panel-stats", goals:"lb-panel-goals",
+      history:"lb-panel-history", leaderboard:"lb-panel-leaderboard", achievements:"lb-panel-achievements",
+      community:"lb-panel-community", roadmap:"lb-panel-roadmap" }[main];
+    const _cover = document.getElementById("app-boot");
+    if (_cover && _panelId && main !== "dashboard") {
+      let _t = 0;
+      (function _wait() {
+        const el = document.getElementById(_panelId);
+        const drawn = el && (el.textContent || "").trim().length > 200;
+        if (drawn || ++_t > 60) { _cover.classList.add("gone"); return; }
+        setTimeout(_wait, 140);
+      })();
+    }
+  }
   _maybeStartHubTabTour(main);
   /* The Progress bar rides with its four panels and stays out of the way of
      everything else. */
@@ -16446,7 +16482,13 @@ function _renderJourneyCard(returnParts) {
 // self-checks): the dashboard journey card and, if the roadmap tab is open, the trail.
 function _rmAfterLoad() {
   try { if (typeof _renderJourneyCard === "function") _renderJourneyCard(); } catch (_) {}
-  try { if (typeof renderRoadmap === "function" && document.getElementById("roadmap-content")) renderRoadmap(); } catch (_) {}
+  /* "if the roadmap tab is open" is what this meant; what it tested was whether
+     the element exists, which it always does. So landing on the dashboard built
+     the whole roadmap behind it. Repaint what is showing, not everything. */
+  try {
+    const _rmPanel = document.getElementById("lb-panel-roadmap");
+    if (typeof renderRoadmap === "function" && _rmPanel && _rmPanel.style.display !== "none") renderRoadmap();
+  } catch (_) {}
 }
 function renderStatsHero() {
   const el = document.getElementById('stats-hero');
