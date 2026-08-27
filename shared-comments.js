@@ -93,6 +93,11 @@
   function _db()            { return _cfg?.db; }
   function _cTable()        { return _cfg?.comments?.table; }
   function _cParent()       { return _cfg?.comments?.parentField || 'parent_id'; }
+  /* Which column points a reply at the comment it answers. content_feed_comments
+     calls it parent_comment_id and event_comments calls it parent_id, so it is
+     configurable with the old name as the default and every existing caller
+     unchanged. */
+  function _cReply()        { return _cfg?.comments?.replyField || 'parent_comment_id'; }
   function _rTable()        { return _cfg?.reactions?.table; }
   function _rParent()       { return _cfg?.reactions?.parentField || 'parent_id'; }
   function _emojis()        { return _cfg?.reactions?.emojis || ["❤️","👏","🔥","🎉","💪","😂"]; }
@@ -1001,10 +1006,11 @@
       // Resolve each comment's top-level ancestor so a reply-to-a-reply stays in
       // the same thread (flat, YouTube-style with an @mention) rather than being
       // orphaned under a parent that isn't rendered as a thread root.
-      const _rootOf=(c)=>{ let cur=c,g=0; while(cur&&cur.parent_comment_id&&byId[cur.parent_comment_id]&&g++<30){cur=byId[cur.parent_comment_id];} return cur.id; };
-      const topLevel=comments.filter(c=>!c.parent_comment_id);
+      const _RF=_cReply();
+      const _rootOf=(c)=>{ let cur=c,g=0; while(cur&&cur[_RF]&&byId[cur[_RF]]&&g++<30){cur=byId[cur[_RF]];} return cur.id; };
+      const topLevel=comments.filter(c=>!c[_RF]);
       const replyMap={};
-      comments.filter(c=>c.parent_comment_id).forEach(c=>{ const root=_rootOf(c); (replyMap[root]=replyMap[root]||[]).push(c); });
+      comments.filter(c=>c[_RF]).forEach(c=>{ const root=_rootOf(c); (replyMap[root]=replyMap[root]||[]).push(c); });
       Object.values(replyMap).forEach(a=>a.sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       const auth=_auth();
       listEl.innerHTML=topLevel.map(c=>{
@@ -1110,7 +1116,7 @@
       try { uploaded=await _uploadMedia(commentId); }
       catch(e){ alert("Failed to upload media: "+e.message); _resetReply(); return; }
       const auth=_auth();
-      const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,parent_comment_id:commentId,reply_to_name:replyToName,media:uploaded.length?uploaded:[]}).select().single();
+      const {data:row,error}=await _db().from(_cTable()).insert({[_cParent()]:parentId,email:auth.email,name:auth.name,content,[_cReply()]:commentId,reply_to_name:replyToName,media:uploaded.length?uploaded:[]}).select().single();
       if(error){_resetReply();alert("Couldn't post reply: "+error.message);return;}
       // Best-effort side effects (poll, notifications, @mentions). These MUST NOT
       // block closing the composer + reloading the thread — a throw here (e.g. in
@@ -1248,10 +1254,10 @@
       let parentId = meta?.parentId || null;
       {
         const { data: crow } = await _db().from(_cTable())
-          .select(`email,parent_comment_id,${_cParent()}`).eq("id", idStr).maybeSingle();
+          .select(`email,${_cReply()},${_cParent()}`).eq("id", idStr).maybeSingle();
         if (crow) {
           if (!authorEmail) authorEmail = crow.email;
-          isReply = !!crow.parent_comment_id;
+          isReply = !!crow[_cReply()];
           if (!parentId) parentId = crow[_cParent()];
         }
       }
@@ -1363,6 +1369,18 @@
   // ── Global handlers (called from onclick in HTML) ────────────────────────────
 
   // Init
+  /* Swap the tables the module reads and writes, for pages that show more than
+     one kind of discussion. Learn does: its library panel is a content-feed
+     post, and a live clinic replay in the same panel is an event, whose
+     comments live in event_comments and always have. Merged rather than
+     replaced, so everything else in the config stays as it was set. */
+  Comments.useSource = function(src) {
+    if (!_cfg || !src) return;
+    if (src.comments)  _cfg.comments  = Object.assign({}, _cfg.comments,  src.comments);
+    if (src.reactions) _cfg.reactions = Object.assign({}, _cfg.reactions, src.reactions);
+    if (src.replyNotificationLinkFn) _cfg.replyNotificationLinkFn = src.replyNotificationLinkFn;
+  };
+
   window.initCommentsSystem = function(config) {
     _cfg = config;
     _injectCSS();
