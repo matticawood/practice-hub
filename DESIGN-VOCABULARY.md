@@ -96,6 +96,19 @@ The small figure at the right of a row: "0/12 lessons", "7 days to go",
 Icon buttons are `inline-flex`, never `grid`: a grid stacks the icon above the
 word and bursts the box.
 
+**Two traps that make a control look foreign, both of them silent:**
+
+1. `font: 700 .76rem/1 inherit` is **invalid**. The `font` shorthand needs a real
+   family and will not take `inherit`, so the browser drops the whole
+   declaration and the element falls back to its default size and weight. Use
+   longhand: `font-weight`, `font-size`, `line-height`. Twelve rules in
+   practice-log.html were dead this way, including most of the goals panel's
+   form controls.
+2. A `<button>`, `<input>`, `<select>` or `<textarea>` **does not inherit the
+   page's typeface**. Set `font-family: inherit` on them, or they draw
+   themselves in the system default, which is how one link's arrow came out in
+   a different face from the identical arrow beside it.
+
 ## Rules, corners and ground
 
 - One hairline between rows, none inside a row, one rule per chapter.
