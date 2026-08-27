@@ -5789,7 +5789,7 @@
        the caret opens the row - but they are the same size and colour. */
     body.rt-trail-mode #roadmap-content .rmp-objs .rg-keys,
     body.rt-trail-mode #roadmap-content .rmp-objs .rg-self-hint{
-      flex:0 0 auto; min-width:56px; text-align:center;
+      flex:0 0 auto; width:var(--rmp-chipw, 56px); text-align:center;
       font-size:.66rem; font-weight:700; letter-spacing:0;
       font-variant-numeric:tabular-nums;
       /* Square-cornered, like the Log practice button above them and like
@@ -5815,6 +5815,12 @@
     body.rt-trail-mode #roadmap-content .rmp-objs .rg-x-tag{
       background:none !important; border:0 !important; padding:0 !important;
       color:var(--rmdim) !important; font-size:.55rem; opacity:.8;
+    }
+    /* the bar measures the objective, so it ends where the objective's own
+       column ends - at the left edge of the count - rather than running on
+       underneath the count and the glyph */
+    body.rt-trail-mode #roadmap-content .rmp-objs .rg-bar{
+      margin-right:calc(var(--rmp-chipw, 56px) + 29px) !important;
     }
     body.rt-trail-mode #roadmap-content .rmp-objs .rg-bar,
     body.rt-trail-mode #roadmap-content .rmp-objs .rg-bar > i{
@@ -5864,6 +5870,7 @@
     body.rt-trail-mode #roadmap-content .rt-status{
       background:rgba(255,255,255,.07) !important; color:var(--rmdim) !important;
       border-color:transparent !important; box-shadow:none !important;
+      border-radius:7px !important; white-space:nowrap;
     }
 
     /* The eight levels keep the trail's own card layout for now. Rebuilding them
@@ -5906,7 +5913,19 @@
     /* Behind you is behind you. The statues you have passed sit back, so the
        one you are on and the one ahead read first. */
     body.rt-trail-mode #roadmap-content .rt-stop.done .rt-statue img{
-      opacity:.5; filter:saturate(.65) brightness(.92);
+      opacity:.42; filter:grayscale(1);
+    }
+    body.rt-trail-mode #roadmap-content .rt-stop.future .rt-statue img{
+      opacity:.28; filter:grayscale(1);
+    }
+    /* The one you are standing on is the only one in colour, and it is named
+       in gold - the page's one colour for your own practice. */
+    body.rt-trail-mode #roadmap-content .rt-stop.current .rt-name{
+      color:#f5c518 !important;
+    }
+    body.rt-trail-mode #roadmap-content .rt-status.here{
+      color:#f5c518 !important;
+      background:color-mix(in srgb, #f5c518 15%, transparent) !important;
     }
     /* An opened level says its piece at the width of the page, not squeezed
        into the column left over beside the statues. */
@@ -32626,7 +32645,12 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       const num=lv.level, done=num<CURRENT, current=num===CURRENT, locked=num>CURRENT;
       const state = done?"done":current?"current":"future";
       const hi=bandLo[i+1];
-      const band=bandLo[i].toLocaleString()+(hi?"–"+hi.toLocaleString():"+")+"h"+(lv.grade?" · "+lv.grade:"");
+      /* "0 to 50 hours", not "0-50h": the hero above says hours and so does
+         everything else on the page, and a level's band is read as a sentence
+         rather than scanned as a figure. */
+      const band=(hi ? bandLo[i].toLocaleString()+" to "+hi.toLocaleString()+" hours"
+                     : bandLo[i].toLocaleString()+" hours and up")
+                 +(lv.grade?" · "+lv.grade:"");
       const pins = SKILLS.filter(function(s){return s.level===num;}).map(function(s){
         return "<button class='rt-pin"+(s.level<CURRENT?" lag":"")+"' onclick=\"_rmOpenArea('"+s.key+"')\" style='background:"+s.cvar+"' title='"+escHtml(s.lbl)+"'>"+_rtSvg(s.icon,"")+"</button>";
       }).join("");
@@ -32646,7 +32670,13 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       } else {
         body = _rtDetail(lv,true)+"<div class='rt-note'>Objectives unlock when you reach this stage.</div>";
       }
-      const status = done?"<span class='rt-status done'>Complete</span>":locked?"<span class='rt-status locked'>Locked</span>":"";
+      /* Three states, and the one you are on says so. "Locked" told a member
+         nothing they could act on; the distance to it is the fact they came
+         to the page for, and it is the same number the hero leads with. */
+      const away = Math.max(0, bandLo[i] - TOTAL_HOURS);
+      const status = done ? "<span class='rt-status done'>Done</span>"
+        : current ? "<span class='rt-status here'>You are here</span>"
+        : "<span class='rt-status away'>" + away.toLocaleString() + " hours away</span>";
       html += "<div class='rt-stop "+state+(current?" open":"")+"' data-i='"+i+"'>"+
         "<button class='rt-node' onclick='rtTogg("+i+")'>"+rmStatueImg(num, total.length, state, "rt-statue")+"</button>"+
         (pins?"<div class='rt-pins'>"+pins+"</div>":"")+
@@ -32985,6 +33015,26 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
           wrap.appendChild(t);
           wrap.appendChild(lab);
         }
+        /* Rows with nowhere to tap carry no glyph, so their count ran out to
+           the row's edge while every other count stopped 29px short of it.
+           An empty glyph holds the column open. */
+        if (!row.querySelector('.rg-go, .rg-caret')) {
+          const g = document.createElement('span');
+          g.className = 'rg-go rmp-noglyph';
+          g.setAttribute('aria-hidden', 'true');
+          (row.querySelector('.rg-goal-top, .rg-why-head') || row).appendChild(g);
+        }
+      });
+      /* One width for every count, taken from the widest one actually on the
+         page, so the column is straight without shortening anyone's units and
+         without a guess that a longer count would overflow. It has to be
+         measured before the tail is hidden, or the hidden ones measure zero. */
+      let cw = 0;
+      _objs.querySelectorAll('.rg-keys, .rg-self-hint').forEach(c => {
+        cw = Math.max(cw, Math.ceil(c.getBoundingClientRect().width));
+      });
+      if (cw) _objs.style.setProperty('--rmp-chipw', cw + 'px');
+      list.forEach((row, i) => {
         if (i >= SHOW) { row.classList.add('rmp-hidden'); hidden++; }
       });
       if (hidden) {
