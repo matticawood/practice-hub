@@ -61,7 +61,7 @@ export default async (request) => {
 
   // ── Find event by room_name ────────────────────────────────────────────────
   const evRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/live_events?daily_room_name=eq.${encodeURIComponent(room_name)}&select=id,stream_started_at`,
+    `${SUPABASE_URL}/rest/v1/live_events?daily_room_name=eq.${encodeURIComponent(room_name)}&select=id,stream_started_at,title,scheduled_at,duration_mins,feed_post_id`,
     { headers: supabaseHeaders }
   );
   const events = await evRes.json();
@@ -117,6 +117,53 @@ export default async (request) => {
     }
   );
   console.log("Supabase patch status:", patchRes.status);
+
+  // ── The replay's post ───────────────────────────────────────────────────
+  // Learn opens a clinic replay in its own viewer, in the page, rather than
+  // sending someone off to the event page: it does that by following
+  // live_events.feed_post_id to a content_feed_posts row carrying the same Mux
+  // video and the discussion under it. Nothing used to create that row or that
+  // link, so every replay fell through to the fallback and navigated away.
+  // The post is made here, where the video first exists, so a clinic is
+  // watchable in Learn the moment its recording lands.
+  //
+  // Titled "Live Practice Clinic: ..." like the rest, which is also what keeps
+  // it out of the Learn feed's own list: the event is the card, and this is
+  // what the card opens.
+  if (muxPlaybackId && !events[0].feed_post_id) {
+    try {
+      const ev = events[0];
+      const postBody = {
+        type: "post",
+        title: ev.title || "Live Practice Clinic",
+        body: "",
+        media: [{ type: "mux", playbackId: muxPlaybackId, assetId: muxAssetId }],
+        published_at: ev.scheduled_at || new Date().toISOString(),
+        duration_seconds: ev.duration_mins ? ev.duration_mins * 60 : null
+      };
+      const postRes = await fetch(`${SUPABASE_URL}/rest/v1/content_feed_posts`, {
+        method: "POST",
+        headers: { ...supabaseHeaders, Prefer: "return=representation" },
+        body: JSON.stringify([postBody])
+      });
+      const postRows = await postRes.json();
+      const postId = Array.isArray(postRows) && postRows[0] && postRows[0].id;
+      if (postId) {
+        const linkRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eventId}`,
+          { method: "PATCH", headers: supabaseHeaders, body: JSON.stringify({ feed_post_id: postId }) }
+        );
+        console.log("Replay post created:", postId, "link status:", linkRes.status);
+      } else {
+        console.error("Replay post not created:", postRes.status, JSON.stringify(postRows).slice(0, 300));
+      }
+    } catch (e) {
+      // The replay itself is already saved and playable; the post is what makes
+      // it open in place. A failure here must never fail the webhook.
+      console.error("Replay post step failed:", e && e.message);
+    }
+  }
+
   console.log(`Done — event ${eventId}, Mux asset ${muxAssetId}, playback ${muxPlaybackId}`);
 
   return new Response("OK");
