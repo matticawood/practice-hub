@@ -130,19 +130,51 @@ collapsed panel first. An audit of the default state is not an audit.
 
 ## Deliberate divergences from the mock
 
-These were decided during the build and are not drift. Change them only on
-purpose.
+**The mock is not the only source.** Decisions made in conversation override it,
+and an audit that reads only the mock will report those decisions as drift. They
+are recorded here with the reason, so the next audit reads both.
 
-- **"Show all" is gold, the mock has it grey** (`.more`, `#b4b0ba`). Gold is the
-  page's colour for your own practice and for the thing to press, and this is a
+### Decided in conversation
+
+- **The eight levels are not the mock's spine.** The mock has "3 · Foundations"
+  with a plain grey "Done / Here / 190 h away". The build shows a LEVEL N
+  eyebrow, the name, the hours band and the grade on its own line, and the
+  status as a square-cornered pill: DONE, YOU ARE HERE in gold, or "365 hours
+  away". Asked for directly: the distance to a level is more use than the word
+  Locked, and the current level is picked out in gold as the mock does for its
+  name.
+- **The ladder's current segment fills to where you have got to, and carries a
+  gold ring.** The mock fills it solid. Solid said you had finished the level
+  you are standing in.
+- **The ladder's empty segments are light** (53% white), not the mock's `#232329`.
+  The dark ones were invisible on the dashboard's ground.
+- **Pills are square-cornered, 7px**, matching the Log practice button. Applies
+  to the counts, the level statuses and the Complete / Locked marks.
+- **The hero eyebrow is grey, not the mock's gold.** Gold means your practice
+  and the thing to press; an eyebrow is neither.
+- **Today's task titles are in the sans, not the mock's Fraunces 17px.** Settled
+  over several rounds on the dashboard.
+- **Objectives are one list in order of importance with a category tag per row**,
+  not grouped under headings. Grouping threw away the importance order and made
+  the capped list show rows chosen by group rather than by how much they matter.
+- **Row hover is a neutral lift, never gold**, and the highlight bleeds past the
+  row on both sides.
+- **Goals is a panel over the page, not a tab**, and the Goals tab is gone from
+  the sub-nav. The dashboard shows the weekly goal and at most two of your own.
+- **Levels, not stages. Hours spelled out.**
+
+### Decided while building
+
+- **"Show all" is gold; the mock has it grey** (`.more`, `#b4b0ba`). It is a
   control.
-- **Tick circles are round; the mock draws rounded squares** (`.ob i`, 18px,
-  radius 5px). Every other tick in the app is round, and the roadmap's objective
-  rows reuse the app's own component rather than the mock's.
-- **Progress bars use radius 3px; the mock uses 4px** on a 6px bar. 4px on a
-  6px-tall bar rounds a small fill into a dot.
-- **Category colours are adjusted per ground.** The mock uses one raw value
-  because it only ever sits on one ground; the app has two.
+- **Ticks are round; the mock draws rounded squares** (`.ob i`). Every other tick
+  in the app is round and these rows reuse the app's own component. The
+  dashboard's Today boxes do follow the mock: 24px, radius 7, 1.5px.
+- **Progress bars use radius 3px; the mock uses 4px** on a 6px bar, which rounds
+  a small fill into a dot.
+- **Category colours are adjusted per ground.** The mock only ever sits on one.
+- **The goals panel is a list; the mock has two tiles** (`.tgt`). Two tiles do
+  not survive a member with ten goals.
 
 ## Words
 
