@@ -9,9 +9,15 @@ assembled rather than designed.
 measure it, and reuse the values. Do not approximate them.** If a treatment
 needs to change, change it in the shared rule so every use changes with it.
 
-Measured values below are the current canonical ones. Where a treatment is used
-in more than one place, the selectors are listed together so they can be kept in
-one rule.
+**The source is the mock, not the build.** `_practice-section-mock.html` and
+`_dashboard-mock.html` are where these decisions were made. Reading values off
+whatever is currently live canonises whatever drifted in last. Where the build
+and the mock disagree, the mock wins unless the divergence was a deliberate
+decision, and the deliberate ones are listed at the bottom of this file.
+
+Values below are the mock's, confirmed against the build. Where a treatment is
+used in more than one place, the selectors are listed together so they can be
+kept in one rule.
 
 ---
 
@@ -27,16 +33,20 @@ the goals panel's Weekly Goal / Goals.
 | family | Fraunces, Georgia, serif |
 | size | 1.5rem (24px) |
 | weight | 700 |
-| letter-spacing | -.022em |
+| letter-spacing | -.02em |
 | line-height | 1 |
-| bar | `::before`, 3px x 36px, 22% of the ink colour |
+| bar | `::before`, 3px wide x 1.5em tall, radius 3px, `#4a4a56` on the dark ground |
 | rule above | 1px, the ground's line colour |
-| padding | 28px above the words, 16px below |
+| padding | 26px above the words, 16px below |
 | margin-top | 18px |
 | first in a column | no rule, no top padding, no top margin |
 
+Mock: `.sec.big` in `_practice-section-mock.html`.
 Selectors: `.dash-band-head`, `#roadmap-content .rmp-head`, `#gm-body .wg-header`
 with `.wg-title`.
+
+A section that is a label rather than a chapter uses the small variant: `.sec`,
+800 .74rem/1, .13em, uppercase, in 50% of the category colour mixed toward white.
 
 ## Category label
 
@@ -46,10 +56,10 @@ panel's rows.
 
 | | |
 |---|---|
-| size | .64rem (10.24px) |
+| size | .66rem (10.56px) |
 | weight | 800 |
-| letter-spacing | .09em |
-| line-height | 1.25 |
+| letter-spacing | .12em |
+| line-height | 1.25 (the mock's 1 assumes it never wraps; these can) |
 | transform | uppercase |
 | colour | the category's own colour, adjusted for the ground |
 
@@ -57,6 +67,7 @@ The colours were chosen against a light card, so neither raw value clears 4.5:1
 on both grounds. On the dark pages mix 82% toward `#fff`; on the white panel mix
 78% toward `#000`.
 
+Mock: `.obg` in `_practice-section-mock.html`.
 Selectors: `.dday-card-cat-txt`, `#roadmap-content .rmp-objs .rmp-tag`,
 `#gm-body .pg-tag`.
 
@@ -116,6 +127,22 @@ carry meaning, such as an unchecked tick circle.
 
 Audit with everything **open**: expand every "Show all", every drop-down, every
 collapsed panel first. An audit of the default state is not an audit.
+
+## Deliberate divergences from the mock
+
+These were decided during the build and are not drift. Change them only on
+purpose.
+
+- **"Show all" is gold, the mock has it grey** (`.more`, `#b4b0ba`). Gold is the
+  page's colour for your own practice and for the thing to press, and this is a
+  control.
+- **Tick circles are round; the mock draws rounded squares** (`.ob i`, 18px,
+  radius 5px). Every other tick in the app is round, and the roadmap's objective
+  rows reuse the app's own component rather than the mock's.
+- **Progress bars use radius 3px; the mock uses 4px** on a 6px bar. 4px on a
+  6px-tall bar rounds a small fill into a dot.
+- **Category colours are adjusted per ground.** The mock uses one raw value
+  because it only ever sits on one ground; the app has two.
 
 ## Words
 
