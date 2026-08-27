@@ -16225,6 +16225,12 @@ function _renderJourneyCard(returnParts) {
     musicianship: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>'
   };
   const goalArea = g => {
+    /* Scales, arpeggios, minors and sight-reading are all stored as type
+       "self", so type alone cannot tell them apart and every sight-reading
+       objective fell through to technique - drawn in technique's colour with
+       technique's icon on every page that shows one. The group is what
+       separates them. */
+    if (grpOf(g) === "sightread") return "sight_reading";
     switch (g.type) {
       case "piece": case "course": return "repertoire";
       case "note":  return "sight_reading";
@@ -16236,6 +16242,12 @@ function _renderJourneyCard(returnParts) {
     tier = tier || 0;
     const area = goalArea(g);
     const aAttr = ` data-area="${area}"`;
+    /* The area again, on every row including the stretch tiers, which do not
+       take data-area because that attribute also carries the coloured left
+       border and the tier rows have their own. Anything that needs to know
+       which area a row builds can read this and be right, rather than
+       guessing from the row above it. */
+    const gaAttr = ` data-goal-area="${area}"`;
     const areaIco = `<span class="rg-area-ico">${_AREA_ICO[area] || ""}</span>`;
     const done = isGoalDone(g, lvl);
     const selfClick = _rmForceFresh ? `_rmPreviewTick('${g.key}')` : `_toggleGoalSelf('${g.key}',event)`;
@@ -16282,7 +16294,7 @@ function _renderJourneyCard(returnParts) {
                     + `<span class="rg-why-body"><span class="rg-why-head">${areaIco}<span class="rg-label">${escHtml(labelText)}</span><span class="rg-x-col"><span class="rg-x-tag">Extra</span>${done ? "" : chip}</span>${caretX}</span></span>`
                     + `</div>`;
         const panelX = openX ? rmMinorPanel(g, mkeysX, legacyX) : "";
-        return `<div class="rg-goal rg-goal--x rg-goal--scales self${done ? " done" : ""}"${style}>${headX}${panelX}</div>`;
+        return `<div class="rg-goal rg-goal--x rg-goal--scales self${done ? " done" : ""}"${gaAttr}${style}>${headX}${panelX}</div>`;
       }
       const ind = (g.type === "self")
         ? `<span class="rg-self-hint">${done ? "" : "tap when done"}</span>`
@@ -16290,10 +16302,10 @@ function _renderJourneyCard(returnParts) {
       const innerX = `<span class="${tickCls}">${done ? CHECK : ring}</span>${areaIco}<span class="rg-label">${escHtml(labelText)}</span><span class="rg-x-col"><span class="rg-x-tag">Extra</span>${ind}</span>`;
       const cls = `rg-goal rg-goal--x${g.type === "self" ? " self" : ""}${done ? " done" : ""}`;
       if (g.type === "self")
-        return `<button type="button" class="${cls}"${style} onclick="${selfClick}">${innerX}</button>`;
+        return `<button type="button" class="${cls}"${gaAttr}${style} onclick="${selfClick}">${innerX}</button>`;
       if (href)
-        return `<a class="${cls} rg-goal--link"${style} href="${href}">${innerX}</a>`;
-      return `<div class="${cls}"${style}>${innerX}</div>`;
+        return `<a class="${cls} rg-goal--link"${gaAttr}${style} href="${href}">${innerX}</a>`;
+      return `<div class="${cls}"${gaAttr}${style}>${innerX}</div>`;
     }
 
     // ── baseline row ──
@@ -32854,13 +32866,24 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     // pointed at. The rows are the journey card's own, moved rather than
     // rebuilt, so ticking one still works exactly as it does there.
     //
-    // Which area a row belongs to is matched by its text against the objective
-    // list, which carries the group. It cannot be done by position, because the
-    // rendered rows and the objective list are not one to one - the stretch
-    // chain adds rows of its own - and it cannot be done by the icon's colour,
-    // because several of them are drawn in a tool's colour rather than an
-    // area's. A stretch row inherits the area of the objective it follows,
-    // which is how the chain is built.
+    // Which area a row belongs to is the app's own answer, carried on the row
+    // as data-area by the renderer that draws it. Matching the text against a
+    // second list of my own was the mistake: it was a second opinion about
+    // which area an objective builds, and where the two disagreed the heading
+    // said one thing while the row's colour and icon said another.
+    //
+    // Two rows do not carry an answer. A stretch row has none, because it
+    // continues the objective above it, so it inherits that one - and that is
+    // the only inheriting done here. And an objective about time at the level
+    // is not area work at all: "Practice another 22 days at this level" builds
+    // nothing in particular, and the renderer files it under technique only
+    // because technique is what its switch falls through to. Those get a
+    // section of their own at the end rather than being pushed into whichever
+    // area happened to be rendered above them.
+    //
+    // Inside every group the rows keep the order they arrived in, which is the
+    // order of importance the list was built in. Grouping changes which rows
+    // sit together, never which comes first within a run.
     /* "best 0/40" in a column of bare counts: the chip already reads as one,
        so the word is dropped here, in the display, and nowhere else. */
     (el.querySelectorAll('.rmp-objs .rg-keys') || []).forEach(c => {
@@ -32870,21 +32893,17 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     const _objs = el.querySelector('.rmp-objs');
     if (_objs && !_objs.dataset.grouped) {
       _objs.dataset.grouped = '1';
-      const AREA_OF = { piece:'repertoire', scales:'technique', minors:'technique', arps:'technique',
-        arpsmin:'technique', sightread:'sight_reading', sight:'sight_reading', note:'musicianship',
-        chord:'musicianship', ear:'musicianship', interval:'musicianship', theory:'musicianship' };
-      const norm = t => (t || '').replace(/\s+/g, ' ').trim().toLowerCase();
-      const known = (parts.goals || []).map(g => ({ k: AREA_OF[g.group] || null, t: norm(g.label) }))
-        .filter(x => x.k && x.t);
-      const bucket = {}; let last = null;
+      const TIME_AT_LEVEL = /\b\d[\d,]*\s+(days?|hours?|minutes?)\s+at this level\b/i;
+      const bucket = {}; let lastArea = null;
       [..._objs.querySelectorAll('.rg-goal')].forEach(row => {
-        const t = norm(row.textContent);
-        const hit = known.find(g => t.indexOf(g.t.slice(0, 40)) > -1);
-        const k = hit ? hit.k : last;
-        if (k) last = k;
-        (bucket[k || 'other'] = bucket[k || 'other'] || []).push(row);
+        const own = row.dataset.goalArea || row.dataset.area || '';
+        let k;
+        if (TIME_AT_LEVEL.test(row.textContent)) k = 'general';
+        else if (own) { k = own; lastArea = k; }
+        else k = lastArea || 'general';
+        (bucket[k] = bucket[k] || []).push(row);
       });
-      const order = rows.slice().sort((x, y) => x.pct - y.pct).map(r => r.k).concat(['other']);
+      const order = rows.slice().sort((x, y) => x.pct - y.pct).map(r => r.k).concat(['general']);
       const PER_GROUP = 2;
       let hidden = 0, total = 0;
       order.forEach(k => {
@@ -32894,7 +32913,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
         const h = document.createElement('div');
         h.className = 'rmp-obg';
         if (areas[k]) h.style.setProperty('--c', areas[k].color);
-        h.textContent = (areas[k] ? areas[k].label : 'Other') + ' \u00b7 ' + list.length;
+        h.textContent = (areas[k] ? areas[k].label : 'General') + ' \u00b7 ' + list.length;
         _objs.appendChild(h);
         list.forEach((row, i) => {
           if (i >= PER_GROUP) { row.classList.add('rmp-hidden'); hidden++; }
