@@ -4977,6 +4977,12 @@
       body.lb-dash #dashboard-content .dday-from span{ color:#f5c518; font-weight:700; white-space:nowrap; }
       body.lb-dash #dashboard-content .dday-from:hover span{ text-decoration:underline; }
       #dashboard-content .dash-stage .dgoal{ display:block !important; padding:0 !important; background:none !important; }
+      /* Every status sits ON the right edge, not near it. The box was already
+         right-aligned but its contents were not, so the weekly figure ran to
+         the edge while "7d left" stopped 32px short and read as indented. */
+      #dashboard-content .dash-stage .dgoal-status{
+        display:flex !important; justify-content:flex-end !important; align-items:baseline !important;
+      }
       #dashboard-content .dash-stage .dgoal-top,
       #dashboard-content .dash-stage .dgoal-head{
         display:flex !important; justify-content:space-between !important;
@@ -15245,7 +15251,32 @@ async function renderDashboard() {
             + (workList
                 ? `Time spent on ${workList}${works.length > 1 ? ',' : ''} lifts your overall level the fastest.`
                 : `Time spent there lifts your overall level the fastest.`)
-          : `All four areas are keeping pace with your level.`;
+          : (function () {
+              /* "All four are keeping pace" is a report, not direction, and
+                 this chapter is called Where to focus. When none is a level
+                 behind there is still always a lowest one, measured the way
+                 the roadmap's chart measures them: against what THIS level
+                 asks of each area, which is the only reading that makes the
+                 four comparable. That one gets named. */
+              try {
+                const A = window._rmAreas || {}, R = window.ROADMAP;
+                const cur = (window._rmState && window._rmState.idx != null)
+                  ? window._rmState.idx + 1 : null;
+                const KEYS = ['repertoire','technique','sight_reading','musicianship'];
+                const rows = KEYS.filter(k => A[k] && R && R.levels && R.levels[k]).map(k => {
+                  const asks = ((R.levels[k][cur - 1] || {}).hours) || 0;
+                  return { k, label: A[k].label, col: A[k].color,
+                           pct: asks > 0 ? Math.round((A[k].mins / 60) / asks * 100) : 100 };
+                });
+                if (!rows.length) return `Every area is keeping pace with your level.`;
+                const low = rows.slice().sort((a, b) => a.pct - b.pct)[0];
+                const work = _AREA_WORK[(low.label || '').toLowerCase()];
+                return `Every area is at or above what your level asks for. `
+                  + `<b style="color:${low.col}">${low.label}</b> is the lowest of the four, at ${low.pct}%, `
+                  + (work ? `so time spent on ${work} does the most from here.`
+                          : `so that is where the next hour does the most.`);
+              } catch (e) { return `Every area is keeping pace with your level.`; }
+            })();
         const hd = _fw.previousElementSibling;
         if (hd && hd.classList.contains('dash-band-head')) {
           let c = hd.querySelector('.dbh-count');
@@ -15255,7 +15286,19 @@ async function renderDashboard() {
           }
           c.textContent = behind.length
             ? `${behind.length} area${behind.length > 1 ? 's' : ''}`
-            : 'all on pace';
+            : (function () {
+                try {
+                  const A = window._rmAreas || {}, R = window.ROADMAP;
+                  const cur = (window._rmState && window._rmState.idx != null) ? window._rmState.idx + 1 : null;
+                  const KEYS = ['repertoire','technique','sight_reading','musicianship'];
+                  const rows = KEYS.filter(k => A[k] && R && R.levels && R.levels[k]).map(k => {
+                    const asks = ((R.levels[k][cur - 1] || {}).hours) || 0;
+                    return { label: A[k].label, pct: asks > 0 ? Math.round((A[k].mins / 60) / asks * 100) : 100 };
+                  });
+                  if (!rows.length) return '';
+                  return rows.slice().sort((a, b) => a.pct - b.pct)[0].label.toLowerCase() + ' lowest';
+                } catch (e) { return ''; }
+              })();
         }
       }
     } catch (e) { return; }
@@ -18331,29 +18374,34 @@ function _renderCoursesCard() {
     </a>`;
   });
 
-  /* TEMPORARY, for looking at the empty state without finishing every course:
-     add ?learnempty=1 to the URL. Remove once it has been signed off. */
-  const _forceEmpty = !!window.__learnEmpty;
-  el.innerHTML = (tiles.length && !_forceEmpty)
-    ? `<div class="dcourse-list">${tiles.join('')}</div>
-       <a href="/courses.html" class="dash-card-article-link" style="margin-top:13px;display:inline-block">Browse all courses &rarr;</a>`
-    /* THIS CHAPTER IS "CONTINUE LEARNING", NOT "YOUR COURSES".
-       With no course in progress it points at the rest of Learn and says
-       nothing else. Any sentence about having finished the courses frames the
-       chapter as a course list and reads as though the app has run out of
-       things to teach, which is the opposite of true: the library, the weekly
-       focus, the daily articles and the clinic replays are all here and none
-       of them need a course. The heading already says continue; these say
-       where. */
-    : `<div class="dcourse-list">
-         <a class="dcourse dcourse--flat" style="--ccol:#10b981" href="/learn.html">
-           <span class="dcourse-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg></span>
-           <span class="dcourse-body">
-             <span class="dcourse-top"><span class="dcourse-name">Learn</span><span class="dcourse-cta">Open &rarr;</span></span>
-             <span class="dcourse-sub">Every lesson, article and clinic replay, searchable by what you are working on</span>
-           </span>
-         </a>
-       </div>`;
+  /* TWO THINGS ARE ALWAYS HERE, under whatever courses there are. Neither is
+     a course, both are somewhere to go next, and between them the chapter can
+     never be empty: the library, and the week's focus, which is not in the
+     library. */
+  const flat = (col, href, name, sub, icon) =>
+    `<a class="dcourse dcourse--flat" style="--ccol:${col}" href="${href}">
+       <span class="dcourse-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span>
+       <span class="dcourse-body">
+         <span class="dcourse-top"><span class="dcourse-name">${name}</span><span class="dcourse-cta">Open &rarr;</span></span>
+         <span class="dcourse-sub">${sub}</span>
+       </span>
+     </a>`;
+  const always = [
+    flat('#10b981', '/learn.html', 'Learn',
+      'Lessons, articles, videos and clinic replays to help you progress',
+      '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>'),
+    flat('#f5c518', '/focus.html', "This week's focus",
+      'One thing to work on, new every week',
+      '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>'),
+  ];
+  /* TEMPORARY, for looking at the no-course state without finishing every
+     course: add ?learnempty=1 to the URL. Remove once signed off. */
+  const _courses = window.__learnEmpty ? [] : tiles;
+  el.innerHTML =
+    `<div class="dcourse-list">${_courses.concat(always).join('')}</div>`
+    + (_courses.length
+        ? `<a href="/courses.html" class="dash-card-article-link" style="margin-top:13px;display:inline-block">Browse all courses &rarr;</a>`
+        : '');
 }
 // The member's own calendar day, not the viewer's. On your own dashboard the device
 // clock IS your clock (and it follows you when you travel). When the owner reviews
