@@ -20736,9 +20736,12 @@ function renderWeeklyGoalWidget() {
   const _pencilSVG = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
   const _flameSVG  = (typeof _emojiToSvg === "function") ? _emojiToSvg("🔥", 17) : "";
 
-  const streakChip = streak > 0
-    ? `<div class="wg-streak"><span class="wg-streak-flame">${_flameSVG}</span><div class="wg-streak-txt"><div class="wg-streak-num">${streak}</div><div class="wg-streak-lab">day streak</div></div></div>`
-    : `<div class="wg-streak wg-streak-zero"><span class="wg-streak-flame">${_flameSVG}</span><div class="wg-streak-txt"><div class="wg-streak-num" style="font-size:.92rem">Start</div><div class="wg-streak-lab">your streak</div></div></div>`;
+  /* The streak is a fact about the week, so it sits in the week's own
+     sentence rather than in a tile of its own in the corner. */
+  const streakTxt = streak > 0
+    ? ` &middot; <b>${streak} day${streak === 1 ? "" : "s"}</b> in a row`
+    : "";
+  const streakChip = "";
 
   el.innerHTML = `
     <div class="wg-card wg-hero${done ? " wg-done" : ""}">
@@ -20749,7 +20752,7 @@ function renderWeeklyGoalWidget() {
       <div class="wg-hero-body">
         <div class="wg-hero-left">
           <div class="wg-hero-num">${formatMinutes(weekMins)}<span class="wg-hero-num-sub"> / ${formatMinutes(goal)}</span></div>
-          <div class="wg-hero-status">${done ? `${_checkSVG} Goal reached this week!` : `${formatMinutes(remaining)} to go${isDefault ? " · default goal" : ""}`}</div>
+          <div class="wg-hero-status">${done ? `${_checkSVG} Goal reached this week!` : `${formatMinutes(remaining)} to go${isDefault ? " · default goal" : ""}`}${streakTxt}</div>
         </div>
         ${streakChip}
       </div>
@@ -21029,6 +21032,10 @@ function renderPieceGoals() {
         : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} to go`;
       const countdownPill = countdownTxt ? `<span class="pg-pill pg-pill-${urgency}">${countdownTxt}</span>` : "";
 
+      /* One status, on the right, in two registers: the reading, and the fact
+         underneath it. The old row put a sentence under the bar and a pill on
+         the other end of it, which is two places to look for one thing. */
+      let statMain = "", statSub = "", statTone = "calm";
       if (goalType === "hours" || goalType === "both") {
         const logged   = pgCalcHours(g);
         const target   = g.target_hours || 1;
@@ -21038,40 +21045,43 @@ function renderPieceGoals() {
         const fill     = hoursDone ? "#22c55e" : "var(--accent)";
         hoursBarHtml = `<div class="pg-track"><div class="pg-fill" style="width:${Math.max(hrsPct, 2)}%;background:${fill}"></div></div>`;
         if (goalType === "both") {
-          metaLeftText = `${loggedStr} / ${target}h · ${hrsPct}%${targetStr ? ` · ${targetStr}` : ""}`;
-          pill = hoursDone ? `<span class="pg-pill pg-pill-done">${PG_CHECK} Complete</span>` : countdownPill;
+          statMain = hoursDone ? "Complete" : (countdownTxt || `${loggedStr} / ${target}h`);
+          statSub  = hoursDone ? `${loggedStr} / ${target}h` : `${loggedStr} / ${target}h`;
+          statTone = hoursDone ? "done" : urgency;
         } else {
-          metaLeftText = `${loggedStr} / ${target}h`;
-          pill = hoursDone ? `<span class="pg-pill pg-pill-done">${PG_CHECK} Complete</span>` : `<span class="pg-pill pg-pill-calm">${hrsPct}%</span>`;
+          statMain = hoursDone ? "Complete" : `${loggedStr} / ${target}h`;
+          statSub  = hoursDone ? `${loggedStr} / ${target}h` : `${hrsPct}%`;
+          statTone = hoursDone ? "done" : "calm";
         }
       } else {
-        // Deadline-only
-        metaLeftText = targetStr ? `Target: ${targetStr}` : "";
-        pill = countdownPill;
+        statMain = countdownTxt;
+        statSub  = targetStr;
+        statTone = urgency;
       }
 
-      const sub = g.composer ? g.composer : (g.category && g.category !== "piece" ? cat.label : "");
+      /* the category is a word in its own column now, so the line under the
+         title is only ever the composer - naming the category twice was half
+         the text in the row */
+      const sub = g.composer || "";
 
       return `${divider}
-      <div class="pg-goal-row" data-goal-id="${g.id}">
+      <div class="pg-goal-row" data-goal-id="${g.id}" style="--pgc:${color}">
         <div class="pg-goal-header">
-          <div class="pg-goal-left">
-            <span class="pg-cat-icon">${typeIconSVG(cat.type)}</span>
-            <div style="min-width:0">
-              <div class="pg-goal-name">${escHtml(g.piece_label || "")}</div>
-              ${sub ? `<div class="pg-goal-sub">${escHtml(sub)}</div>` : ""}
-            </div>
+          <span class="pg-tag">${escHtml(cat.label)}</span>
+          <div class="pg-body">
+            <div class="pg-goal-name">${escHtml(g.piece_label || "")}</div>
+            ${sub ? `<div class="pg-goal-sub">${escHtml(sub)}</div>` : ""}
+            ${hoursBarHtml}
+          </div>
+          <div class="pg-stat pg-stat-${statTone}">
+            ${statMain ? `<span>${escHtml(statMain)}</span>` : ""}
+            ${statSub ? `<em>${escHtml(statSub)}</em>` : ""}
           </div>
           <div class="pg-actions">
             <button class="pg-done-btn" data-pg-done="${g.id}">${PG_CHECK}<span>Done</span></button>
             <button class="pg-icon-btn" data-pg-edit="${g.id}" title="Edit">${PG_PENCIL}</button>
             <button class="pg-icon-btn pg-remove" data-pg-remove="${g.id}" title="Remove">${PG_X}</button>
           </div>
-        </div>
-        ${hoursBarHtml}
-        <div class="pg-meta">
-          <span>${metaLeftText}</span>
-          <span class="pg-meta-right">${pill}</span>
         </div>
       </div>`;
     }).join("");
@@ -32686,18 +32696,35 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   }
   #gm-body .pg-summary + .pg-goal-row{ margin-top:14px !important; }
   #gm-body .pg-goal-header{ display:flex !important; align-items:flex-start !important; gap:14px !important; }
-  #gm-body .pg-goal-left{ flex:1; min-width:0; display:flex !important; align-items:flex-start !important; gap:12px !important; }
-  #gm-body .pg-cat-icon{
-    flex:0 0 auto; width:26px; height:26px; border-radius:7px;
-    display:inline-flex !important; align-items:center; justify-content:center;
-    background:color-mix(in srgb, var(--pgc, #d99e12) 14%, transparent) !important;
-    color:var(--pgc, #d99e12) !important; margin:0 !important;
+  /* the category as a word, in its own column, the way an objective wears its
+     area. An icon said the same thing but you had to know the icon. */
+  #gm-body .pg-tag{
+    flex:0 0 92px; display:block; padding-top:3px;
+    font:800 .62rem/1.2 inherit; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--pgc, #b08a3e);
   }
-  #gm-body .pg-cat-icon svg{ width:14px; height:14px; }
+  #gm-body .pg-body{ flex:1; min-width:0; }
+  /* the status: the reading, and the fact under it */
+  #gm-body .pg-stat{
+    flex:0 0 96px; text-align:right; padding-top:2px; line-height:1.3;
+    font-size:.8rem; font-weight:700; color:var(--text-muted);
+    font-variant-numeric:tabular-nums;
+  }
+  #gm-body .pg-stat em{
+    display:block; margin-top:4px; font-style:normal;
+    font-size:.74rem; font-weight:500; color:var(--text-muted); opacity:.75;
+  }
+  #gm-body .pg-stat-warn > span{ color:#c2410c; }
+  #gm-body .pg-stat-danger > span{ color:#b91c1c; }
+  #gm-body .pg-stat-done > span{ color:#0d9c6e; }
   #gm-body .pg-goal-name{
     font-size:.98rem !important; font-weight:700 !important; line-height:1.35 !important;
     color:var(--text) !important;
+    /* a piece can carry its whole catalogue in its title; two lines of that is
+       plenty in a list you are scanning */
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden;
   }
+  #gm-body .wg-hero-status b{ color:var(--text) !important; font-weight:700 !important; }
   #gm-body .pg-goal-sub{
     margin-top:5px !important; font-size:.8rem !important; font-weight:500 !important;
     line-height:1.35 !important; color:var(--text-muted) !important;
@@ -32723,7 +32750,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   /* the bar sits under the name, and the status line under that */
   #gm-body .pg-track{
     height:5px !important; border-radius:3px !important; background:var(--surface-2) !important;
-    margin:10px 0 0 38px !important; overflow:hidden;
+    margin:10px 0 0 !important; overflow:hidden;
   }
   #gm-body .pg-fill{ border-radius:3px !important; }
   #gm-body .pg-meta{
@@ -32803,7 +32830,11 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   /* On a phone the icon column would leave the title a strip, so it steps out
      of the row and the title runs the full width. */
   @media (max-width:560px){
-    #gm-body .pg-track, #gm-body .pg-meta{ margin-left:0 !important; }
+    #gm-body .pg-goal-header{ flex-wrap:wrap !important; gap:10px !important; }
+    #gm-body .pg-tag{ flex:1 1 100%; padding-top:0; }
+    #gm-body .pg-body{ flex:1 1 auto; }
+    #gm-body .pg-stat{ flex:0 0 auto; }
+    #gm-body .pg-actions{ flex:1 1 100%; justify-content:flex-end; }
   }
 
   /* The add / edit goal sheet sits at z-index 1200, which was above everything
