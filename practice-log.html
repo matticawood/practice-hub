@@ -5645,6 +5645,17 @@
     }
     body.rt-trail-mode #roadmap-content .rmp-prior .dash-lvl-cal svg{ width:14px; height:14px; }
 
+    /* Every objective wears its area, so one list in order of importance still
+       shows at a glance that the level is asking for a rounded set of work.
+       Inline, at the head of the line, so it costs no row height and the text
+       flows past it the way a category tag on an article does. */
+    body.rt-trail-mode #roadmap-content .rmp-objs .rmp-tag{
+      margin-right:9px;
+      font-size:.62rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase;
+      color:var(--c, var(--rmdim)); vertical-align:.1em; white-space:nowrap;
+    }
+    body.rt-trail-mode #roadmap-content .rmp-objs .rg-goal.done .rmp-tag{ opacity:.55; }
+
     /* the area a run of objectives belongs to */
     body.rt-trail-mode #roadmap-content .rmp-obg{
       padding:22px var(--rmg) 8px;
@@ -16233,8 +16244,17 @@ function _renderJourneyCard(returnParts) {
     if (grpOf(g) === "sightread") return "sight_reading";
     switch (g.type) {
       case "piece": case "course": return "repertoire";
-      case "note":  return "sight_reading";
-      case "theory": case "ear": case "chord": case "interval": return "musicianship";
+      /* Note Recognition and Chord Recognition are reading tools - "name the
+         note on the stave" and "read a chord off the page" - and both log
+         their minutes to the sight-reading track. The objectives that ask for
+         a score in them belong to the same area their practice does. */
+      case "note": case "chord": return "sight_reading";
+      /* Interval Training runs both ways and logs itself accordingly, ear
+         training when you are listening and sight-reading when you are
+         reading. Its objectives say which they are asking for. */
+      case "interval": return /\bhearing\b|\bby ear\b|\blisten/i.test(g.label || "")
+        ? "musicianship" : "sight_reading";
+      case "theory": case "ear": return "musicianship";
       default:      return "technique";   // scales / arpeggios / minors (self), days, hours
     }
   };
@@ -32866,24 +32886,31 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     // pointed at. The rows are the journey card's own, moved rather than
     // rebuilt, so ticking one still works exactly as it does there.
     //
+    // ONE LIST, IN THE ORDER IT WAS BUILT, EACH ROW TAGGED WITH ITS AREA.
+    //
+    // Grouping by area cost more than it gave. The list arrives in order of
+    // importance, and grouping throws that away at the top level: the first
+    // thing you read becomes the most important MUSICIANSHIP objective, which
+    // may not be the most important objective. Worse, the list is capped, so
+    // with two shown per group the ten rows on screen were chosen by which
+    // group they were in rather than by how much they matter. Flat, the rows
+    // on screen are the ones that matter most, which is the whole question
+    // someone opens this page with.
+    //
+    // The area is still worth showing - seeing four different areas in the
+    // first six rows is what tells you the level is asking for a rounded set
+    // of work - but a tag on the row says that as well as a heading does, and
+    // costs no order. The chart directly above already names which area is
+    // behind, in a sentence, so five sub-headings under it were saying the
+    // same thing again, less precisely.
+    //
     // Which area a row belongs to is the app's own answer, carried on the row
-    // as data-area by the renderer that draws it. Matching the text against a
-    // second list of my own was the mistake: it was a second opinion about
-    // which area an objective builds, and where the two disagreed the heading
-    // said one thing while the row's colour and icon said another.
-    //
-    // Two rows do not carry an answer. A stretch row has none, because it
-    // continues the objective above it, so it inherits that one - and that is
-    // the only inheriting done here. And an objective about time at the level
-    // is not area work at all: "Practice another 22 days at this level" builds
-    // nothing in particular, and the renderer files it under technique only
-    // because technique is what its switch falls through to. Those get a
-    // section of their own at the end rather than being pushed into whichever
-    // area happened to be rendered above them.
-    //
-    // Inside every group the rows keep the order they arrived in, which is the
-    // order of importance the list was built in. Grouping changes which rows
-    // sit together, never which comes first within a run.
+    // by the renderer that draws it. Matching the text against a second list
+    // of my own was the earlier mistake: where the two disagreed the heading
+    // said one thing and the row's own colour said another. The one exception
+    // is an objective about time at the level, which builds nothing in
+    // particular and is only filed under technique because technique is what
+    // the renderer's switch falls through to.
     /* "best 0/40" in a column of bare counts: the chip already reads as one,
        so the word is dropped here, in the display, and nowhere else. */
     (el.querySelectorAll('.rmp-objs .rg-keys') || []).forEach(c => {
@@ -32894,31 +32921,25 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     if (_objs && !_objs.dataset.grouped) {
       _objs.dataset.grouped = '1';
       const TIME_AT_LEVEL = /\b\d[\d,]*\s+(days?|hours?|minutes?)\s+at this level\b/i;
-      const bucket = {}; let lastArea = null;
-      [..._objs.querySelectorAll('.rg-goal')].forEach(row => {
+      const SHOW = 6;
+      const list = [..._objs.querySelectorAll('.rg-goal')];
+      const total = list.length;
+      let hidden = 0, lastArea = null;
+      list.forEach((row, i) => {
         const own = row.dataset.goalArea || row.dataset.area || '';
         let k;
         if (TIME_AT_LEVEL.test(row.textContent)) k = 'general';
         else if (own) { k = own; lastArea = k; }
         else k = lastArea || 'general';
-        (bucket[k] = bucket[k] || []).push(row);
-      });
-      const order = rows.slice().sort((x, y) => x.pct - y.pct).map(r => r.k).concat(['general']);
-      const PER_GROUP = 2;
-      let hidden = 0, total = 0;
-      order.forEach(k => {
-        const list = bucket[k];
-        if (!list || !list.length) return;
-        total += list.length;
-        const h = document.createElement('div');
-        h.className = 'rmp-obg';
-        if (areas[k]) h.style.setProperty('--c', areas[k].color);
-        h.textContent = (areas[k] ? areas[k].label : 'General') + ' \u00b7 ' + list.length;
-        _objs.appendChild(h);
-        list.forEach((row, i) => {
-          if (i >= PER_GROUP) { row.classList.add('rmp-hidden'); hidden++; }
-          _objs.appendChild(row);
-        });
+        const lab = row.querySelector('.rg-label');
+        if (lab && !lab.querySelector('.rmp-tag')) {
+          const t = document.createElement('span');
+          t.className = 'rmp-tag';
+          if (areas[k]) t.style.setProperty('--c', areas[k].color);
+          t.textContent = areas[k] ? areas[k].label : 'General';
+          lab.insertBefore(t, lab.firstChild);
+        }
+        if (i >= SHOW) { row.classList.add('rmp-hidden'); hidden++; }
       });
       if (hidden) {
         const rest = [..._objs.querySelectorAll('.rg-goal.rmp-hidden')];
