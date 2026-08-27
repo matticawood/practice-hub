@@ -2300,7 +2300,7 @@ window._shMaybeShowOnboarding = async function(db, myEmail) {
     const css = document.createElement("style");
     css.id = "sh-welcome-css";
     css.textContent = `
-      #sh-welcome-backdrop { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; background: rgba(20,16,10,.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); padding: 20px; opacity: 0; transition: opacity .2s ease; }
+      #sh-welcome-backdrop { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); padding: 20px; opacity: 0; transition: opacity .2s ease; }
       #sh-welcome-backdrop.open { opacity: 1; }
       .sh-welcome-card { background: #fff; color: #4a443b; max-width: 600px; width: 100%; max-height: 88vh; overflow-y: auto; border-radius: 18px; box-shadow: 0 24px 60px -12px rgba(0,0,0,.5); padding: 32px 34px 26px; font-family: inherit; line-height: 1.5; transform: translateY(10px) scale(.98); transition: transform .24s cubic-bezier(.2,.7,.3,1); }
       #sh-welcome-backdrop.open .sh-welcome-card { transform: none; }
