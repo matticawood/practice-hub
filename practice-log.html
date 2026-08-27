@@ -11065,6 +11065,21 @@
       <div id="piece-goals-section" style="display:none"></div>
     </div><!-- end #lb-panel-goals -->
 
+    <!-- ── GOALS, AS A PANEL RATHER THAN A TAB ──────────────────────────
+         The tab held two sections and nothing else, and it was reached on 15%
+         of the days anyone opened Practice. The dashboard shows what you are
+         working towards; this is where you set it. The sections themselves are
+         untouched and keep their ids, so everything that renders and saves
+         them works exactly as it did. -->
+    <div id="goals-modal" class="gm-modal" aria-hidden="true">
+      <div class="gm-backdrop" onclick="closeGoalsModal()"></div>
+      <div class="gm-card" role="dialog" aria-modal="true" aria-label="Goals">
+        <button type="button" class="gm-close" onclick="closeGoalsModal()" aria-label="Close">&times;</button>
+        <div class="gm-title">Goals</div>
+        <div id="gm-body"></div>
+      </div>
+    </div>
+
     <!-- Session history panel -->
     <div id="lb-panel-history" style="display:none;margin-top:14px">
       <div class="panel-head-row" style="min-height:28px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
@@ -12838,12 +12853,15 @@ async function loadData() {
      tab 50ms later by the deep-link router, which meant the dashboard was built
      in full - all of it - for someone who never asked to see it. Read the link
      here and land on it first time. */
-  const _GOTO_TAB = { stats:1, goals:1, roadmap:1, history:1, leaderboard:1, achievements:1 };
+  const _GOTO_TAB = { stats:1, roadmap:1, history:1, leaderboard:1, achievements:1 };
   const _gotoTab = (new URLSearchParams(location.search).get('goto') || '').trim();
   switchMainLbTab(
     (_gotoTab && _GOTO_TAB[_gotoTab]) ? _gotoTab
       : (_picked && _picked !== 'dashboard') ? _picked
       : (_restoredTab || 'dashboard'));
+  /* ?goto=goals is still live in older links, notifications and emails. It
+     lands on the dashboard and opens the panel over it. */
+  if (_gotoTab === 'goals') setTimeout(() => { try { openGoalsModal(); } catch (e) {} }, 400);
   /* Every one of these builds a tab nobody is looking at yet, and
      switchMainLbTab already runs each of them the moment its tab is opened.
      Rendering them here as well was the same work done twice, once into a
@@ -14066,7 +14084,44 @@ function _dashGoTab(tab) {
 }
 window._dashGoTab = _dashGoTab;
 
+/* Goals opens over the page it was asked from, rather than being a tab of its
+   own. Everything that used to say switchMainLbTab('goals') still works: the
+   call is caught below and opens this instead. */
+function openGoalsModal() {
+  const m = document.getElementById('goals-modal');
+  const panel = document.getElementById('lb-panel-goals');
+  const body = document.getElementById('gm-body');
+  if (!m || !panel || !body) return;
+  /* Out of #app-main and onto the body. The dashboard remaps --surface and
+     --border inside #app-main for the dark ground, so a card built from those
+     variables while it sat in there came out transparent. */
+  if (m.parentElement !== document.body) document.body.appendChild(m);
+  if (panel.parentElement !== body) body.appendChild(panel);
+  panel.style.display = '';
+  if (_goalsLoaded) { renderWeeklyGoalWidget(); renderPieceGoals(); }
+  else { loadWeeklyGoal(); loadPieceGoals(); }
+  m.classList.add('open');
+  m.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', _goalsModalEsc);
+}
+function closeGoalsModal() {
+  const m = document.getElementById('goals-modal');
+  if (!m) return;
+  m.classList.remove('open');
+  m.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+  document.removeEventListener('keydown', _goalsModalEsc);
+  /* the dashboard's goals card is a reading of what is in here, so it is
+     redrawn on the way out rather than going stale behind the panel */
+  try { if (typeof window._rebuildDashGoals === 'function') window._rebuildDashGoals(); } catch (e) {}
+}
+function _goalsModalEsc(e) { if (e.key === 'Escape') closeGoalsModal(); }
+window.openGoalsModal = openGoalsModal;
+window.closeGoalsModal = closeGoalsModal;
+
 function switchMainLbTab(main, fromHistory) {
+  if (main === 'goals') { openGoalsModal(); return; }
   /* The dashboard is one white surface on a phone; every other panel here is
      still cards on the beige. The surface has to run to the bottom of the
      scroll, and what sits below it - a 32px section margin, #app-main's own
@@ -14780,6 +14835,18 @@ async function renderDashboard() {
   };
 
   // ── Goals section ────────────────────────────────────────────────
+  /* One place that draws the card, so the panel can redraw it on the way out
+     without knowing how it is built. */
+  const _paintDashGoals = () => {
+    const c = document.getElementById('dash-goals-card');
+    if (!c) return;
+    c.innerHTML =
+      `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="dash-section-title" style="margin-bottom:0">Goals</div>
+      </div>` + buildDashGoalsHTML();
+  };
+  window._rebuildDashGoals = _paintDashGoals;
+
   const buildDashGoalsHTML = () => {
     const goal    = weeklyGoalMins || DEFAULT_WEEKLY_GOAL;
     const wkPct   = Math.min(100, Math.round((weekMins / goal) * 100));
@@ -15136,13 +15203,7 @@ async function renderDashboard() {
       ]);
       weeklyGoalMins = wgRes.data?.weekly_goal_minutes || null;
       allGoals       = pgRes.data || [];
-      const goalsCard = document.getElementById('dash-goals-card');
-      if (goalsCard) {
-        goalsCard.innerHTML =
-          `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-            <div class="dash-section-title" style="margin-bottom:0">Goals</div>
-          </div>` + buildDashGoalsHTML();
-      }
+      _paintDashGoals();
     } catch(e) {}
   }
 
@@ -32472,6 +32533,22 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   .rm-modal-sub { font-size: .82rem; color: var(--text-muted); font-weight: 600; margin: 0 0 14px; }
   .rm-modal-foot { margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--border); font-size: .76rem; line-height: 1.5; color: var(--text-muted); font-style: italic; }
   .rm-bl-row label small { display: block; font-size: .66rem; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
+
+  /* Goals panel */
+  .gm-modal{ position:fixed; inset:0; z-index:4200; display:none; align-items:center; justify-content:center; padding:20px; }
+  .gm-modal.open{ display:flex; }
+  .gm-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.5); backdrop-filter:blur(3px); }
+  .gm-card{ position:relative; z-index:1; width:100%; max-width:640px; max-height:86vh; overflow-y:auto;
+    background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:24px 24px 22px;
+    box-shadow:0 26px 70px -22px rgba(0,0,0,.55); animation:rmModalIn .26s cubic-bezier(.22,1,.36,1); }
+  .gm-close{ position:absolute; top:12px; right:14px; width:32px; height:32px; border:none;
+    background:var(--surface-2); border-radius:9px; font-size:1.3rem; line-height:1; color:var(--text-muted); cursor:pointer; }
+  .gm-close:hover{ color:var(--text); }
+  .gm-title{ font-family:Fraunces,Georgia,serif; font-size:1.5rem; font-weight:700; letter-spacing:-.022em;
+    color:var(--text); margin:0 0 14px; }
+  #gm-body > #lb-panel-goals{ display:block !important; margin-top:0 !important; padding-top:0 !important; }
+  @media (max-width:560px){ .gm-modal{ padding:0; align-items:flex-end; }
+    .gm-card{ max-width:none; max-height:92vh; border-radius:20px 20px 0 0; } }
 
   /* Stone modal */
   .rm-modal { position: fixed; inset: 0; z-index: 4000; display: none; align-items: center; justify-content: center; padding: 20px; }

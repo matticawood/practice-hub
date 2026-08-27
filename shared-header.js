@@ -37,7 +37,11 @@ const SH_SUBNAV = {
        are inside the page, so this costs the menu nothing: it is the slot "My
        Pieces" already had. */
     { label: "Pieces", href: "/resources.html" },
-    { label: "Goals", href: "/practice-log.html?goto=goals" },
+    /* Goals held a slot for two sections that were reached on 15% of the days
+       anyone opened Practice. What you are working towards now reads on the
+       dashboard, and setting it opens over whatever page you asked from, so
+       the tab is gone rather than the feature. ?goto=goals still works and
+       opens that panel. */
     { label: "Roadmap", href: "/practice-log.html?goto=roadmap" },
     /* Stats, History, Ranks and Achievements answer one question - how is it
        going - and they held four of this menu's eight slots between them, which
