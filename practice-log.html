@@ -14279,7 +14279,29 @@ function _renderProgressHero(show) {
   if (!el) return;
   el.style.display = show ? '' : 'none';
   if (!show) return;
-  let hrs = 0, sessions = 0, since = '';
+  /* ALL TIME MEANS ALL TIME.
+     The roadmap and the dashboard both count the hours you practised before you
+     joined, because that is what puts you on your level. A total here that left
+     them out gave this page a different headline figure from the other two for
+     the same member, which is worse than no figure at all. The baseline is not
+     fetched on this tab, so it is fetched if it is missing and the hero is
+     drawn again when it lands. */
+  let baseHrs = 0, sessions = 0, since = '';
+  try {
+    const b = (typeof _practiceBaseline !== 'undefined' && _practiceBaseline && typeof _practiceBaseline === 'object')
+      ? _practiceBaseline : null;
+    if (b) baseHrs = (Number(b.total_minutes) || 0) / 60;
+    else if (typeof _rmLoadBaseline === 'function' && !_renderProgressHero._loading) {
+      _renderProgressHero._loading = 1;
+      _rmLoadBaseline().then(() => { _renderProgressHero._loading = 0; _renderProgressHero(true); });
+    }
+  } catch (e) {}
+  /* _rmTrackMinutes().total ALREADY includes the hours before you joined - it
+     is the same figure the roadmap sets your level from. Adding the baseline to
+     it counted those hours twice. It reads 35 until the baseline has loaded and
+     335 after, which is why this has to wait for the fetch rather than adding
+     anything of its own. */
+  let hrs = 0;
   try { hrs = Math.round(_rmTrackMinutes().total / 60); } catch (e) {}
   try {
     const ss = (allSessions || []).filter(s => s && s.session_date);
@@ -14291,8 +14313,10 @@ function _renderProgressHero(show) {
     }
   } catch (e) {}
   const bits = [];
-  if (sessions) bits.push(sessions.toLocaleString() + ' session' + (sessions === 1 ? '' : 's'));
-  if (since) bits.push('since ' + since);
+  if (baseHrs >= 1) bits.push(Math.round(baseHrs).toLocaleString() + ' before you joined');
+  if (sessions) bits.push(sessions.toLocaleString() + ' session' + (sessions === 1 ? '' : 's')
+    + (since ? ' since ' + since : ''));
+  else if (since) bits.push('since ' + since);
   el.innerHTML =
     '<div class="ph-eye">All time</div>'
     + '<div class="ph-fig">' + hrs.toLocaleString() + '<span> hour' + (hrs === 1 ? '' : 's') + '</span></div>'
