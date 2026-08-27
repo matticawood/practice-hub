@@ -863,7 +863,7 @@ export default async (request) => {
 
     // Get the event to find mux_live_stream_id
     const evRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}&select=mux_live_stream_id,daily_room_name`,
+      `${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}&select=mux_live_stream_id,daily_room_name,title,scheduled_at,duration_mins,feed_post_id`,
       { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
     );
     const evRows = await evRes.json();
@@ -936,6 +936,50 @@ export default async (request) => {
       const patchErr = await patchRes.text().catch(() => patchRes.status);
       console.error("fetch-recording: Supabase PATCH failed:", patchErr);
       return json({ error: "Recording found but could not save to database: " + patchErr }, 500);
+    }
+
+    // ── The replay's post ─────────────────────────────────────────────────
+    // Learn opens a clinic replay in its own viewer rather than sending someone
+    // to the event page, and it finds the video by following
+    // live_events.feed_post_id to a content_feed_posts row carrying the same
+    // Mux playback id. Nothing created that row or that link, so every replay
+    // fell through to the fallback and navigated away. It is made here, where
+    // the VOD first exists, so a clinic is watchable in Learn as soon as its
+    // recording is saved.
+    //
+    // Titled "Live Practice Clinic: ..." like the others, which is also what
+    // keeps it out of Learn's own feed list: the event is the card, and this is
+    // what that card opens.
+    if (!ev.feed_post_id) {
+      try {
+        const postRes = await fetch(`${SUPABASE_URL}/rest/v1/content_feed_posts`, {
+          method: "POST",
+          headers: { ...supaHeaders, "Prefer": "return=representation" },
+          body: JSON.stringify([{
+            type: "post",
+            title: ev.title || "Live Practice Clinic",
+            body: "",
+            media: [{ type: "mux", playbackId: muxPlaybackId, assetId }],
+            published_at: ev.scheduled_at || new Date().toISOString(),
+            duration_seconds: ev.duration_mins ? ev.duration_mins * 60 : null
+          }])
+        });
+        const postRows = await postRes.json();
+        const postId = Array.isArray(postRows) && postRows[0] && postRows[0].id;
+        if (postId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/live_events?id=eq.${eid}`, {
+            method: "PATCH", headers: supaHeaders,
+            body: JSON.stringify({ feed_post_id: postId })
+          });
+          console.log("fetch-recording: replay post", postId, "linked to event", eid);
+        } else {
+          console.error("fetch-recording: replay post not created:", postRes.status, JSON.stringify(postRows).slice(0, 300));
+        }
+      } catch (e) {
+        // The recording is already saved and playable. The post is what makes it
+        // open in place, and failing to make it must not fail the save.
+        console.error("fetch-recording: replay post step failed:", e && e.message);
+      }
     }
 
     return json({ ok: true, muxAssetId: assetId, muxPlaybackId });
