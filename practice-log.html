@@ -11163,7 +11163,10 @@
       <div class="gm-backdrop" onclick="closeGoalsModal()"></div>
       <div class="gm-card" role="dialog" aria-modal="true" aria-label="Goals">
         <button type="button" class="gm-close" onclick="closeGoalsModal()" aria-label="Close">&times;</button>
-        <div class="gm-title">Goals</div>
+        <div class="gm-head">
+          <div class="gm-title">Goals</div>
+          <button type="button" class="gm-add" onclick="pgOpenForm()">+ Add goal</button>
+        </div>
         <div id="gm-body"></div>
       </div>
     </div>
@@ -14207,15 +14210,46 @@ function openGoalsModal() {
 function closeGoalsModal() {
   const m = document.getElementById('goals-modal');
   if (!m) return;
-  m.classList.remove('open');
-  m.classList.remove('gm-shown');
-  try { const c = m.querySelector('.gm-card'); if (c) c.style.transform = ''; } catch (e) {}
-  m.setAttribute('aria-hidden', 'true');
-  document.body.style.overflow = '';
-  document.removeEventListener('keydown', _goalsModalEsc);
-  /* the dashboard's goals card is a reading of what is in here, so it is
-     redrawn on the way out rather than going stale behind the panel */
-  try { if (typeof window._rebuildDashGoals === 'function') window._rebuildDashGoals(); } catch (e) {}
+  const finish = function () {
+    m.classList.remove('open');
+    m.classList.remove('gm-shown');
+    try { const c = m.querySelector('.gm-card'); if (c) c.style.transform = ''; } catch (e) {}
+    m.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    document.removeEventListener('keydown', _goalsModalEsc);
+    /* the dashboard's goals card is a reading of what is in here, so it is
+       redrawn on the way out rather than going stale behind the panel */
+    try { if (typeof window._rebuildDashGoals === 'function') window._rebuildDashGoals(); } catch (e) {}
+  };
+  /* On a phone it leaves the way it came: down, over a measured distance, and
+     the panel is not hidden until it has gone. Hiding it first is why it
+     vanished - display:none while a transform is mid-flight shows nothing. */
+  try {
+    const c = m.querySelector('.gm-card');
+    if (c && c.animate && window.innerWidth <= 768) {
+      let slow = false;
+      try { slow = !!window.__slowSheet; } catch (e) {}
+      const ms = slow ? 1200 : 260;
+      const dist = Math.max(120, Math.round(window.innerHeight - c.getBoundingClientRect().top));
+      const bd = m.querySelector('.gm-backdrop');
+      if (bd) bd.style.background = 'rgba(0,0,0,0)';
+      const an = c.animate(
+        [{ transform: 'none' }, { transform: 'translateY(' + dist + 'px)' }],
+        { duration: ms, easing: 'cubic-bezier(.4,0,.7,.2)', fill: 'forwards' }
+      );
+      let done = false;
+      const end = function () {
+        if (done) return; done = true;
+        try { an.cancel(); } catch (e) {}
+        if (bd) bd.style.background = '';
+        finish();
+      };
+      an.addEventListener('finish', end);
+      setTimeout(end, ms + 300);
+      return;
+    }
+  } catch (e) {}
+  finish();
 }
 function _goalsModalEsc(e) { if (e.key === 'Escape') closeGoalsModal(); }
 window.openGoalsModal = openGoalsModal;
@@ -20943,20 +20977,29 @@ function renderWeeklyGoalWidget() {
     : "";
   const streakChip = "";
 
+  /* THE WEEK IS A ROW, NOT A HERO.
+     It used to be a hero figure in the serif above a table of sans rows, with
+     its own chapter head and its own left edge, and the panel read as two
+     designs sharing a container. It is the same shape as everything else here
+     now: a category on the left, what it is, the reading on the right, the bar
+     under the title. The figure it used to be still exists on the dashboard,
+     which is where you read your week; this panel is where you set it. */
   el.innerHTML = `
-    <div class="wg-card wg-hero${done ? " wg-done" : ""}">
-      <div class="wg-header">
-        <span class="wg-title">Weekly Goal</span>
-        <button class="wg-edit-btn" onclick="startEditGoal()">${_pencilSVG} Edit</button>
-      </div>
-      <div class="wg-hero-body">
-        <div class="wg-hero-left">
-          <div class="wg-hero-num">${formatMinutes(weekMins)}<span class="wg-hero-num-sub"> / ${formatMinutes(goal)}</span></div>
-          <div class="wg-hero-status">${done ? `${_checkSVG} Goal reached this week!` : `${formatMinutes(remaining)} to go${isDefault ? " · default goal" : ""}`}${streakTxt}</div>
+    <div class="pg-goal-row wg-row${done ? " wg-done" : ""}" style="--pgc:#c99b1e">
+      <div class="pg-goal-header">
+        <span class="pg-tag">This week</span>
+        <div class="pg-body">
+          <div class="pg-goal-name">Practice time</div>
+          <div class="pg-goal-sub">${done ? `${_checkSVG} Reached this week` : `${formatMinutes(remaining)} to go${isDefault ? " &middot; default goal" : ""}`}${streakTxt}</div>
+          <div class="pg-track"><div class="pg-fill" style="width:${Math.max(pct, 2)}%;background:${done ? "#22c55e" : "var(--accent)"}"></div></div>
         </div>
-        ${streakChip}
+        <div class="pg-side">
+          <div class="pg-stat"><span>${formatMinutes(weekMins)}</span><em>of ${formatMinutes(goal)}</em></div>
+          <div class="pg-actions">
+            <button class="pg-icon-btn" onclick="startEditGoal()" title="Edit your weekly goal">${_pencilSVG}</button>
+          </div>
+        </div>
       </div>
-      <div class="wg-track"><div class="wg-fill" style="width:${pct}%"></div></div>
       <div id="wg-edit-area"></div>
     </div>`;
 }
@@ -21580,10 +21623,41 @@ function pgOpenForm() {
 }
 
 function pgCloseForm() {
-  _pgAddOpen  = false;
-  _pgSelPiece = null; _pgSelTech = null;
-  _pgLabelVal = ""; _pgDateVal = "";
-  renderPieceGoals();
+  /* On a phone the sheet leaves the way it arrived. The close is held until
+     the slide has run, because the close is a re-render that removes the sheet
+     from the page, and a sheet that is gone cannot animate. Measured, like the
+     way in: how far it is from the bottom of the screen, not a percentage of a
+     height it is about to lose. */
+  const _close = function () {
+    _pgAddOpen  = false;
+    _pgSelPiece = null; _pgSelTech = null;
+    _pgLabelVal = ""; _pgDateVal = "";
+    renderPieceGoals();
+  };
+  try {
+    const _m = document.querySelector('#pg-modal-backdrop .log-modal');
+    const _bd = document.getElementById('pg-modal-backdrop');
+    if (_m && _m.animate && window.innerWidth <= 768) {
+      let _slow = false;
+      try { _slow = !!window.__slowSheet; } catch (e) {}
+      const ms = _slow ? 1200 : 260;
+      const r = _m.getBoundingClientRect();
+      const dist = Math.max(120, Math.round(window.innerHeight - r.top));
+      if (_bd) _bd.style.background = 'rgba(0,0,0,0)';
+      const an = _m.animate(
+        [{ transform: 'none', opacity: 1 },
+         { transform: 'translateY(' + dist + 'px)', opacity: 0.85 }],
+        { duration: ms, easing: 'cubic-bezier(.4,0,.7,.2)', fill: 'forwards' }
+      );
+      let done = false;
+      const fin = function () { if (done) return; done = true; _close(); };
+      an.addEventListener('finish', fin);
+      /* and a floor: if the slide never runs, the sheet still closes */
+      setTimeout(fin, ms + 300);
+      return;
+    }
+  } catch (e) {}
+  _close();
 }
 
 async function pgHandleInput(val) {
@@ -32817,8 +32891,12 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   .gm-close{ position:absolute; top:12px; right:14px; width:32px; height:32px; border:none;
     background:var(--surface-2); border-radius:9px; font-size:1.3rem; line-height:1; color:var(--text-muted); cursor:pointer; }
   .gm-close:hover{ color:var(--text); }
-  .gm-title{ font-family:Fraunces,Georgia,serif; font-size:1.5rem; font-weight:700; letter-spacing:-.02em;
-    color:var(--text); margin:0 0 14px; }
+  .gm-head{ display:flex; align-items:center; gap:12px; margin:0 0 14px; padding-right:44px; }
+  .gm-title{ flex:1; font-family:Fraunces,Georgia,serif; font-size:1.5rem; font-weight:700;
+    letter-spacing:-.02em; color:var(--text); margin:0; }
+  .gm-add{ flex:0 0 auto; border:1px solid var(--border); background:#fff; border-radius:7px;
+    padding:7px 11px; font:700 .76rem/1 inherit; color:var(--text); cursor:pointer; }
+  .gm-add:hover{ background:var(--surface-2); }
   #gm-body > #lb-panel-goals{ display:block !important; margin-top:0 !important; padding-top:0 !important; }
   /* On a phone it is a sheet: it comes up from the bottom edge, holds the
      bottom edge, and takes the thumb rather than the middle of the screen.
@@ -32867,29 +32945,12 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     background:none !important; border:0 !important; border-radius:0 !important;
     box-shadow:none !important; padding:0 !important; margin:0 0 4px !important;
   }
-  /* CHAPTER HEAD. The app's, not a smaller cousin of it: the same Fraunces at
-     1.5rem, the same 3px bar drawn as a ::before, the same 1px rule with 28
-     above the words and 16 below, the same 18 of margin. It was 1.12rem with a
-     gold left border, which is the same idea said in different numbers, and
-     that drift is what makes a big app feel assembled rather than designed. */
-  #gm-body .wg-header{
-    display:flex !important; align-items:center !important; gap:11px !important;
-    margin:18px 0 0 !important; padding:26px 0 16px !important;
-    border:0 !important; border-top:1px solid var(--border) !important; background:none !important;
-  }
-  #gm-body .wg-header::before{
-    content:''; flex:0 0 auto; width:3px; height:36px; border-radius:3px;
-    background:color-mix(in srgb, var(--text) 22%, transparent);
-  }
-  #gm-body #weekly-goal-section .wg-header{
-    margin-top:0 !important; padding-top:0 !important; border-top:0 !important;
-  }
-  #gm-body .wg-title{
-    flex:1; font-family:Fraunces,Georgia,serif !important; font-size:1.5rem !important;
-    font-weight:700 !important; letter-spacing:-.02em !important; line-height:1 !important;
-    text-transform:none !important; color:var(--text) !important;
-    padding:0 !important; border:0 !important;
-  }
+  /* NO CHAPTER HEADS IN HERE. The panel is one list: the week, then your own
+     goals. Two heads meant the word Goals appeared four times in the first
+     screen - the panel, a chapter, a button, a link - and none of them
+     distinguished anything. The panel's own title is the name, and the one
+     action sits beside it. */
+  #gm-body .wg-header{ display:none !important; }
   #gm-body .wg-edit-btn{
     flex:0 0 auto; border:1px solid var(--border) !important; background:#fff !important;
     border-radius:7px !important; padding:7px 11px !important;
