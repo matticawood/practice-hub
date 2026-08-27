@@ -6370,6 +6370,15 @@
         margin-top:14px !important; padding-bottom:0 !important;
       }
       body.lb-dash #dashboard-content .dash-stage .dash-goals-all{ margin-top:13px !important; }
+      /* The link carries the same 13 as Browse all courses and View full feed,
+         but those sit under a list whose last row has 13 of its own padding
+         underneath it, so the gap you see is 26. This list had none, and the
+         link came out pressed against the goal above it. The list supplies its
+         own, rather than the link being given a different margin from the two
+         it is meant to match. */
+      body.lb-dash #dashboard-content .dash-stage #dash-goals-card .dgoal:last-of-type{
+        padding-bottom:13px !important;
+      }
 
       body.lb-dash #dashboard-content .dash-stage{
         display:grid !important;
@@ -7918,17 +7927,15 @@
            gap. Pin it to the bottom edge while staying scrollable when tall. */
         margin: auto 0 0 !important;
       }
-      /* Driven by a class rather than a keyframe. A keyframe whose first frame
-         is "off the bottom of the screen" leaves the sheet off the bottom of
-         the screen if it never runs - a re-render that swaps the element out
-         mid-animation, a throttled tab - and then it looks as though it simply
-         appeared. With a class the end state applies either way. */
-      .pg-modal-backdrop.pg-anim-open .log-modal{
-        animation:none !important;
-        transform:translateY(100%);
-        transition:transform .3s cubic-bezier(.22,.61,.36,1);
-      }
-      .pg-modal-backdrop.pg-anim-open.pg-shown .log-modal{ transform:none; }
+      /* No resting transform and no keyframe. The sheet's resting state IS
+         open, and the slide is played on it once, in script, at the moment it
+         lands in the body. Every CSS approach here failed the same way: the
+         element is built inside the panel and then moved to the body, and a
+         move restarts the box, so a rule whose first frame is "off the bottom
+         of the screen" could leave it parked there or blink it into place. An
+         animation played on the element that is already in its final position
+         cannot do either. */
+      .pg-modal-backdrop.pg-anim-open .log-modal{ animation:none !important; }
     }
     .pg-modal-x {
       background: none; border: none; cursor: pointer; font-size: 1.05rem;
@@ -21429,7 +21436,23 @@ function renderPieceGoals() {
   // still bind after the move.
   document.querySelectorAll("body > .pg-modal-backdrop").forEach(n => n.remove());
   const _pgRelocate = el.querySelector(".pg-modal-backdrop");
-  if (_pgRelocate) document.body.appendChild(_pgRelocate);
+  if (_pgRelocate) {
+    document.body.appendChild(_pgRelocate);
+    /* Played here, on the node that is now in the body and already sitting
+       where it belongs. Narrow screens only: on a desktop it is a centred
+       dialog, not a sheet. */
+    if (_pgJustOpened && window.innerWidth <= 768) {
+      const _m = _pgRelocate.querySelector(".log-modal");
+      if (_m && _m.animate) {
+        try {
+          _m.animate(
+            [{ transform: "translateY(100%)" }, { transform: "none" }],
+            { duration: 300, easing: "cubic-bezier(.22,.61,.36,1)" }
+          );
+        } catch (e) {}
+      }
+    }
+  }
 
   // Attach events
   document.getElementById("pg-add-btn")?.addEventListener("click", pgOpenForm);
@@ -21507,22 +21530,6 @@ function renderPieceGoals() {
 
   /* One frame at the closed position, then the class that brings it up, with a
      timeout behind it in case frames are being throttled. */
-  if (_pgJustOpened) {
-    const _bd = document.getElementById('pg-modal-backdrop');
-    if (_bd) {
-      requestAnimationFrame(() => requestAnimationFrame(() => _bd.classList.add('pg-shown')));
-      setTimeout(() => _bd.classList.add('pg-shown'), 90);
-      /* And a floor under it. The slide is a transition, and a transition that
-         never advances - a throttled tab, a device that has stopped animating -
-         leaves the sheet parked off the bottom of the screen. After the slide
-         should have finished, the sheet is put where it belongs whether it
-         travelled there or not. */
-      setTimeout(() => {
-        const m = _bd.querySelector('.log-modal');
-        if (m) m.style.transform = 'none';
-      }, 460);
-    }
-  }
   // Consumed by this render only — re-renders (category/type toggles) must not replay the sheet animation.
   _pgJustOpened = false;
 }
@@ -21536,11 +21543,6 @@ function pgOpenForm() {
 }
 
 function pgCloseForm() {
-  try {
-    const _bd = document.getElementById('pg-modal-backdrop');
-    const _m = _bd && _bd.querySelector('.log-modal');
-    if (_m) _m.style.transform = '';
-  } catch (e) {}
   _pgAddOpen  = false;
   _pgSelPiece = null; _pgSelTech = null;
   _pgLabelVal = ""; _pgDateVal = "";
