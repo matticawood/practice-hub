@@ -3875,6 +3875,14 @@
        wide layout turns it back into a real box. */
     .dash-rail { display: contents; }
 
+    /* The goals list carries a little of its own space under it, so All goals
+       is not pressed against the last goal. On the list rather than the last
+       row, because the wide layout hides the third goal and :last-of-type then
+       matches a row nobody can see. Six, not thirteen: the courses tiles it is
+       matching are twice the height of these rows, so the same figure reads
+       twice as big here. */
+    #dash-goals-card .dgoal-list { padding-bottom: 6px; }
+
     /* the Learn tiles that stand in for courses when there are none left: the
        same tile, without the progress a course would carry */
     .dcourse-note { color: var(--text-muted); font-size: .82rem; line-height: 1.5; margin: 0 0 14px; }
@@ -6376,12 +6384,7 @@
          link came out pressed against the goal above it. The list supplies its
          own, rather than the link being given a different margin from the two
          it is meant to match. */
-      /* On the list, not on the last row. The wide layout hides the third goal,
-         so :last-of-type matched a row nobody can see and the visible last one
-         got nothing. */
-      body.lb-dash #dashboard-content .dash-stage #dash-goals-card .dgoal-list{
-        padding-bottom:13px !important;
-      }
+
 
       body.lb-dash #dashboard-content .dash-stage{
         display:grid !important;
@@ -12942,6 +12945,7 @@ async function loadData() {
   const _gotoTab = (new URLSearchParams(location.search).get('goto') || '').trim();
   /* read before the boot tidies the query off the URL */
   window.__learnEmpty = new URLSearchParams(location.search).get('learnempty') === '1';
+  window.__slowSheet  = new URLSearchParams(location.search).get('slowsheet')  === '1';
   switchMainLbTab(
     (_gotoTab && _GOTO_TAB[_gotoTab]) ? _gotoTab
       : (_picked && _picked !== 'dashboard') ? _picked
@@ -21444,16 +21448,45 @@ function renderPieceGoals() {
     /* Played here, on the node that is now in the body and already sitting
        where it belongs. Narrow screens only: on a desktop it is a centred
        dialog, not a sheet. */
+    /* ?slowsheet=1 plays the slide over 1.6s, to answer one question: does it
+       move at all on this device. Temporary. */
     if (_pgJustOpened && window.innerWidth <= 768) {
+      var _slow = false;
+      try { _slow = new URLSearchParams(location.search).get('slowsheet') === '1' || !!window.__slowSheet; } catch (e) {}
       const _m = _pgRelocate.querySelector(".log-modal");
       if (_m && _m.animate) {
-        try {
-          _m.animate(
-            [{ transform: "translateY(100%)", opacity: 0.6 },
-             { transform: "none", opacity: 1 }],
-            { duration: 360, easing: "cubic-bezier(.22,.61,.36,1)" }
-          );
-        } catch (e) {}
+        /* Played one frame later, and over a distance MEASURED from the screen
+           rather than expressed as a percentage of the sheet.
+           translateY(100%) is 100% of the sheet's own height, and at the moment
+           it is created that height is not final - the content is still being
+           laid out - so the slide covered a few pixels and then the sheet grew
+           into place. That is the bounce: the travel was right, the distance
+           was wrong. Measured against the bottom edge of the screen it always
+           starts fully below it, whatever the sheet ends up holding. */
+        let _played = false;
+        const _play = function () {
+          if (_played) return;
+          _played = true;
+          try {
+            const r = _m.getBoundingClientRect();
+            const dist = Math.max(120, Math.round(window.innerHeight - r.top));
+            const _an = _m.animate(
+              [{ transform: "translateY(" + dist + "px)", opacity: 0.85 },
+               { transform: "none", opacity: 1 }],
+              { duration: _slow ? 1600 : 340, easing: "cubic-bezier(.22,.61,.36,1)" }
+            );
+            /* An animation that never advances holds its first frame, and this
+               one's first frame is off the bottom of the screen. If it has not
+               finished by the time it should have, it is cancelled, which drops
+               the sheet back to its base style - which is open, where it
+               belongs. Motion is worth having; a sheet nobody can see is not. */
+            setTimeout(function () {
+              try { if (_an.playState !== "finished") _an.cancel(); } catch (e) {}
+            }, (_slow ? 1600 : 340) + 400);
+          } catch (e) {}
+        };
+        requestAnimationFrame(_play);
+        setTimeout(_play, 50);
       }
     }
   }
