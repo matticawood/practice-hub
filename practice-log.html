@@ -5616,6 +5616,16 @@
     }
     body.rt-trail-mode #roadmap-content .rmp-prior:active{ color:var(--rmink); }
 
+    body.rt-trail-mode #roadmap-content .rmp-hidden{ display:none !important; }
+    /* "Show all eight" and its kind: a quiet full-width row that ends a list */
+    body.rt-trail-mode #roadmap-content .rmp-more{
+      display:block; width:100%; margin:2px 0 0; padding:14px var(--rmg);
+      background:none; border:0; border-top:1px solid var(--rmline);
+      font:inherit; font-size:.86rem; font-weight:700; color:#f5c518;
+      text-align:left; cursor:pointer;
+    }
+    body.rt-trail-mode #roadmap-content .rmp-more:active{ opacity:.7; }
+
     /* ── the four areas ── */
     /* The journey card's rows carry a card's own outdent. In a chapter there is
        no card to outdent from, so they ran past the gutter on both sides. */
@@ -32533,8 +32543,40 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
             + escHtml(r.label) + '</span>').join('')
         + '</div></div>';
       wrap.insertBefore(note('The areas do not need the same hours, so each one is measured against what this level asks of it. The line is where it should be.'), wrap.firstChild);
-      if (worst && worst.pct < 100) wrap.appendChild(note('<b>' + escHtml(worst.label)
-        + ' is furthest behind</b>, at ' + worst.pct + '% of what ' + escHtml(lv.name) + ' asks for.'));
+      /* The reading, not just the number. Which area is furthest behind, how the
+         others stand against the same line, and how much of this level's work
+         is in that area - which is the part that says what to do about it.
+         Every clause is computed, so it says whatever is true for this member:
+         one behind or three, objectives in that area or none. */
+      if (worst && worst.pct < 100) {
+        const others = rows.filter(r => r.k !== worst.k);
+        const ok = others.filter(r => r.pct >= 100);
+        const alsoBehind = others.filter(r => r.pct < 100);
+        let line = '<b>' + escHtml(worst.label) + ' is furthest behind</b>, at ' + worst.pct
+          + '% of what ' + escHtml(lv.name) + ' asks for';
+        if (!alsoBehind.length) {
+          line += ', while your other ' + (others.length === 3 ? 'three' : others.length)
+            + ' areas are at or above it.';
+        } else if (alsoBehind.length === 1) {
+          line += ', and ' + escHtml(alsoBehind[0].label) + ' is behind too, at ' + alsoBehind[0].pct + '%.';
+        } else {
+          line += ', with ' + escHtml(alsoBehind.map(r => r.label).join(' and '))
+            + ' behind as well.' + (ok.length ? ' ' + escHtml(ok.map(r => r.label).join(' and '))
+            + (ok.length === 1 ? ' is' : ' are') + ' at or above the line.' : '');
+        }
+        /* How many of this level's objectives sit in that area: the sentence
+           ends by pointing at the work, not at the gap. */
+        const AREA_OF = { piece:'repertoire', scales:'technique', minors:'technique', arps:'technique',
+          arpsmin:'technique', sightread:'sight_reading', note:'musicianship', chord:'musicianship',
+          ear:'musicianship', interval:'musicianship', theory:'musicianship' };
+        const inArea = (parts.goals || []).filter(g => AREA_OF[g.group] === worst.k).length;
+        if (inArea) {
+          const N = ['no','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'][inArea] || inArea;
+          line += ' ' + N + ' of this level\'s objectives ' + (inArea === 1 ? 'is a ' : 'are ')
+            + escHtml(worst.label.toLowerCase()) + (inArea === 1 ? ' one.' : ' ones.');
+        }
+        wrap.appendChild(note(line));
+      }
       trail.parentNode.insertBefore(head('Your four areas', behind.length ? behind.length + ' behind' : 'all keeping pace'), trail);
       trail.parentNode.insertBefore(wrap, trail);
     }
@@ -32563,6 +32605,30 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       h.classList.add('rmp-head-levels');
       trail.parentNode.insertBefore(h, trail);
     }
+    // ── the spine is not the whole ladder ────────────────────────────────
+    // Eight levels is a reference table, and someone opening this page wants
+    // the two behind them and the one ahead, not all eight. The rest are one
+    // tap away and nothing is removed.
+    (function () {
+      const stops = [...trail.querySelectorAll('.rt-stop')];
+      if (stops.length < 6 || trail.dataset.trimmed) return;
+      trail.dataset.trimmed = '1';
+      const cur = stops.findIndex(n => n.classList.contains('current'));
+      const at = cur < 0 ? 0 : cur;
+      const from = Math.max(0, Math.min(at - 2, stops.length - 4));
+      const to = from + 4;
+      stops.forEach((n, i) => { if (i < from || i >= to) n.classList.add('rmp-hidden'); });
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'rmp-more';
+      more.textContent = 'Show all ' + (stops.length === 8 ? 'eight' : stops.length);
+      more.onclick = () => {
+        stops.forEach(n => n.classList.remove('rmp-hidden'));
+        more.remove();
+      };
+      trail.parentNode.insertBefore(more, trail.nextSibling);
+    })();
+
     /* The heading and the trail are one thing, so on a wide screen they can be
        one column that runs from the top rather than two items that have to wait
        for the row above them to finish. */
@@ -32572,6 +32638,8 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
       trail.parentNode.insertBefore(rail, el.querySelector('.rmp-head-levels'));
       rail.appendChild(el.querySelector('.rmp-head-levels'));
       rail.appendChild(trail);
+      const _more = el.querySelector('.rmp-more');
+      if (_more) rail.appendChild(_more);
     }
   }
 
