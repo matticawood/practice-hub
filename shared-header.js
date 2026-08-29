@@ -2121,6 +2121,13 @@ function _shPalScheduleSearch(q) {
    post is the only type that still calls the feed page home. */
 function _shPalContentHref(a) {
   if (a.type === "youtube") return "/learn.html?post=" + encodeURIComponent(a.id);
+  /* A Monday Music Tips article is a library item too: it opens in the app's
+     reader, which is where Learn sends it. */
+  if (a.type === "blog") {
+    var m = /monday-music-tips\/([^/?#]+)/.exec(a.url || "");
+    return m ? "/theory/sheets/view.html?mmt=" + encodeURIComponent(m[1])
+             : "/learn.html?post=" + encodeURIComponent(a.id);
+  }
   return "/content-feed.html?post=" + a.id;
 }
 
@@ -2142,7 +2149,7 @@ async function _shPalRemoteSearch(query, navHits) {
     try {
       // Clinics carry a post row only so their comments share one table; the
       // clinic itself is found through Live, not through this palette.
-      const r = await _shPalDb.from("content_feed_posts").select("id,title,type")
+      const r = await _shPalDb.from("content_feed_posts").select("id,title,type,url")
         .not("type", "in", '("clinic","blog")')
         .ilike("title", "%" + esc + "%").order("published_at", { ascending: false }).limit(6);
       content = r.data || [];
