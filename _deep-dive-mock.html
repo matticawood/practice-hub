@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>The deep dive — analytics board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   THE DEEP DIVE — an analytics board.
+
+   Progress is the overview and the quick look. This is under the bonnet: every
+   stat the account can compute, on one board, for the members who want to go
+   looking.
+
+   WHAT THE LAST TWO PASSES GOT WRONG. Both built a page with one subject: you
+   picked a piece and every panel reshaped to it, so choosing a piece deleted
+   everything about the player and choosing nothing left a thin page. That is a
+   deep dive inside a deep dive, and it is not what this is.
+
+   WHAT IT IS. Every stat, and every one of them carries ITS OWN controls:
+
+     · its own time horizon, so the board can hold "hours in the last 30 days"
+       next to "how the four areas have moved over a year"
+     · its own focus where the stat has one, so time takes a piece, accuracy
+       takes a trainer, share takes an area, app time takes a surface
+
+   Nothing here is global. Setting a piece on the repertoire table does not
+   touch the skills tiles, because "how long have I spent on the Ballade" and
+   "is my chord reading improving" are two questions asked at the same time by
+   the same person, and a page with one selected subject can only answer one.
+
+   Covers practice, repertoire, skills, theory, the roadmap, app usage, the
+   community comparison and the searchable session record with the member's
+   own notes.
+
+   Values are measured off the live page, not approximated. Chapter head
+   Fraunces 24/700/-.02em over a 1px rgba(255,255,255,.11) rule, 26 above the
+   words and 16 below, 18 margin-top, 3x24 bar as a flex item, 11px gap. Notes
+   #b7b4bd. Gold #f5c518. Radii 7 / 9 / 12. Ground #0b0b0e with the page's own
+   indigo cast. Tiles take the app's tile treatment: a hairline above each cell
+   and one down the middle, no gap and no fill, because nothing on the three
+   dark pages is in a card. Data is this account's real data.
+   ───────────────────────────────────────────────────────────────────────── */
+:root{
+  --ink:#f4f4f6; --dim:#b7b4bd; --dim2:#93939e; --line:rgba(255,255,255,.11);
+  --bg:#0b0b0e; --lift:rgba(255,255,255,.05);
+  --gold:#f5c518; --tec:#6366f1; --sig:#10b981; --mus:#a855f7;
+  --behind:#f87171; --ahead:#34d399;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --serif:Fraunces,Georgia,serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#050507;color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;font-size:16px;line-height:1.6}
+
+/* the mock's own scaffolding, not part of the design */
+.stage{max-width:1500px;margin:0 auto;padding:30px 24px 90px}
+.plabel{font-family:var(--serif);font-size:1.15rem;font-weight:700;margin:0 0 4px}
+.psub{margin:0 0 14px;font-size:.8rem;color:var(--dim2)}
+
+/* the ground, with the page's own light: not a flat fill */
+/* NO overflow:hidden ON THE DESKTOP FRAME. It was there to clip the rounded
+   corners, and it silently broke the rail: any ancestor whose overflow is not
+   visible becomes the scroll container for its descendants, so position:sticky
+   had nothing to stick to and the rail simply scrolled away with the page.
+   The phone frame keeps it, because that one genuinely scrolls inside itself. */
+.frame{container-type:inline-size;background:var(--bg);position:relative;z-index:0;
+  border:1px solid rgba(255,255,255,.09);border-radius:14px}
+.frame--desk{overflow:visible}
+.frame--phone{overflow-y:auto;overflow-x:hidden}
+.frame::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  border-radius:14px;overflow:hidden;
+  background:radial-gradient(58% 24% at 92% 2%, rgba(99,102,241,.13), transparent 64%)}
+.frame--desk{width:100%}
+.frame--phone{width:390px;height:860px;scrollbar-width:thin}
+.frame--phone::-webkit-scrollbar{width:4px}
+.frame--phone::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+.wrap{padding:32px 28px 60px}
+@container (max-width:760px){ .wrap{padding:22px 20px 48px} }
+
+/* the chapter head, exactly as .pc-head builds it */
+.sec{display:flex;align-items:center;gap:11px;margin:18px 0 0;padding:26px 0 16px;
+  border-top:1px solid var(--line)}
+.sec::before{content:"";display:block;flex:0 0 auto;width:3px;height:24px;
+  border-radius:3px;background:#4a4a56}
+.sec h2{margin:0;font-family:var(--serif);font-size:1.5rem;font-weight:700;
+  letter-spacing:-.02em;line-height:1;color:var(--ink)}
+.sec em{margin-left:auto;font-style:normal;font-size:.86rem;font-weight:600;
+  color:var(--dim2);display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.sec em::before{content:"";width:4px;height:4px;border-radius:50%;
+  background:currentColor;opacity:.55;flex:none}
+.sec--first{border-top:0;margin-top:0;padding-top:0}
+.note{margin:0 0 6px;font-size:.82rem;line-height:1.5;color:var(--dim);max-width:78ch}
+.note b{color:var(--ink);font-weight:700}
+
+.back{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:0;
+  color:var(--dim2);font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:16px}
+h1{margin:0 0 6px;font-family:var(--serif);font-size:2.6rem;font-weight:700;letter-spacing:-.025em;line-height:1}
+.sub{margin:0 0 20px;font-size:.98rem;font-weight:600;color:var(--dim);max-width:70ch}
+@container (max-width:760px){ h1{font-size:2rem} .sub{font-size:.88rem} }
+
+/* ── the board's one global control ───────────────────────────────────────
+   A DEFAULT, NOT A FILTER. It sets the horizon every tile STARTS on. Each tile
+   then keeps its own, so the board can hold thirty days of practice next to a
+   year of area balance without one choice fighting the other. */
+/* TWO RULES AT THE TOP, 32px APART. This drew a border-bottom and the first
+   chapter below it drew a border-top, so the board opened on a double line
+   with nothing between them. The chapter's own rule is the one that means
+   something, so this one goes. */
+.board-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;padding:0 0 4px}
+.board-ctl > span{font-size:.66rem;font-weight:800;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--dim2)}
+.rangebar{display:flex;gap:2px;background:rgba(255,255,255,.06);border-radius:9px;padding:3px}
+.rangebar button{border:0;background:none;padding:5px 10px;border-radius:7px;color:#b4b0ba;
+  font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.rangebar button.on{background:var(--gold);color:#141410}
+.ghost{height:32px;padding:0 12px;border-radius:9px;border:1px solid rgba(255,255,255,.14);
+  background:none;color:var(--dim);font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer}
+.ghost--add{border-style:dashed}
+@container (max-width:760px){
+  .board-ctl{gap:10px}
+  .rangebar{display:grid;grid-template-columns:repeat(7,1fr);width:100%}
+  .rangebar button{text-align:center;padding:6px 2px;font-size:.68rem}
+  .ghost{flex:1 1 auto}
+}
+
+/* ── the tile layout ──────────────────────────────────────────────────────
+   COLUMNS, NOT A GRID, AND THIS IS THE FIX FOR THE WHOLE PAGE. Measured, five
+   tiles were half empty and the worst were at 50% fill: Theory held 174px of
+   content in a 351px box, Rotation 145 in 291. None of that was a content
+   problem. A grid row is as tall as its tallest cell, so every short tile was
+   stretched to match whatever happened to sit beside it and the difference
+   came out as a hole. Padding them with filler would have been inventing data
+   to fix a layout bug.
+   Multi-column lets each tile be exactly as tall as it is and packs the next
+   one under it, so there is no dead space anywhere by construction. It also
+   gives the rule down the middle natively, as column-rule, which is the one
+   hairline this layout actually needs. */
+.tiles{columns:2;column-gap:52px;column-rule:1px solid var(--line)}
+.tiles--3{columns:3;column-gap:40px;column-rule:1px solid var(--line)}
+@container (max-width:900px){ .tiles,.tiles--3{columns:1;column-rule:0} }
+/* No rule between tiles at all now. The column rule separates left from
+   right, and 34px of space separates one tile from the next down a column,
+   which is what took the page from 105 hairlines to a handful. */
+.tile{break-inside:avoid;padding:4px 0 34px;min-width:0}
+@container (max-width:900px){ .tile{padding:4px 0 30px} }
+/* A FULL-WIDTH BLOCK IS NOT A GRID CHILD. Putting one inside .tiles with
+   grid-column:1/-1 left it occupying child slot 1, so every tile after it took
+   the padding and the middle rule of the OTHER column: Rotation sat in column
+   one wearing column two's left padding, and Longest untouched sat in column
+   two wearing column one's right border, which is why their contents collided.
+   Wide blocks sit between the grids instead, so nth-child never lies. */
+.block{border-top:1px solid var(--line);padding:16px 0 22px;min-width:0}
+
+/* the tile's own head: its name, and its own controls */
+.th{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.th h3{margin:0;font-size:.92rem;font-weight:700;color:var(--ink);min-width:0}
+.th .tctl{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+/* Twenty-eight bordered selects read as twenty-eight more boxes. A control
+   can be a field without being outlined. */
+.mini{height:26px;padding:0 22px 0 8px;border-radius:7px;
+  border:0;background-color:rgba(255,255,255,.08);
+  color:var(--dim);font-family:inherit;font-size:.7rem;font-weight:700;
+  -webkit-appearance:none;appearance:none;cursor:pointer;max-width:100%;
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393939e' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 6px center;background-size:11px}
+.mini option,.mini optgroup{background:#1b1b20;color:var(--ink)}
+.mini--focus{color:var(--ink);border-color:rgba(255,255,255,.24)}
+
+/* the tile's headline figure and its change */
+.big{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.big b{font-size:1.7rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.delta{font-size:.76rem;font-weight:700}
+.delta.up{color:var(--ahead)} .delta.down{color:var(--behind)} .delta.flat{color:var(--dim2);font-weight:600}
+.cap{margin:6px 0 0;font-size:.74rem;font-weight:600;color:var(--dim2)}
+.cap b{color:var(--dim);font-weight:700}
+
+/* small charts */
+svg text{font-family:var(--sans)}
+.gl{stroke:rgba(255,255,255,.09);stroke-width:1;shape-rendering:crispEdges}
+.gl0{stroke:rgba(255,255,255,.18)}
+.yl,.xl{font-size:9px;fill:var(--dim2);font-weight:600}
+.yl{text-anchor:end}.xl{text-anchor:middle}
+.spark{display:block;margin-top:12px}
+
+/* ranked bars inside a tile */
+.rank{display:block;margin-top:10px}
+.rrow{display:grid;grid-template-columns:minmax(0,7.5rem) 1fr 4.2rem;gap:10px;align-items:center;padding:7px 0}
+.rn{font-size:.78rem;font-weight:700;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rb{height:6px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.rb i{display:block;height:100%;border-radius:3px;background:#4a4a56}
+.rv{text-align:right;font-size:.76rem;font-weight:600;color:var(--dim2);font-variant-numeric:tabular-nums}
+
+/* a real table inside a wide tile */
+.tbl{display:block;margin-top:6px}
+.tr{display:grid;grid-template-columns:minmax(0,1fr) 4.6rem 4rem 5rem 5rem 4.4rem;
+  gap:10px;align-items:baseline;padding:10px 0;border-top:1px solid var(--line)}
+@container (max-width:900px){
+  .tr{grid-template-columns:minmax(0,1fr) 4.4rem 4.4rem}
+  .tr > *:nth-child(n+4){display:none}
+}
+.tr:first-child{border-top:0}
+.tr > span{font-size:.8rem;color:var(--dim2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr > span:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
+.tr b{font-weight:700;color:var(--ink);font-size:.84rem}
+.th-row > span{font-size:.64rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase;opacity:.85}
+.th-row button{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer}
+.th-row button.on{color:var(--ink);text-decoration:underline;text-underline-offset:4px}
+.more{display:block;margin-top:12px;background:none;border:0;padding:0;
+  font-family:inherit;font-size:.78rem;font-weight:700;color:var(--gold);cursor:pointer}
+
+/* the session finder, a wide tile */
+.fsearch{position:relative;margin:4px 0 12px;max-width:520px}
+.fsearch input{width:100%;height:36px;padding:0 12px 0 34px;border-radius:9px;
+  border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);
+  color:var(--ink);font-family:inherit;font-size:.82rem;font-weight:600;-webkit-appearance:none}
+.fsearch input::placeholder{color:#85838d;font-weight:500}
+.fsearch svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--dim2)}
+.lrow{display:grid;grid-template-columns:6rem 1fr;gap:0 18px;padding:13px 0;border-top:1px solid var(--line)}
+@container (max-width:900px){ .lrow{grid-template-columns:minmax(0,1fr);gap:5px 0} }
+.ldate{font-size:.8rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.lday{font-size:.68rem;font-weight:600;color:var(--dim2)}
+.lnote{margin:0;font-size:.85rem;line-height:1.5;color:var(--dim)}
+.lnote mark{background:rgba(245,197,24,.22);color:var(--ink);border-radius:3px;padding:0 2px}
+.ltags{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:7px;
+  background:rgba(255,255,255,.07);color:var(--dim)}
+
+/* heat map */
+.heat{display:grid;grid-template-columns:repeat(15,1fr);gap:5px;margin-top:16px}
+.heat i{aspect-ratio:1;border-radius:4px;background:rgba(255,255,255,.06)}
+.heat i.l1{background:rgba(245,197,24,.28)}
+.heat i.l2{background:rgba(245,197,24,.55)}
+.heat i.l3{background:rgba(245,197,24,.85)}
+
+/* comparison to other members */
+.vs{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:8px 0}
+.vs-n{font-size:.78rem;font-weight:700;color:var(--dim)}
+.vs-bar{grid-column:1/-1;height:6px;border-radius:3px;background:rgba(255,255,255,.07);position:relative}
+.vs-bar i{position:absolute;top:0;bottom:0;border-radius:3px;background:#4a4a56}
+.vs-bar u{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);border-radius:1px}
+.vs-v{font-size:.76rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* ── ONE ENCODING PER NEIGHBOUR ───────────────────────────────────────────
+   Eight tiles in a row were the same ranked bar list, which is the thing the
+   research is clearest about: the same shape repeated stops being read. Each
+   tile now carries the encoding its data actually wants, and no two touching
+   tiles share one. Line, heat map, stacked band, histogram, lollipops, gauge,
+   pictogram, timeline, small multiples, waffle, ladder, treemap.
+
+   AND THE COLOURS COME FROM THE SOURCE. A trainer is drawn in its own tc from
+   tools.html, a course in its own colour from course-catalogue.js, an area in
+   the roadmap's colour. Nothing invents a palette:
+     Note Recognition #10b981 · Chord Recognition #8b5cf6
+     Chord Ear Training #ec4899 · Interval Training #0ea5e9
+     Passage Fixer #14b8a6 · Metronome #f97316
+     Music Theory #10b981 · Ear Training #ec4899 · Improvisation #f97316
+     Repertoire #f5c518 · Technique #6366f1 · Sight-reading #10b981 · Musicianship #a855f7 */
+
+/* one 100% band, not a list of bars */
+.stack{display:flex;height:18px;border-radius:9px;overflow:hidden;margin-top:14px}
+.stack i{display:block;min-width:2px}
+.stackkey{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:14px}
+.stackkey span{font-size:.74rem;font-weight:700;color:var(--dim);display:inline-flex;align-items:center;gap:7px}
+.stackkey b{color:var(--ink);font-variant-numeric:tabular-nums}
+.stackkey i{width:9px;height:9px;border-radius:2px;flex:none}
+
+/* lollipops for the week */
+.pops{margin-top:12px}
+
+/* a gauge for a rating out of five */
+.gauge{display:flex;align-items:center;gap:22px;margin-top:6px;flex-wrap:wrap}
+.gauge-body{flex:1 1 200px;min-width:0}
+.gauge-fig b{font-size:1.9rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.gauge-fig span{display:block;margin-top:3px;font-size:.72rem;font-weight:600;color:var(--dim2)}
+.bands{display:flex;justify-content:space-between;gap:10px 22px;flex-wrap:wrap;margin-top:16px}
+.bands span{font-size:.72rem;font-weight:600;color:var(--dim2);display:flex;flex-direction:column}
+.bands b{font-size:1rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* a pictogram: one mark per piece */
+.dots{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}
+.dots i{width:26px;height:26px;border-radius:6px;background:rgba(255,255,255,.09)}
+.dotkey{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:14px}
+.dotkey span{font-size:.74rem;font-weight:700;color:var(--dim);display:inline-flex;align-items:center;gap:7px}
+.dotkey i{width:10px;height:10px;border-radius:3px;flex:none}
+.dotkey b{color:var(--ink)}
+
+/* a timeline, because "how long ago" is a position not a length */
+/* a ranked row, because that is what a ranking is */
+.unt{margin-top:10px}
+.urow{display:grid;grid-template-columns:minmax(0,1fr) 5.5rem 3rem;gap:12px;align-items:center;padding:8px 0}
+.un{font-size:.8rem;font-weight:700;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ub{height:6px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.ub i{display:block;height:100%;border-radius:3px;background:#f87171}
+.uv{text-align:right;font-size:.78rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.tl{position:relative;margin:22px 0 4px;height:96px}
+.tl-axis{position:absolute;left:0;right:0;top:6px;height:1px;background:rgba(255,255,255,.16)}
+.tl-pt{position:absolute;top:1px;width:11px;height:11px;border-radius:50%;transform:translateX(-50%);
+  border:2px solid var(--bg)}
+.tl-end{position:absolute;top:20px;font-size:.64rem;font-weight:700;color:var(--dim2)}
+.tl-list{position:absolute;top:40px;left:0;right:0;margin:0;display:flex;flex-wrap:wrap;gap:6px 16px}
+.tl-list span{font-size:.74rem;font-weight:700;color:var(--dim);display:inline-flex;align-items:center;gap:7px}
+.tl-list i{width:9px;height:9px;border-radius:50%;flex:none}
+.tl-list b{color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* small multiples: four little lines rather than four bars */
+/* Four rows inside one tile do not need ruling off from each other. */
+.sm-row{display:grid;grid-template-columns:minmax(0,8.6rem) 1fr 3.2rem;gap:12px;align-items:center;
+  padding:11px 0}
+.sm-n{font-size:.8rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sm-n u{display:block;text-decoration:none;font-size:.66rem;font-weight:600;color:var(--dim2)}
+.sm-v{text-align:right;font-size:.86rem;font-weight:700;font-variant-numeric:tabular-nums}
+.sm-v u{display:block;text-decoration:none;font-size:.64rem;font-weight:600;color:var(--dim2)}
+
+/* a waffle: 33 lessons, and you can count them */
+/* Eleven columns capped at 250px left this pinned to the left of a tile twice
+   that wide. Thirty-three lessons in one strip fills the tile and is still
+   countable, which is the whole reason for drawing them as marks. */
+.waffle{display:grid;grid-template-columns:repeat(33,1fr);gap:4px;margin-top:16px}
+.waffle i{aspect-ratio:1;border-radius:3px;background:rgba(255,255,255,.08)}
+
+/* the roadmap's own ladder, eight segments an area */
+.lad{display:grid;grid-template-columns:minmax(0,6.6rem) 1fr 2.6rem;gap:12px;align-items:center;
+  padding:11px 0}
+.lad-n{font-size:.78rem;font-weight:700;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lad-seg{display:flex;gap:3px}
+.lad-seg i{flex:1 1 0;height:11px;border-radius:2px;background:rgba(255,255,255,.09)}
+.lad-seg i.cur{background:linear-gradient(to right,var(--c) var(--p),rgba(255,255,255,.09) var(--p));
+  box-shadow:0 0 0 1.5px var(--c)}
+.lad-v{text-align:right;font-size:.76rem;font-weight:700;color:var(--ink)}
+
+/* a treemap: area is the quantity, so a long thin bar is not needed */
+/* LABEL AND VALUE ON ONE LINE. Stacked, the short blocks were only a third of
+   132px tall and overflow:hidden ate the label, so on a phone the treemap read
+   "2h 05m" and "40m" with no idea what either was. Side by side, a block only
+   needs one line's height, which every block has at any size. */
+.tree{display:grid;gap:5px;margin-top:16px;height:150px;
+  grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(4,1fr)}
+@container (max-width:900px){ .tree{height:190px} }
+.tree div{border-radius:7px;padding:9px 11px;display:flex;align-items:baseline;
+  justify-content:space-between;gap:10px;min-width:0;overflow:hidden}
+.tree b{font-size:.76rem;font-weight:700;color:var(--ink);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tree span{font-size:.74rem;font-weight:700;color:var(--ink);opacity:.8;
+  font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+
+/* a fortnight of marks under the streak figure */
+.strip{display:grid;grid-template-columns:repeat(14,1fr);gap:5px;margin-top:18px}
+.strip i{aspect-ratio:1;border-radius:4px;background:rgba(255,255,255,.07)}
+.strip i.on{background:#f5c518}
+/* the three most recent achievements, in their own areas' colours */
+.ach{margin-top:16px;display:flex;flex-direction:column;gap:11px}
+.ach span{display:flex;align-items:center;gap:9px;font-size:.78rem;font-weight:700;color:var(--dim)}
+.ach i{width:10px;height:10px;border-radius:3px;flex:none}
+.ach u{margin-left:auto;text-decoration:none;font-size:.7rem;font-weight:600;color:var(--dim2)}
+/* the roadmap ladders, given room as the lead of their section */
+.lads{margin-top:6px}
+.lad{grid-template-columns:minmax(0,9rem) 1fr 8.5rem;padding:13px 0}
+.lad-v u{display:block;text-decoration:none;font-size:.68rem;font-weight:600;color:var(--dim2);margin-top:2px}
+.lad-v{text-align:right;line-height:1.25}
+.lad-seg i{height:14px;border-radius:3px}
+@container (max-width:760px){ .lad{grid-template-columns:minmax(0,7rem) 1fr 6rem} }
+
+/* the theory ring beside its detail */
+.ringrow{display:flex;align-items:center;gap:22px;margin-top:10px;flex-wrap:wrap}
+.ringbody{flex:1 1 190px;min-width:0}
+
+/* ── the comparison scale ─────────────────────────────────────────────────
+   A band for the middle half, a marker for you, and the verdict in colour. */
+.scale{display:grid;grid-template-columns:minmax(0,12rem) 1fr 8.5rem;gap:6px 18px;
+  align-items:center;padding:15px 0;border-top:1px solid var(--line)}
+.scale:first-of-type{border-top:0}
+@container (max-width:760px){
+  .scale{grid-template-columns:minmax(0,1fr) 6.5rem}
+  .sc-track{grid-column:1/-1;order:3}
+  .sc-lo,.sc-hi{order:4}
+}
+.sc-n{font-size:.86rem;font-weight:700;color:var(--ink)}
+.sc-track{position:relative;height:10px;border-radius:5px;background:rgba(255,255,255,.06)}
+.sc-track i{position:absolute;top:0;bottom:0;border-radius:5px;
+  background:linear-gradient(90deg,rgba(99,102,241,.45),rgba(168,85,247,.45))}
+.sc-track u{position:absolute;top:-5px;bottom:-5px;width:4px;border-radius:2px;background:#f5c518;
+  box-shadow:0 0 0 3px rgba(11,11,14,.9)}
+.sc-track u.low{background:#f87171}
+.sc-v{text-align:right;font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.sc-v u{display:block;text-decoration:none;font-size:.68rem;font-weight:700;margin-top:2px}
+.sc-v.good{color:#34d399} .sc-v.bad{color:#f87171}
+.sc-lo,.sc-hi{grid-column:2;font-size:.66rem;font-weight:600;color:var(--dim2);margin-top:-2px}
+.sc-lo{justify-self:start} .sc-hi{justify-self:end;grid-row:auto}
+/* the two halves of "what you keep", side by side */
+.keep{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:34px;align-items:start}
+@container (max-width:900px){ .keep{grid-template-columns:minmax(0,1fr);gap:26px} }
+/* every course, each in its own colour */
+.clist{margin-top:18px;display:flex;flex-direction:column;gap:12px}
+.clist span{display:grid;grid-template-columns:auto minmax(0,9.5rem) 1fr 3.4rem;gap:10px;
+  align-items:center;font-size:.8rem;font-weight:700;color:var(--dim)}
+.clist i{width:10px;height:10px;border-radius:3px}
+.clist em{height:6px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden;display:block}
+.clist em b{display:block;height:100%;border-radius:3px}
+.clist u{text-decoration:none;text-align:right;font-size:.74rem;font-weight:600;color:var(--dim2);
+  font-variant-numeric:tabular-nums}
+@container (max-width:900px){ .clist span{grid-template-columns:auto minmax(0,1fr) 3.4rem}
+  .clist em{display:none} }
+
+/* ── THE APP'S OWN STAGE, WHICH IS WHAT THIS SHOULD HAVE BEEN ─────────────
+   The board was one full-width run of tiles, which reads as a deck of slides
+   rather than a page in this app. Dashboard, Roadmap and Progress all use one
+   main column with a sticky rail that scrolls itself, and the deep dive uses
+   the same one, to the same measured values: 1fr beside clamp(340px,26vw,480px),
+   a clamp(44px,3.4vw,64px) gutter, the rail pinned 22 from the top and as tall
+   as the screen less that margin top and bottom.
+   The wide work goes in the reading column: the charts, the piece table, the
+   ladders, the tools, the session record. The compact figures go in the rail,
+   which is what a rail is for. */
+.stage2{display:block}
+.mainc,.railc{min-width:0}
+@container (min-width:1100px){
+  .stage2{display:grid;grid-template-columns:minmax(0,1fr) clamp(340px,26vw,420px);
+    column-gap:clamp(44px,3.4vw,60px);align-items:start}
+  /* SCROLL, THEN STICK. Pinned to the top with its own max-height, the rail
+     stuck the instant the page moved and grew a second scrollbar inside it, so
+     you had to scroll a panel inside a scrolling page to reach the bottom of a
+     column. Anchored to the BOTTOM instead, a rail taller than the screen
+     travels up with the page normally until its last row is in view, and only
+     then pins, which is what a long rail should do. No inner scrollbar, and
+     nothing in it is unreachable.
+     SCROLL, THEN PIN, AND THE OFFSET HAS TO BE NEGATIVE. Three attempts got
+     this wrong and the measurements said so each time:
+
+       top:22px            pins the moment the page moves, and needs a second
+                           scrollbar inside the rail to reach its own bottom
+       top + bottom        the spec gives top the win for a box taller than
+                           the scrollport, so it behaves as above
+       bottom:22px alone   never engages going DOWN at all. A bottom-anchored
+                           sticky box is pushed UP, and that shift is clamped
+                           by the top of its containing block, so it just
+                           scrolls past. Measured: bottom edge 1154 at 1200 of
+                           scroll and 568 at 1800, when pinning would have held
+                           it at 871 both times. bottom: is for keeping a box
+                           in view as you scroll UP past it.
+
+     What actually does it is a NEGATIVE top: the rail pins when its own top
+     has travelled (railHeight - viewportHeight + 22) above the viewport, which
+     is exactly the moment its last row reaches the bottom of the screen. That
+     depends on two measured heights, so it cannot be written in CSS alone and
+     is set from script on load and on resize. A rail SHORTER than the screen
+     takes a plain 22px and pins immediately, which is right for a short one.
+     The outer column stretches the full row so the inner has somewhere to
+     travel; align-self:start collapsed it and left no room at all. */
+  .railc{align-self:stretch}
+  .railin{position:sticky;top:22px;padding-bottom:10px}
+}
+/* in a single column each analysis gets the full measure, so the charts are
+   drawn at a size worth reading rather than squeezed two to a row */
+.mainc .tile,.mainc .block{padding:4px 0 34px}
+.railc .tile{padding:4px 0 26px}
+.railc .sec{margin-top:14px;padding:22px 0 14px}
+.railc .sec h2{font-size:1.24rem}
+.railc .big b{font-size:1.5rem}
+.ann{margin:48px auto 0;max-width:1040px;padding:18px 20px;border-radius:12px;
+  background:rgba(255,255,255,.03);border:1px solid var(--line)}
+.ann h3{margin:0 0 10px;font-family:var(--serif);font-size:1.05rem;font-weight:700}
+.ann ul{margin:0;padding-left:18px}
+.ann li{font-size:.84rem;line-height:1.6;color:var(--dim);margin-bottom:8px}
+.ann li b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="stage">
+  <p class="plabel">Desktop</p>
+  <p class="psub">Progress is the overview. This is under the bonnet. Every tile carries its own
+     period, and its own focus where the stat has one. Nothing here is filtered globally.</p>
+  <div class="frame frame--desk" id="desk"></div>
+
+  <p class="plabel" style="margin-top:46px">Phone</p>
+  <p class="psub">390px. One column, the same tiles, the same per-tile controls.</p>
+  <div class="frame frame--phone" id="ph1"></div>
+
+  <div class="ann">
+    <h3>What this is, and how it differs from the last two attempts</h3>
+    <ul>
+      <li><b>No global subject.</b> The last two passes reshaped the whole page around one
+          selected piece, so picking a piece deleted everything about the player and picking
+          nothing left a thin page. Here a piece is a focus you set on the tiles it applies to,
+          and the skills, habits, app and community tiles carry on answering their own questions
+          beside it.</li>
+      <li><b>Every stat has its own time horizon.</b> The control at the top only sets what each
+          tile starts on. Hours in the last 30 days can sit next to the area mix over a year,
+          which is the point of a board rather than a filtered page.</li>
+      <li><b>Nothing is measured per sitting.</b> A sitting is not a real unit in this app:
+          24 of the 77 sessions are auto-logged, so a two minute game counts as one and drags
+          every per-session average down. Everything is per day.</li>
+      <li><b>Every stat with a focus carries one.</b> Time takes a piece, accuracy takes a
+          trainer, levels take an area, the session record takes a piece, an area, or notes only.</li>
+      <li><b>It covers the whole account:</b> practice volume, consistency and the heat map, the
+          four areas, how long your practice days run, day of week, focus, repertoire and
+          rotation, longest
+          untouched, the four trainers with history, theory, roadmap levels, app usage, streak,
+          achievements, the community comparison, and the searchable session record.</li>
+      <li><b>"How long have I spent on the Ballade"</b> is answered by setting the piece on the
+          repertoire table or sorting it, with nothing else on the board moving.</li>
+      <li><b>Add a stat</b> puts the rest of the library on the board; <b>Save this view</b> keeps
+          an arrangement; <b>Export CSV</b> takes it away.</li>
+    </ul>
+  </div>
+</div>
+
+<template id="tpl">
+<div class="wrap">
+  <div class="stage2">
+
+    <!-- ══ THE READING COLUMN ═══════════════════════════════════════════ -->
+    <div class="mainc">
+      <button class="back">&larr; Back to Progress</button>
+      <h1>The deep dive</h1>
+      <p class="sub">335 hours in total. 34h 36m of that is logged here, across 28 days and
+         130 items. The other 300 hours is the practice you recorded when you joined.</p>
+
+      <div class="board-ctl">
+        <span>Default period</span>
+        <div class="rangebar">
+          <button>7D</button><button class="on">30D</button><button>3M</button>
+          <button>6M</button><button>1Y</button><button>All</button><button>Custom</button>
+        </div>
+        <button class="ghost ghost--add">+ Add a stat</button>
+        <button class="ghost">Save this view</button>
+        <button class="ghost">Export CSV</button>
+      </div>
+
+      <div class="sec sec--first" style="margin-top:26px;padding-top:26px;border-top:1px solid var(--line)">
+        <h2>Your practice</h2><em>6 stats</em></div>
+      <div class="tile">
+      <div class="th"><h3>Hours practiced</h3><div class="tctl">
+        <select class="mini"><option>30D</option><option>7D</option><option>3M</option><option>6M</option><option>1Y</option><option>All</option></select></div></div>
+      <div class="big"><b>4h 12m</b><span class="delta up">&#9650; 18%</span></div>
+      <p class="cap">against <b>3h 34m</b> in the previous 30 days</p>
+      <!-- A 591 by 56 line is a thread across a void: this tile was 351 tall
+           and 170 of it was empty. A chart is the substance of its tile, so it
+           gets the height, an axis to sit on and a fill under it. -->
+      <svg class="spark" viewBox="0 0 300 132" width="100%" height="150" preserveAspectRatio="none">
+        <defs><linearGradient id="gHrs" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#f5c518" stop-opacity=".38"/>
+          <stop offset="100%" stop-color="#f5c518" stop-opacity="0"/></linearGradient></defs>
+        <path d="M0,92 L30,84 L60,88 L90,62 L120,70 L150,48 L180,56 L210,40 L240,52 L270,26 L300,38
+                 L300,110 L0,110 Z" fill="url(#gHrs)"/>
+        <polyline points="0,92 30,84 60,88 90,62 120,70 150,48 180,56 210,40 240,52 270,26 300,38"
+          fill="none" stroke="#f5c518" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      </svg>
+    </div>
+      <div class="tile">
+      <div class="th"><h3>Days practiced</h3><div class="tctl">
+        <select class="mini"><option>30D</option><option>7D</option><option>3M</option><option>All</option></select></div></div>
+      <div class="big"><b>11 / 30</b><span class="delta up">&#9650; 2</span></div>
+      <p class="cap">longest run <b>4 days</b> &middot; current run <b>1 day</b></p>
+      <!-- Fifteen across, two rows, so the marks are big enough to read as
+           days rather than a thin strip of dashes. -->
+      <div class="heat">
+        <i></i><i class="l1"></i><i></i><i class="l2"></i><i class="l1"></i><i></i><i></i>
+        <i class="l3"></i><i class="l1"></i><i></i><i></i><i class="l2"></i><i></i><i></i><i class="l1"></i>
+        <i></i><i class="l2"></i><i class="l3"></i><i></i><i></i><i></i>
+        <i class="l1"></i><i></i><i></i><i class="l2"></i><i></i><i></i><i class="l1"></i><i></i>
+      </div>
+
+    </div>
+      <div class="tile">
+      <div class="th"><h3>How long your practice days are</h3><div class="tctl">
+        <select class="mini"><option>Days</option><option>Share of time</option></select>
+        <select class="mini"><option>All</option><option>30D</option><option>3M</option><option>1Y</option></select></div></div>
+      <div class="big"><b>20 min</b><span class="delta flat">typical day</span></div>
+      <p class="cap">your average is <b>1h 14m</b>, pulled up by five long days</p>
+      <!-- A 300 UNIT VIEWBOX IN AN 841px COLUMN LETTERBOXES. With the default
+           preserveAspectRatio the drawing keeps its 300x132 shape and is
+           centred, so the chart became a small island floating in the middle
+           of the column with empty space either side. Drawn at the column's
+           own proportions instead, so it fills it without stretching the type. -->
+      <svg class="spark" viewBox="0 0 800 160" width="100%" height="160">
+        <line class="gl gl0" x1="20" y1="126" x2="795" y2="126"/>
+        <rect x="40"  y="26"  width="80" height="100" rx="4" fill="#4a4a56"/>
+        <rect x="200" y="81"  width="80" height="45"  rx="4" fill="#4a4a56"/>
+        <rect x="360" y="81"  width="80" height="45"  rx="4" fill="#4a4a56"/>
+        <rect x="520" y="108" width="80" height="18"  rx="4" fill="#4a4a56"/>
+        <rect x="680" y="81"  width="80" height="45"  rx="4" fill="#f5c518"/>
+        <text class="xl" x="80"  y="20"  style="fill:#b7b4bd;font-size:12px">11 days</text>
+        <text class="xl" x="240" y="75"  style="fill:#93939e;font-size:12px">5</text>
+        <text class="xl" x="400" y="75"  style="fill:#93939e;font-size:12px">5</text>
+        <text class="xl" x="560" y="102" style="fill:#93939e;font-size:12px">2</text>
+        <text class="xl" x="720" y="75"  style="fill:#f5c518;font-size:12px">5</text>
+        <text class="xl" x="80"  y="146" style="font-size:12px">under 15m</text>
+        <text class="xl" x="240" y="146" style="font-size:12px">15&ndash;30m</text>
+        <text class="xl" x="400" y="146" style="font-size:12px">30&ndash;60m</text>
+        <text class="xl" x="560" y="146" style="font-size:12px">1&ndash;2h</text>
+        <text class="xl" x="720" y="146" style="font-size:12px">2h+</text>
+      </svg>
+      <p class="cap"><b>11</b> of your 28 practice days are under fifteen minutes, and
+         <b>5 days</b> carry 77% of everything you have logged</p>
+    </div>
+      <div class="tile">
+      <div class="th"><h3>Which days you practice</h3><div class="tctl">
+        <select class="mini"><option>6M</option><option>30D</option><option>3M</option><option>All</option></select></div></div>
+      <div class="big"><b>Thursday</b><span class="delta down">43%</span></div>
+      <p class="cap">an even week would put <b>14%</b> on each day</p>
+      <!-- Lollipops, because the tile directly beside this one is already a
+           histogram and two column charts side by side read as one. -->
+      <svg class="spark pops" viewBox="0 0 800 160" width="100%" height="160">
+        <line class="gl gl0" x1="20" y1="126" x2="795" y2="126"/>
+        <line x1="77"  y1="126" x2="77"  y2="78"  stroke="#4a4a56" stroke-width="3"/>
+        <line x1="191" y1="126" x2="191" y2="110" stroke="#4a4a56" stroke-width="3"/>
+        <line x1="306" y1="126" x2="306" y2="87"  stroke="#4a4a56" stroke-width="3"/>
+        <line x1="420" y1="126" x2="420" y2="26"  stroke="#f5c518" stroke-width="3"/>
+        <line x1="534" y1="126" x2="534" y2="94"  stroke="#4a4a56" stroke-width="3"/>
+        <line x1="649" y1="126" x2="649" y2="120" stroke="#4a4a56" stroke-width="3"/>
+        <line x1="763" y1="126" x2="763" y2="118" stroke="#4a4a56" stroke-width="3"/>
+        <circle cx="77"  cy="78"  r="8" fill="#4a4a56"/><circle cx="191" cy="110" r="8" fill="#4a4a56"/>
+        <circle cx="306" cy="87"  r="8" fill="#4a4a56"/><circle cx="420" cy="26"  r="10" fill="#f5c518"/>
+        <circle cx="534" cy="94"  r="8" fill="#4a4a56"/><circle cx="649" cy="120" r="8" fill="#4a4a56"/>
+        <circle cx="763" cy="118" r="8" fill="#4a4a56"/>
+        <text class="xl" x="420" y="14" style="fill:#f5c518;font-size:12px">43%</text>
+        <text class="xl" x="77"  y="148" style="font-size:12px">Mon</text>
+        <text class="xl" x="191" y="148" style="font-size:12px">Tue</text>
+        <text class="xl" x="306" y="148" style="font-size:12px">Wed</text>
+        <text class="xl" x="420" y="148" style="font-size:12px">Thu</text>
+        <text class="xl" x="534" y="148" style="font-size:12px">Fri</text>
+        <text class="xl" x="649" y="148" style="font-size:12px">Sat</text>
+        <text class="xl" x="763" y="148" style="font-size:12px">Sun</text>
+      </svg>
+
+    </div>
+
+      <!-- ORDERED BY WHAT IS ASKED FIRST. Skills sat third, behind the piece
+           table, but "am I actually getting better" is the question this page
+           exists for and the roadmap ladders are the clearest answer on it.
+           Practice volume opens because it is the ground everything else
+           stands on; the repertoire detail follows; app usage and the search
+           are last because they are the least often the reason you came. -->
+      <div class="sec"><h2>Your skills</h2><em>4 tools &middot; theory</em></div>
+      <p class="note">The only data in the account that measures <b>ability</b> rather than time.</p>
+      <div class="block">
+    <div class="th"><h3>Where you are on the roadmap</h3></div>
+    <div class="big"><b>Level 3</b><span class="delta flat">your highest, in Repertoire</span></div>
+    <p class="cap">sight-reading is the one still on Level 1, and the nearest to moving</p>
+    <div class="lads">
+      <div class="lad"><span class="lad-n" style="color:#f5c518">Repertoire</span><span class="lad-seg">
+        <i style="background:#f5c518"></i><i style="background:#f5c518"></i>
+        <i class="cur" style="--c:#f5c518;--p:62%"></i>
+        <i></i><i></i><i></i><i></i><i></i></span>
+        <span class="lad-v">Level 3<u>165h to Level 4</u></span></div>
+      <div class="lad"><span class="lad-n" style="color:#6366f1">Technique</span><span class="lad-seg">
+        <i style="background:#6366f1"></i>
+        <i class="cur" style="--c:#6366f1;--p:38%"></i>
+        <i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="lad-v">Level 2<u>31h to Level 3</u></span></div>
+      <div class="lad"><span class="lad-n" style="color:#a855f7">Musicianship</span><span class="lad-seg">
+        <i style="background:#a855f7"></i>
+        <i class="cur" style="--c:#a855f7;--p:31%"></i>
+        <i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="lad-v">Level 2<u>35h to Level 3</u></span></div>
+      <div class="lad"><span class="lad-n" style="color:#10b981">Sight-reading</span><span class="lad-seg">
+        <i class="cur" style="--c:#10b981;--p:12%"></i>
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="lad-v">Level 1<u>9h to Level 2</u></span></div>
+    </div>
+  </div>
+      <div class="tile">
+      <div class="th"><h3>Every tool</h3><div class="tctl">
+        <select class="mini"><option>Accuracy</option><option>Best score</option><option>Attempts</option><option>Last played</option></select>
+        <select class="mini"><option>1Y</option><option>30D</option><option>3M</option><option>All</option></select></div></div>
+      <div class="big"><b>95%</b><span class="delta up">Note Recognition</span></div>
+      <p class="cap">your strongest, and up <b>12 points</b> over the year</p>
+      <div>
+        <div class="sm-row"><span class="sm-n">Note Recognition<u>mixed clef, stave</u></span>
+          <svg viewBox="0 0 120 30" height="30" width="100%" preserveAspectRatio="none">
+            <polyline points="0,24 24,20 48,15 72,10 96,7 120,4" fill="none" stroke="#10b981"
+              stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+          <span class="sm-v" style="color:#10b981">95%<u>+12</u></span></div>
+        <div class="sm-row"><span class="sm-n">Interval Training<u>reading</u></span>
+          <svg viewBox="0 0 120 30" height="30" width="100%" preserveAspectRatio="none">
+            <polyline points="0,22 24,20 48,21 72,16 96,14 120,12" fill="none" stroke="#0ea5e9"
+              stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+          <span class="sm-v" style="color:#0ea5e9">74%<u>+6</u></span></div>
+        <div class="sm-row"><span class="sm-n">Chord Ear Training<u>triads, quality</u></span>
+          <svg viewBox="0 0 120 30" height="30" width="100%" preserveAspectRatio="none">
+            <polyline points="0,17 24,16 48,17 72,16 96,17 120,16" fill="none" stroke="#ec4899"
+              stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+          <span class="sm-v" style="color:#ec4899">68%<u>flat</u></span></div>
+        <div class="sm-row"><span class="sm-n">Chord Recognition<u>free, mixed</u></span>
+          <svg viewBox="0 0 120 30" height="30" width="100%" preserveAspectRatio="none">
+            <polyline points="0,12 24,14 48,17 72,19 96,22 120,25" fill="none" stroke="#8b5cf6"
+              stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+          <span class="sm-v" style="color:#8b5cf6">51%<u>&minus;4</u></span></div>
+      </div>
+      <p class="cap"><b>Chord Recognition</b> is the one behind, and unopened for <b>34 days</b></p>
+    </div>
+
+      <div class="sec"><h2>Your repertoire</h2><em>15 pieces</em></div>
+      <p class="note">The table answers "how long have I spent on X" without changing anything
+         else on the board. Set a piece to focus it, or leave it on all and sort.</p>
+      <div class="block">
+      <div class="th"><h3>Time by piece</h3><div class="tctl">
+        <select class="mini mini--focus"><option>All pieces</option><option>Ballade No. 1 in G minor</option>
+          <option>Moonlight Sonata &mdash; 1st mvt</option><option>Fantaisie Impromptu</option>
+          <option>Étude Op. 25 No. 11</option><option>ABRSM Jazz Piano: Grade 1</option>
+          <option>ABRSM Jazz Grade 1 (your own entry)</option></select>
+        <select class="mini"><option>All</option><option>30D</option><option>3M</option><option>6M</option><option>1Y</option></select></div></div>
+      <div class="big"><b>15 pieces</b><span class="delta flat">34h 36m between them</span></div>
+      <p class="cap">the top three carry <b>42%</b> of all the time you have logged</p>
+      <div class="tbl">
+        <div class="tr th-row"><span>Piece</span><span><button class="on">Hours</button></span>
+          <span><button>Days</button></span><span><button>Avg a day</button></span>
+          <span><button>Median gap</button></span><span><button>Last</button></span></div>
+        <div class="tr"><span><b>Ballade No. 1 in G minor</b></span><span>6h 00m</span><span>3</span><span>2h 00m</span><span>9d</span><span>92d</span></div>
+        <div class="tr"><span><b>Moonlight Sonata &mdash; 1st mvt</b></span><span>4h 54m</span><span>6</span><span>49m</span><span>6d</span><span>79d</span></div>
+        <div class="tr"><span><b>Fantaisie Impromptu (Op. 66)</b></span><span>3h 25m</span><span>6</span><span>34m</span><span>5d</span><span>79d</span></div>
+        <div class="tr"><span><b>Étude Op. 25 No. 11</b></span><span>1h 11m</span><span>4</span><span>18m</span><span>11d</span><span>8d</span></div>
+        <div class="tr"><span><b>ABRSM Jazz Piano: Grade 1</b></span><span>44m</span><span>5</span><span>9m</span><span>14d</span><span>8d</span></div>
+        <div class="tr"><span><b>Air on the G String</b></span><span>45m</span><span>1</span><span>45m</span><span>&ndash;</span><span>113d</span></div>
+      </div>
+      <button class="more">Show all 15</button>
+  </div>
+      <div class="block">
+    <!-- THE TWO HALVES HAVE TO START ON THE SAME LINE. The figure sat above
+         the whole block, so the left half began under it while the right half
+         began at its own heading, and the columns were out of step by the
+         height of a figure plus a caption. Each half leads with its own figure
+         now, on the same line, and the control moves up to the tile head where
+         every other control on the board lives. -->
+    <div class="th"><h3>What you keep and what you drop</h3><div class="tctl">
+      <select class="mini"><option>Pieces</option><option>Books</option>
+        <option>Both</option></select></div></div>
+    <div class="keep">
+      <div>
+        <div class="big"><b>9 of 15</b><span class="delta down">gone quiet</span></div>
+        <p class="cap">the four still in rotation are the four you came back to
+           within a fortnight of starting them</p>
+        <div class="dots">
+          <i style="background:#f5c518"></i><i style="background:#f5c518"></i>
+          <i style="background:#f5c518"></i><i style="background:#f5c518"></i>
+          <i style="background:#4a4a56"></i><i style="background:#4a4a56"></i>
+          <i style="background:#f87171"></i><i style="background:#f87171"></i>
+          <i style="background:#f87171"></i><i style="background:#f87171"></i>
+          <i style="background:#f87171"></i><i style="background:#f87171"></i>
+          <i style="background:#f87171"></i><i style="background:#f87171"></i>
+          <i style="background:#f87171"></i>
+        </div>
+        <div class="dotkey">
+          <span><i style="background:#f5c518"></i>In rotation <b>4</b></span>
+          <span><i style="background:#4a4a56"></i>Resting <b>2</b></span>
+          <span><i style="background:#f87171"></i>Gone quiet <b>9</b></span>
+        </div>
+        <p class="cap">one mark a piece &middot; the median piece gets <b>3 days</b> of practice
+           before it goes quiet</p>
+      </div>
+      <div>
+        <div class="big"><b>127 days</b><span class="delta down">since the coldest</span></div>
+        <p class="cap">pieces you have put real hours into and stopped
+           returning to</p>
+        <div class="unt">
+          <div class="urow"><span class="un">Prelude in Jazz Style</span>
+            <span class="ub"><i style="width:100%"></i></span><span class="uv">127d</span></div>
+          <div class="urow"><span class="un">Air on the G String</span>
+            <span class="ub"><i style="width:89%"></i></span><span class="uv">113d</span></div>
+          <div class="urow"><span class="un">ABRSM Piano Pieces: Grade 1</span>
+            <span class="ub"><i style="width:89%"></i></span><span class="uv">113d</span></div>
+          <div class="urow"><span class="un">ABRSM Jazz Grade 1</span>
+            <span class="ub"><i style="width:74%"></i></span><span class="uv">94d</span></div>
+          <div class="urow"><span class="un">Ballade No. 1 in G minor</span>
+            <span class="ub"><i style="width:72%"></i></span><span class="uv">92d</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+      <div class="sec"><h2>How you use the app</h2></div>
+      <div class="tile">
+      <div class="th"><h3>Where your app time goes</h3><div class="tctl">
+        <select class="mini"><option>3M</option><option>30D</option><option>1Y</option><option>All</option></select></div></div>
+      <div class="big"><b>34h 36m</b><span class="delta flat">in the app</span></div>
+      <p class="cap"><b>78%</b> of it logged by hand rather than picked up automatically</p>
+      <!-- Area is the quantity here, which a treemap shows at a glance and a
+           row of bars does not. -->
+      <div class="tree">
+        <div style="grid-column:1/4;grid-row:1/5;background:rgba(245,197,24,.26);box-shadow:inset 0 0 0 1px rgba(245,197,24,.5)">
+          <b>Logged by hand</b><span>27h</span></div>
+        <div style="grid-column:4/6;grid-row:1/3;background:rgba(99,102,241,.26);box-shadow:inset 0 0 0 1px rgba(99,102,241,.5)">
+          <b>Practice tools</b><span>4h 51m</span></div>
+        <div style="grid-column:4/6;grid-row:3/4;background:rgba(168,85,247,.26);box-shadow:inset 0 0 0 1px rgba(168,85,247,.5)">
+          <b>Lessons</b><span>2h 05m</span></div>
+        <div style="grid-column:4/6;grid-row:4/5;background:rgba(255,255,255,.07);box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)">
+          <b>Articles</b><span>40m</span></div>
+      </div>
+    </div>
+
+      <div class="sec"><h2>Find a session</h2><em>77 sessions &middot; 36 notes</em></div>
+      <p class="note">The whole record, searchable, including the text of your own notes.
+         Nothing else on the board changes when you search here.</p>
+      <div class="block">
+      <div class="th"><h3>Session record</h3><div class="tctl">
+        <select class="mini mini--focus"><option>All practice</option><option>Ballade No. 1 in G minor</option>
+          <option>Repertoire</option><option>Technique</option><option>Sight-reading</option>
+          <option>Musicianship</option><option>Only sessions with notes</option></select>
+        <select class="mini"><option>All</option><option>30D</option><option>3M</option><option>1Y</option></select></div></div>
+      <div class="big"><b>77 sessions</b><span class="delta flat">36 with notes</span></div>
+      <p class="cap">search the words you wrote, not only the titles</p>
+      <div class="fsearch">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" value="pedal" aria-label="Search sessions and notes">
+      </div>
+      <p class="cap" style="margin-bottom:8px"><b>2</b> sessions mention &ldquo;pedal&rdquo;</p>
+      <div>
+        <div class="lrow">
+          <div><div class="ldate">2 Jun</div><div class="lday">Monday</div></div>
+          <div>
+            <p class="lnote">First page, slow to ensure I have the polyrhythms in my hands then
+               focussed on dynamics, balance and the <mark>pedal</mark>.</p>
+            <div class="ltags"><span class="tag">15m</span><span class="tag">Fantaisie Impromptu</span><span class="tag">Repertoire</span></div>
+          </div>
+        </div>
+        <div class="lrow">
+          <div><div class="ldate">6 May</div><div class="lday">Wednesday</div></div>
+          <div>
+            <p class="lnote">Second page slowly, watching the <mark>pedal</mark>. Started to hear
+               the phrasing in the right hand rather than counting it.</p>
+            <div class="ltags"><span class="tag">1h 45m</span><span class="tag">Ballade No. 1</span><span class="tag">Repertoire</span></div>
+          </div>
+        </div>
+      </div>
+      <button class="more">Show all 77 sessions</button>
+  </div>
+    </div>
+
+    <!-- ══ THE RAIL ═════════════════════════════════════════════════════
+         The compact figures, the ones you scan rather than study. It scrolls
+         itself against the reading column, as it does on the other pages. -->
+    <aside class="railc">
+     <div class="railin">
+      <div class="sec sec--first"><h2>Where it goes</h2></div>
+      <div class="tile">
+      <div class="th"><h3>Where the hours went</h3><div class="tctl">
+        <select class="mini"><option>Share</option><option>Hours</option></select>
+        <select class="mini"><option>1Y</option><option>30D</option><option>3M</option><option>6M</option><option>All</option></select></div></div>
+      <div class="big"><b>56%</b><span class="delta flat">Repertoire</span></div>
+      <p class="cap">your largest area, and <b>14 points</b> down on April</p>
+      <!-- A share of one whole is one band, not four bars that each look like
+           their own quantity. Roadmap colours. -->
+      <div class="stack">
+        <i style="width:56%;background:#f5c518"></i><i style="width:23%;background:#6366f1"></i>
+        <i style="width:15%;background:#a855f7"></i><i style="width:4%;background:#10b981"></i>
+      </div>
+      <div class="stackkey">
+        <span><i style="background:#f5c518"></i>Repertoire <b>56%</b></span>
+        <span><i style="background:#6366f1"></i>Technique <b>23%</b></span>
+        <span><i style="background:#a855f7"></i>Musicianship <b>15%</b></span>
+        <span><i style="background:#10b981"></i>Sight-reading <b>4%</b></span>
+      </div>
+      <p class="cap">sight-reading has not moved off 4% in five months</p>
+    </div>
+      <div class="tile">
+      <div class="th"><h3>Focus</h3><div class="tctl">
+        <select class="mini"><option>By day length</option><option>Over time</option><option>By area</option></select>
+        <select class="mini"><option>All</option><option>3M</option><option>1Y</option></select></div></div>
+      <!-- A rating out of five is a position on a fixed scale, so it reads as
+           a dial rather than a bar whose length means nothing on its own. -->
+      <div class="gauge">
+        <!-- dasharray "133 200", not dashoffset. A positive dashoffset shifts
+             the pattern backwards, so it drew the LAST 80% of the arc and left
+             the start empty; a dash of 133 followed by a gap longer than the
+             path draws the first 133 of 166.5, which is 4.0 out of 5. The box
+             also has to clear half the 11px stroke on every side or the arc is
+             sliced where it meets the edge. -->
+        <svg viewBox="0 0 136 82" width="136" height="82" aria-hidden="true">
+          <path d="M15,70 A53,53 0 0 1 121,70" fill="none" stroke="rgba(255,255,255,.09)"
+                stroke-width="11" stroke-linecap="round"/>
+          <path d="M15,70 A53,53 0 0 1 121,70" fill="none" stroke="#f5c518"
+                stroke-width="11" stroke-linecap="round" stroke-dasharray="133 200"/>
+          <!-- the member average at 3.7, a tick across the track -->
+          <line x1="99.5" y1="36.5" x2="109" y2="26.3" stroke="#0b0b0e" stroke-width="3.5" stroke-linecap="round"/>
+          <line x1="100.5" y1="35.8" x2="108" y2="27.5" stroke="#e6e4ea" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <!-- SQUASHED INTO THE LEFT THIRD. The dial is a fixed 136px and the
+             tile is six hundred, so the figure and the bands sat in a huddle
+             with four hundred pixels of nothing beside them. The dial keeps its
+             size; everything else takes the rest of the width. -->
+        <div class="gauge-body">
+          <div class="gauge-fig"><b>4.0</b><span>out of 5 &middot; members 3.7</span></div>
+          <div class="bands">
+            <span><b>3.9</b>30&ndash;60m days</span>
+            <span><b>3.7</b>1&ndash;2h days</span>
+            <span><b>3.4</b>under 15m</span>
+          </div>
+        </div>
+      </div>
+      <!-- THE GAUGE DROPPED THE BREAKDOWN. Changing the encoding is not a
+           licence to show less: the three day-length bands were the only part
+           of this tile that said anything actionable, and the dial replaced
+           them with one number. The dial carries the headline, the bands stay. -->
+      <p class="cap">the tick is the member average &middot; only <b>1</b> of your days is
+         rated, so this leans on the community figure</p>
+    </div>
+
+      <!-- Courses is progress, so it belongs with the split rather than with
+           the streak. Streak and achievements are the softest things on the
+           page and go last. -->
+      <div class="sec"><h2>Courses</h2></div>
+<div class="tile">
+      <div class="ringrow">
+        <svg viewBox="0 0 120 120" width="106" height="106" aria-hidden="true">
+          <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="13"/>
+          <circle cx="60" cy="60" r="50" fill="none" stroke="#10b981" stroke-width="13"
+            stroke-linecap="round" stroke-dasharray="28 314" transform="rotate(-90 60 60)"/>
+          <text x="60" y="56" text-anchor="middle" style="font-size:26px;font-weight:700;fill:#f4f4f6">3</text>
+          <text x="60" y="76" text-anchor="middle" style="font-size:12px;font-weight:600;fill:#93939e">of 33</text>
+        </svg>
+        <div class="ringbody">
+          <p class="cap" style="margin:0"><b>Music Theory</b> is the one you are into &middot;
+             9% done &middot; last lesson <b>23d ago</b></p>
+        </div>
+      </div>
+      <div class="clist">
+        <span><i style="background:#10b981"></i>Music Theory
+          <em><b style="width:9%;background:#10b981"></b></em><u>3 / 33</u></span>
+        <span><i style="background:#2563eb"></i>Learn Your First Piece
+          <em><b style="width:0;background:#2563eb"></b></em><u>0 / 18</u></span>
+        <span><i style="background:#ec4899"></i>Ear Training
+          <em><b style="width:0;background:#ec4899"></b></em><u>0 / 40</u></span>
+        <span><i style="background:#f97316"></i>Improvisation
+          <em><b style="width:0;background:#f97316"></b></em><u>0 / 40</u></span>
+      </div>
+    </div>
+
+      <div class="sec"><h2>The room</h2><em>opt in</em></div>
+      <div class="tile">
+    <div class="th"><h3>Where you sit in the room</h3><div class="tctl">
+      <select class="mini"><option>3M</option><option>30D</option><option>1Y</option></select></div></div>
+    <div class="big"><b>Top third</b><span class="delta up">for hours a month</span></div>
+    <p class="cap" style="margin-bottom:20px">the band is the middle half of everyone who logged in
+       the same period &middot; the marker is you</p>
+
+    <div class="scale">
+      <span class="sc-n">Hours a month</span>
+      <span class="sc-track"><i style="left:22%;right:34%"></i><u style="left:71%"></u></span>
+      <span class="sc-v good">6h 55m<u>top third</u></span>
+      <span class="sc-lo">less</span><span class="sc-hi">more &middot; members average 4h 40m</span>
+    </div>
+
+    <div class="scale">
+      <span class="sc-n">Minutes a practice day</span>
+      <span class="sc-track"><i style="left:26%;right:34%"></i><u style="left:22%" class="low"></u></span>
+      <span class="sc-v bad">20 min<u>below the middle</u></span>
+      <span class="sc-lo">less</span><span class="sc-hi">more &middot; members typically 26 min</span>
+    </div>
+
+    <div class="scale">
+      <span class="sc-n">Days a week</span>
+      <span class="sc-track"><i style="left:30%;right:28%"></i><u style="left:24%" class="low"></u></span>
+      <span class="sc-v bad">2.6<u>below the middle</u></span>
+      <span class="sc-lo">less</span><span class="sc-hi">more &middot; members average 3.4</span>
+    </div>
+
+    <p class="cap">You do more in a month than most, in fewer and shorter days. Turning one long
+       day into two shorter ones would move both of the figures you are behind on.</p>
+  </div>
+      <div class="sec"><h2>Keeping at it</h2></div>
+      <div class="tile">
+      <!-- A streak is a fact about today. A period on it means nothing. -->
+      <div class="th"><h3>Streak</h3></div>
+      <div class="big"><b>1 day</b><span class="delta down">&#9660; from 4</span></div>
+      <p class="cap">longest ever <b>9 days</b> &middot; <b>2</b> saves left &middot; the last fortnight below</p>
+      <!-- 108px of this tile was empty. The fortnight behind the number is the
+           thing that explains it. -->
+      <div class="strip">
+        <i></i><i class="on"></i><i class="on"></i><i></i><i class="on"></i><i></i><i></i>
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i class="on"></i>
+      </div>
+
+    </div>
+      <div class="tile">
+      <div class="th"><h3>Achievements</h3><div class="tctl">
+        <select class="mini"><option>All</option><option>30D</option><option>1Y</option></select></div></div>
+      <div class="big"><b>14</b><span class="delta up">&#9650; 2</span></div>
+      <p class="cap">earned across practice, tools and theory</p>
+      <div class="ach">
+        <span><i style="background:#f5c518"></i>First hour on one piece<u>92d ago</u></span>
+        <span><i style="background:#10b981"></i>Fifty notes in a row<u>2d ago</u></span>
+        <span><i style="background:#a855f7"></i>First theory lesson<u>23d ago</u></span>
+      </div>
+    </div>
+           </div>
+    </aside>
+
+  </div>
+</div>
+</template>
+
+<script>
+/* One markup, both frames, so desktop and phone cannot drift apart in the mock
+   the way they did on the real page. Layout responds to CONTAINER width. */
+const tpl = document.getElementById('tpl');
+['desk','ph1'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.appendChild(tpl.content.cloneNode(true));
+});
+
+/* The rail's sticky offset is viewportHeight minus its own height, so it rides
+   up with the page and pins the instant its last row reaches the bottom of the
+   screen. Both heights are measured, so this is the one part of the layout
+   that cannot be pure CSS. Re-measured on resize, and on load once the fonts
+   have settled, because the rail's height moves when the type does. */
+function railTop() {
+  document.querySelectorAll('.railin').forEach(el => {
+    const wide = el.closest('.frame').getBoundingClientRect().width >= 1100;
+    if (!wide) { el.style.top = ''; return; }
+    const h = el.offsetHeight, vh = window.innerHeight;
+    el.style.top = (h + 44 <= vh) ? '22px' : (vh - h - 22) + 'px';
+  });
+}
+railTop();
+addEventListener('resize', railTop);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(railTop);
+</script>
+</body>
+</html>

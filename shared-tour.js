@@ -21,7 +21,7 @@
     css.id = "sp-tour-css";
     css.textContent =
       ".sp-tour-mask{position:fixed;inset:0;z-index:100000}" +
-      ".sp-tour-spot{position:fixed;z-index:100001;border-radius:14px;pointer-events:none;opacity:0;box-shadow:0 0 0 9999px rgba(20,16,10,.74),0 0 0 2px rgba(245,197,24,.95);transition:all .28s cubic-bezier(.4,0,.2,1)}" +
+      ".sp-tour-spot{position:fixed;z-index:100001;border-radius:14px;pointer-events:none;opacity:0;box-shadow:0 0 0 9999px rgba(0,0,0,.72),0 0 0 2px rgba(245,197,24,.95);transition:all .28s cubic-bezier(.4,0,.2,1)}" +
       ".sp-tour-pop{position:fixed;z-index:100002;max-width:290px;background:#fff;color:#4a443b;border-radius:14px;padding:15px 16px 13px;box-shadow:0 18px 44px -12px rgba(0,0,0,.55);opacity:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;transition:top .28s cubic-bezier(.4,0,.2,1),left .28s cubic-bezier(.4,0,.2,1),opacity .2s ease}" +
       ".sp-tour-pop h4{margin:0 0 5px;font-size:.92rem;font-weight:800;color:#1a1410;line-height:1.25}" +
       ".sp-tour-pop p{margin:0;font-size:.8rem;line-height:1.45;color:#6b6256}" +
@@ -82,12 +82,46 @@
     var spot = mk("sp-tour-spot", "sp-tour-spot");
     var pop  = mk("sp-tour-pop", "sp-tour-pop");
     mask.addEventListener("click", function (e) { e.stopPropagation(); });
-    function cur() { return i < STEPS.length ? document.querySelector(STEPS[i].sel) : null; }
+    // sel may be a function, resolved at display time, so a step can point at
+    // whichever of two elements is the one on screen at this width. It may also
+    // be an ARRAY of selectors, in which case the spotlight covers all of them:
+    // some things on a page are one thing to a reader and several boxes to the
+    // DOM, and lighting only the first cuts a piece off the side of it.
+    function selOf(s) { return (s && typeof s.sel === "function") ? s.sel() : (s && s.sel); }
+    function elsOf(s) {
+      var sel = selOf(s), list = Array.isArray(sel) ? sel : [sel], out = [];
+      list.forEach(function (q) { var e = q && document.querySelector(q); if (e) out.push(e); });
+      return out;
+    }
+    // the union of every box the step names, ignoring any that is not laid out
+    function rectOf(s) {
+      var r = null;
+      elsOf(s).forEach(function (e) {
+        var b = e.getBoundingClientRect();
+        if (!b.width && !b.height) return;
+        r = r ? { left: Math.min(r.left, b.left), top: Math.min(r.top, b.top),
+                  right: Math.max(r.right, b.right), bottom: Math.max(r.bottom, b.bottom) }
+              : { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+      });
+      if (!r) return null;
+      r.width = r.right - r.left; r.height = r.bottom - r.top;
+      return r;
+    }
+    function cur() { return i < STEPS.length ? elsOf(STEPS[i])[0] : null; }
 
+    var placeTries = 0;
     function place() {
-      var elx = cur(); if (!elx) return;
-      var r = elx.getBoundingClientRect();
-      if (!r.width && !r.height) return;
+      // THE TARGET CAN GO AWAY UNDER US. A page that fills itself in stages
+      // rewrites whole sections after the tour has started, and the step's
+      // element is replaced mid-flight. Returning quietly left the spotlight
+      // sitting on the previous step's box, invisible, for the rest of the
+      // walk; waiting for the element to come back fixes every tour at once.
+      var r = i < STEPS.length ? rectOf(STEPS[i]) : null;
+      if (!r) {
+        if (placeTries++ < 30) setTimeout(place, 200);
+        return;
+      }
+      placeTries = 0;
       var pad = 8;
       spot.style.left = (r.left - pad) + "px"; spot.style.top = (r.top - pad) + "px";
       spot.style.width = (r.width + pad * 2) + "px"; spot.style.height = (r.height + pad * 2) + "px";
@@ -103,8 +137,7 @@
       // undefined on SVG elements (e.g. the circle-of-fifths), which would wrongly
       // skip an SVG-targeted step.
       while (i < STEPS.length) {
-        var e0 = document.querySelector(STEPS[i].sel);
-        if (e0) { var r0 = e0.getBoundingClientRect(); if (r0.width || r0.height) break; }
+        if (rectOf(STEPS[i])) break;
         i++;
       }
       if (i >= STEPS.length) { end(); return; }

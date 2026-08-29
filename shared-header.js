@@ -737,6 +737,22 @@ const SH_SUBNAV = {
       border-radius: 5px; padding: 1px 5px; line-height: 1.4;
     }
     #sh-search-btn:focus-visible { outline: 2px solid var(--accent, #f5c518); outline-offset: 2px; }
+    /* ONE HEIGHT FOR THE ROW, AT EVERY WIDTH. The 30px normalisation further up
+       was written inside the phone breakpoint, so on a desktop the drift stayed:
+       chat, bell and avatar at 30, the search button and the presence pill at
+       35. A row of controls that do not agree on a height reads as a mistake at
+       a glance, and 30 is what the majority already were. */
+    #app-header .header-user { align-items: center; }
+    #app-header #sh-search-btn,
+    #app-header #presence-btn { height: 30px; min-height: 30px; }
+    #app-header #sh-search-btn { padding: 0 10px; justify-content: center; }
+    #app-header #presence-btn { padding: 0 12px; }
+    /* PAST 1100 THE LABEL GOES AND THE BUTTON IS THE ICON. It kept the padding
+       of a button with words in it, so the glass was wider than what was in it
+       and the magnifier sat off to one side of its own square. */
+    @media (max-width: 1100px) {
+      #app-header #sh-search-btn { width: 30px; padding: 0; }
+    }
     @media (max-width: 1100px) {
       .sh-search-label, .sh-search-kbd { display: none; }
       #sh-search-btn { padding: 7px; }

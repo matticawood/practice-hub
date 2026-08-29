@@ -759,14 +759,14 @@ const ACHIEVEMENTS = [
 
   // ── Roadmap stage trophies (badge = the level's statue) ──────────────────────
   // check counts logged + prior-hours; prog shows total minutes vs the threshold.
-  { id:"rm1", cat:"roadmap", img:"/statue-l1.webp", name:"First Steps",  desc:"Begin your roadmap journey",       check:(s,x)=>_achRoadmapMins(s,x)>=0,      prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),0]      },
-  { id:"rm2", cat:"roadmap", img:"/statue-l2.webp", name:"Beginner",     desc:"Reach the Beginner stage (50h)",   check:(s,x)=>_achRoadmapMins(s,x)>=3000,   prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),3000]   },
-  { id:"rm3", cat:"roadmap", img:"/statue-l3.webp", name:"Foundations",  desc:"Reach the Foundations stage (150h)",check:(s,x)=>_achRoadmapMins(s,x)>=9000,   prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),9000]   },
-  { id:"rm4", cat:"roadmap", img:"/statue-l4.webp", name:"Intermediate", desc:"Reach the Intermediate stage (350h)",check:(s,x)=>_achRoadmapMins(s,x)>=21000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),21000]  },
-  { id:"rm5", cat:"roadmap", img:"/statue-l5.webp", name:"Confident",    desc:"Reach the Confident stage (700h)", check:(s,x)=>_achRoadmapMins(s,x)>=42000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),42000]  },
-  { id:"rm6", cat:"roadmap", img:"/statue-l6.webp", name:"Advanced",     desc:"Reach the Advanced stage (1,200h)",check:(s,x)=>_achRoadmapMins(s,x)>=72000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),72000]  },
-  { id:"rm7", cat:"roadmap", img:"/statue-l7.webp", name:"Performer",    desc:"Reach the Performer stage (2,000h)",check:(s,x)=>_achRoadmapMins(s,x)>=120000, prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),120000] },
-  { id:"rm8", cat:"roadmap", img:"/statue-l8.webp", name:"Artist",       desc:"Reach the Artist stage (3,500h)",  check:(s,x)=>_achRoadmapMins(s,x)>=210000, prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),210000] },
+  { id:"rm1", cat:"roadmap", thr:0, img:"/statue-l1.webp", name:"First Steps",  desc:"Begin your roadmap journey",       check:(s,x)=>_achRoadmapMins(s,x)>=0,      prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),0]      },
+  { id:"rm2", cat:"roadmap", thr:3000, img:"/statue-l2.webp", name:"Beginner",     desc:"Reach the Beginner stage (50h)",   check:(s,x)=>_achRoadmapMins(s,x)>=3000,   prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),3000]   },
+  { id:"rm3", cat:"roadmap", thr:9000, img:"/statue-l3.webp", name:"Foundations",  desc:"Reach the Foundations stage (150h)",check:(s,x)=>_achRoadmapMins(s,x)>=9000,   prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),9000]   },
+  { id:"rm4", cat:"roadmap", thr:21000, img:"/statue-l4.webp", name:"Intermediate", desc:"Reach the Intermediate stage (350h)",check:(s,x)=>_achRoadmapMins(s,x)>=21000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),21000]  },
+  { id:"rm5", cat:"roadmap", thr:42000, img:"/statue-l5.webp", name:"Confident",    desc:"Reach the Confident stage (700h)", check:(s,x)=>_achRoadmapMins(s,x)>=42000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),42000]  },
+  { id:"rm6", cat:"roadmap", thr:72000, img:"/statue-l6.webp", name:"Advanced",     desc:"Reach the Advanced stage (1,200h)",check:(s,x)=>_achRoadmapMins(s,x)>=72000,  prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),72000]  },
+  { id:"rm7", cat:"roadmap", thr:120000, img:"/statue-l7.webp", name:"Performer",    desc:"Reach the Performer stage (2,000h)",check:(s,x)=>_achRoadmapMins(s,x)>=120000, prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),120000] },
+  { id:"rm8", cat:"roadmap", thr:210000, img:"/statue-l8.webp", name:"Artist",       desc:"Reach the Artist stage (3,500h)",  check:(s,x)=>_achRoadmapMins(s,x)>=210000, prog:(s,x)=>[Math.round(_achRoadmapMins(s,x)),210000] },
 ];
 
 // Extra achievement data (reading list, collection, passage games)

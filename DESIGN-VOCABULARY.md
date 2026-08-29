@@ -84,6 +84,58 @@ The small figure at the right of a row: "0/12 lessons", "7 days to go",
 - Where a status has two registers, the reading goes on top and the fact under
   it in a smaller, dimmer size. Not two places in the row.
 
+## The count beside a chapter head
+
+The small figure to the right of a chapter's name: "last 12", "0 of 13",
+"28 days".
+
+.86rem, weight **600**, `#93939e`, with a 4px dot at 55% opacity between it and
+the heading. The mock sets 700 (`.sec.big em`); the build settled on 600 on the
+roadmap and Progress follows it, so the same figure beside the same heading
+reads the same on both pages.
+
+## The link out of a section
+
+"All goals", "Browse all courses", "View full feed", "Open the full history",
+"See it on your roadmap". Every one of these leaves for somewhere else, and the
+dashboard sets all three of its own identically:
+
+| | |
+|---|---|
+| size | .78rem |
+| weight | 700 |
+| colour | `#93939e`, lifting to `#f4f4f6` on hover |
+| after the words | a space and `→` |
+
+Not gold. Gold is reserved for your practice and for the thing to press *here*;
+a link that takes you off the page is neither, and the dashboard settled this
+across three instances before Progress existed. This is separate from **"Show
+all"**, which is gold, because that one expands the list in place rather than
+leaving.
+
+## The four areas
+
+One set of names and one set of colours, taken from the roadmap's `AREA` map,
+which is what the roadmap paints its comparison plot from:
+
+| area | name | colour |
+|---|---|---|
+| repertoire | Repertoire | `#f5c518` |
+| technique | Technique | `#6366f1` |
+| sight_reading | Sight-reading | `#10b981` |
+| musicianship | Musicianship | `#a855f7` |
+
+The mock names them Pieces & books, Scales & technique and Theory & ear, which
+read better on their own. They are not used: the page links to the roadmap, and
+the same four things under two sets of names across one tap is worse than a
+plainer name. `#d99e12` is the repertoire colour on the **light** goals list
+only; on the dark pages repertoire is `#f5c518`.
+
+**A share is a share of something nameable.** `_rmTrackMinutes().total` counts
+every logged item but only files an item into an area if its type maps to one,
+so the four areas measured against the total came to 82% with no way to say
+what the other 18% was. Percentages are of the four areas' own sum.
+
 ## Buttons
 
 | | |
@@ -109,6 +161,22 @@ word and bursts the box.
    themselves in the system default, which is how one link's arrow came out in
    a different face from the identical arrow beside it.
 
+## Nothing is in a box
+
+The three dark pages put nothing in a card. A section is a rule, a heading, and
+rows on the page itself. No fills, no rounded containers, no icon squares.
+
+A block brought in from the old stats page must be flattened before it is shown
+here: `background: transparent`, `border: 0`, `border-radius: 0`, no side
+padding of its own. A grid of figures inside it takes the page's tile treatment
+instead: a hairline above each cell, one down the middle, no gap and no fill.
+
+**One gutter.** Everything on the page starts on `--dgut`, and the only things
+allowed past it are a heading's own bar and text indented under an icon. The old
+page inset its blocks by a further 16px on a phone, as padding on some and as a
+negative margin on others, so a moved block sat 16px right of every native row
+beside it. The slot carries the gutter; the block carries none.
+
 ## Rules, corners and ground
 
 - One hairline between rows, none inside a row, one rule per chapter.
@@ -127,6 +195,23 @@ the dark pages. Anything built from those variables **while inside `#app-main`**
 comes out with the dark values, which is why modals built there render
 transparent. Move a panel to `document.body` before showing it, or state its
 colours outright.
+
+**`--text` and `--text-main` are the ones that were missed.** `body.hub-mode`
+sets both to `#1a1410` for the cream ground. The dark pages remapped
+`--surface`, `--border` and `--text-muted` and left those two alone, because
+everything on them was rebuilt from scratch and stated its own colour. The
+moment an existing component is shown on a dark page it inherits near-black
+text on a near-black ground and is invisible rather than merely unstyled. That
+was the Sessions, Achievements and Ranks chips, and it was every block moved
+into Progress. `body.lb-prog #app-main` remaps `--text`, `--text-main` and
+`--accent-dark` for exactly this reason.
+
+**Move the element, do not rewrite the analysis.** Progress shows the old stats
+page's blocks by moving the nodes into its own chapters. Their ids travel with
+them, so every renderer that fills them by id goes on working; re-rendering the
+page hands them back to their original parent first, or the next `innerHTML`
+would delete them from the document for good. A second implementation of the
+same analysis is how the hero came to say 35 hours while the roadmap said 335.
 
 Never build a track, a field or a border from a variable without checking which
 value it will resolve to on the page you are on. The ladder's empty segments

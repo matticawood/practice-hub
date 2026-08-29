@@ -1,5 +1,5 @@
 // The Practice Room — Service Worker
-const CACHE = 'practice-room-v65';
+const CACHE = 'practice-room-v66';
 const PRECACHE = [
   '/',
   '/practice-log.html',
@@ -37,6 +37,12 @@ self.addEventListener('fetch', event => {
 
   // Skip non-GET and Supabase/external API requests
   if (event.request.method !== 'GET') return;
+  /* Only http(s) can go in a Cache. A browser extension's own requests come
+     through here as chrome-extension:// and reach the cache-first branch at the
+     bottom, where cache.put() throws "Request scheme 'chrome-extension' is
+     unsupported" as an unhandled rejection on every page load. Nothing to do
+     with this app, but it is our service worker throwing it. */
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   if (url.hostname.includes('supabase.co') ||
       url.hostname.includes('supabase.io') ||
       url.hostname.includes('jsdelivr.net') ||
@@ -47,8 +53,19 @@ self.addEventListener('fetch', event => {
     // stale page), and we never write HTML into the SW cache. The only cache
     // fallback is when the device is genuinely offline. This guarantees a
     // deployed change is visible on the next page load — no stale-HTML dance.
+    /* WAS { cache: 'no-store' }, WHICH RE-DOWNLOADED THE WHOLE PAGE EVERY TIME.
+       practice-log.html is 2 MB, and no-store forbids the browser from even
+       ASKING whether its copy is still good: no If-None-Match, no 304, a full
+       transfer on every single refresh.
+       Netlify already serves these with `cache-control: public, max-age=0,
+       must-revalidate`, which requires the browser to check with the server
+       before using a stored copy. So a plain fetch is exactly as fresh - a
+       deploy still shows up on the next load - and costs a conditional request
+       instead of two megabytes when nothing has changed.
+       If a stale page is ever seen after a deploy, this line is the first place
+       to look; putting { cache: 'no-store' } back restores the old behaviour. */
     event.respondWith(
-      fetch(event.request, { cache: 'no-store' })
+      fetch(event.request)
         .catch(() => caches.match(event.request) || caches.match('/'))
     );
     return;
@@ -65,7 +82,7 @@ self.addEventListener('fetch', event => {
       fetch(event.request).then(response => {
         if (response.ok) {
           const clone = response.clone();
-          caches.open(CACHE).then(c => c.put(event.request, clone));
+          caches.open(CACHE).then(c => c.put(event.request, clone)).catch(() => {});
         }
         return response;
       }).catch(() => caches.match(event.request))
@@ -79,7 +96,7 @@ self.addEventListener('fetch', event => {
       const networkFetch = fetch(event.request).then(response => {
         if (response.ok) {
           const clone = response.clone();
-          caches.open(CACHE).then(c => c.put(event.request, clone));
+          caches.open(CACHE).then(c => c.put(event.request, clone)).catch(() => {});
         }
         return response;
       });
