@@ -480,7 +480,10 @@
     body.chat-full .chat-conv-hdr,
     body.chat-full .chat-list-hdr {
       height: 64px; box-sizing: border-box;
-      padding: 0 62px 0 16px !important;
+      /* 40 for the cross, 16 to the window edge, 10 between it and whatever the
+         header's last item is. At 62 the cross was 6px off New chat while
+         keeping 16 from the edge, which read as the two being out of step. */
+      padding: 0 66px 0 16px !important;
       align-items: center !important;
     }
     /* THE CROSS IS ONLY OVER THE LIST ON A PHONE. With both panes on screen it
@@ -1195,6 +1198,21 @@
       flex: 1; overflow-y: auto;
       background: var(--surface);
     }
+    .chat-selfnote {
+      display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+      background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      padding: 10px 12px; margin-bottom: 14px; cursor: pointer; font: inherit;
+      color: var(--text); transition: background .14s, border-color .14s;
+    }
+    .chat-selfnote:hover { background: var(--accent-subtle); border-color: #eccf6a; }
+    .chat-selfnote-av { flex-shrink: 0; display: inline-flex; }
+    .chat-selfnote-txt { flex: 1; min-width: 0; }
+    .chat-selfnote-txt b { display: block; font-size: .9rem; font-weight: 700; }
+    .chat-selfnote-txt small {
+      display: block; font-size: .76rem; color: var(--text-muted); margin-top: 1px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .chat-selfnote svg { flex-shrink: 0; color: var(--text-muted); }
     .chat-chips-row {
       display: flex; flex-wrap: wrap; gap: 6px;
       margin-bottom: 8px; min-height: 0;
@@ -1376,6 +1394,16 @@
           <button class="chat-new-cancel" onclick="showChatList()">Cancel</button>
         </div>
         <div class="chat-new-body">
+          <!-- Somewhere to put a thought. Always here rather than buried in the
+               search, since nobody thinks to look for their own name. -->
+          <button type="button" class="chat-selfnote" id="chat-selfnote-btn" onclick="openSelfChat()">
+            <span class="chat-selfnote-av" id="chat-selfnote-av"></span>
+            <span class="chat-selfnote-txt">
+              <b>Notes to self</b>
+              <small>Message yourself to keep something you want to remember</small>
+            </span>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
           <div class="chat-chips-row" id="chat-selected-chips"></div>
           <input class="chat-people-input" id="chat-people-input" type="text" placeholder="Add people…"
             oninput="_onPeopleSearch(this.value)"
@@ -2973,6 +3001,24 @@ function _dmChatId(otherEmail) {
   return [myEmail, otherEmail].sort().join("|");
 }
 
+/* MESSAGING YOURSELF. A DM whose two ends are the same person: somewhere to put
+   a thought you want to keep, in the place you are already in. It needs no new
+   table and no new plumbing - "you|you" is a canonical DM id like any other -
+   only a name, your own face on it, and a way in from the New Conversation
+   panel. */
+function _selfChatId() { return myEmail ? _dmChatId(myEmail) : null; }
+function _isSelfChat(chatId) {
+  if (!chatId || !myEmail || !chatId.includes("|")) return false;
+  const p = chatId.split("|");
+  return p.length === 2 && p[0] === p[1] && p[0] === myEmail;
+}
+const SELF_CHAT_NAME = "Notes to self";
+window.openSelfChat = function () {
+  _showChatView();
+  _subscribeGlobalRealtime();
+  _openConversation(myEmail, SELF_CHAT_NAME);
+};
+
 // ── Chat state switching ──────────────────────────────────────────────────────
 
 function _setChatPanel(panel) {
@@ -3156,6 +3202,14 @@ async function _loadConversationsList() {
     }
   }
 
+  // And one with yourself, pinned the same way. A place to put a thought is no
+  // use if you have to start a conversation to find it: it is simply there,
+  // for everyone, from the first time they open chat.
+  const _selfId = _selfChatId();
+  if (_selfId && !seen.has(_selfId)) {
+    seen.set(_selfId, { chat_id: _selfId, content: "", email: myEmail, name: myName || "", created_at: null });
+  }
+
   // 4. Fetch room names for group DMs
   const roomIds = [...seen.keys()].filter(id => myRoomIds.has(id));
   let roomNames = {};
@@ -3207,8 +3261,9 @@ function _renderConvList(convList, roomNames) {
       // DM
       const otherEmail = cid.split("|").find(e => e !== myEmail) || cid.split("|")[0];
       const member = (_allMembers || []).find(m => m.email === otherEmail);
-      name = member ? member.name : (otherEmail.split("@")[0]);
-      avatarEl = avatarHtml(otherEmail, name, 44, member?.avatar_url || null);
+      name = _isSelfChat(cid) ? SELF_CHAT_NAME : (member ? member.name : (otherEmail.split("@")[0]));
+      avatarEl = avatarHtml(otherEmail, member?.name || name, 44,
+                            (_isSelfChat(cid) ? myAvatarUrl : null) || member?.avatar_url || null);
     } else {
       // Group DM room
       name = roomNames && roomNames[cid] ? roomNames[cid] : "Group";
@@ -3266,7 +3321,9 @@ async function _setChatHeaderAvatar(chatId) {
     return;
   }
   let emails = [];
-  if (chatId.includes("|")) {
+  if (_isSelfChat(chatId)) {
+    emails = [myEmail];
+  } else if (chatId.includes("|")) {
     emails = chatId.split("|").filter(e => e && e !== myEmail);
   } else if (/^[0-9a-f-]{36}$/i.test(chatId)) {
     const { data } = await db.from("community_chat_participants").select("email").eq("room_id", chatId);
@@ -3296,16 +3353,18 @@ async function _openConversation(chatIdOrEmail, otherName) {
     const parts = chatId.split("|");
     const other = parts.find(e => e !== myEmail) || parts[0];
     const member = (_allMembers || []).find(m => m.email === other);
-    title = otherName || (member ? member.name : other.split("@")[0]);
+    title = _isSelfChat(chatId) ? SELF_CHAT_NAME
+          : (otherName || (member ? member.name : other.split("@")[0]));
   } else if (/^[0-9a-f-]{36}$/i.test(chatIdOrEmail)) {
     // UUID — group DM room
     chatId = chatIdOrEmail;
     title  = otherName || "Group";
   } else {
-    // Raw email — DM
+    // Raw email — DM (your own address included: that is the self chat)
     chatId = _dmChatId(chatIdOrEmail);
     const member = (_allMembers || []).find(m => m.email === chatIdOrEmail);
-    title  = otherName || (member ? member.name : chatIdOrEmail.split("@")[0]);
+    title  = _isSelfChat(chatId) ? SELF_CHAT_NAME
+           : (otherName || (member ? member.name : chatIdOrEmail.split("@")[0]));
   }
 
   _currentChatId   = chatId;
@@ -4492,6 +4551,8 @@ async function showNewChat() {
     document.getElementById("chat-sidebar").style.display   = "none";
     document.getElementById("chat-main-area").style.display = "flex";
   }
+  const _selfAv = document.getElementById("chat-selfnote-av");
+  if (_selfAv) _selfAv.innerHTML = avatarHtml(myEmail, myName, 36, myAvatarUrl || null);
   setTimeout(() => document.getElementById("chat-people-input").focus(), 50);
 }
 
@@ -4506,10 +4567,21 @@ function _onPeopleSearch(q) {
     ((m.name || "").toLowerCase().includes(lq) || (m.email || "").toLowerCase().includes(lq))
   ).slice(0, 8);
 
-  if (!results.length) { acEl.style.display = "none"; return; }
+  /* Searching your own name, or "note", should find the self chat: the row above
+     the field is the way in, but people type before they look. */
+  const selfHit = ["note", "self", "me", "myself"].some(w => w.startsWith(lq) || lq.startsWith(w))
+    || (myName || "").toLowerCase().includes(lq)
+    || (myEmail || "").toLowerCase().includes(lq);
+  const selfRow = selfHit
+    ? `<div class="chat-ac-item" onclick="openSelfChat()">
+         ${avatarHtml(myEmail, myName, 36, myAvatarUrl || null)}
+         <span class="chat-ac-name">Notes to self</span>
+       </div>` : "";
+
+  if (!results.length && !selfRow) { acEl.style.display = "none"; return; }
 
   acEl.style.display = "block";
-  acEl.innerHTML = results.map(m => `
+  acEl.innerHTML = selfRow + results.map(m => `
     <div class="chat-ac-item" onclick="_selectPerson('${escHtml(m.email)}','${escHtml(m.name || "")}','${escHtml(m.avatar_url || "")}')">
       ${avatarHtml(m.email, m.name, 36, m.avatar_url || null)}
       <span class="chat-ac-name">${escHtml(m.name || m.email)}</span>
