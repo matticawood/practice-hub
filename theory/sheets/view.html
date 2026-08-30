@@ -72,6 +72,29 @@
     /* Monday Music Tips arrive as a body of HTML rather than the sections the
        Piano Practice Daily schema builds, so the prose is styled directly. */
     .ar-html{font-size:1.04rem;line-height:1.75;color:#3a2e24;margin-top:30px}
+    /* THE THREAD READS AS PART OF THE ARTICLE. The shared component draws
+       itself as a white card with 20px of its own padding, which is right on a
+       feed of cards and wrong on a page of paper: it sat as a box in a
+       different colour to the page, with its text out of line with the prose
+       above it. Same component, this page's ground. */
+    .mmt-comments{margin-top:42px;padding-top:26px;border-top:1px solid #e8e0d5}
+    .mmt-comments:empty{display:none}
+    .mmt-comments .tc-comments-section{background:transparent;border:0;border-radius:0;overflow:visible}
+    .mmt-comments .tc-comments-hdr{padding:0 0 12px;border-bottom:0}
+    .mmt-comments .tc-comment-item{padding:13px 0;border-bottom:1px solid rgba(26,20,16,.07)}
+    .mmt-comments .tc-comment-form{padding:16px 0 0;border-top:1px solid rgba(26,20,16,.07)}
+    /* the reaction row: the button's own styling lives in shared-post-view.css,
+       which this page has no other use for, so the few rules it needs are here */
+    .mmt-cmt-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;
+      font:500 .8rem/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#8a7868}
+    .mmt-cmt-meta .tc-react-btn{background:none;border:none;cursor:pointer;display:inline-flex;
+      align-items:center;gap:5px;font-size:.82rem;color:#8a7868;font-family:inherit;
+      padding:4px 6px;border-radius:6px;transition:color .15s,background .15s}
+    .mmt-cmt-meta .tc-react-btn:hover{color:#1a1410;background:rgba(0,0,0,.05)}
+    .mmt-cmt-meta .tc-react-btn.liked{color:#e879a0}
+    .mmt-cmt-meta .tc-like-avatars{display:inline-flex;align-items:center;margin-left:2px}
+    .mmt-cmt-meta .tc-like-chip{border-color:#faf7f3}
+    .mmt-comments .tc-comments-hdr{font-size:.72rem}
     .ar-html > *:first-child{margin-top:0}
     .ar-html p{margin:0 0 1.15em}
     .ar-html h2{font-size:1.35rem;font-weight:750;line-height:1.25;color:var(--text);margin:2em 0 .6em;letter-spacing:-.01em}
@@ -247,6 +270,12 @@
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/shared-practice-autolog.js?v=3"></script>
+  <script src="/shared-comments.js?v=20260823a"></script>
+  <script src="/shared-member-modal.js?v=14"></script>
+  <!-- for window.Mentions only: the @-autocomplete every other composer has.
+       The header itself is never initialised here, so this page stays the
+       chrome-free reading surface it is. -->
+  <script src="/shared-header.js?v=2026071802"></script>
   <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -853,8 +882,105 @@
       /* The excerpt is a machine-made truncation of the opening paragraph,
          so printing it above the article says the same words twice and cuts
          the second copy mid-word. The body speaks for itself. */
-      '<div class="ar-page ar-html">' + mmtBody(data.body_html || '') + '</div>';
+      '<div class="ar-page ar-html">' + mmtBody(data.body_html || '') + '</div>' +
+      '<div id="mmt-comments" class="mmt-comments"></div>';
     hideLoader();
+    /* Not awaited: the article is what they came for and it is already on
+       screen. The thread arrives underneath a moment later. */
+    _mmtComments(slug);
+  }
+
+  /* ── The conversation under a Monday Music Tip ────────────────────────────
+     An article is a library item like a video, and until now it was the one
+     piece of Matt's content nobody could reply to: it moved into the app's own
+     reader and left its comments behind on a page members no longer visit.
+     This is the SAME thread as everywhere else - the shared component, the
+     content_feed tables, keyed to the article's own content post - so a comment
+     left here is the comment anyone else sees, and the notifications, replies,
+     mentions and reactions all work as they do on a video. An article with no
+     content post behind it (and a theory sheet, which is not one of these at
+     all) simply gets no thread. */
+  async function _mmtComments(slug) {
+    const host = document.getElementById('mmt-comments');
+    if (!host || typeof initCommentsSystem !== 'function') return;
+    try {
+      const { data: post } = await db.from('content_feed_posts')
+        .select('id,title')
+        .eq('type', 'blog')
+        .ilike('url', '%' + slug + '%')
+        .limit(1).maybeSingle();
+      if (!post) return;
+
+      const { data: sess } = await db.auth.getSession();
+      const email = (sess && sess.session && sess.session.user && sess.session.user.email) || userEmail;
+      if (!email) return;                          // signed out: read, do not comment
+      const { data: me } = await db.from('allowed_emails')
+        .select('name,avatar_url').eq('email', email).maybeSingle();
+      const name = (me && me.name) || email.split('@')[0];
+
+      if (typeof initMemberModal === 'function') { try { initMemberModal({ db, myEmail: email }); } catch (e) {} }
+      /* @mentions come from the shared module, which initSharedHeader normally
+         wires up. This page has no header, so it wires the one part it needs:
+         without it the composer's @ does nothing and a tagged member is never
+         told they were named. */
+      if (window.Mentions && window.Mentions._init) { try { window.Mentions._init(db, email); } catch (e) {} }
+
+      initCommentsSystem({
+        db,
+        auth: { email: email, name: name, avatarUrl: (me && me.avatar_url) || null,
+                isAdmin: email.toLowerCase() === OWNER },
+        comments:  { table: 'content_feed_comments', parentField: 'post_id' },
+        reactions: { table: 'content_feed_likes',    parentField: 'post_id' },
+        commentReactionEventType: 'content_comment',
+        /* back to the article, not to the feed page: this is where it was said */
+        replyNotificationLinkFn: () => '/theory/sheets/view.html?mmt=' + encodeURIComponent(slug),
+        ownerEmail: OWNER,
+        ownerNotifyTitleFn:   (n) => n + ' commented on your article',
+        ownerReactionTitleFn: (n, emoji) => n + ' reacted ' + emoji + ' to your article',
+      });
+
+      await Comments.loadReactions([post.id]);
+
+      /* WHO REACTED, NOT JUST HOW MANY. The chips are the host page's job in
+         every other place this component is used, so they are built here from
+         the same tables: the emails on the article, then their names and
+         faces. */
+      let chips = '';
+      try {
+        const { data: likes } = await db.from('content_feed_likes')
+          .select('email').eq('post_id', post.id).limit(24);
+        const emails = [...new Set((likes || []).map(l => l.email).filter(Boolean))];
+        if (emails.length) {
+          const { data: people } = await db.from('allowed_emails')
+            .select('email,name,avatar_url').in('email', emails.slice(0, 12));
+          const by = {}; (people || []).forEach(r => { by[r.email] = r; });
+          chips = '<span class="tc-like-avatars">' + emails.slice(0, 3).map(em => {
+            const r = by[em] || {};
+            const nm = r.name || em.split('@')[0];
+            const inner = r.avatar_url
+              ? '<img src="' + esc(r.avatar_url) + '" alt="' + esc(nm) + '">'
+              : '<span style="background:#efe9df;color:#8a7868;width:100%;height:100%;display:flex;'
+                + 'align-items:center;justify-content:center;font-size:.52rem;font-weight:800;border-radius:50%">'
+                + esc(nm[0].toUpperCase()) + '</span>';
+            return '<div class="tc-like-chip">' + inner + '</div>';
+          }).join('') + '</span>'
+          + (emails.length > 3 ? '<span style="font-size:.72rem;color:#8a7868;margin-left:6px">+'
+             + (emails.length - 3) + '</span>' : '');
+        }
+      } catch (e) {}
+
+      host.innerHTML =
+        '<div class="mmt-cmt-meta">'
+          + Comments.reactBtnHtml(post.id, 'mmt_' + String(post.id).replace(/-/g, '_'))
+          + chips
+        + '</div>' +
+        '<div class="tc-comments-section">' +
+          '<div id="tc-comments-hdr-' + post.id + '" class="tc-comments-hdr">Comments</div>' +
+          '<div id="tc-comments-list-' + post.id + '"></div>' +
+          Comments.formHtml(post.id) +
+        '</div>';
+      await Comments.load(post.id);
+    } catch (e) { /* the article stands on its own if the thread cannot load */ }
   }
 
   /* ============================================================
