@@ -965,14 +965,35 @@
        day before, which the space already does; a rule under it ties it to the
        rows it belongs to, which is the job. The gap above each date is what
        marks the end of the day before. */
+    /* A DAY OPENS AND CLOSES. It is a control now, not a caption, so it takes
+       the whole width, keeps its own type, and says what is inside it while it
+       is shut: how many things, and which areas they were in. */
     .hist-day-hdr {
-      display: flex; align-items: baseline; justify-content: space-between;
-      gap: 10px; margin: 22px 2px 0; padding-bottom: 9px;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; margin: 22px 2px 0; padding: 0 0 9px;
       border-bottom: 1px solid var(--border);
+      width: calc(100% - 4px); background: none; border-left: 0; border-right: 0; border-top: 0;
+      font: inherit; text-align: left; cursor: pointer; color: inherit;
+      -webkit-tap-highlight-color: transparent;
     }
+    .hist-day-hdr:hover .hist-day-name { color: var(--text); }
+    .hist-day-chev {
+      flex-shrink: 0; color: var(--text-muted); opacity: .7;
+      transition: transform .16s ease;
+    }
+    .hist-day-hdr.is-open .hist-day-chev { transform: rotate(90deg); }
+    .hist-day-sum {
+      margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+      font-size: .66rem; font-weight: 600; color: var(--text-muted); opacity: .85; white-space: nowrap;
+    }
+    .hist-day-dots { display: inline-flex; gap: 3px; }
+    .hist-day-dots i { width: 6px; height: 6px; border-radius: 50%; display: block; }
+    /* a closed day still reads as the end of something, so the rule stays */
+    .hist-day-hdr:not(.is-open) { padding-bottom: 11px; }
     .hist-month-hdr + .hist-day-hdr { margin-top: 4px; }
     .hist-day-name { font-size: .75rem; font-weight: 700; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
-    .hist-day-total { font-size: .66rem; font-weight: 600; color: var(--text-muted); opacity: .8; white-space: nowrap; }
+    .hist-day-total { font-size: .66rem; font-weight: 600; color: var(--text-muted); opacity: .8; white-space: nowrap; margin-left: 10px; }
+    .hist-day-body[hidden] { display: none; }
     /* Today's group stands out as the latest-practice anchor */
     .hist-day-hdr.is-today .hist-day-name { color: var(--text); font-weight: 800; }
     body.hub-mode .hist-day-hdr.is-today .hist-day-name { color: #1a1410; }
@@ -1283,7 +1304,12 @@
       padding: 0 36px 0 38px; border: none; border-radius: 0; background: transparent;
       font-family: inherit; font-size: .85rem; color: var(--text);
     }
-    body.hub-mode #hist-search { background: transparent; color: #1a1410; }
+    /* BLACK ON BLACK. This forced the typed text to the cream page's ink, and
+       Sessions has been a dark page since the Progress rebuild: the well is
+       white at 5%, so anything typed into it disappeared. Reported by a member,
+       who could see the placeholder and nothing they wrote. The page's own ink,
+       and the caret with it. */
+    body.hub-mode #hist-search { background: transparent; color: #f4f4f6; caret-color: #f5c518; }
     #hist-search::placeholder { color: var(--text-muted); }
     #hist-search:focus { outline: none; }
     .hist-search-clear {
@@ -32236,6 +32262,21 @@ document.getElementById("bd-notes-close-btn").addEventListener("click", closeBre
 // ── Render session history ────────────────────────────────────────
 let _sessionsPage = 1;
 const SESSIONS_PER_PAGE = 10;
+let _histOpenDays = new Set();  // days the member has opened by hand this visit
+const _histDayId = (dk) => String(dk).replace(/[^0-9]/g, "");
+/* Opening a day keeps it open while you are on the page. It is not remembered
+   across visits: the default - newest open, the rest closed - is the useful
+   state to come back to, and a remembered scatter of half-open days is not. */
+window._histToggleDay = function (dk) {
+  const body = document.getElementById("hist-day-" + _histDayId(dk));
+  const hdr  = document.querySelector(`.hist-day-hdr[data-day="${dk}"]`);
+  if (!body) return;
+  const opening = body.hasAttribute("hidden");
+  if (opening) { body.removeAttribute("hidden"); _histOpenDays.add(dk); }
+  else         { body.setAttribute("hidden", ""); _histOpenDays.delete(dk); }
+  if (hdr) { hdr.classList.toggle("is-open", opening); hdr.setAttribute("aria-expanded", opening ? "true" : "false"); }
+};
+
 let _histSearch = "";        // current search query
 let _histTypeFilter = null;  // null = all, or an item_type
 
@@ -32432,9 +32473,30 @@ function renderSessions(resetPage) {
   _histDaySessions = {};
   filtered.forEach(x => { const dk = x.session_date || "";
     (_histDaySessions[dk] = _histDaySessions[dk] || []).push(x); });
+  /* WHAT A CLOSED DAY HAS TO SAY. Enough to decide whether to open it: how
+     many things you did and which areas they were in. */
+  const dayItems = {}, dayTypes = {};
+  filtered.forEach(x => {
+    const dk = x.session_date || "";
+    const items = x.practice_items || [];
+    dayItems[dk] = (dayItems[dk] || 0) + Math.max(1, items.length);
+    const set = (dayTypes[dk] = dayTypes[dk] || new Set());
+    if (items.length) items.forEach(i => set.add(i.item_type || "other"));
+    else set.add("other");
+  });
 
   // Auto-expand the most recent session on a fresh render of the unfiltered list.
   const autoExpand = resetPage && !isFiltering;
+  /* ── THE DAY IS THE UNIT ────────────────────────────────────────────────
+     Every day was open, so a member with a busy fortnight scrolled through all
+     of it to reach last week. A closed day is one line - the date, what it came
+     to, how many things and which areas - and the newest day opens itself, so
+     the screen shows weeks instead of days. Searching opens every day that
+     matched, because a result hidden inside a closed day is the same complaint
+     wearing a different hat. */
+  if (resetPage) _histOpenDays = new Set();
+  const _firstDay = (visible[0] && visible[0].session_date) || "";
+  const _dayIsOpen = (dk) => isFiltering || dk === _firstDay || _histOpenDays.has(dk);
   /* ── ONE ROW PER THING YOU DID ──────────────────────────────────────────
      The list used to be one card per SESSION, each opening onto its items. But
      a session is a container the app made, not something the member did: five
@@ -32453,13 +32515,13 @@ function renderSessions(resetPage) {
   const dayFooter = (dk) => {
     if (!dk) return "";
     const ids = (_histDaySessions[dk] || []).map(x => x.id);
-    if (!ids.length) return "";
+    if (!ids.length) return "</div>";   /* still closes .hist-day-body */
     return `<div class="hist-day-foot">
       <button class="btn btn-ghost btn-sm" data-copy-day="${dk}" title="Copy everything logged on this day as plain text">Copy as text</button>
       ${canEdit ? (_histDayShared(dk)
         ? `<button class="btn btn-ghost btn-sm" disabled style="opacity:.5;cursor:default">Shared</button>`
         : `<button class="btn btn-ghost btn-sm sa-share" data-share-day="${dk}" title="Share this day's practice to the community">Share to community</button>`) : ""}
-    </div>`;
+    </div></div>`;   /* the second closes .hist-day-body */
   };
   visible.forEach((sess) => {
     const mk = (sess.session_date || "").slice(0, 7);
@@ -32481,7 +32543,18 @@ function renderSessions(resetPage) {
       if (dayOpen) html += dayFooter(curDay);
       curDay = dk; dayOpen = true;
       const isToday = dk === todayStr();
-      html += `<div class="hist-day-hdr${isToday ? " is-today" : ""}"><span class="hist-day-name">${_histRelDate(dk)}</span><span class="hist-day-total">${formatMinutes(dayMins[dk] || 0)}</span></div>`;
+      const open = _dayIsOpen(dk);
+      const n = dayItems[dk] || 0;
+      const dots = [...(dayTypes[dk] || [])].slice(0, 5)
+        .map(t => `<i style="background:${(TYPE_COLOR[t] || TYPE_COLOR.other).border}"></i>`).join("");
+      html += `<button type="button" class="hist-day-hdr${isToday ? " is-today" : ""}${open ? " is-open" : ""}"
+          data-day="${dk}" aria-expanded="${open ? "true" : "false"}" onclick="_histToggleDay('${dk}')">
+          <svg class="hist-day-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="hist-day-name">${_histRelDate(dk)}</span>
+          <span class="hist-day-sum"><span class="hist-day-dots">${dots}</span>${n} item${n !== 1 ? "s" : ""}</span>
+          <span class="hist-day-total">${formatMinutes(dayMins[dk] || 0)}</span>
+        </button>
+        <div class="hist-day-body" id="hist-day-${_histDayId(dk)}"${open ? "" : " hidden"}>`;
     }
     html += _histSessionRows(sess, canEdit);
   });
