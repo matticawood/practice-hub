@@ -4198,7 +4198,26 @@ function _contentPostById(id) {
   return p;
 }
 
-function showDetail(postId, skipPush) {
+/* A LINK CAN NAME A POST THE FEED NEVER LOADED. The feed holds the 300 newest
+   member posts and the 50 newest of Matt's, but a notification, a search result
+   or an old link can name anything - and an id that is in neither list rendered
+   an empty page and read the wrong comment store, because "is this one of
+   Matt's?" was answered from the loaded lists alone. Fetched by id when it is
+   not already in hand, so a link to a two-year-old post opens like any other. */
+async function _ensurePostLoaded(postId) {
+  if (!postId) return;
+  if ((_posts || []).some(p => p.id === postId)) return;
+  if ((_contentFeedItems || []).some(p => p.id === postId)) return;
+  try {
+    const { data: cm } = await db.from("community_posts").select("*").eq("id", postId).maybeSingle();
+    if (cm) { _posts.push(cm); return; }
+    const { data: cf } = await db.from("content_feed_posts").select("*").eq("id", postId).maybeSingle();
+    if (cf) _contentFeedItems.push(cf);
+  } catch (e) {}
+}
+
+async function showDetail(postId, skipPush) {
+  await _ensurePostLoaded(postId);
   /* A LINK TO A POST ALWAYS LANDS SOMEWHERE. The community is the destination
      for posts, so notifications, the palette and old links all point here - but
      a video and a Monday Music Tip are library items and live in Learn and the
