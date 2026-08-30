@@ -1557,11 +1557,12 @@ const _SH_PAGE_LABELS = {
   "/chat.html":           "Chat",
   "/learn.html":          "Learn",
   "/courses.html":        "Courses",
-  "/resources.html":      "Resources",
-  "/tools.html":          "All Tools",
+  "/resources.html":      "Pieces",
+  "/tools.html":          "Tools",
   "/focus.html":          "Weekly Focus",
   "/content-feed.html":   "Content Feed",
-  "/events.html":         "Live Clinics",
+  "/theory/sheets/view.html": "Reading an article",
+  "/events.html":         "Live",
   "/clinic-booking.html": "Book a Lesson",
   "/updates.html":        "Updates",
   "/profile.html":        "Profile",
@@ -1573,11 +1574,19 @@ const _SH_PAGE_LABELS = {
 };
 // Friendly labels for the Hub's internal sub-views (reported via window._shPageDetail
 // as a #fragment, since they switch without changing the URL).
+/* KEPT IN STEP WITH THE TABS THEMSELVES. These are what the presence panel
+   says a member is looking at, and they were the names the Hub used before
+   Progress gathered Stats, History, Achievements and the Leaderboard under one
+   tab with its own four names. Reporting "Practice · History" for a member
+   sitting on Progress · Sessions is a quiet way to be wrong about your own
+   app. */
 const _SH_HUB_LABELS = {
-  dashboard: "Practice · Dashboard", stats: "Practice · Stats", goals: "Practice · Goals",
-  roadmap: "Practice · Roadmap", history: "Practice · History", leaderboard: "Practice · Leaderboard",
-  achievements: "Practice · Achievements", community: "Practice · Community", log: "Practice · Practice Log",
-  library: "Library", theory: "Theory", tools: "All Tools", feedback: "Feedback",
+  dashboard: "Practice · Dashboard", goals: "Practice · Goals",
+  roadmap: "Practice · Roadmap", log: "Practice · Logging a session",
+  stats: "Progress · Practice", history: "Progress · Sessions",
+  leaderboard: "Progress · Ranks", achievements: "Progress · Achievements",
+  community: "Practice · Community",
+  library: "Pieces", theory: "Theory", tools: "Tools", feedback: "Feedback",
 };
 function _shPageLabel(path) {
   if (!path) return "";
