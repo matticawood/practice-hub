@@ -1266,7 +1266,7 @@
           switch (eventType) {
             case "focus_comment":  return "/focus.html";
             case "update_comment": return "/updates.html";
-            case "content_comment":return "/content-feed.html";
+            case "content_comment":return "/community.html";
             default: return "/";
           }
         })();

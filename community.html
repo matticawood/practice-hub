@@ -20,6 +20,7 @@
   <script src="/shared-header.js?v=2026071802"></script>
 <script src="/live-session.js?v=1"></script>
   <script src="/shared-member-modal.js?v=16"></script>
+  <script src="/shared-comments.js?v=20260823a"></script>
   <script src="/shared-tour.js?v=11"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3/dist/mux-player.mjs"></script>
   <style>
@@ -2689,7 +2690,14 @@
 
         <div id="detail-post-area"></div>
 
-        <div class="comments-section">
+        <!-- THE SHARED THREAD LIVES HERE. Built per post in showDetail, since
+             the component keys its ids on the post it belongs to. What was in
+             this block - a hand-rolled list, composer, toolbar, recorder and
+             poll builder - is the same thing the component already does on
+             every other page. -->
+        <div id="post-thread-host"></div>
+
+        <div class="comments-section" style="display:none">
           <div class="comments-hdr" id="comments-hdr">Comments</div>
           <div id="comments-list"></div>
           <div class="comment-form" style="flex-direction:column;align-items:stretch;gap:0">
@@ -3294,6 +3302,29 @@ let _feedItems = []; // all feed rows for detail view lookup
   // Universal member-profile modal (shared across the whole site). On community
   // we open posts in-page via showDetail rather than navigating to community.html.
   initMemberModal({ db, myEmail, onPostClick: (id) => showDetail(id) });
+
+  /* ONE COMMENT SYSTEM, NOT TWO. A post opened here had its own thread code -
+     its own replies, comment reactions, polls, mentions, edit and delete - all
+     doing the same job as the shared component every other page uses, which is
+     why the same action behaved slightly differently depending on which card
+     you tapped. The stores do not move: comments stay in community_post_comments,
+     post reactions in community_post_likes, and comment reactions where they
+     already are, in activity_reactions under the community_comment event type,
+     so nothing is migrated and no comment, reaction or poll is lost. */
+  if (typeof initCommentsSystem === "function") {
+    initCommentsSystem({
+      db,
+      auth: { email: myEmail, name: myName, avatarUrl: myAvatarUrl, isAdmin },
+      comments:  { table: "community_post_comments", parentField: "post_id" },
+      reactions: { table: "community_post_likes",    parentField: "post_id" },
+      commentReactionEventType: "community_comment",
+      replyNotificationLinkFn: (parentId) => `/community.html?post=${parentId}`,
+      ownerEmail: OWNER_EMAIL,
+      ownerNotifyTitleFn:   (name) => `${name} commented on a community post`,
+      ownerReactionTitleFn: (name, emoji) => `${name} reacted ${emoji} to a community post`,
+      onCommentChange: (parentId) => { try { _syncCommentCount(parentId); } catch (e) {} },
+    });
+  }
 
   // Portal the composer modal out of #view-list to be a direct child of
   // #community-main (like the member modal). Otherwise opening it from the post
@@ -4140,7 +4171,40 @@ function _pauseVideosIn(sel) {
   document.querySelectorAll(`${sel} mux-player, ${sel} video`).forEach(v => { try { v.pause(); } catch (e) {} });
 }
 
+/* A CONTENT POST IS STILL A POST. Matt's written posts and polls live in
+   content_feed_posts because that is where he writes them, but they are posts
+   to the community and they open here, with the same thread under them. Videos
+   and Monday Music Tips are the exception: those are library items and open in
+   Learn and the reader. */
+/* Where a content post belongs if it is NOT a post to the community: a video
+   opens in Learn, an article in the app's reader. Anything else is a post and
+   belongs here, so this returns nothing for it. */
+function _contentOnwardHref(id) {
+  const p = (_contentFeedItems || []).find(x => x.id === id);
+  if (!p) return null;
+  if (p.type === "youtube" || p.youtube_id) return "/learn.html?post=" + encodeURIComponent(p.id);
+  if (p.type === "blog") {
+    const m = /monday-music-tips\/([^/?#]+)/.exec(p.url || "");
+    return m ? "/theory/sheets/view.html?mmt=" + encodeURIComponent(m[1])
+             : "/learn.html?post=" + encodeURIComponent(p.id);
+  }
+  return null;
+}
+
+function _contentPostById(id) {
+  const p = (_contentFeedItems || []).find(x => x.id === id);
+  if (!p) return null;
+  if (p.type === "youtube" || p.youtube_id || p.type === "blog") return null;
+  return p;
+}
+
 function showDetail(postId, skipPush) {
+  /* A LINK TO A POST ALWAYS LANDS SOMEWHERE. The community is the destination
+     for posts, so notifications, the palette and old links all point here - but
+     a video and a Monday Music Tip are library items and live in Learn and the
+     reader. Rather than show an empty detail for those, this hands them on. */
+  const _onward = _contentOnwardHref(postId);
+  if (_onward) { location.href = _onward; return; }
   _currentPostId = postId;
   _feedScrollY = window.scrollY;          // remember where we were in the feed
   _pauseVideosIn("#view-list");           // stop the feed video before hiding it
@@ -4148,12 +4212,49 @@ function showDetail(postId, skipPush) {
   document.getElementById("view-detail").style.display = "";
   window.scrollTo(0, 0);
   renderDetail(postId);
-  loadComments(postId);
+  _mountPostThread(postId);
   // Push a history entry so the OS edge-swipe (browser back) and the in-app Back
   // button both return to the post list instead of leaving the page. Skipped when
   // opened from the ?post= deep link (that path manages history itself).
   if (!skipPush) history.pushState({ commDetail: postId }, "");
 }
+
+/* Matt's post, opened in the community. The banner across the top is the only
+   thing that differs from a member's post: it says which kind it is, where a
+   member's post carries their name and face. Everything below it - the body,
+   the media, the poll, the reactions and the thread - is the same. */
+function _renderContentDetail(p) {
+  const when = relativeTime(p.published_at || p.created_at);
+  let mediaHtml = "";
+  (Array.isArray(p.media) ? p.media : []).forEach(m => {
+    if (m.type === "mux") {
+      mediaHtml += `<div class="post-card-inline-media post-card-video"><div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div></div>`;
+    } else if (m.type === "youtube") {
+      mediaHtml += `<div class="post-card-inline-media post-card-embed"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "vimeo") {
+      mediaHtml += `<div class="post-card-inline-media post-card-embed"><iframe src="https://player.vimeo.com/video/${escHtml(m.vimeoId)}" allowfullscreen loading="lazy"></iframe></div>`;
+    } else if (m.type === "image") {
+      mediaHtml += `<div class="comm-img-wrap" style="margin-top:8px"><img src="${escHtml(m.url)}" style="width:100%;border-radius:8px" loading="lazy" onload="this.parentElement.classList.add('loaded')"></div>`;
+    }
+  });
+  const body = String(p.body || "");
+  document.getElementById("detail-post-area").innerHTML = `
+    <div class="post-card cf-comm-card cf-comm-post" style="cursor:default">
+      <div class="cf-comm-header">
+        <span class="cf-comm-label">${_CF_POST_SVG} Practice Room Post</span>
+        <span class="cf-comm-date">${escHtml(when)}</span>
+      </div>
+      <div class="cf-comm-body">
+        ${p.title ? `<div class="cf-comm-title">${escHtml(p.title)}</div>` : ""}
+        ${body ? `<div class="cf-comm-preview" style="white-space:pre-wrap">${escHtml(body)}</div>` : ""}
+        ${mediaHtml}
+        ${_cfCommPollHtml(p)}
+      </div>
+    </div>`;
+}
+
+/* the label glyph, lifted out of the card builder so the detail can use it too */
+const _CF_POST_SVG = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>`;
 
 function showList() {
   _currentPostId = null;
@@ -6076,7 +6177,7 @@ function contentFeedCardHTML(p) {
     }
   });
   return `
-    <div class="post-card cf-comm-card cf-comm-post" style="cursor:pointer" onclick="location.href='/content-feed.html?post=${p.id}'">
+    <div class="post-card cf-comm-card cf-comm-post" style="cursor:pointer" onclick="showDetail('${p.id}')">
       <div class="cf-comm-header">
         <span class="cf-comm-label">${SVG_POST} Practice Room Post</span>
         <span class="cf-comm-date">${timeAgo}</span>
@@ -6087,7 +6188,7 @@ function contentFeedCardHTML(p) {
         ${mediaHtml}
         ${_cfCommPollHtml(p)}
       </div>
-      ${footer(`<a href="/content-feed.html?post=${p.id}" class="cf-comm-cta" style="text-decoration:none" onclick="event.stopPropagation()">View post →</a>`)}
+      ${footer(`<a href="/community.html?post=${p.id}" class="cf-comm-cta" style="text-decoration:none" onclick="event.stopPropagation();showDetail('${p.id}');return false">View post →</a>`)}
     </div>`;
 }
 
@@ -6103,7 +6204,10 @@ function _cfDestHref(p) {
     return m ? "/theory/sheets/view.html?mmt=" + encodeURIComponent(m[1])
              : "/learn.html?post=" + encodeURIComponent(p.id);
   }
-  return "/content-feed.html?post=" + encodeURIComponent(p.id);
+  /* A written post or a poll is not a library item: it is a post to the
+     community, and it opens where a member's post opens. The content feed is
+     where these are written, not where they are read. */
+  return "/community.html?post=" + encodeURIComponent(p.id);
 }
 
 function updateFeedCardHTML(p) {
@@ -7522,6 +7626,8 @@ window.previewChampions = async function(data) {
 
 // ── Detail view ───────────────────────────────────────────────────────────────
 function renderDetail(postId) {
+  const cp = _contentPostById(postId);
+  if (cp) return _renderContentDetail(cp);
   const p = _posts.find(p => p.id === postId);
   if (!p) return;
 
@@ -7875,6 +7981,55 @@ async function deletePost(postId) {
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────────
+/* The thread under a post: the same component, the same markup and the same
+   behaviour as every other page in the app, pointed at this page's stores. */
+async function _mountPostThread(postId) {
+  const host = document.getElementById("post-thread-host");
+  if (!host) return;
+  if (typeof initCommentsSystem !== "function" || !window.Comments) {
+    /* the component failed to load: fall back to the page's own thread rather
+       than leaving a post with no comments at all */
+    document.querySelector(".comments-section").style.display = "";
+    return loadComments(postId);
+  }
+  /* One component, two stores. A member's post keeps its comments in
+     community_post_comments; Matt's keeps his in content_feed_comments, where
+     they already are. Pointed per post rather than per page. */
+  const isContent = !!_contentPostById(postId);
+  if (Comments.useSource) {
+    Comments.useSource(isContent
+      ? { comments:  { table: "content_feed_comments", parentField: "post_id" },
+          reactions: { table: "content_feed_likes",    parentField: "post_id" },
+          replyNotificationLinkFn: (id) => `/community.html?post=${id}` }
+      : { comments:  { table: "community_post_comments", parentField: "post_id" },
+          reactions: { table: "community_post_likes",    parentField: "post_id" },
+          replyNotificationLinkFn: (id) => `/community.html?post=${id}` });
+  }
+  host.innerHTML =
+    '<div class="tc-comments-section">'
+      + '<div class="tc-comments-hdr" id="tc-comments-hdr-' + postId + '">Comments</div>'
+      + '<div id="tc-comments-list-' + postId + '"></div>'
+      + Comments.formHtml(postId)
+    + '</div>';
+  await Comments.load(postId);
+  _syncCommentCount(postId);
+}
+
+/* The feed card's "N comments" line, kept true when the shared thread adds or
+   removes one. The old loader did this inline; the component reports instead. */
+function _syncCommentCount(postId) {
+  const listEl = document.getElementById(`tc-comments-list-${postId}`);
+  if (!listEl) return;
+  const count = listEl.querySelectorAll(".tc-comment-item").length;
+  const post  = _posts.find(p => p.id === postId);
+  if (post) post.commentCount = count;
+  document.querySelectorAll(`.like-count-${postId}`).forEach(el => {
+    el.innerHTML = count
+      ? `<span onclick="event.stopPropagation();showDetail('${postId}')" style="cursor:pointer">${count} comment${count !== 1 ? "s" : ""}</span>`
+      : "";
+  });
+}
+
 async function loadComments(postId) {
   const listEl = document.getElementById("comments-list");
   const hdrEl  = document.getElementById("comments-hdr");

@@ -2137,7 +2137,9 @@ function _shPalContentHref(a) {
     return m ? "/theory/sheets/view.html?mmt=" + encodeURIComponent(m[1])
              : "/learn.html?post=" + encodeURIComponent(a.id);
   }
-  return "/content-feed.html?post=" + a.id;
+  /* Everything else is a post to the community and opens there, the same as
+     it does from the feed. The content feed is where they are written. */
+  return "/community.html?post=" + a.id;
 }
 
 async function _shPalRemoteSearch(query, navHits) {
