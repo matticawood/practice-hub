@@ -959,13 +959,20 @@ async function load() {
       ITEMS.push({ type:"video", ctype:"video", ref:p.youtube_id, title:p.title, date:p.published_at, playable:true, vertical:vert,
         yt:p.youtube_id, mins:Math.max(1, Math.round((p.duration_seconds || 0) / 60)),
         img:"https://i.ytimg.com/vi/" + p.youtube_id + (vert ? "/oardefault.jpg" : "/mqdefault.jpg"),
-        href:"/content-feed.html?post=" + encodeURIComponent(p.id),
+        /* Opens here, in the lightbox. The feed address is kept as the alias so
+           a pick coming back from picks_for still matches the library item it
+           belongs to — content_index still spells a video's home that way, and
+           an unmatched pick would carry a member into the studio. Same trick as
+           the Monday Music Tips articles below. */
+        href:"/learn.html?post=" + encodeURIComponent(p.id),
+        altHref:"/content-feed.html?post=" + encodeURIComponent(p.id),
         dur:p.duration_seconds ? mins(p.duration_seconds) : "",
         meta:fmtDate(p.published_at) });
     } else if (mux) {                                    // Matthew's own uploads
       ITEMS.push({ type:"video", title:p.title, date:p.published_at, playable:true, only:true,
         img:"https://image.mux.com/" + mux + "/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=8",
-        href:"/content-feed.html?post=" + encodeURIComponent(p.id),
+        href:"/learn.html?post=" + encodeURIComponent(p.id),
+        altHref:"/content-feed.html?post=" + encodeURIComponent(p.id),
         dur:p.duration_seconds ? mins(p.duration_seconds) : "",
         meta:fmtDate(p.published_at) });
     } else {
@@ -1385,7 +1392,9 @@ async function openClinic(eventId) {
 async function openPost(postId) {
   if (window.Comments && Comments.useSource) Comments.useSource(LB_SRC_POST);
   const p = FEED[postId];
-  if (!p) { location.href = "/content-feed.html?post=" + encodeURIComponent(postId); return; }
+  // Not in what Learn loaded (an older post, or a written one): the community
+  // post page can fetch any of them. The feed page is a studio now.
+  if (!p) { location.href = "/community.html?post=" + encodeURIComponent(postId); return; }
 
   const media = $("ln-lb-media"), body = $("ln-lb-body"), cmts = $("ln-lb-cmts");
 
@@ -1667,14 +1676,19 @@ async function loadPicks() {
   if (pk.length) {
     const byHref = {};
     ITEMS.forEach(i => { byHref[i.href] = i; if (i.altHref) byHref[i.altHref] = i; });
+    /* Last resort for a pick with no library item: never hand back the feed
+       address. The studio is not a destination for members. */
+    const _safeHref = h => String(h || "").startsWith("/content-feed.html?post=")
+      ? "/learn.html?post=" + String(h).split("post=")[1]
+      : h;
     PICK_SHORTS = pk.filter(r => r.fmt === "short").map(r => Object.assign({},
-      byHref[r.href] || { type:"video", title:r.title, href:r.href, meta:"" },
+      byHref[r.href] || { type:"video", title:r.title, href:_safeHref(r.href), meta:"" },
       { topic:r.topic, vertical:true })).filter(Boolean);
     pk = pk.filter(r => r.fmt !== "short");
     PICKS = pk.map(r => Object.assign({}, byHref[r.href] || {
       type: r.content_type === "mmt" ? "article" : r.content_type === "theory_sheet" ? "sheet"
           : r.content_type === "lesson" ? "course" : r.content_type,
-      title: r.title, href: r.href, meta: "" },
+      title: r.title, href: _safeHref(r.href), meta: "" },
       /* topic becomes the reason it was picked, which is what the card says.
          The article's own category has to survive that, because the book takes
          its colour and its letter from the category, not from the reason. */
@@ -2273,7 +2287,9 @@ function wire(heroChanged) {
          what there is to click - left the page for the feed. Same destination,
          two different behaviours on one tile. */
       const href = sl.dataset.href || "";
-      if (href.startsWith("/content-feed.html?post=")) {
+      // Both spellings: the cards say /learn.html?post= now, and anything still
+      // carrying the old feed URL must open here too rather than leave for it.
+      if (href.startsWith("/learn.html?post=") || href.startsWith("/content-feed.html?post=")) {
         openPost(decodeURIComponent(href.split("post=")[1] || ""));
         return;
       }
