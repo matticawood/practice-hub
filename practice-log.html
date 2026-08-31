@@ -1841,6 +1841,50 @@
     }
     .wiz-date-arrow:hover { color: var(--text); }
     .wiz-date-arrow:disabled { opacity: .2; cursor: default; }
+    /* Quiet until it is used: an offer, not a field waiting to be filled in. */
+    .wiz-time-row { margin-top: 10px; min-height: 22px; }
+    /* One phrase, centred as one thing. The underline stops before the
+       parenthetical so the offer still reads as the part you press. */
+    .wiz-time-add {
+      background: none; border: none; padding: 0; cursor: pointer; font: inherit;
+      font-size: .82rem; font-weight: 600; color: var(--text-muted,#888);
+    }
+    .wiz-time-add-u { border-bottom: 1px dashed rgba(140,132,120,.5); }
+    .wiz-time-add:hover { color: var(--accent,#f5c518); }
+    .wiz-time-add:hover .wiz-time-add-u { border-bottom-color: var(--accent,#f5c518); }
+    /* Says it is an offer without making a label of it. Not underlined, so it
+       reads as a note on the link rather than part of what you press. */
+    .wiz-time-opt {
+      font-size: .72rem; font-weight: 600; opacity: .6; margin-left: 6px;
+      letter-spacing: .01em;
+    }
+    #session-time { display: none !important; }
+    .wiz-time-picker { display: inline-flex; align-items: center; gap: 6px; }
+    .wiz-time-sel {
+      font: inherit; font-size: .9rem; font-weight: 700; color: var(--text);
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 9px; padding: 5px 7px; cursor: pointer;
+      appearance: none; -webkit-appearance: none; text-align: center;
+    }
+    .wiz-time-sel:focus { outline: none; border-color: var(--accent,#f5c518); }
+    .wiz-time-colon { font-weight: 800; color: var(--text-muted,#888); margin: 0 -2px; }
+    /* Two halves of one control, so it reads as a switch rather than as two
+       buttons that happen to sit together. */
+    .wiz-time-ampm {
+      display: inline-flex; border: 1.5px solid var(--border); border-radius: 9px;
+      overflow: hidden; margin-left: 2px;
+    }
+    .wiz-time-ampm button {
+      font: inherit; font-size: .78rem; font-weight: 700; letter-spacing: .02em;
+      background: none; border: none; color: var(--text-muted,#888);
+      padding: 6px 9px; cursor: pointer;
+    }
+    .wiz-time-ampm button.on { background: var(--accent,#f5c518); color: #1a1410; }
+    .wiz-time-clear {
+      background: none; border: none; cursor: pointer; padding: 0 2px; line-height: 1;
+      font-size: 1.15rem; color: var(--text-muted,#888); margin-left: 2px;
+    }
+    .wiz-time-clear:hover { color: var(--text); }
     .wiz-section-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted,#888); font-weight: 600; }
     #wiz-structures-list { display: flex; flex-wrap: wrap; gap: 8px; }
     .wiz-structure-chip {
@@ -14964,6 +15008,32 @@
             <div class="wiz-date-value" id="wiz-date-display">Today</div>
             <button class="wiz-date-arrow" id="wiz-date-next" type="button">&#8250;</button>
           </div>
+          <!-- The time belongs to the date, so it lives in the same card rather
+               than competing with it as a second field. Nothing here is
+               required: left alone it stays empty and nothing is recorded. -->
+          <div class="wiz-time-row">
+            <button type="button" class="wiz-time-add" id="wiz-time-add"
+                    onclick="event.stopPropagation();wizTimeOpen()"><span
+                    class="wiz-time-add-u">Add a start time</span><span
+                    class="wiz-time-opt">(optional)</span></button>
+            <!-- Our own control rather than the browser's. A native time field
+                 puts its picker where IT likes and looks like nothing else in
+                 the app; this is the same pill vocabulary as the rest of the
+                 card, and on a phone each part opens the OS wheel. -->
+            <span class="wiz-time-picker" id="wiz-time-picker" style="display:none"
+                  onclick="event.stopPropagation()">
+              <select class="wiz-time-sel" id="wiz-time-h" onchange="wizTimeSync()" aria-label="Hour"></select>
+              <span class="wiz-time-colon">:</span>
+              <select class="wiz-time-sel" id="wiz-time-m" onchange="wizTimeSync()" aria-label="Minutes"></select>
+              <span class="wiz-time-ampm" id="wiz-time-ampm">
+                <button type="button" data-ap="am" onclick="wizTimeAmPm('am')">am</button>
+                <button type="button" data-ap="pm" class="on" onclick="wizTimeAmPm('pm')">pm</button>
+              </span>
+              <button type="button" class="wiz-time-clear" title="Remove the start time"
+                      aria-label="Remove the start time" onclick="wizTimeClear()">&times;</button>
+            </span>
+            <input type="time" id="session-time" tabindex="-1" aria-hidden="true" />
+          </div>
         </div>
         <div id="wiz-structures-wrap" style="display:none">
           <div class="wiz-section-label" style="margin-bottom:8px">Practice Structures</div>
@@ -18234,13 +18304,37 @@ function _renderProgressPage(show) {
     + '</div>';
 
   /* ── 5 · WHEN YOU PRACTISE ──────────────────────────────────────────────
-     Built from when each session was logged, which is the honest signal the
-     app holds: there is no start time on a session. */
+     ONLY FROM TIMES THAT MEAN WHAT THE HEADING SAYS.
+
+     This was built from created_at, the moment the row was written, which for
+     anyone who writes the day up afterwards is the hour they typed rather than
+     the hour they played. A member reported it telling her she practises at
+     midnight: 78 of her 88 typed sessions were saved on the calendar day AFTER
+     the practice they describe, at about half past midnight her time. The chart
+     was not wrong about its data, it was wrong about what its data meant.
+
+     Two timestamps do mean it, and nothing else does:
+       · start_time  - the member said so, or the live timer recorded it. A wall
+                       clock with no timezone, used exactly as given.
+       · created_at on a row the APP wrote (a lesson, a drill, an article),
+                       which is stamped at the moment they did the thing.
+     A typed session with no start time is left out rather than counted at the
+     hour it was typed. Better a smaller true chart than a big false one. */
   const cTod = (function () {
     const hrs = new Array(24).fill(0);
+    let used = 0, skipped = 0;
     ss.forEach(s => {
-      const t = s.created_at ? new Date(s.created_at) : null;
-      if (t && !isNaN(t)) hrs[t.getHours()] += Number(s.duration_minutes) || 0;
+      const mins = Number(s.duration_minutes) || 0;
+      let hour = null;
+      if (s.start_time) {
+        const h = parseInt(String(s.start_time).slice(0, 2), 10);
+        if (!isNaN(h) && h >= 0 && h < 24) hour = h;
+      } else if (String(s.source || "").startsWith("app-")) {
+        const t = s.created_at ? new Date(s.created_at) : null;
+        if (t && !isNaN(t)) hour = t.getHours();
+      }
+      if (hour === null) { skipped++; return; }
+      hrs[hour] += mins; used++;
     });
     const peak = Math.max.apply(null, hrs);
     /* peak of 0 would divide every bar by zero and produce NaN heights, which
@@ -18252,10 +18346,22 @@ function _renderProgressPage(show) {
       + (peak ? Math.max(m ? 3 : 0, Math.round(m / peak * 100)) : 0) + '%"></i>').join('');
     const hour = h => h === 0 ? 'midnight' : h === 12 ? 'noon'
       : (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? 'am' : 'pm');
+    /* Nothing to draw from is not a chart with no bars: it is a chapter that
+       says what would fill it. The two ways in are the same two the chart
+       trusts, so the sentence doubles as the reason it is empty. */
+    if (!used) {
+      return '<div class="pc-head"><h2>When you practice</h2></div>'
+        + '<p class="pc-note">Nothing here yet. Add a start time when you log a'
+        + ' session, or use the live timer, and this fills itself in. Sessions'
+        + ' written up later are left out rather than counted at the hour you'
+        + ' typed them.</p>';
+    }
     return '<div class="pc-head"><h2>When you practice</h2></div>'
       + '<div class="pc-chart' + (peak ? '' : ' pc-chart--empty') + '"><div class="pc-tod">' + bars + '</div>'
       + '<div class="pc-todx"><span>midnight</span><span>6am</span><span>noon</span><span>6pm</span><span>midnight</span></div></div>'
-      + (peak ? '<p class="pc-note">Most of your practice happens around <b>' + hour(hot) + '</b>.</p>' : '');
+      + (peak ? '<p class="pc-note">Most of your practice happens around <b>' + hour(hot) + '</b>.'
+              + (skipped ? ' From the ' + used + ' session' + (used === 1 ? '' : 's')
+                           + ' that carry a time.' : '') + '</p>' : '');
   })();
 
   /* ── 6 · WHAT GETS IN THE WAY ───────────────────────────────────────────
@@ -33087,6 +33193,7 @@ async function _openSessionForEdit(rawId) {
   editingSessionId = sess.id;
   document.getElementById("log-modal-title").textContent = "Edit Practice Session";
   document.getElementById("session-date").value = sess.session_date;
+  _wizSetTimeField(sess.start_time);
   document.getElementById("session-notes").value = sess.notes || "";
   let _fr = sess.focus_rating;
   if (_fr === undefined) {
@@ -33127,6 +33234,7 @@ async function _duplicateSession(rawId) {
   resetLogForm();
   // Default to today — a duplicate is a new log; the member can change the date.
   document.getElementById("session-date").value = sessionTodayStr();
+  _wizClearTimeField();
   document.getElementById("session-notes").value = sess.notes || "";
   setSessionFocus(sess.focus_rating || 0);
   formItems = [];
@@ -33826,6 +33934,7 @@ function resetLogForm() {
   const t = document.getElementById("log-modal-title");
   if (t) t.textContent = "Log Practice Session";
   document.getElementById("session-date").value = sessionTodayStr();
+  _wizClearTimeField();
   document.getElementById("session-notes").value = "";
   clearSessionFocus();
   _wizReturnSlotToStore();
@@ -33856,6 +33965,129 @@ function _wizRenderDateDisplay() {
   // Disable next arrow if already on today
   const nextBtn = document.getElementById("wiz-date-next");
   if (nextBtn) nextBtn.disabled = val >= todayStr();
+  _wizRenderTime();
+}
+
+/* THE START TIME, optional, in the same card as the date it belongs to.
+
+   A wall-clock time with no timezone: a member who picks 4:00 means four
+   o'clock where they are, and the chart that reads it wants exactly that.
+   Treating it as an instant is what made the old chart claim people practise
+   at midnight.
+
+   The control is ours rather than the browser's. A native time field drops its
+   picker wherever it likes and looks like nothing else in the app; hours and
+   minutes as pills match the card they sit in, and on a phone each one opens
+   the OS wheel. `#session-time` stays as the single value everything else
+   reads, so the picker is only ever a way of setting it.
+
+   Two states, not three: the offer, or the control with a way to take it back.
+   No time is recorded until an hour is chosen, so nothing is invented for a
+   member who opens it and thinks better of it. */
+let _wizAmPm = "pm";
+
+function _wizBuildTimeOptions() {
+  const h = document.getElementById("wiz-time-h");
+  const m = document.getElementById("wiz-time-m");
+  if (!h || !m || h.options.length) return;
+  h.innerHTML = '<option value="">--</option>'
+    + Array.from({ length: 12 }, (_, i) => '<option>' + (i + 1) + '</option>').join("");
+  // Five-minute steps: nobody knows they started at 16:23, and a shorter list
+  // is quicker to land on.
+  m.innerHTML = Array.from({ length: 12 },
+    (_, i) => '<option>' + String(i * 5).padStart(2, "0") + '</option>').join("");
+}
+
+function _wizRenderTime() {
+  const inp = document.getElementById("session-time");
+  const add = document.getElementById("wiz-time-add");
+  const pick = document.getElementById("wiz-time-picker");
+  if (!inp || !add || !pick) return;
+  _wizBuildTimeOptions();
+  const open = pick.style.display !== "none";
+  add.style.display = open ? "none" : "";
+  // Reflect the stored value back into the parts, so editing a saved session
+  // shows the time it already has.
+  if (inp.value) {
+    const [H, M] = inp.value.split(":").map(Number);
+    _wizAmPm = H < 12 ? "am" : "pm";
+    document.getElementById("wiz-time-h").value = String(H % 12 === 0 ? 12 : H % 12);
+    const mSel = document.getElementById("wiz-time-m");
+    const mm = String(M).padStart(2, "0");
+    // The list steps in fives, but a stored time need not: show what is really
+    // there rather than silently rounding somebody's record.
+    if (![...mSel.options].some(o => o.value === mm)) {
+      const o = document.createElement("option");
+      o.value = mm; o.textContent = mm;
+      mSel.appendChild(o);
+    }
+    mSel.value = mm;
+  }
+  document.querySelectorAll("#wiz-time-ampm button").forEach(b =>
+    b.classList.toggle("on", b.dataset.ap === _wizAmPm));
+}
+
+// The parts are the truth while the picker is open; this is where they become
+// the value everything else reads.
+function wizTimeSync() {
+  const h = document.getElementById("wiz-time-h").value;
+  const m = document.getElementById("wiz-time-m").value || "00";
+  const inp = document.getElementById("session-time");
+  if (!h) { inp.value = ""; return; }          // no hour chosen means no time
+  let H = parseInt(h, 10) % 12;
+  if (_wizAmPm === "pm") H += 12;
+  inp.value = String(H).padStart(2, "0") + ":" + m;
+}
+
+function wizTimeAmPm(ap) {
+  _wizAmPm = ap;
+  document.querySelectorAll("#wiz-time-ampm button").forEach(b =>
+    b.classList.toggle("on", b.dataset.ap === ap));
+  wizTimeSync();
+}
+
+function wizTimeOpen() {
+  const pick = document.getElementById("wiz-time-picker");
+  const add = document.getElementById("wiz-time-add");
+  if (!pick || !add) return;
+  _wizBuildTimeOptions();
+  pick.style.display = "inline-flex";
+  add.style.display = "none";
+  const h = document.getElementById("wiz-time-h");
+  if (h) h.focus();
+}
+
+function wizTimeClear() {
+  const inp = document.getElementById("session-time");
+  const pick = document.getElementById("wiz-time-picker");
+  const add = document.getElementById("wiz-time-add");
+  if (inp) inp.value = "";
+  const h = document.getElementById("wiz-time-h");
+  if (h) h.value = "";
+  if (pick) pick.style.display = "none";
+  if (add) add.style.display = "";
+}
+window.wizTimeOpen = wizTimeOpen;
+window.wizTimeClear = wizTimeClear;
+window.wizTimeSync = wizTimeSync;
+window.wizTimeAmPm = wizTimeAmPm;
+
+// `time` comes back from PostgREST as HH:MM:SS; the input wants HH:MM.
+function _wizSetTimeField(v) {
+  const inp = document.getElementById("session-time");
+  const pick = document.getElementById("wiz-time-picker");
+  const add = document.getElementById("wiz-time-add");
+  if (!inp) return;
+  inp.value = v ? String(v).slice(0, 5) : "";
+  if (inp.value) { if (pick) pick.style.display = "inline-flex"; if (add) add.style.display = "none"; }
+  else { if (pick) pick.style.display = "none"; if (add) add.style.display = ""; }
+  _wizRenderTime();
+}
+function _wizClearTimeField() { _wizSetTimeField(""); }
+function _wizTimeValue() {
+  const inp = document.getElementById("session-time");
+  const v = inp && inp.value ? inp.value.slice(0, 5) : "";
+  return v || null;
 }
 
 function _wizRenderStructures() {
@@ -34623,6 +34855,15 @@ function liveStartActivity() {
   if (!_liveOn) return;
   _liveItemStart = Date.now(); _livePausedAt = null; _livePausedMs = 0;
   _liveItemStopped = false; _liveAutoPaused = false;
+  /* A timed session knows exactly when it began, so nobody should have to tell
+     it. Recorded once, when the clock first runs, and only into an empty field:
+     a time the member typed themselves is theirs and is left alone. */
+  const _t = document.getElementById("session-time");
+  if (_t && !_t.value) {
+    const n = new Date();
+    n.setMinutes(Math.round(n.getMinutes() / 5) * 5, 0, 0);   // the picker steps in fives
+    _wizSetTimeField(String(n.getHours()).padStart(2, "0") + ":" + String(n.getMinutes()).padStart(2, "0"));
+  }
   _livePersist(); _liveRenderBar(); _liveStartTick();
 }
 function livePauseToggle() {
@@ -36726,7 +36967,7 @@ async function quickLogSubmit() {
   const dateVal = document.getElementById("session-date").value || sessionTodayStr();
   try {
     const { data: sess, error } = await db.from("practice_sessions")
-      .insert({ email: myEmail, session_date: dateVal, duration_minutes: mins, timing_mode: "per_item", notes: null, source: "quick" })
+      .insert({ email: myEmail, session_date: dateVal, start_time: _wizTimeValue(), duration_minutes: mins, timing_mode: "per_item", notes: null, source: "quick" })
       .select("id").single();
     if (error) throw error;
     // Fill the four roadmap areas by the member's split (not a single unattributed 'other'),
@@ -36835,7 +37076,7 @@ async function saveSession() {
     if (editingSessionId) {
       // Update existing session
       const { error: updateErr } = await db.from("practice_sessions")
-        .update({ session_date: dateVal, duration_minutes: durationMins, timing_mode: "per_item", notes, focus_rating })
+        .update({ session_date: dateVal, start_time: _wizTimeValue(), duration_minutes: durationMins, timing_mode: "per_item", notes, focus_rating })
         .eq("id", editingSessionId);
       if (updateErr) throw updateErr;
 
@@ -36849,7 +37090,7 @@ async function saveSession() {
     } else {
       // Insert new session
       const { data: newSession, error: insertErr } = await db.from("practice_sessions")
-        .insert({ email: myEmail, session_date: dateVal, duration_minutes: durationMins, timing_mode: "per_item", notes, focus_rating })
+        .insert({ email: myEmail, session_date: dateVal, start_time: _wizTimeValue(), duration_minutes: durationMins, timing_mode: "per_item", notes, focus_rating })
         .select()
         .single();
       if (insertErr) throw insertErr;
@@ -37940,6 +38181,7 @@ async function bootApp() {
 
   // Default: set date to today
   document.getElementById("session-date").value = sessionTodayStr();
+  _wizClearTimeField();
 
   // Apply initial tab theme
   document.body.classList.add("hub-mode");
