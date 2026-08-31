@@ -854,7 +854,7 @@
 
 <header id="app-header" style="display:none"></header>
 <script src="/shared-header.js?v=2026071802"></script>
-<script src="/live-session.js?v=1"></script>
+<script src="/live-session.js?v=13"></script>
 <script src="/shared-practice-autolog.js?v=4"></script>
 <script src="/shared-achievements.js?v=9"></script>
 
@@ -2607,6 +2607,54 @@ function resetGame() {
    app, and a pulse left running behind a closed tool is a thing you then have
    to go and find. */
 const _pfSwitchState = (function () { return null; })();
+/* A game round counts its own minute, so the live session clock stands down for
+   exactly the sixty seconds it runs and starts itself again afterwards. Nothing
+   is deducted at the end: the two are never counting at the same time. The
+   Passage Fixer logs nothing of its own, which is why it is not in here and why
+   the clock keeps running through it. */
+/* Where the round's top row actually is. Measured rather than guessed: the drills
+   and the Passage Fixer each size their own band from its contents, so a number
+   typed into the stylesheet would be wrong on the first screen that disagreed.
+   The chip and the note both line up with whatever else is in that row. */
+function _toolsBarMetrics() {
+  var bar = document.querySelector(".tool-panel.active .nr-game-hdr")
+         || document.querySelector(".tool-panel.active .play-header");
+  if (!bar) return;
+  var r = bar.getBoundingClientRect();
+  if (!r.height) return;
+  /* Line up with the WAY BACK, not with the band's box: the band's padding is
+     not symmetrical, so its middle sits a few pixels below the row of controls
+     the member actually sees. */
+  var anchor = bar.querySelector(".nr-quit") || bar.querySelector("button") || bar;
+  var a = anchor.getBoundingClientRect();
+  if (!a.height) a = r;
+  document.body.style.setProperty("--rm-band-bottom", Math.round(r.bottom) + "px");
+  document.body.style.setProperty("--rm-bar-mid", Math.round(a.top + a.height / 2) + "px");
+}
+window.addEventListener("resize", function () {
+  if (document.body.classList.contains("tool-playing")) _toolsBarMetrics();
+});
+
+function toolsLiveHold(on, tool) {
+  if (!window.RMLive) return;
+  if (on) {
+    RMLive.hold("tool", (tool || "This tool") + " logs this minute for you.");
+    _toolsBarMetrics();
+    return;
+  }
+  var before = RMLive.read();
+  RMLive.release("tool");
+  var after = RMLive.read();
+  /* Say what happened, but only to a member who actually had it running. No
+     figure: the tool keeps ONE rolling entry per day, so a second round makes it
+     2 min and a third 3 min, and "1 min" every time would read as if each round
+     started the count again. */
+  if (before && before.heldBy === "tool" && after && RMLive.isRunning(after)) {
+    window.dispatchEvent(new CustomEvent("rmlive:note",
+      { detail: { text: (tool || "That") + " logged", ms: 5000 } }));
+  }
+}
+
 function switchState(id) {
   document.querySelectorAll(".game-state").forEach(el => el.classList.remove("active"));
   document.getElementById("state-" + id).classList.add("active");
@@ -2614,6 +2662,8 @@ function switchState(id) {
      busy, so the two verdicts want to be the size of a piano key and the app's
      chrome wants to be out of the way. Same frame as the drills. */
   document.body.classList.toggle("tool-playing", id === "playing");
+  // The chip sits on the same line as the way back and the level badge.
+  if (id === "playing") _toolsBarMetrics();
 }
 
 function startGame() {
@@ -3399,6 +3449,7 @@ function nrShowSetup() {
   document.getElementById("nr-screen-setup").style.display    = "";
   document.getElementById("nr-screen-playing").style.display  = "none";
   document.body.classList.remove("tool-playing");
+  toolsLiveHold(false, "Note Recognition");
   document.getElementById("nr-screen-results").style.display  = "none";
   nrWizGoTo(1);
   nrRefreshLeaderboards(null);
@@ -3420,6 +3471,7 @@ function nrStartWithCountdown() {
      game out of the narrow framed column for the minute it runs, and hand it
      back afterwards. */
   document.body.classList.add("tool-playing");
+  toolsLiveHold(true, "Note Recognition");
 
   // Hide leaderboard during gameplay
   var mobileLb = document.getElementById("nr-lb-setup");
@@ -3493,6 +3545,7 @@ async function nrEndGame() {
 
   document.getElementById("nr-screen-playing").style.display  = "none";
   document.body.classList.remove("tool-playing");
+  toolsLiveHold(false, "Note Recognition");
   document.getElementById("nr-screen-results").style.display  = "";
 
   document.getElementById("nr-results-num").textContent = nrGameScore;
@@ -5508,6 +5561,7 @@ function crShowScreen(name) {
      this the round was still sitting inside the framed column, which is why the
      overlay left strips of page uncovered and the score ran off the edge. */
   document.body.classList.toggle("tool-playing", name === "playing");
+  toolsLiveHold(name === "playing", "Chord Recognition");
 }
 function crShowSetup() { clearInterval(crTimerInt); crLocked = true;
   crShowScreen("setup"); crWizGoTo(1); crSyncOnePage(); }
@@ -6145,6 +6199,7 @@ function etInitKeyPicker(){
 function etShowScreen(name){
   ["setup","playing","results"].forEach(s=>{const el=document.getElementById("et-screen-"+s); if(el)el.style.display = s===name ? "" : "none";});
   document.body.classList.toggle("tool-playing", name === "playing");
+  toolsLiveHold(name === "playing", "Chord Ear Training");
 }
 function etShowSetup(){ clearInterval(etTimerInt); clearInterval(etCountdownInt);
   etGameLive = false; etShowScreen("setup"); etWizGoTo(1); etSyncOnePage(); }
@@ -6616,6 +6671,7 @@ function itInitKeyPicker(){
 function itShowScreen(name){
   ["setup","playing","results"].forEach(s=>{const el=document.getElementById("it-screen-"+s); if(el)el.style.display = s===name?"":"none";});
   document.body.classList.toggle("tool-playing", name === "playing");
+  toolsLiveHold(name === "playing", "Interval Training");
   /* Reading puts notation on paper; listening has nothing to draw. The round
      says which it is, so the answer keys can be made of the same thing. */
   document.body.classList.toggle("it-reading", name === "playing" && itSide === "reading");
@@ -7552,6 +7608,41 @@ body.th-open .th-r-wait { width: 4rem; height: 2.2rem; border-radius: 6px;
    edge. The class is set by nrStartWithCountdown and dropped on the way out,
    so nothing else about the tools page changes. */
 /* Out of the framed column for the whole tool, not only while a round runs. */
+/* THE CHIP DURING A ROUND. Every playing screen here is fixed at z-index 400,
+   so at its own 110 the chip was painted underneath the round: a control the
+   member could neither see nor press, which is exactly what the Passage Fixer
+   needed it for. Lifted above the round, and moved out of the corner, where the
+   fixer keeps its two verdict keys. The top band has room to spare between the
+   way back and the level. */
+body.tool-playing #rm-live-chip {
+  z-index: 450;
+  top: var(--rm-bar-mid, 41px); bottom: auto; right: auto; left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* WHERE THE PAUSED NOTE GOES IN A DRILL. The chip's corner is where the answer
+   keys are, so the note would sit on top of the thing the member is pressing.
+   All four drills share the same 97px header band, with the countdown at one end
+   and the score at the other and nothing in between, so the note goes there: in
+   the round's own chrome, clear of the stave and clear of the keys. */
+body.tool-full #rm-live-note {
+  /* The playing screen is fixed at z-index 400, so at the chip's own 110 this
+     was being painted underneath the round: present, correct, and invisible. */
+  z-index: 450;
+  top: var(--rm-bar-mid, 48px); bottom: auto; right: auto; left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(470px, 54vw);
+  padding: 8px 16px; border-radius: 16px;
+  white-space: nowrap; text-align: center;
+}
+/* A phone's band has no room beside the countdown, so it sits just under the
+   band instead, where every drill has clear space above its content. */
+@media (max-width: 640px) {
+  body.tool-full #rm-live-note {
+    top: calc(var(--rm-band-bottom, 97px) + 10px); transform: translateX(-50%);
+    max-width: 84vw; white-space: normal; padding: 9px 14px;
+  }
+}
 body.tool-full main#app-main { padding: 0 !important; max-width: none; }
 body.tool-full .tools-wrap { max-width: none; margin: 0; padding: 0;
   background: none; border: 0; border-radius: 0; box-shadow: none; }

@@ -2168,12 +2168,28 @@
     #live-fab {
       position: fixed; bottom: 28px; right: 28px; z-index: 110;
       background: #1a1a1a; color: #fff; border: 1px solid #3a3320; border-radius: 50px;
-      padding: 13px 19px; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer;
-      box-shadow: 0 4px 20px rgba(0,0,0,.3); display: none; align-items: center; gap: 9px;
+      padding: 12px 19px; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0,0,0,.3); display: none; align-items: center; gap: 10px;
+      line-height: 1.15;
     }
-    /* This chip is only ever on screen while the session window is closed, and
-       the clock does not run then — so it reads as paused rather than pulsing. */
-    #live-fab .wiz-live-dot { background: #7a736a; animation: none; }
+    /* The same control as the chip every other page draws (live-session.js), and
+       deliberately identical: the clock can be started from wherever the member
+       is, so the thing that starts it cannot look or behave one way here and
+       another way there. */
+    #live-fab-go {
+      width: 26px; height: 26px; flex: 0 0 auto; border: 0; border-radius: 50%; cursor: pointer;
+      display: grid; place-items: center; background: rgba(255,255,255,.1); color: #e8e2d7; padding: 0;
+    }
+    #live-fab-go:hover { background: rgba(255,255,255,.18); }
+    /* Sizing only. Display belongs to the icons themselves, or this rule would
+       outrank them and both would show at once. */
+    #live-fab-go svg { width: 13px; height: 13px; }
+    #live-fab-ic-play { display: block; }
+    #live-fab-ic-pause { display: none; }
+    #live-fab.running #live-fab-go { background: #e5484d; color: #fff; }
+    #live-fab.running #live-fab-ic-play { display: none; }
+    #live-fab.running #live-fab-ic-pause { display: block; }
+    #live-fab #live-fab-time { font-variant-numeric: tabular-nums; }
     #live-fab #live-fab-lbl { color: #a49a8c; font-weight: 600; font-size: .78rem; }
     #live-fab:hover { opacity: .92; }
     body.rm-immersive #live-fab { display: none !important; }
@@ -14885,9 +14901,15 @@
   + Log Practice
 </button>
 <!-- Live session in progress: reopens the log wizard. Hidden unless one is running. -->
-<button id="live-fab" style="display:none" onclick="liveReopen()" title="Back to your practice session">
-  <span class="wiz-live-dot"></span><span id="live-fab-time">0:00</span><span id="live-fab-lbl">paused</span>
-</button>
+<div id="live-fab" role="button" tabindex="0" style="display:none" onclick="liveReopen()"
+     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();liveReopen();}"
+     title="Back to your practice session">
+  <button id="live-fab-go" type="button" aria-label="Start or pause the clock"
+          onclick="event.stopPropagation();livePauseToggle()">
+    <svg id="live-fab-ic-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+    <svg id="live-fab-ic-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+  </button><span id="live-fab-time">0:00</span><span id="live-fab-lbl">paused</span>
+</div>
 <!-- Dev-only floating toggle between the trail roadmap and the scenic map. Sits just
      above the Log Practice FAB; shown only on the roadmap views via body classes. -->
 <button class="rm-vis-fab rm-to-scene" onclick="rmToggleScene(true)">Scenic map</button>
@@ -15260,7 +15282,7 @@
      top bar with only Search and a sidebar with no sub-items until a
      refresh. Every other page already loads it first. ── -->
 <script src="/shared-header.js?v=2026071802"></script>
-<script src="/live-session.js?v=1"></script>
+<script src="/live-session.js?v=13"></script>
 <script src="/shared-member-modal.js?v=16"></script>
 <script src="/shared-tour.js?v=11"></script>
 <script src="/roadmap-levels.js?v=41"></script>
@@ -34371,7 +34393,12 @@ function _livePersist() {
     msById: _liveMsById,
     needsType: _liveNeedsType, itemStopped: _liveItemStopped, lastItemMs: _liveLastItemMs,
     itemIdx: _wizItemIdx, draftId: draftId,
-    autoPaused: _liveAutoPaused
+    autoPaused: _liveAutoPaused,
+    // Counting while the session window is CLOSED can only have happened by the
+    // member pressing play on the chip, and that is exactly the permission that
+    // lets the clock keep counting when they change page (see RMLive.autoPause).
+    // Derived rather than stored, so this page and storage cannot disagree.
+    chipRun: _liveItemStart != null && !_livePausedAt && !_liveWindowOpen()
   });
 }
 // A live session's activities live in the wizard's in-memory formItems, which do
@@ -34410,6 +34437,12 @@ function _liveRestore() {
   _liveRestorePending = true;          // the activities are not in the DOM yet
   _liveStartTick();
   _liveRenderBar();                    // chip shows the right total immediately
+}
+// The session window being open is what tells a clock the member is watching
+// from a clock they have deliberately left running elsewhere.
+function _liveWindowOpen() {
+  const b = document.getElementById("log-wizard-backdrop");
+  return !!(b && b.classList.contains("open"));
 }
 function _liveRenderBar() {
   const bar = document.getElementById("wiz-live-bar");
@@ -34483,7 +34516,20 @@ function _liveRenderBar() {
   if (fab) {
     const show = _liveOn && viewingEmail === myEmail && backdrop && !backdrop.classList.contains("open");
     fab.style.display = show ? "flex" : "none";
-    if (show) document.getElementById("live-fab-time").textContent = _liveFmt(_liveSessionMs());
+    if (show) {
+      document.getElementById("live-fab-time").textContent = _liveFmt(_liveSessionMs());
+      /* The chip says what is true and offers the other state, exactly as it does
+         on every other page. Closing the session window still stops the clock —
+         nobody should leave one counting by accident — but the member who went to
+         the metronome, or simply minimised this, can set it counting again from
+         here without reopening anything. */
+      const ticking = _liveItemStart != null && !_livePausedAt;
+      fab.classList.toggle("running", ticking);
+      // Before the first activity has been picked there is no clock to run yet.
+      const go = document.getElementById("live-fab-go");
+      if (go) go.style.display = _liveItemStart == null ? "none" : "grid";
+      document.getElementById("live-fab-lbl").textContent = ticking ? "running" : "paused";
+    }
     // It REPLACES Log Practice rather than sitting next to it — two buttons in
     // the same corner is clutter, and you are already logging.
     _logFabApply();
