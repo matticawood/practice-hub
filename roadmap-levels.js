@@ -467,9 +467,70 @@
     }));
   }
 
+  /* How a member describes their own level, in their words rather than ours.
+     Onboarding asks with these and the dashboard re-asks with them, so the two
+     can never drift apart. tierSelfName softens the first one: "Absolute
+     Beginner" is fine on a piece and cold about yourself. */
+  const TIER_BLURBS = [
+    "Just starting out.",
+    "Learning simple pieces.",
+    "Comfortable with a range of pieces.",
+    "Playing challenging pieces.",
+    "Highly competent.",
+    "Reaching for professional level."
+  ];
+  const TIER_SELF_NAMES = { 0: "New to the piano" };
+
+  /* What a player at each tier can actually do, taken from that tier's own
+     objectives. Used where someone has to place themselves and an adjective is
+     not enough to go on: the description of a level and the work at that level
+     are then the same thing. */
+  const TIER_MARKERS = [
+    ["Finding your way around the keys",
+     "Playing hands together on very easy material",
+     "Working through your first pieces"],
+    ["A few major scales, hands together, two octaves",
+     "Playing pieces with a melody over a simple accompaniment",
+     "Improvising over a broken-chord left hand"],
+    ["All 12 major scales, hands together, at speed",
+     "Playing pieces of a few pages with real character",
+     "Hearing a I\u2013IV\u2013V\u2013I progression"],
+    ["Scales a third and a sixth apart",
+     "Reading a short passage at sight without stopping",
+     "Telling perfect, imperfect and interrupted cadences apart by ear"],
+    ["Chromatic and whole-tone scales, contrary motion in every key",
+     "Performing a programme from memory",
+     "Reharmonising a passage of a piece you're playing"],
+    ["Large-scale works, a sonata or a suite",
+     "Giving a full recital from memory",
+     "Composing or arranging your own"]
+  ];
+
+  /* Declared hours in, seeded hours out. The tier is a ceiling, never a floor:
+     it stops hours placing someone above the level they claim, and stops them
+     landing more than halfway through it so there is always something left to
+     do there. No hours at all is "I don't know" rather than "none", so the tier
+     places them at its foot. One implementation, used by onboarding and by the
+     dashboard's level check. */
+  function seedHours(declaredHours, tier) {
+    const all = levels.total;
+    const mine = all.filter(L => L.tier === tier);
+    if (!mine.length) return declaredHours;
+    if (!(declaredHours > 0)) return mine[0].hours;
+    let cur = mine[0];
+    mine.forEach(L => { if (declaredHours >= L.hours) cur = L; });
+    const next = all[all.indexOf(cur) + 1];
+    const cap = next ? cur.hours + (next.hours - cur.hours) / 2 : cur.hours;
+    return Math.min(declaredHours, cap);
+  }
+
   window.ROADMAP = {
     stages: STAGES,
     tierLabels: TIER_LABELS,
+    tierBlurbs: TIER_BLURBS,
+    tierSelfNames: TIER_SELF_NAMES,
+    tierMarkers: TIER_MARKERS,
+    seedHours: seedHours,
     tracks: TRACKS,
     levels: levels,
     picks: PICKS,

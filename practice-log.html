@@ -1651,6 +1651,29 @@
     }
 
     /* ── Log Modal ── */
+    /* ── LEVEL CHECK ─────────────────────────────────────────────────────
+       For a member whose starting level was worked out from hours alone,
+       before we asked anyone what level they actually were. It asks once,
+       recalculates from their answer, and never appears again. */
+    #lvlchk-backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,.8);
+      z-index:1300; align-items:center; justify-content:center; overflow-y:auto; padding:20px; }
+    #lvlchk-backdrop.open { display:flex; }
+    .lvlchk { background:var(--surface); border:1.5px solid var(--border); border-radius:16px;
+      width:min(520px,100%); margin:auto; box-shadow:0 20px 60px rgba(0,0,0,.7); overflow:hidden; }
+    .lvlchk-head { padding:22px 24px 16px; border-bottom:1px solid var(--border); }
+    .lvlchk-head h2 { font-size:1.1rem; font-weight:700; color:var(--text); margin:0 0 6px; }
+    .lvlchk-head p { font-size:.86rem; color:var(--text-muted); line-height:1.5; margin:0; }
+    .lvlchk-body { padding:18px 24px 22px; display:flex; flex-direction:column; gap:8px; }
+    .lvlchk-opt { display:block; width:100%; text-align:left; cursor:pointer; font-family:inherit;
+      background:var(--surface-2); border:1.5px solid var(--border); border-radius:10px;
+      padding:11px 14px; color:var(--text); transition:border-color .15s, background .15s; }
+    .lvlchk-opt:hover { border-color:#4a4a4a; }
+    .lvlchk-opt b { display:block; font-size:.92rem; font-weight:700; }
+    .lvlchk-opt span { display:block; font-size:.78rem; color:var(--text-muted); margin-top:2px; }
+    .lvlchk-foot { padding:0 24px 20px; }
+    .lvlchk-keep { background:none; border:0; padding:0; font-family:inherit; cursor:pointer;
+      font-size:.8rem; color:var(--text-muted); text-decoration:underline; }
+
     #log-modal-backdrop {
       display: none;
       position: fixed;
@@ -15256,6 +15279,19 @@
 </div>
 
 <!-- ── Share Modal ── -->
+<!-- Level check: for a member whose starting level came from hours alone,
+     before onboarding asked anyone what they could actually play. -->
+<div id="lvlchk-backdrop">
+  <div class="lvlchk" role="dialog" aria-modal="true" aria-labelledby="lvlchk-title">
+    <div class="lvlchk-head">
+      <h2 id="lvlchk-title">Where should we start you?</h2>
+      <p>We've changed how we work out where you join the roadmap. Yours was set from the hours you gave us when you joined, so it may not be in the right place. Which one best describes you?</p>
+    </div>
+    <div class="lvlchk-body" id="lvlchk-opts"></div>
+    <div class="lvlchk-foot"><button type="button" class="lvlchk-keep" onclick="_lvlchkKeep()">Leave it as it is</button></div>
+  </div>
+</div>
+
 <div id="share-modal-backdrop">
   <div class="share-modal" role="dialog" aria-modal="true">
     <div class="share-modal-header">
@@ -41700,6 +41736,60 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   let _selfChecks = null;         // null = not loaded; false = loading; object {key:true} = loaded
   const _RM_TYPE_TO_TRACK = { piece:"repertoire", book:"repertoire", technique:"technique", sightreading:"sight_reading", theory:"musicianship", eartraining:"musicianship", improvisation:"musicianship" };
 
+  /* ── LEVEL CHECK ───────────────────────────────────────────────────────
+     Some members were placed on the roadmap by their declared hours alone,
+     before onboarding asked what they could actually play. Hours are the only
+     thing that moves anyone here, so a wrong figure is not something they can
+     work their way out of. This asks once, using each tier's own objectives so
+     the answer is about their hands rather than their opinion of themselves,
+     and never appears again once answered. */
+  function _lvlchkOpen() {
+    const R = window.ROADMAP; if (!R) return;
+    const box = document.getElementById("lvlchk-opts"); if (!box) return;
+    /* Never offered to someone this fires for: it only ever fires for a member
+       placed high, and nobody in that position is new to the piano. */
+    const tiers = R.tierLabels.map((label, tier) => ({ tier, label })).filter(t => t.tier > 0);
+    box.innerHTML = tiers.map(t =>
+      '<button type="button" class="lvlchk-opt" onclick="_lvlchkPick(' + t.tier + ')">' +
+        '<b>' + t.label + '</b>' +
+        '<span>' + (R.tierMarkers[t.tier] || []).join(' &middot; ') + '</span>' +
+      '</button>').join("");
+    document.getElementById("lvlchk-backdrop").classList.add("open");
+  }
+  function _lvlchkMaybeOpen() {
+    const force = /(^|\.)dev--/.test(location.hostname)
+      && new URLSearchParams(location.search).has("lvlchk");
+    const due = _practiceBaseline && typeof _practiceBaseline === "object" && _practiceBaseline.level_check_due;
+    if (force || due) _lvlchkOpen();
+  }
+  async function _lvlchkSave(patch) {
+    document.getElementById("lvlchk-backdrop").classList.remove("open");
+    if (/(^|\.)dev--/.test(location.hostname) && new URLSearchParams(location.search).has("lvlchk")) return;
+    try {
+      const { error } = await db.from("practice_baseline")
+        .update(Object.assign({ level_check_due: false, updated_at: new Date().toISOString() }, patch))
+        .eq("email", myEmail);
+      if (error) throw error;
+      Object.assign(_practiceBaseline, patch, { level_check_due: false });
+      renderRoadmap();
+      try { _renderJourneyCard(); } catch (_) {}
+    } catch (e) { console.warn("level check save failed:", e?.message || e); }
+  }
+  function _lvlchkPick(tier) {
+    const declared = Number(_practiceBaseline && _practiceBaseline.declared_minutes)
+      || Number(_practiceBaseline && _practiceBaseline.total_minutes) || 0;
+    const seeded = Math.round(window.ROADMAP.seedHours(declared / 60, tier) * 60);
+    _lvlchkSave({ self_level: tier, declared_minutes: declared, total_minutes: seeded });
+    showToast("Thanks. We've moved your starting point.", 2800);
+  }
+  function _lvlchkKeep() {
+    /* Answering "leave it" still records a band, so it never asks again. */
+    const hrs = (Number(_practiceBaseline && _practiceBaseline.total_minutes) || 0) / 60;
+    const L = window.ROADMAP.levels.total.filter(x => hrs + 1e-9 >= x.hours).pop();
+    _lvlchkSave({ self_level: L ? L.tier : null });
+  }
+  window._lvlchkPick = _lvlchkPick; window._lvlchkKeep = _lvlchkKeep;
+
   async function _rmLoadBaseline() {
     const who = (typeof viewingEmail === "string" && viewingEmail) ? viewingEmail : myEmail;
     if (!who) { _practiceBaseline = 0; return; }
@@ -41713,6 +41803,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
        on the page after the cover has lifted is the most visible pop there is,
        so the cover waits for it. */
     window._baselineReady = 1;
+    try { _lvlchkMaybeOpen(); } catch (e) {}
   }
 
   // Durable "tap when done" self-checks (scales/arps/minors fluency, perform goals).
