@@ -11862,7 +11862,7 @@
       box-shadow: -10px 0 0 rgba(245,197,24,.09), 10px 0 0 rgba(245,197,24,.09); }
     #prog-page .pc-slot .dd-prow.is-picked .dd-prow-n { color: #f5c518; }
     .dd-prows--cap.is-open { max-height: min(56vh, 460px); overflow-y: auto;
-      overscroll-behavior: contain; scrollbar-width: thin; }
+      scrollbar-width: thin; }
     /* ── LISTS THAT GROW FOR EVER ────────────────────────────────────────
        Every piece gains a row for every piece anyone ever touches, month by
        month gains one a month, and the repertoire table gains one a piece. A
@@ -11878,9 +11878,20 @@
     .dd-tbl--cap .dd-tr--over { display: none; }
     .dd-tbl--cap.is-open .dd-tr--over { display: grid; }
     .dd-tbl--cap.is-open, .pc-rows--open, .rep-list--open {
-      max-height: min(56vh, 460px); overflow-y: auto; overscroll-behavior: contain;
+      max-height: min(56vh, 460px); overflow-y: auto;
       scrollbar-width: thin;
     }
+    /* CONTAIN ONLY WHERE THERE IS SOMETHING TO CONTAIN. These windows are
+       scroll containers whether or not the list inside them is long enough to
+       fill one. When it isn't, overscroll-behavior stops a gesture that starts
+       inside the box from reaching the page, and the page then does not move
+       at all: a member with six pieces could not scroll past their own table.
+       So the rule waits for is-scrollable, which _capGuard sets by measuring
+       after the list opens. */
+    .dd-prows--cap.is-open.is-scrollable,
+    .dd-tbl--cap.is-open.is-scrollable,
+    .pc-rows--open.is-scrollable,
+    .rep-list--open.is-scrollable { overscroll-behavior: contain; }
     .dd-tbl--cap.is-open::-webkit-scrollbar, .pc-rows--open::-webkit-scrollbar,
     .rep-list--open::-webkit-scrollbar { width: 4px; }
     .dd-tbl--cap.is-open::-webkit-scrollbar-thumb, .pc-rows--open::-webkit-scrollbar-thumb,
@@ -26261,11 +26272,27 @@ window.setMonthlyRange = function(r) { _monthlyRange = r; _ddPaintChart();
 /* Your repertoire's expander. Open, the rows go into a scrolling window rather
    than onto the page, so a member with three hundred pieces does not bury
    every chapter under this one. */
+/* A capped window only earns overscroll-behavior once its content is actually
+   taller than the cap. Without this an unfilled window swallows the gesture and
+   the page underneath cannot scroll. Measured after the class lands, so the
+   rows are laid out. */
+function _capGuard(el) {
+  if (!el) return;
+  requestAnimationFrame(function () {
+    el.classList.toggle('is-scrollable', el.scrollHeight > el.clientHeight + 1);
+  });
+}
+window._capGuard = _capGuard;
+addEventListener('resize', function () {
+  document.querySelectorAll('.pc-rows--open, .rep-list--open, .dd-tbl--cap.is-open, .dd-prows--cap.is-open')
+    .forEach(_capGuard);
+});
 window.pcMore = function (btn, n) {
   const rows = btn.previousElementSibling;
   if (!rows) return;
   const open = rows.classList.toggle('pc-rows--open');
   rows.classList.toggle('pc-rows--cap', !open);
+  _capGuard(rows);
   btn.textContent = open ? 'Show fewer' : 'Show all ' + n + ' pieces';
 };
 /* The capped tables' toggle. The rows are already there, so this only flips a
@@ -26276,12 +26303,14 @@ window.ddPieces = function (btn, n) {
   const t = document.getElementById('dd-prows');
   if (!t) return;
   const open = t.classList.toggle('is-open');
+  _capGuard(t);
   btn.textContent = open ? 'Show fewer' : 'Show all ' + n;
 };
 window.ddMore = function (id, btn) {
   const t = document.getElementById(id);
   if (!t) return;
   const open = t.classList.toggle('is-open');
+  _capGuard(t);
   btn.textContent = open ? 'Show fewer' : 'Show all ' + (t.querySelectorAll('.dd-tr').length - 1);
 };
 
@@ -26613,7 +26642,7 @@ window.repShowAll = function (btn) {
      a member with three hundred pieces would otherwise bury everything below
      this table. */
   const list = card.querySelector('.rep-list');
-  if (list) list.classList.add('rep-list--open');
+  if (list) { list.classList.add('rep-list--open'); _capGuard(list); }
   const ov = card.querySelector('.rep-overflow');
   if (ov) ov.style.display = 'block';
   btn.remove();
