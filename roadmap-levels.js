@@ -482,28 +482,28 @@
   const TIER_SELF_NAMES = { 0: "New to the piano" };
 
   /* What a player at each tier can actually do, taken from that tier's own
-     objectives. Used where someone has to place themselves and an adjective is
-     not enough to go on: the description of a level and the work at that level
-     are then the same thing. */
+     objectives. Written to complete "I can ...", so a member places themselves
+     by reading facts about their hands rather than by picking a word they
+     already think describes them. */
   const TIER_MARKERS = [
-    ["Finding your way around the keys",
-     "Playing hands together on very easy material",
-     "Working through your first pieces"],
-    ["A few major scales, hands together, two octaves",
-     "Playing pieces with a melody over a simple accompaniment",
-     "Improvising over a broken-chord left hand"],
-    ["All 12 major scales, hands together, at speed",
-     "Playing pieces of a few pages with real character",
-     "Hearing a I\u2013IV\u2013V\u2013I progression"],
-    ["Scales a third and a sixth apart",
-     "Reading a short passage at sight without stopping",
-     "Telling perfect, imperfect and interrupted cadences apart by ear"],
-    ["Chromatic and whole-tone scales, contrary motion in every key",
-     "Performing a programme from memory",
-     "Reharmonising a passage of a piece you're playing"],
-    ["Large-scale works, a sonata or a suite",
-     "Giving a full recital from memory",
-     "Composing or arranging your own"]
+    ["find my way around the keys",
+     "play hands together, slowly",
+     "work through my first pieces"],
+    ["play a few scales, hands together",
+     "play a melody with an accompaniment",
+     "improvise over a left-hand pattern"],
+    ["play all 12 major scales up to speed",
+     "play pieces of a few pages",
+     "hear a I\u2013IV\u2013V\u2013I progression"],
+    ["play scales a third and a sixth apart",
+     "sight-read without stopping",
+     "tell cadences apart by ear"],
+    ["play chromatic and whole-tone scales",
+     "perform a programme from memory",
+     "reharmonise a passage"],
+    ["learn a sonata or a suite",
+     "give a full recital from memory",
+     "compose or arrange my own music"]
   ];
 
   /* Declared hours in, seeded hours out. The tier is a ceiling, never a floor:
