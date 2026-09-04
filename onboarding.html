@@ -8,6 +8,10 @@
   <meta name="theme-color" content="#f5c518" />
   <link rel="icon" href="/icon-192.png"  />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- The six level bands, their roadmap levels and their hour thresholds all
+       come from here, so onboarding, the roadmap and the pieces library keep
+       one vocabulary. -->
+  <script src="/roadmap-levels.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -90,6 +94,23 @@
     .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
     .field textarea { resize: none; height: 90px; }
     .field-hint { font-size: 0.75rem; color: var(--muted); }
+
+    /* ── Level bands (experience step) ───────────────────────────────────
+       Hours alone put a twenty-year casual player at the top of the roadmap on
+       the day they joined, with nothing left to work towards. The band they
+       pick here bounds where those hours can place them. */
+    .lvl-opts { display: flex; flex-direction: column; gap: 8px; }
+    .lvl-opt {
+      display: block; width: 100%; text-align: left; cursor: pointer;
+      background: #1a1a1a; border: 1.5px solid var(--border); border-radius: 10px;
+      padding: 11px 13px; font-family: inherit; color: var(--text);
+      transition: border-color .15s, background .15s;
+    }
+    .lvl-opt:hover { border-color: #3a3a3a; }
+    .lvl-opt.is-on { border-color: var(--accent); background: #1f1c12; }
+    .lvl-opt-name { font-size: 0.9rem; font-weight: 700; }
+    .lvl-opt.is-on .lvl-opt-name { color: var(--accent); }
+    .lvl-opt-desc { font-size: 0.76rem; color: var(--muted); line-height: 1.45; margin-top: 3px; }
 
     /* ── Sliders (experience step) ── */
     .field.slider { gap: 10px; }
@@ -353,7 +374,11 @@
   <div class="step" id="step-5">
     <div class="step-header">
       <h1>Have you played before?</h1>
-      <p>Tell us roughly how much you've practiced, so we start you at the right level rather than from scratch. Brand new? Leave these at none and just tap "Let's go".</p>
+      <p>Tell us where you are and roughly how much you've practiced, so we start you at the right level rather than from scratch. Brand new? Pick the first one, leave the sliders at none and tap "Let's go".</p>
+    </div>
+    <div class="field">
+      <label>What level would you consider yourself to be?</label>
+      <div class="lvl-opts" id="lvl-opts"></div>
     </div>
     <div class="field slider">
       <label>How long have you been playing? <span class="slider-val" id="exp-years-val">Not started</span></label>
@@ -493,11 +518,18 @@ async function finish() {
   const expYears = parseFloat(document.getElementById("exp-years").value) || 0;
   const expDays  = parseFloat(document.getElementById("exp-days").value)  || 0;
   const expMins  = parseInt(document.getElementById("exp-mins").value, 10) || 0;
-  const priorMinutes = Math.round(expYears * 52 * expDays * expMins);   // weeks × days/wk × min/session
-  if (priorMinutes > 0) {
+  const declaredMinutes = Math.round(expYears * 52 * expDays * expMins);   // weeks × days/wk × min/session
+  /* The band they picked bounds where those hours can place them, and the row is
+     written even when the answer is zero: a genuine beginner who correctly
+     enters nothing was previously indistinguishable from someone who skipped. */
+  const seededMinutes = _selfTier == null
+    ? declaredMinutes
+    : Math.round(_seedHours(declaredMinutes / 60, _selfTier) * 60);
+  {
     try {
       await db.from("practice_baseline").upsert(
-        { email: myEmail, total_minutes: priorMinutes,
+        { email: myEmail, total_minutes: seededMinutes,
+          declared_minutes: declaredMinutes, self_level: _selfTier,
           split: { repertoire: 45, technique: 25, sight_reading: 10, musicianship: 20 },
           updated_at: new Date().toISOString() },
         { onConflict: "email" });
@@ -557,6 +589,65 @@ function _sliderFill(el) {
   const pct = max > min ? ((parseFloat(el.value) - min) / (max - min)) * 100 : 0;
   el.style.setProperty("--pct", pct + "%");
 }
+/* ── Level bands ───────────────────────────────────────────────────────────
+   Six bands, built from window.ROADMAP so the labels, the roadmap levels behind
+   them and the pieces-library ratings never drift apart. The one-line
+   descriptions are distilled from each tier's own canDo text.
+   The band BOUNDS the level; the hours position them inside it, and never past
+   halfway, so there is always something at that level left to work on. */
+const LVL_BLURB = {
+  0: "Just starting out",
+  1: "Learning simple pieces",
+  2: "Comfortable with a range of pieces",
+  3: "Playing challenging pieces",
+  4: "Highly competent",
+  5: "Reaching for professional level"
+};
+const LVL_FIRST_NAME = { 0: "New to the piano" };   // kinder than "Absolute Beginner" about yourself
+let _selfTier = null;
+
+function _lvlBands() {
+  const levels = (window.ROADMAP && window.ROADMAP.levels && window.ROADMAP.levels.total) || [];
+  const bands = [];
+  levels.forEach((L, i) => {
+    let b = bands.find(x => x.tier === L.tier);
+    if (!b) { b = { tier: L.tier, label: L.tierLabel, levels: [] }; bands.push(b); }
+    b.levels.push({ level: L.level, hours: L.hours, next: levels[i + 1] ? levels[i + 1].hours : null });
+  });
+  return bands;
+}
+
+function renderLevelOptions() {
+  const box = document.getElementById("lvl-opts");
+  if (!box) return;
+  box.innerHTML = _lvlBands().map(b =>
+    '<button type="button" class="lvl-opt" data-tier="' + b.tier + '" onclick="pickLevel(' + b.tier + ')">' +
+      '<span class="lvl-opt-name">' + (LVL_FIRST_NAME[b.tier] || b.label) + '</span>' +
+      '<span class="lvl-opt-desc">' + (LVL_BLURB[b.tier] || "") + '</span>' +
+    '</button>').join("");
+}
+function pickLevel(tier) {
+  _selfTier = tier;
+  document.querySelectorAll(".lvl-opt").forEach(el =>
+    el.classList.toggle("is-on", Number(el.dataset.tier) === tier));
+  updateExpEstimate();
+}
+
+/* Declared hours in, seeded hours out. The band is a CEILING, never a floor:
+   it stops hours placing someone above the level they claim, and stops them
+   landing more than halfway through it so there is always something left to do
+   there. It never lifts anyone up, so someone who picks a level their practice
+   does not yet support is placed by their hours instead. */
+function _seedHours(declaredHours, tier) {
+  const bands = _lvlBands();
+  const b = bands.find(x => x.tier === tier) || bands[0];
+  if (!b) return declaredHours;
+  let lv = b.levels[0];
+  b.levels.forEach(x => { if (declaredHours >= x.hours) lv = x; });
+  const cap = lv.next == null ? lv.hours : lv.hours + (lv.next - lv.hours) / 2;
+  return Math.min(declaredHours, cap);
+}
+
 function updateExpEstimate() {
   const yEl = document.getElementById("exp-years");
   const dEl = document.getElementById("exp-days");
@@ -569,11 +660,15 @@ function updateExpEstimate() {
   document.getElementById("exp-days-val").textContent  = _fmtDays(d);
   document.getElementById("exp-mins-val").textContent  = _fmtMins(m);
   const hrs = Math.round(y * 52 * d * m / 60);
-  document.getElementById("exp-estimate").textContent = hrs > 0
-    ? `≈ ${hrs.toLocaleString()} hours of prior practice. We'll start you at the right level.`
-    : "";
+  const est = document.getElementById("exp-estimate");
+  if (_selfTier == null) { est.textContent = hrs > 0 ? `≈ ${hrs.toLocaleString()} hours of prior practice.` : ""; return; }
+  const seeded = Math.round(_seedHours(hrs, _selfTier));
+  est.textContent = hrs > 0
+    ? `≈ ${hrs.toLocaleString()} hours of prior practice. We'll start you partway through ${(_lvlBands().find(b => b.tier === _selfTier) || {}).label}.`
+    : `We'll start you at the beginning of ${(_lvlBands().find(b => b.tier === _selfTier) || {}).label}.`;
 }
-// Paint the initial slider fills/readouts on load.
+// Paint the bands and the initial slider fills/readouts on load.
+renderLevelOptions();
 updateExpEstimate();
 
 // ── Photo handling ────────────────────────────────────────────────────
