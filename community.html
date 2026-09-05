@@ -20,7 +20,7 @@
   <script src="/shared-header.js?v=2026071802"></script>
 <script src="/live-session.js?v=13"></script>
   <script src="/shared-member-modal.js?v=16"></script>
-  <script src="/shared-comments.js?v=20260905a"></script>
+  <script src="/shared-comments.js?v=20260905b"></script>
   <script src="/shared-tour.js?v=11"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3/dist/mux-player.mjs"></script>
   <style>
@@ -4827,6 +4827,48 @@ function _setMuxOverlay({ show, filename, pct, status, processing }) {
   }
 }
 
+/* CHUNKED UPLOAD TO MUX. A single PUT of a whole video stalls on a weak
+   connection without ever firing an error: the socket stays open, progress
+   stops, and the page waits for ever. Members reported that as "it uploads to a
+   point and then hangs", and there was nothing in the code to end it. UpChunk
+   is Mux's own client: it splits the file and retries the chunk that failed
+   rather than the whole upload. If the module cannot be fetched we keep the old
+   single PUT, now with a stall watchdog so at least it fails honestly. */
+async function _putFileToMux(file, uploadUrl, onPct) {
+  let createUpload = null;
+  try {
+    ({ createUpload } = await import("https://cdn.jsdelivr.net/npm/@mux/upchunk@3/dist/upchunk.mjs"));
+  } catch (e) {
+    console.warn("[Mux] UpChunk unavailable, using single PUT:", e?.message || e);
+  }
+
+  if (createUpload) {
+    await new Promise((resolve, reject) => {
+      const up = createUpload({ endpoint: uploadUrl, file, chunkSize: 5120 });  // 5 MB chunks
+      up.on("progress", e => onPct(Math.round(e.detail)));
+      up.on("error",    e => reject(new Error(e.detail?.message || "Upload failed")));
+      up.on("success",  () => resolve());
+    });
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let last = Date.now(), watchdog = null;
+    const stop = () => { if (watchdog) clearInterval(watchdog); watchdog = null; };
+    xhr.open("PUT", uploadUrl);
+    xhr.upload.onprogress = e => {
+      last = Date.now();
+      if (e.lengthComputable) onPct(Math.round(e.loaded / e.total * 100));
+    };
+    xhr.onload  = () => { stop(); xhr.status < 300 ? resolve() : reject(new Error("Upload failed (" + xhr.status + ")")); };
+    xhr.onerror = () => { stop(); reject(new Error("Network error during upload")); };
+    xhr.onabort = () => { stop(); reject(new Error("Upload stalled and was stopped. Please try again.")); };
+    watchdog = setInterval(() => { if (Date.now() - last > 90000) xhr.abort(); }, 5000);
+    xhr.send(file);
+  });
+}
+
 async function _uploadVideoToMux(file, onDone = null) {
   if (!file || !file.type.startsWith("video/")) { alert("Please select a video file."); return; }
   if (_muxUploading) { alert("A video upload is already in progress."); return; }
@@ -4866,23 +4908,10 @@ async function _uploadVideoToMux(file, onDone = null) {
     // Step 2: PUT the file directly to Mux with XHR for progress
     _setOverlay({ pct: 0, status: "Uploading… 0%" });
     console.log("[Mux] Starting upload…");
-    await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("PUT", uploadUrl);
-      xhr.upload.onprogress = e => {
-        if (e.lengthComputable) {
-          const pct = Math.round(e.loaded / e.total * 100);
-          console.log("[Mux] Upload progress:", pct + "%");
-          _setOverlay({ pct, status: `Uploading… ${pct}%` });
-        }
-      };
-      xhr.onload = () => {
-        console.log("[Mux] Upload complete, status:", xhr.status);
-        xhr.status < 300 ? resolve() : reject(new Error("Upload failed (" + xhr.status + ")"));
-      };
-      xhr.onerror = () => reject(new Error("Network error during upload"));
-      xhr.send(file);
+    await _putFileToMux(file, uploadUrl, pct => {
+      _setOverlay({ pct, status: `Uploading… ${pct}%` });
     });
+    console.log("[Mux] Upload complete");
 
     // Step 3: poll for Mux to finish processing
     const barId  = onDone ? "mux-global-bar" : "mux-overlay-bar";

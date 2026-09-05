@@ -393,6 +393,41 @@
     return data;
   }
 
+  /* Chunked upload to Mux, for the same reason as the composer's copy: a single
+     PUT of a large video stalls on a weak connection and fires no error at all,
+     so the bar freezes and nothing ever ends it. UpChunk retries the failed
+     chunk instead of the whole file. Falls back to the old PUT, with a stall
+     watchdog, if the module cannot be fetched. */
+  async function _putFileToMux(file, uploadUrl, onPct) {
+    let createUpload = null;
+    try {
+      ({ createUpload } = await import("https://cdn.jsdelivr.net/npm/@mux/upchunk@3/dist/upchunk.mjs"));
+    } catch (e) { console.warn("[Mux] UpChunk unavailable, using single PUT:", e?.message || e); }
+
+    if (createUpload) {
+      await new Promise((resolve, reject) => {
+        const up = createUpload({ endpoint: uploadUrl, file, chunkSize: 5120 });
+        up.on("progress", e => onPct(Math.round(e.detail)));
+        up.on("error",    e => reject(new Error(e.detail?.message || "Upload failed")));
+        up.on("success",  () => resolve());
+      });
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      let last = Date.now(), watchdog = null;
+      const stop = () => { if (watchdog) clearInterval(watchdog); watchdog = null; };
+      xhr.open("PUT", uploadUrl);
+      xhr.upload.onprogress = e => { last = Date.now(); if (e.lengthComputable) onPct(Math.round(e.loaded / e.total * 100)); };
+      xhr.onload  = () => { stop(); xhr.status < 300 ? resolve() : reject(new Error("Upload to Mux failed (" + xhr.status + ")")); };
+      xhr.onerror = () => { stop(); reject(new Error("Network error uploading to Mux")); };
+      xhr.onabort = () => { stop(); reject(new Error("Upload stalled and was stopped. Please try again.")); };
+      watchdog = setInterval(() => { if (Date.now() - last > 90000) xhr.abort(); }, 5000);
+      xhr.send(file);
+    });
+  }
+
   async function _uploadVideoToMux(file, onDone) {
     if (!file||!file.type.startsWith("video/")) { alert("Please select a video file."); return; }
     if (_muxUploading) { alert("A video upload is already in progress."); return; }
@@ -406,14 +441,7 @@
       if (!uploadUrl) throw new Error("No upload URL returned");
 
       onDone?.({_progress:"Uploading… 0%"});
-      await new Promise((res,rej)=>{
-        const xhr=new XMLHttpRequest();
-        xhr.open("PUT",uploadUrl);
-        xhr.upload.onprogress=e=>{if(e.lengthComputable)onDone?.({_progress:`Uploading… ${Math.round(e.loaded/e.total*100)}%`});};
-        xhr.onload=()=>xhr.status<300?res():rej(new Error("Upload to Mux failed ("+xhr.status+")"));
-        xhr.onerror=()=>rej(new Error("Network error uploading to Mux"));
-        xhr.send(file);
-      });
+      await _putFileToMux(file, uploadUrl, pct => onDone?.({_progress:`Uploading… ${pct}%`}));
       onDone?.({_progress:"Processing…"});
       let playbackId=null, assetId=null;
       for (let i=0;i<72;i++) {
