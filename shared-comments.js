@@ -712,6 +712,18 @@
     return `tccrx_${String(commentId).replace(/[^a-z0-9]/gi, "_")}`;
   }
 
+  /* WHO OWNS THIS THREAD. Weekly focus, updates and the content feed have one
+     owner for every thread, so ownerEmail is a constant there. A community post
+     is owned by the member who wrote it, so that config passes ownerEmailFn
+     instead and this resolves it per thread. Returning nothing means nobody is
+     notified as owner, which is right for a thread with no owner. */
+  async function _ownerOf(parentId){
+    try{
+      if(typeof _cfg?.ownerEmailFn==="function"){ return (await _cfg.ownerEmailFn(parentId)) || null; }
+    }catch(e){ console.warn("owner lookup failed:", e); return null; }
+    return _cfg?.ownerEmail || null;
+  }
+
   async function _loadCmtReactions(commentIds) {
     const eventType = _cfg?.commentReactionEventType;
     if (!eventType || !commentIds.length) return;
@@ -889,13 +901,14 @@
       _cfg?.onReactionChange?.(parentId);
       await _db().from(_rTable()).upsert({[_rParent()]:parentId,email:auth.email,emoji},{onConflict:`${_rParent()},email`});
       // Notify the owner that someone reacted (skip self).
-      if (_cfg?.ownerEmail
+      const _rxOwner = await _ownerOf(parentId);
+      if (_rxOwner
           && auth.email
-          && auth.email.toLowerCase() !== _cfg.ownerEmail.toLowerCase()) {
+          && auth.email.toLowerCase() !== _rxOwner.toLowerCase()) {
         const titleFn = _cfg.ownerReactionTitleFn
           || ((name, em) => `${name} reacted ${em} to your post`);
         await _db().from("notifications").insert({
-          email:    _cfg.ownerEmail,
+          email:    _rxOwner,
           type:     "reaction",
           title:    titleFn(auth.name || "Someone", emoji),
           body:     "",
@@ -1067,14 +1080,15 @@
         // Notify the content owner (e.g. Matthew for weekly focus / updates /
         // content-feed posts) about new top-level comments. Skipped when the
         // commenter IS the owner. Config: ownerEmail + ownerNotifyTitleFn(name).
-        if (_cfg?.ownerEmail
+        const _cOwner = await _ownerOf(parentId);
+        if (_cOwner
             && auth.email
-            && auth.email.toLowerCase() !== _cfg.ownerEmail.toLowerCase()) {
+            && auth.email.toLowerCase() !== _cOwner.toLowerCase()) {
           const title = (typeof _cfg.ownerNotifyTitleFn === "function")
             ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
             : `${auth.name || "Someone"} left a new comment`;
           await _db().from("notifications").insert({
-            email:    _cfg.ownerEmail,
+            email:    _cOwner,
             type:     "new_comment",
             title,
             body:     (content || "Sent an attachment").slice(0, 120),
@@ -1131,6 +1145,18 @@
         }
         if(replyToEmail&&replyToEmail!==auth.email){
           await _db().from("notifications").insert({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
+        }
+        /* A reply is still activity on somebody's thread. Whoever owns it hears
+           about it too, unless they wrote the reply or were already told as the
+           person being replied to. */
+        const _rOwner = await _ownerOf(parentId);
+        if(_rOwner
+           && auth.email && _rOwner.toLowerCase()!==auth.email.toLowerCase()
+           && (!replyToEmail || _rOwner.toLowerCase()!==replyToEmail.toLowerCase())){
+          const title = (typeof _cfg.ownerNotifyTitleFn === "function")
+            ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
+            : `${auth.name || "Someone"} replied on your post`;
+          await _db().from("notifications").insert({email:_rOwner,type:"new_comment",title,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
         }
         window.Mentions?.notify(content, {
           fromName: auth.name || "Someone",
