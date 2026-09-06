@@ -752,6 +752,19 @@
     return _cfg?.ownerEmail || null;
   }
 
+  /* Write one notification. A notification is a side effect: it must never throw
+     into the action the member just took, and it must never fail silently either.
+     Do NOT chain .catch() on the builder — a supabase-js v2 PostgREST builder has
+     .then but no .catch, so .catch(...) throws a synchronous TypeError and the
+     insert is never sent at all. That is exactly what silenced every comment and
+     reply notification here. */
+  async function _notify(payload){
+    try{
+      const { error } = await _db().from("notifications").insert(payload);
+      if(error) console.warn("notification insert failed:", payload.type, error.message);
+    }catch(e){ console.warn("notification insert threw:", payload.type, e); }
+  }
+
   async function _loadCmtReactions(commentIds) {
     const eventType = _cfg?.commentReactionEventType;
     if (!eventType || !commentIds.length) return;
@@ -935,14 +948,14 @@
           && auth.email.toLowerCase() !== _rxOwner.toLowerCase()) {
         const titleFn = _cfg.ownerReactionTitleFn
           || ((name, em) => `${name} reacted ${em} to your post`);
-        await _db().from("notifications").insert({
+        await _notify({
           email:    _rxOwner,
           type:     "reaction",
           title:    titleFn(auth.name || "Someone", emoji),
           body:     "",
           link_url: _notifyLink(parentId),
           metadata: { parent_id: parentId, emoji },
-        }).catch(() => {});
+        });
       }
       window.tcCheckAchievements?.();  // reacting can earn engagement achievements
     },
@@ -1115,14 +1128,14 @@
           const title = (typeof _cfg.ownerNotifyTitleFn === "function")
             ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
             : `${auth.name || "Someone"} left a new comment`;
-          await _db().from("notifications").insert({
+          await _notify({
             email:    _cOwner,
             type:     "new_comment",
             title,
             body:     (content || "Sent an attachment").slice(0, 120),
             link_url: _notifyLink(parentId),
             metadata: {},
-          }).catch(() => {});
+          });
         }
         window.Mentions?.notify(content, {
           fromName: auth.name || "Someone",
@@ -1172,7 +1185,7 @@
           }
         }
         if(replyToEmail&&replyToEmail!==auth.email){
-          await _db().from("notifications").insert({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
+          await _notify({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}});
         }
         /* A reply is still activity on somebody's thread. Whoever owns it hears
            about it too, unless they wrote the reply or were already told as the
@@ -1184,7 +1197,7 @@
           const title = (typeof _cfg.ownerNotifyTitleFn === "function")
             ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
             : `${auth.name || "Someone"} replied on your post`;
-          await _db().from("notifications").insert({email:_rOwner,type:"new_comment",title,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}}).catch(()=>{});
+          await _notify({email:_rOwner,type:"new_comment",title,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}});
         }
         window.Mentions?.notify(content, {
           fromName: auth.name || "Someone",
