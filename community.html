@@ -3393,6 +3393,12 @@ let _editingPostId = null; // set while editing an existing post in the composer
 let _editingRemovedMux = []; // Mux assetIds removed during an edit — deleted on Save, not on remove (so Cancel can't orphan-delete)
 let _currentPostId = null;
 let _posts         = [];
+/* Author lookups live here rather than inside loadPosts: the content-feed and
+   update cards read them after the posts are hydrated, and a page fetched later
+   by infinite scroll adds its authors to the same maps. */
+let _avatarUrlMap  = {};
+let _badgeMap      = {};
+let _nameFromDbMap = {};
 let _postFilter    = null; // null = all, or 'progress'|'feedback'|'question'|'post'
 let _searchQuery   = "";  // live text search across post content + title
 let _postsPage     = 1;
@@ -3785,6 +3791,10 @@ function setPostFilter(type, btn) {
   const badge = document.getElementById("badge-" + (type || "feed"));
   if (badge) { badge.style.display = "none"; badge.textContent = ""; }
   _renderFilteredPosts();
+  /* Open a tab and it may hold only the handful of its type that came in on the
+     shared first page. Ask for its own first 50 straight away so the tab opens
+     full rather than showing three posts until you scroll. */
+  _fillTab(type);
   // Keep URL and nav in sync. PUSH a new history entry when the filter actually
   // changes (so swiping back steps through the previous filters); REPLACE when the
   // URL is already correct — i.e. the initial load, a back/forward restore that
@@ -4013,9 +4023,11 @@ function _renderFilteredPosts() {
     list.innerHTML = `<div class="posts-empty"><div class="posts-empty-icon">${emptyIcon}</div>${label}</div>`;
   } else {
     const visible = items.slice(0, _postsPage * POSTS_PER_PAGE);
-    const hasMore = visible.length < items.length;
+    // The sentinel must survive running out of LOADED items, or infinite scroll
+    // stops at the edge of the last page instead of fetching the next one.
+    const hasMore = visible.length < items.length || !_streamDone(_postFilter);
     list.innerHTML = visible.map(i => i.html).join("") +
-      (hasMore ? `<button class="see-more-btn" style="margin-top:4px" onclick="loadMorePosts()">Load more <span style="opacity:.6">(${items.length - visible.length} remaining)</span></button>` : "");
+      (hasMore ? `<button class="see-more-btn" style="margin-top:4px" onclick="loadMorePosts()">Load more${items.length > visible.length ? ` <span style="opacity:.6">(${items.length - visible.length} remaining)</span>` : ""}</button>` : "");
     // Gentle staggered fade on the very first load only (no re-animation on
     // filter changes or "load more").
     if (!_feedArrived) {
@@ -4048,7 +4060,17 @@ function _observeLoadMore() {
   _feedIO.observe(btn);
 }
 
-function loadMorePosts() {
+async function loadMorePosts() {
+  const f = _postFilter;
+  const have = f && f !== "saved" ? _posts.filter(p => p.type === f).length : _posts.length;
+  // Reaching the end of what is loaded is the trigger to go and get more.
+  if ((_postsPage + 1) * POSTS_PER_PAGE > have && !_streamDone(f)) {
+    // Keep walking past pages that turn out to be duplicates, within reason.
+    for (let i = 0; i < 6; i++) {
+      const r = await _fetchMorePosts(f);
+      if (r !== "skipped") break;
+    }
+  }
   _postsPage++;
   _renderFilteredPosts();
   // Re-fix Mux players that were just added
@@ -6630,60 +6652,42 @@ function _refreshUpLikeBtn(safeKey, updateId) {
 }
 
 // ── Posts ─────────────────────────────────────────────────────────────────────
-async function loadPosts() {
-  _postsPage = 1; // reset pagination on fresh load
-  const list = document.getElementById("posts-list");
-  list.innerHTML = _postsSkeletonHTML(3);
-
-  const [postsResult, cfResult, updatesResult] = await Promise.all([
-    db.from("community_posts").select("*").order("created_at", { ascending: false }).limit(300),
-    // Clinics carry a post row only so their comments share the one comment
-    // table; they are not feed items.
-    db.from("content_feed_posts").select("*").neq("type", "clinic").order("published_at", { ascending: false }).limit(50),
-    db.from("practice_room_updates").select("*").order("published_at", { ascending: false }).limit(50),
-    _loadFocusFeedItems(),
-    loadSavedPosts(),
-    _loadPins(),
-  ]);
-  const { data: posts, error } = postsResult;
-
-  // Normalise media: imported rows use snake_case playback_id; renderers expect playbackId
-  function _normMedia(rows) {
-    return (rows || []).map(r => ({
-      ...r,
-      media: Array.isArray(r.media) ? r.media.map(m =>
-        (m.type === "mux" && m.playback_id && !m.playbackId) ? { ...m, playbackId: m.playback_id } : m
-      ) : r.media
-    }));
+/* Everything a post needs to render beyond its own row: likes, comment counts,
+   polls, reactions, author avatars and, for a practice log, its session. Pulled
+   out of loadPosts so a page fetched later by infinite scroll is hydrated the
+   same way the first page was. The shared maps are merged into, never reset,
+   so a later page cannot wipe what an earlier one put there. */
+/* A PostgREST `.in(...)` travels in the URL, so a long id list silently blows
+   the request: ~577 uuids is about 21KB of query string and the whole lookup
+   comes back empty, which is how a feed ends up showing nobody's reactions.
+   Ask in batches and stitch the rows back together. */
+const _IN_BATCH = 100;
+async function _inChunks(ids, run) {
+  const list = [...new Set((ids || []).map(String))];
+  const rows = [];
+  for (let i = 0; i < list.length; i += _IN_BATCH) {
+    const { data, error } = await run(list.slice(i, i + _IN_BATCH));
+    if (error) { console.warn("batched lookup failed:", error.message); continue; }
+    if (data) rows.push(...data);
   }
-  const cfPosts      = _normMedia(cfResult?.data);
-  const updatePosts  = _normMedia(updatesResult?.data);
+  return { data: rows };
+}
 
-  if (error || !posts) {
-    list.innerHTML = '<div class="posts-empty">Could not load posts.</div>';
-    return;
-  }
-  _normMedia(posts).forEach((p, i) => { posts[i] = p; });
-
-  if (!posts.length && !_focusFeedItems.length && !cfPosts.length) {
-    list.innerHTML = `<div class="posts-empty">No posts yet — be the first to share something! 👆</div>`;
-    return;
-  }
-
+async function _hydratePosts(rows) {
   // Fetch like counts, comment counts, poll info, and post reactions in parallel
-  const ids = (posts || []).map(p => p.id);
+  const ids = (rows || []).map(p => p.id);
   const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }, { data: postReactions }] = ids.length
     ? await Promise.all([
-        db.from("community_post_likes").select("post_id,email").in("post_id", ids),
-        db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", ids),
-        db.from("community_post_comments").select("post_id").in("post_id", ids),
-        db.from("community_post_polls").select("post_id,question,id").in("post_id", ids),
-        db.from("activity_reactions").select("item_id,email,emoji").eq("event_type","post").in("item_id", ids)
+        _inChunks(ids, c => db.from("community_post_likes").select("post_id,email").in("post_id", c)),
+        _inChunks(ids, c => db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", c)),
+        _inChunks(ids, c => db.from("community_post_comments").select("post_id").in("post_id", c)),
+        _inChunks(ids, c => db.from("community_post_polls").select("post_id,question,id").in("post_id", c)),
+        _inChunks(ids, c => db.from("activity_reactions").select("item_id,email,emoji").eq("event_type","post").in("item_id", c))
       ])
     : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   // Build _postRxMap[postId][emoji] = { count, mine }
-  _postRxMap = {};
+  // merge, never reset: later pages add to what earlier pages already put here
   (postReactions || []).forEach(rx => {
     if (!_postRxMap[rx.item_id]) _postRxMap[rx.item_id] = {};
     if (!_postRxMap[rx.item_id][rx.emoji]) _postRxMap[rx.item_id][rx.emoji] = { count: 0, mine: false };
@@ -6733,13 +6737,12 @@ async function loadPosts() {
   // Fetch avatar URLs + badges for all post authors AND likers (community_post_likes)
   const rxEmails    = (postReactions || []).map(r => r.email);
   const likerEmails = (allLikes      || []).map(l => l.email);
-  const allEmails   = [...new Set([...posts.map(p => p.email), 'matthew@matthewcawood.com', ...rxEmails, ...likerEmails])];
-  const { data: avatarRows } = await db.from("allowed_emails")
-    .select("email,avatar_url,badge,name").in("email", allEmails);
-  const avatarUrlMap = {};
-  const badgeMap     = {};
-  const nameFromDbMap = {};
-  _commLikerAvatarMap = {};
+  const allEmails   = [...new Set([...rows.map(p => p.email), 'matthew@matthewcawood.com', ...rxEmails, ...likerEmails])];
+  const { data: avatarRows } = await _inChunks(allEmails, c => db.from("allowed_emails").select("email,avatar_url,badge,name").in("email", c));
+  const avatarUrlMap  = _avatarUrlMap;   // merged into, not replaced
+  const badgeMap      = _badgeMap;
+  const nameFromDbMap = _nameFromDbMap;
+
   (avatarRows || []).forEach(r => {
     if (r.avatar_url) avatarUrlMap[r.email] = r.avatar_url;
     if (r.badge)      badgeMap[r.email]     = r.badge;
@@ -6748,7 +6751,7 @@ async function loadPosts() {
   });
 
   // Build _commRxLikersMap: emoji reactions (activity_reactions) + heart likes (community_post_likes)
-  _commRxLikersMap = {};
+
   (postReactions || []).forEach(rx => {
     if (!_commRxLikersMap[rx.item_id]) _commRxLikersMap[rx.item_id] = [];
     if (!_commRxLikersMap[rx.item_id].find(x => x.email === rx.email))
@@ -6761,7 +6764,7 @@ async function loadPosts() {
       _commRxLikersMap[l.post_id].push({ email: l.email, emoji: "❤️" });
   });
 
-  _posts = posts.map(p => {
+  let out = rows.map(p => {
     const rxData = _postRxMap[p.id] || {};
     let myEmoji = null, totalReactions = 0;
     for (const [e, d] of Object.entries(rxData)) {
@@ -6785,12 +6788,11 @@ async function loadPosts() {
   // Hydrate session_data for structured practice log posts. A post may bundle
   // extra_session_ids (the member's other activity that day) — those sessions'
   // items are merged into the card and their minutes added to the total.
-  const logPostsWithSession = _posts.filter(p => p.type === "practice_log" && p.session_id);
+  const logPostsWithSession = out.filter(p => p.type === "practice_log" && p.session_id);
   if (logPostsWithSession.length) {
     const sessionIds = [...new Set(logPostsWithSession.flatMap(p =>
       [p.session_id, ...(Array.isArray(p.extra_session_ids) ? p.extra_session_ids : [])]).filter(Boolean))];
-    const { data: sessionRows } = await db.from("practice_sessions")
-      .select("id,session_date,duration_minutes,notes,focus_rating").in("id", sessionIds);
+    const { data: sessionRows } = await _inChunks(sessionIds, c => db.from("practice_sessions").select("id,session_date,duration_minutes,notes,focus_rating").in("id", c));
     // IMPORTANT: page the practice_items fetch. A busy feed (300 posts) can
     // reference more than PostgREST's default 1000-row cap of items; the old
     // single unbounded query silently truncated at 1000 and, because it ordered
@@ -6812,7 +6814,7 @@ async function loadPosts() {
     (sessionRows || []).forEach(s => { sessionMap[s.id] = { ...s, items: [] }; });
     (itemRows    || []).forEach(i => { if (sessionMap[i.session_id]) sessionMap[i.session_id].items.push(i); });
     const sumDur = s => s ? (s.duration_minutes || (s.items || []).reduce((a, i) => a + (i.duration_minutes || 0), 0)) : 0;
-    _posts = _posts.map(p => {
+    out = out.map(p => {
       if (!p.session_id || !sessionMap[p.session_id]) return p;
       const base = sessionMap[p.session_id];
       const extras = (Array.isArray(p.extra_session_ids) ? p.extra_session_ids : []).map(id => sessionMap[id]).filter(Boolean);
@@ -6822,6 +6824,131 @@ async function loadPosts() {
       return { ...p, session_data: { ...base, items: mergedItems, duration_minutes: mergedDur } };
     });
   }
+  return out;
+}
+
+/* Infinite scroll that actually reaches the database. The feed used to fetch one
+   window of posts and then page through it in the browser, so "load more" could
+   only ever reveal rows already downloaded: scroll to the end of that window and
+   the older posts were unreachable, however long you scrolled. Each tab now keeps
+   its own cursor and asks for the next page of ITS type, so a member can scroll
+   back to the first post ever written without every other tab's posts being
+   dragged along to get there. */
+const _fetchState = {};                       // stream key -> { offset, done, loading }
+const _fkey = f => (f && f !== "saved") ? f : "__all";
+function _streamDone(f) { return f === "saved" ? true : !!(_fetchState[_fkey(f)] || {}).done; }
+
+function _seedFetchState(rows) {
+  const n = (rows || []).length;
+  // The first page is a global window, so the Feed can page it by offset exactly.
+  // Each type stream starts at nothing of its own: a tab asks for its first 50
+  // the moment you open it, and dedupes against whatever the Feed already holds.
+  Object.keys(_fetchState).forEach(k => delete _fetchState[k]);
+  _fetchState["__all"] = { offset: n, done: n < POSTS_PER_PAGE, loading: false };
+}
+
+function _normPostMedia(rows) {
+  return (rows || []).map(r => ({
+    ...r,
+    media: Array.isArray(r.media) ? r.media.map(m =>
+      (m.type === "mux" && m.playback_id && !m.playbackId) ? { ...m, playbackId: m.playback_id } : m
+    ) : r.media
+  }));
+}
+
+/* Top a tab up to a full screen when it is opened, then re-render in place. */
+async function _fillTab(type) {
+  if (type === "saved") return;
+  const have = type ? _posts.filter(p => p.type === type).length : _posts.length;
+  if (have >= POSTS_PER_PAGE || _streamDone(type)) return;
+  let grew = false;
+  for (let i = 0; i < 6; i++) { const r = await _fetchMorePosts(type); if (r !== "skipped") { grew = !!r; break; } }
+  if (grew && _postFilter === type) _renderFilteredPosts();
+}
+
+async function _fetchMorePosts(filter) {
+  if (filter === "saved") return false;        // saved is a view over what is loaded
+  const key = _fkey(filter);
+  const st = _fetchState[key] || (_fetchState[key] = { offset: 0, done: false, loading: false });
+  if (st.done || st.loading) return false;
+  st.loading = true;
+  try {
+    let q = db.from("community_posts").select("*").order("created_at", { ascending: false });
+    if (key !== "__all") q = q.eq("type", key);
+    const { data, error } = await q.range(st.offset, st.offset + POSTS_PER_PAGE - 1);
+    if (error) { console.warn("could not fetch more posts:", error.message); return false; }
+    const batch = data || [];
+    st.offset += batch.length;
+    if (batch.length < POSTS_PER_PAGE) st.done = true;
+    const have = new Set(_posts.map(p => String(p.id)));
+    const fresh = batch.filter(r => !have.has(String(r.id)));
+    /* A page can be entirely rows we already hold: the Feed walks global order
+       while a tab may have pulled the same posts in through its own stream. Say
+       so rather than returning "nothing more", so the caller advances again
+       instead of leaving the reader scrolling at a sentinel that never moves. */
+    if (!fresh.length) return st.done ? false : "skipped";
+    const hydrated = await _hydratePosts(_normPostMedia(fresh));
+    _posts = _posts.concat(hydrated)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return true;
+  } finally { st.loading = false; }
+}
+
+/* The first page is small and mixed: the newest POSTS_PER_PAGE posts of any
+   type. Every tab then pages its own stream from the database as you scroll, so
+   nothing is capped by how much was fetched up front and the feed does not get
+   slower as the community grows. */
+async function _loadCommunityPosts() {
+  return db.from("community_posts").select("*")
+    .order("created_at", { ascending: false })
+    .range(0, POSTS_PER_PAGE - 1);
+}
+
+async function loadPosts() {
+  _postsPage = 1; // reset pagination on fresh load
+  const list = document.getElementById("posts-list");
+  list.innerHTML = _postsSkeletonHTML(3);
+
+  const [postsResult, cfResult, updatesResult] = await Promise.all([
+    _loadCommunityPosts(),
+    // Clinics carry a post row only so their comments share the one comment
+    // table; they are not feed items.
+    db.from("content_feed_posts").select("*").neq("type", "clinic").order("published_at", { ascending: false }).limit(50),
+    db.from("practice_room_updates").select("*").order("published_at", { ascending: false }).limit(50),
+    _loadFocusFeedItems(),
+    loadSavedPosts(),
+    _loadPins(),
+  ]);
+  const { data: posts, error } = postsResult;
+
+  // Normalise media: imported rows use snake_case playback_id; renderers expect playbackId
+  function _normMedia(rows) {
+    return (rows || []).map(r => ({
+      ...r,
+      media: Array.isArray(r.media) ? r.media.map(m =>
+        (m.type === "mux" && m.playback_id && !m.playbackId) ? { ...m, playbackId: m.playback_id } : m
+      ) : r.media
+    }));
+  }
+  const cfPosts      = _normMedia(cfResult?.data);
+  const updatePosts  = _normMedia(updatesResult?.data);
+
+  if (error || !posts) {
+    list.innerHTML = '<div class="posts-empty">Could not load posts.</div>';
+    return;
+  }
+  _normMedia(posts).forEach((p, i) => { posts[i] = p; });
+
+  if (!posts.length && !_focusFeedItems.length && !cfPosts.length) {
+    list.innerHTML = `<div class="posts-empty">No posts yet — be the first to share something! 👆</div>`;
+    return;
+  }
+
+  _postRxMap = {}; _commRxLikersMap = {}; _commLikerAvatarMap = {};
+  _avatarUrlMap = {}; _badgeMap = {}; _nameFromDbMap = {};
+  _posts = await _hydratePosts(posts);
+  _seedFetchState(posts);
+
 
   // Fetch like/comment counts for content feed posts
   const cfIds = cfPosts.map(p => p.id);
@@ -6875,8 +7002,8 @@ async function loadPosts() {
     }
   }
 
-  const _matthewAvatar = avatarUrlMap['matthew@matthewcawood.com'] || null;
-  const _matthewName   = nameFromDbMap['matthew@matthewcawood.com'] || 'Matthew Cawood';
+  const _matthewAvatar = _avatarUrlMap['matthew@matthewcawood.com'] || null;
+  const _matthewName   = _nameFromDbMap['matthew@matthewcawood.com'] || 'Matthew Cawood';
   _contentFeedItems = cfPosts.map(p => {
     const rxData = _cfRxMap[p.id] || {};
     let myEmoji = null, totalReactions = 0;
