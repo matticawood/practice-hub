@@ -18865,7 +18865,7 @@ function _renderProgressHero(show) {
      the right, the ladder full width underneath - so the statue can be tall
      without stretching the text rows. Progress takes the identical shape with
      one extra text row for the level line, and the statue spans all four. */
-  el.innerHTML =
+  const _html =
     '<div class="ph-eye">All time</div>'
     + '<div class="ph-fig">' + hrs.toLocaleString() + '<span> hour' + (hrs === 1 ? '' : 's') + '</span></div>'
     /* One text row fewer: the status line IS the sub now, so it is not printed
@@ -18873,6 +18873,21 @@ function _renderProgressHero(show) {
        so the header never loses the date entirely. */
     + (statusHTML || (bits.length ? '<div class="ph-sub">' + bits.join(' &middot; ') + '</div>' : ''))
     + statueHTML;
+  /* REWRITING THIS BLANKS THE STATUE, AND IT IS USUALLY THE SAME HERO.
+     switchMainLbTab calls this on every tap, including between Practice,
+     Sessions, Achievements and Ranks - four tabs that share one hero, so the
+     markup it builds is identical each time. Assigning innerHTML anyway threw
+     the <img> away and made a new one, and the browser then has to decode a
+     1024x1024 webp again before it can paint it. On a phone that leaves a hole
+     where the statue was for a frame or two, then it pops back and the buttons
+     underneath shift with it. Frame by frame through a member's recording:
+     statue, gone, back at a different size, over and over while he moved
+     between the sub-tabs. Writing only when the hero has actually changed keeps
+     the same <img> alive, so there is nothing to re-decode and nothing to
+     flicker. */
+  if (el._phHtml === _html) return;
+  el._phHtml = _html;
+  el.innerHTML = _html;
 }
 
 /* One play per entrance. Re-renders during those 900ms are covered by the same
@@ -18881,11 +18896,12 @@ function _renderProgressHero(show) {
 window._panelEnter = function (id, ms) {
   const st = document.getElementById(id);
   if (!st) return;
+  const win = ms || 900;
   st.classList.remove('pg-enter');
   void st.offsetWidth;                    // restart the animation, not resume it
   st.classList.add('pg-enter');
   clearTimeout(st._enterT);
-  st._enterT = setTimeout(function () { st.classList.remove('pg-enter'); }, ms || 900);
+  st._enterT = setTimeout(function () { st.classList.remove('pg-enter'); }, win);
 };
 window._progEnter = function () { window._panelEnter('prog-stage'); };
 /* The dashboard's cards fill in over a second or so, so its window is longer:
@@ -29758,11 +29774,11 @@ let _achById = {};
 
 function _achAnimateHero(earned, pct, circ) {
   const ring  = document.querySelector(".ach-hero-ring-fill");
-  if (ring) requestAnimationFrame(() => { ring.style.strokeDashoffset = String(circ * (1 - pct / 100)); });
   const numEl = document.querySelector(".ach-hero-earned");
   const pctEl = document.querySelector(".ach-hero-pct-num");
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduce) { if (numEl) numEl.textContent = earned; if (pctEl) pctEl.textContent = pct; return; }
+  if (ring) requestAnimationFrame(() => { ring.style.strokeDashoffset = String(circ * (1 - pct / 100)); });
   const dur = 900, start = performance.now();
   (function tick(t) {
     const p = Math.min(1, (t - start) / dur), e = 1 - Math.pow(1 - p, 3);
