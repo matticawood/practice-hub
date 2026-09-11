@@ -18752,9 +18752,26 @@ function _renderProgressHero(show) {
     const b = (typeof _practiceBaseline !== 'undefined' && _practiceBaseline && typeof _practiceBaseline === 'object')
       ? _practiceBaseline : null;
     if (b) baseHrs = (Number(b.total_minutes) || 0) / 60;
-    else if (typeof _rmLoadBaseline === 'function' && !_renderProgressHero._loading) {
+    /* ONLY WHEN IT HAS NEVER BEEN FETCHED, AND ONLY BACK ONTO THIS PAGE.
+       Two faults lived in this one branch. _practiceBaseline is null before the
+       fetch but 0 for a member who simply has no baseline row, and 0 is not an
+       object, so for them the condition stayed true and every render started
+       another fetch that could never satisfy it. And the callback re-showed the
+       hero unconditionally: leave Progress for the Roadmap while that fetch is
+       in flight and it lands afterwards, sets display back, and the Progress
+       header - eyebrow, hours, statue and ladder, 312px of it - reappears above
+       the roadmap's own hero. That is the extra header section, and it repeated
+       for anyone with no baseline row, which is every member who has not filled
+       in their prior hours. */
+    else if (_practiceBaseline == null && typeof _rmLoadBaseline === 'function'
+             && !_renderProgressHero._loading) {
       _renderProgressHero._loading = 1;
-      _rmLoadBaseline().then(() => { _renderProgressHero._loading = 0; _renderProgressHero(true); });
+      _rmLoadBaseline().then(() => {
+        _renderProgressHero._loading = 0;
+        const stillOnProgress = ['stats', 'history', 'leaderboard', 'achievements']
+          .includes(window._shHubView);
+        if (stillOnProgress) _renderProgressHero(true);
+      });
     }
   } catch (e) {}
   /* _rmTrackMinutes().total ALREADY includes the hours before you joined - it
@@ -18897,6 +18914,21 @@ window._panelEnter = function (id, ms) {
   const st = document.getElementById(id);
   if (!st) return;
   const win = ms || 900;
+  /* ALREADY RUNNING? EXTEND THE WINDOW, DO NOT RESTART IT.
+     The roadmap asks for this twice on purpose - once on the switch and again
+     on a 120ms timer - so a child built after the switch still animates in. But
+     the restart below is a real restart, and the second call does not arrive at
+     120ms: the thread is busy building the roadmap, and it was measured landing
+     at 1001ms. The 900ms entrance has finished by then, so the page faded in,
+     settled, and then faded in again from the beginning, which is the roadmap
+     appearing to load twice.
+     Leaving the class on gives the second call what it actually wanted - a late
+     child still animating - without throwing away what the reader is watching. */
+  if (st.classList.contains('pg-enter')) {
+    clearTimeout(st._enterT);
+    st._enterT = setTimeout(function () { st.classList.remove('pg-enter'); }, win);
+    return;
+  }
   st.classList.remove('pg-enter');
   void st.offsetWidth;                    // restart the animation, not resume it
   st.classList.add('pg-enter');
@@ -42391,11 +42423,24 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     const rows = KEYS.filter(k => areas[k] && R.levels[k]).map(k => {
       const a = areas[k], ladder = R.levels[k];
       const asks = (ladder[cur - 1] || {}).hours || 0;
+      const next = (ladder[cur] || {}).hours || 0;
       const has = a.mins / 60;
-      return { k, label: a.label, color: a.color, asks, has, pct: asks > 0 ? Math.round(has / asks * 100) : 100 };
+      /* LEVEL ONE ASKS FOR NOTHING, AND THAT MADE THE WHOLE SECTION MEANINGLESS.
+         `asks` is the hours at which this level STARTS for that area, and every
+         ladder starts at 0. So at level 1 the old fallback reported a flat 100%
+         for all four areas: four full bars against a line drawn at the top, and
+         "all keeping pace", for every beginner whatever they had actually done.
+         With no bar to clear, the honest reading is how far through this level
+         the area is, so level 1 measures against what it takes to REACH level 2.
+         Nobody can be behind at level 1, which is why `behind` is a separate
+         flag rather than pct < 100: above level 1 both are unchanged. */
+      const pct = asks > 0
+        ? Math.round(has / asks * 100)
+        : (next > 0 ? Math.min(100, Math.round(has / next * 100)) : 100);
+      return { k, label: a.label, color: a.color, asks, has, pct, behind: asks > 0 && pct < 100 };
     });
     if (rows.length && !el.querySelector('.rmp-areas')) {
-      const behind = rows.filter(r => r.pct < 100);
+      const behind = rows.filter(r => r.behind);
       const worst = rows.slice().sort((a, b) => a.pct - b.pct)[0];
       const wrap = document.createElement('div');
       wrap.className = 'rmp-areas';
@@ -42411,7 +42456,7 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
             + '<i style="height:' + y(r.pct) + '%"></i></span>').join('')
         + '</div><div class="rmp-cmp-x">'
         + rows.map(r => '<span data-k="' + r.k + '"'
-            + (r.pct < 100 ? ' class="cold" style="color:' + r.color + '"' : '') + '>'
+            + (r.behind ? ' class="cold" style="color:' + r.color + '"' : '') + '>'
             + escHtml(r.label) + '</span>').join('')
         + '</div></div>';
       /* Each column opens that area's own panel - where you are in it, what
