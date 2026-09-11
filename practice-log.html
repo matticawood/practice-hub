@@ -16492,6 +16492,29 @@ async function loadData() {
       try { if (typeof _renderDailyCard === 'function') _renderDailyCard(); } catch (_) {}
       try { if (typeof _renderCoursesCard === 'function') _renderCoursesCard(); } catch (_) {}
       try { if (typeof _renderNextMoveCard === 'function') _renderNextMoveCard(); } catch (_) {}
+      /* THE OBJECTIVES READ THIS DATA TOO, AND NOBODY WAS TELLING THEM IT HAD
+         ARRIVED. "Aiming for" is built from _goalTheory, _lypCourse,
+         _goalPieceTiers, _goalCollectionTiers and _insightTrainers, every one of
+         which is null until the load above returns. Land on the Roadmap before
+         it does and the list is drawn from nulls: fewer objectives in it, and
+         the ones that are there unticked. It read "1 of 10" where the member
+         actually had "4 of 13".
+         Staying on the tab never corrected it, because the only thing that
+         rebuilds the panel is a call to renderRoadmap and nothing made one.
+         Refreshing only re-ran the same race, which is why it took a few goes
+         to land on a version that was right.
+         The journey card on the dashboard is the same rows from the same data,
+         so it is refreshed here too. Both are full rebuilds, and both are
+         skipped when their panel is not the one on screen: the next visit
+         renders from complete data anyway. */
+      try {
+        const _rmVisible = (document.getElementById('lb-panel-roadmap') || {}).style?.display !== 'none';
+        if (_rmVisible && typeof renderRoadmap === 'function') renderRoadmap();
+      } catch (_) {}
+      try {
+        const _dashVisible = (document.getElementById('lb-panel-dashboard') || {}).style?.display !== 'none';
+        if (_dashVisible && typeof _renderJourneyCard === 'function') _renderJourneyCard();
+      } catch (_) {}
     } catch (e) { _insightTrainers = null; _insightCollections = null; _goalPieceTiers = null; _goalTheory = null; _courseStats = null; _goalCollectionTiers = null; _goalCollectionIds = null; _dormantCustomPieces = null; _fsCourse = null; _lypCourse = null; /* _goalAllPieces kept — loaded separately */ }
     /* ATTEMPTED, not "arrived". The boot cover waits on this, and these values
        are null both before the fetch and after a failed one, so the flag has to
@@ -18969,16 +18992,32 @@ function switchMainLbTab(main, fromHistory) {
   // Switching to a different page should start at the top (was keeping the old
   // scroll position, so you'd land half-way down the new panel).
   window.scrollTo(0, 0);
-  if (main === "dashboard")    { renderDashboard(); }
-  if (main === "stats")        { renderStats(); }
-  if (main === "goals")        { if (_goalsLoaded) { renderWeeklyGoalWidget(); renderPieceGoals(); } else { loadWeeklyGoal(); loadPieceGoals(); } }
-  if (main === "leaderboard")  { renderLeaderboard(); loadLbOptOut(); }
-  if (main === "achievements") { renderAchievements(); }
-  if (main === "roadmap")      { if (typeof renderRoadmap === "function") renderRoadmap(); }
-  if (main === "community")    { renderCommunityFeed(); }
-  /* History used to be built at boot for everyone; it builds when it is asked
-     for now, once. */
-  if (main === "history" && !window._histRendered) { window._histRendered = 1; renderSessions(true); }
+  /* SWAP FIRST, BUILD ON THE NEXT FRAME.
+     Everything above is cheap: body classes, panel visibility, a scroll to the
+     top. Building the panel is not. renderStats() holds the main thread for
+     about half a second on a desktop and longer on a phone, and it used to run
+     in this same task, so nothing the swaps did could paint until it finished.
+     What a member saw was the new page's theme arriving over an empty panel,
+     the old one apparently still showing through, and the tap itself feeling
+     dead - worst between Progress and Roadmap, which are the two heaviest
+     renders and the two that swap the whole page treatment.
+     One frame is enough for the swap to paint before the thread goes busy. The
+     token is for a second tap landing inside that frame: the newest tap wins
+     and the one it overtook never builds, instead of both building in turn. */
+  const _tabToken = (window._hubTabToken = (window._hubTabToken || 0) + 1);
+  requestAnimationFrame(function () {
+    if (window._hubTabToken !== _tabToken) return;   // overtaken by a newer tap
+    if (main === "dashboard")    { renderDashboard(); }
+    if (main === "stats")        { renderStats(); }
+    if (main === "goals")        { if (_goalsLoaded) { renderWeeklyGoalWidget(); renderPieceGoals(); } else { loadWeeklyGoal(); loadPieceGoals(); } }
+    if (main === "leaderboard")  { renderLeaderboard(); loadLbOptOut(); }
+    if (main === "achievements") { renderAchievements(); }
+    if (main === "roadmap")      { if (typeof renderRoadmap === "function") renderRoadmap(); }
+    if (main === "community")    { renderCommunityFeed(); }
+    /* History used to be built at boot for everyone; it builds when it is asked
+       for now, once. */
+    if (main === "history" && !window._histRendered) { window._histRendered = 1; renderSessions(true); }
+  });
 
   /* THE COVER BELONGS TO THE PANEL YOU LANDED ON.
      It used to be lifted from inside renderDashboard, so a link straight to any
