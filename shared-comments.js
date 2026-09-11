@@ -475,13 +475,13 @@
       html+=`<div class="media-preview-images" style="grid-template-columns:repeat(${cols},1fr)">`+
         images.map((m,_i)=>{
           const idx=media.indexOf(m);
-          return`<div class="media-thumb-wrap"><img src="${m.url}" alt="${_escHtml(m.name)}" style="${cols>1?"height:180px;object-fit:cover":""}"/><button class="media-thumb-remove" onclick="removeInlineMedia('${key}',${idx})" title="Remove">×</button></div>`;
+          return`<div class="media-thumb-wrap"><img src="${m.url}" alt="${_escHtml(m.name)}" style="${cols>1?"height:180px;object-fit:cover":""}"/><button class="media-thumb-remove" onclick="tc_removeInlineMedia('${key}',${idx})" title="Remove">×</button></div>`;
         }).join("")+`</div>`;
     }
     const rmBtn=fn=>`<button onclick="${fn}" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:.8rem;display:flex;align-items:center;justify-content:center;cursor:pointer" onmouseover="this.style.background='#ef4444'" onmouseout="this.style.background='rgba(0,0,0,.55)'">×</button>`;
     others.forEach(m=>{
       const idx=media.indexOf(m);
-      const rm=`removeInlineMedia('${key}',${idx})`;
+      const rm=`tc_removeInlineMedia('${key}',${idx})`;
       if(m.type==="mux"){
         if(m._uploading){
           html+=`<div style="position:relative;margin-top:6px"><div class="mux-upload-overlay" style="margin-bottom:0"><div class="mux-upload-overlay-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div><div class="mux-upload-overlay-body"><div class="mux-upload-overlay-filename">${_escHtml(m.name)}</div><div class="mux-upload-overlay-track"><div class="mux-upload-overlay-bar processing" id="tc-mux-bar-${key}"></div></div><div class="mux-upload-overlay-status processing" id="tc-mux-status-${key}">${_escHtml(m._progress||"Uploading…")}</div></div></div>${rmBtn(rm)}</div>`;
@@ -511,7 +511,7 @@
   function _closeExcept(key, except) {
     if(except!=="video"){const vp=document.getElementById(`inline-vid-panel-${key}`);if(vp&&vp.style.display!=="none"){vp.style.display="none";document.getElementById(`inline-vid-btn-${key}`)?.classList.remove("recording");}}
     if(except!=="poll"){const pp=document.getElementById(`inline-poll-${key}`);if(pp&&pp.style.display!=="none"){pp.style.display="none";_inlinePollOpen[key]=false;document.getElementById(`inline-poll-btn-${key}`)?.classList.remove("recording");}}
-    if(except!=="cam"){if(_inlineCamPreviewKey===key)inlineCancelCamPreview(key);if(_inlineCamKey===key&&_inlineCamRec&&_inlineCamRec.state!=="inactive")_inlineCamRec.stop();}
+    if(except!=="cam"){if(_inlineCamPreviewKey===key)tc_inlineCancelCamPreview(key);if(_inlineCamKey===key&&_inlineCamRec&&_inlineCamRec.state!=="inactive")_inlineCamRec.stop();}
     if(except!=="voice"){if(_inlineVoiceRec[key]&&_inlineVoiceRec[key].state!=="inactive")_inlineVoiceRec[key].stop();}
   }
 
@@ -523,10 +523,10 @@
       <div class="composer-toolbar" id="inline-main-toolbar-${key}" style="flex-wrap:wrap;margin-top:4px">
         <button class="toolbar-btn" title="Image" onclick="document.getElementById('tc-fi-img-${key}').click()"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
         <button class="toolbar-btn" title="File" onclick="document.getElementById('tc-fi-file-${key}').click()"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-        <button class="toolbar-btn" title="Video / embed" id="inline-vid-btn-${key}" onclick="inlineToggleVideoPanel('${key}')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="4"/><polygon points="10 8 18 12 10 16 10 8" fill="currentColor" stroke="none"/></svg></button>
-        <button class="toolbar-btn" title="Record video" id="inline-camrec-btn-${key}" onclick="inlineToggleCamRec('${key}')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>
-        <button class="toolbar-btn" title="Voice recording" id="inline-voice-btn-${key}" onclick="toggleInlineVoice('${key}')"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
-        <button class="toolbar-btn" title="Poll" id="inline-poll-btn-${key}" onclick="toggleInlinePoll('${key}')"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button>
+        <button class="toolbar-btn" title="Video / embed" id="inline-vid-btn-${key}" onclick="tc_inlineToggleVideoPanel('${key}')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="4"/><polygon points="10 8 18 12 10 16 10 8" fill="currentColor" stroke="none"/></svg></button>
+        <button class="toolbar-btn" title="Record video" id="inline-camrec-btn-${key}" onclick="tc_inlineToggleCamRec('${key}')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>
+        <button class="toolbar-btn" title="Voice recording" id="inline-voice-btn-${key}" onclick="tc_toggleInlineVoice('${key}')"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
+        <button class="toolbar-btn" title="Poll" id="inline-poll-btn-${key}" onclick="tc_toggleInlinePoll('${key}')"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button>
         <input type="file" id="tc-fi-img-${key}" accept="image/*" multiple style="display:none" onchange="tcHandleImage(this,'${key}')">
         <input type="file" id="tc-fi-file-${key}" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.mp3,.wav,.aiff,.aif,.flac,.m4a,.ogg,.opus,.wma,.mid,.midi" style="display:none" onchange="tcHandleFile(this,'${key}')">
         <input type="file" id="tc-fi-vid-${key}" accept="video/*" style="display:none" onchange="tcHandleVideo(this,'${key}')">
@@ -535,28 +535,28 @@
         <span class="recording-dot"></span>
         <span>Recording…</span>
         <span id="inline-rec-time-${key}" style="margin-left:4px;opacity:.8">0:00</span>
-        <button class="recording-stop-btn" onclick="stopInlineVoice('${key}')">■ Stop</button>
+        <button class="recording-stop-btn" onclick="tc_stopInlineVoice('${key}')">■ Stop</button>
       </div>
       <div id="inline-cam-panel-${key}" style="display:none" class="video-rec-panel">
         <video id="inline-cam-preview-${key}" autoplay muted playsinline class="video-rec-preview"></video>
         <div class="video-rec-devices" id="inline-cam-devices-${key}">
-          <select id="inline-cam-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')"><option>Loading cameras…</option></select>
-          <select id="inline-mic-sel-${key}" class="video-rec-select" onchange="inlineSwitchCamDevice('${key}')"><option>Loading mics…</option></select>
+          <select id="inline-cam-sel-${key}" class="video-rec-select" onchange="tc_inlineSwitchCamDevice('${key}')"><option>Loading cameras…</option></select>
+          <select id="inline-mic-sel-${key}" class="video-rec-select" onchange="tc_inlineSwitchCamDevice('${key}')"><option>Loading mics…</option></select>
         </div>
         <div class="video-rec-actions" id="inline-cam-actions-${key}">
-          <button class="video-rec-start-btn" onclick="inlineStartCamRecording('${key}')">⏺ Start Recording</button>
-          <button class="video-rec-cancel-btn" onclick="inlineCancelCamPreview('${key}')">Cancel</button>
+          <button class="video-rec-start-btn" onclick="tc_inlineStartCamRecording('${key}')">⏺ Start Recording</button>
+          <button class="video-rec-cancel-btn" onclick="tc_inlineCancelCamPreview('${key}')">Cancel</button>
         </div>
         <div class="video-rec-recording-bar" id="inline-cam-recbar-${key}" style="display:none">
           <span class="recording-dot"></span>
           <span id="inline-cam-timer-${key}" style="font-size:.88rem;font-weight:600;color:var(--text);flex:1">0:00</span>
-          <button class="video-rec-stop-btn" onclick="inlineStopCamRecording('${key}')">■ Stop & Upload</button>
+          <button class="video-rec-stop-btn" onclick="tc_inlineStopCamRecording('${key}')">■ Stop & Upload</button>
         </div>
       </div>
       <div id="inline-vid-panel-${key}" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:4px">
         <div style="display:flex;gap:4px;margin-bottom:8px">
-          <button id="inline-vt-up-btn-${key}" style="${tabBase};${tabAct}" onclick="inlineSwitchVideoTab('upload','${key}')">Upload</button>
-          <button id="inline-vt-em-btn-${key}" style="${tabBase}" onclick="inlineSwitchVideoTab('embed','${key}')">Embed URL</button>
+          <button id="inline-vt-up-btn-${key}" style="${tabBase};${tabAct}" onclick="tc_inlineSwitchVideoTab('upload','${key}')">Upload</button>
+          <button id="inline-vt-em-btn-${key}" style="${tabBase}" onclick="tc_inlineSwitchVideoTab('embed','${key}')">Embed URL</button>
         </div>
         <div id="inline-vt-up-${key}">
           <div onclick="document.getElementById('tc-fi-vid-${key}').click()" style="border:2px dashed var(--border);border-radius:6px;padding:14px;text-align:center;cursor:pointer;font-size:.84rem;color:var(--text-muted)">
@@ -566,17 +566,17 @@
         </div>
         <div id="inline-vt-em-${key}" style="display:none">
           <input type="text" id="inline-vurl-${key}" placeholder="YouTube or Vimeo URL…" style="width:100%;box-sizing:border-box;background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:.88rem;font-family:inherit;margin-bottom:6px">
-          <button onclick="inlineAddVideoUrl('${key}')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:.84rem;font-weight:600;cursor:pointer;font-family:inherit">Add</button>
+          <button onclick="tc_inlineAddVideoUrl('${key}')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:.84rem;font-weight:600;cursor:pointer;font-family:inherit">Add</button>
         </div>
       </div>
       <div id="inline-poll-${key}" style="display:none" class="poll-builder">
         <div class="poll-builder-title">Poll</div>
         <input class="poll-question-input" id="inline-poll-q-${key}" placeholder="Ask a question…" />
         <div class="poll-options-list" id="inline-poll-opts-${key}">
-          <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
-          <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>
+          <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1" /><button class="poll-option-remove" onclick="tc_removeInlinePollOption(this)">×</button></div>
+          <div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2" /><button class="poll-option-remove" onclick="tc_removeInlinePollOption(this)">×</button></div>
         </div>
-        <button class="poll-add-option" onclick="addInlinePollOption('${key}')">+ Add option</button>
+        <button class="poll-add-option" onclick="tc_addInlinePollOption('${key}')">+ Add option</button>
       </div>
       <div class="media-preview-area" id="inline-media-preview-${key}"></div>`;
   }
@@ -1095,7 +1095,7 @@
       const ta=document.getElementById(`tc-cmt-input-${parentId}`);
       const content=ta?.value.trim()||"";
       const media=_inlineMedia[key]||[];
-      const poll=_inlinePollOpen[key]?_readInlinePoll(key):null;
+      const poll=_inlinePollOpen[key]?tc_readInlinePoll(key):null;
       if(!content&&!media.length&&!poll)return;
       const btn=document.getElementById(`send-btn-${key}`);
       if(btn&&btn.disabled)return; // already submitting — ignore repeat presses (prevents duplicate comments)
@@ -1160,7 +1160,7 @@
       if(btn&&btn.disabled)return; // already submitting — ignore repeat presses (prevents duplicate replies)
       const content=ta?.value.trim()||"";
       const media=_inlineMedia[commentId]||[];
-      const poll=_inlinePollOpen[commentId]?_readInlinePoll(commentId):null;
+      const poll=_inlinePollOpen[commentId]?tc_readInlinePoll(commentId):null;
       if(!content&&!media.length&&!poll)return;
       const replyToName =composerEl?.dataset.replyToName||null;
       const replyToEmail=composerEl?.dataset.replyToEmail||null;
@@ -1375,7 +1375,7 @@
     uploadMedia: async (key) => _uploadMedia(key),
 
     // Read poll data (for custom submit handlers)
-    readPoll: (key) => _readInlinePoll(key),
+    readPoll: (key) => tc_readInlinePoll(key),
 
     // Clear inline state (for custom submit handlers)
     clearState: (key) => _clearState(key),
@@ -1420,13 +1420,13 @@
     document.getElementById(`inline-vid-btn-${key}`)?.classList.remove("recording");
     document.getElementById(`inline-voice-btn-${key}`)?.classList.remove("recording");
     document.getElementById(`inline-camrec-btn-${key}`)?.classList.remove("recording");
-    if(_inlineCamPreviewKey===key)inlineCancelCamPreview(key);
+    if(_inlineCamPreviewKey===key)tc_inlineCancelCamPreview(key);
     const pq=document.getElementById(`inline-poll-q-${key}`);if(pq)pq.value="";
     const po=document.getElementById(`inline-poll-opts-${key}`);
-    if(po)po.innerHTML=`<div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1"/><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div><div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2"/><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button></div>`;
+    if(po)po.innerHTML=`<div class="poll-option-row"><input class="poll-option-input" placeholder="Option 1"/><button class="poll-option-remove" onclick="tc_removeInlinePollOption(this)">×</button></div><div class="poll-option-row"><input class="poll-option-input" placeholder="Option 2"/><button class="poll-option-remove" onclick="tc_removeInlinePollOption(this)">×</button></div>`;
   }
 
-  function _readInlinePoll(key) {
+  function tc_readInlinePoll(key) {
     const q=document.getElementById(`inline-poll-q-${key}`)?.value.trim();
     const opts=Array.from(document.querySelectorAll(`#inline-poll-opts-${key} .poll-option-input`)).map(i=>i.value.trim()).filter(Boolean);
     if(!q||opts.length<2)return null;
@@ -1528,7 +1528,7 @@
   };
   window.tcHandleVideo = function(input, key) {
     const file=input.files[0];input.value="";if(!file)return;
-    inlineToggleVideoPanel(key);
+    tc_inlineToggleVideoPanel(key);
     if(!_inlineMedia[key])_inlineMedia[key]=[];
     const idx=_inlineMedia[key].length;
     _inlineMedia[key].push({type:"mux",name:file.name,_uploading:true,_progress:"Uploading…"});
@@ -1540,13 +1540,13 @@
       _renderPreview(key);
     });
   };
-  window.removeInlineMedia = function(key, idx) {
+  window.tc_removeInlineMedia = function(key, idx) {
     if(_inlineMedia[key]){const m=_inlineMedia[key][idx];if(m?.type==="mux"&&m.assetId)_deleteMuxAsset(m.assetId);_inlineMedia[key].splice(idx,1);}
     _renderPreview(key);
   };
 
   // Video panel
-  window.inlineToggleVideoPanel = function(key) {
+  window.tc_inlineToggleVideoPanel = function(key) {
     const panel=document.getElementById(`inline-vid-panel-${key}`);
     const btn=document.getElementById(`inline-vid-btn-${key}`);
     if(!panel)return;
@@ -1554,9 +1554,9 @@
     if(open)_closeExcept(key,"video");
     panel.style.display=open?"":"none";
     btn?.classList.toggle("recording",open);
-    if(open)inlineSwitchVideoTab("upload",key);
+    if(open)tc_inlineSwitchVideoTab("upload",key);
   };
-  window.inlineSwitchVideoTab = function(tab, key) {
+  window.tc_inlineSwitchVideoTab = function(tab, key) {
     const up=document.getElementById(`inline-vt-up-${key}`),em=document.getElementById(`inline-vt-em-${key}`);
     const ubtn=document.getElementById(`inline-vt-up-btn-${key}`),ebtn=document.getElementById(`inline-vt-em-btn-${key}`);
     const act="background:rgba(0,0,0,.07);border-radius:4px;font-weight:600";
@@ -1565,7 +1565,7 @@
     if(ubtn)ubtn.style.cssText=ubtn.style.cssText.replace(/font-weight:\s*600/g,"")+(tab==="upload"?act:"");
     if(ebtn)ebtn.style.cssText=ebtn.style.cssText.replace(/font-weight:\s*600/g,"")+(tab==="embed"?act:"");
   };
-  window.inlineAddVideoUrl = function(key) {
+  window.tc_inlineAddVideoUrl = function(key) {
     const input=document.getElementById(`inline-vurl-${key}`);const val=input?.value.trim();if(!val)return;
     if(!_inlineMedia[key])_inlineMedia[key]=[];
     const ytId=_parseYouTubeId(val),viId=_parseVimeoId(val);
@@ -1573,11 +1573,11 @@
     else if(viId)  _inlineMedia[key].push({type:"vimeo",vimeoId:viId,url:val,name:"Vimeo video"});
     else           _inlineMedia[key].push({type:"video-url",url:val,name:"Video"});
     if(input)input.value="";
-    inlineToggleVideoPanel(key);_renderPreview(key);
+    tc_inlineToggleVideoPanel(key);_renderPreview(key);
   };
 
   // Voice recording
-  window.toggleInlineVoice = async function(key) {
+  window.tc_toggleInlineVoice = async function(key) {
     if(_inlineVoiceRec[key]){if(_inlineVoiceRec[key].state!=="inactive")_inlineVoiceRec[key].stop();return;}
     _closeExcept(key,"voice");
     try{
@@ -1600,16 +1600,16 @@
       _inlineRecTimer[key]=setInterval(()=>{const s=Math.round((Date.now()-_inlineRecStart[key])/1000);if(timeEl)timeEl.textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;},1000);
     }catch(e){alert("Microphone access denied: "+e.message);}
   };
-  window.stopInlineVoice = function(key) {
+  window.tc_stopInlineVoice = function(key) {
     if(_inlineVoiceRec[key]&&_inlineVoiceRec[key].state!=="inactive")_inlineVoiceRec[key].stop();
   };
 
   // Camera recording
-  window.inlineToggleCamRec = async function(key) {
-    if(_inlineCamPreviewKey===key){inlineCancelCamPreview(key);return;}
-    if(_inlineCamKey===key&&_inlineCamRec&&_inlineCamRec.state!=="inactive"){inlineStopCamRecording(key);return;}
+  window.tc_inlineToggleCamRec = async function(key) {
+    if(_inlineCamPreviewKey===key){tc_inlineCancelCamPreview(key);return;}
+    if(_inlineCamKey===key&&_inlineCamRec&&_inlineCamRec.state!=="inactive"){tc_inlineStopCamRecording(key);return;}
     if(_inlineCamRec&&_inlineCamRec.state!=="inactive"){alert("Stop the current recording first.");return;}
-    if(_inlineCamPreviewStream)inlineCancelCamPreview(_inlineCamPreviewKey);
+    if(_inlineCamPreviewStream)tc_inlineCancelCamPreview(_inlineCamPreviewKey);
     _closeExcept(key,"cam");
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:{aspectRatio:16/9}});
@@ -1624,13 +1624,13 @@
       if(ms)ms.innerHTML=mics.map(d=>`<option value="${d.deviceId}" ${d.label===aal?"selected":""}>${d.label||"Mic "+(mics.indexOf(d)+1)}</option>`).join("");
     }catch(e){alert("Could not access camera/mic: "+e.message);}
   };
-  window.inlineSwitchCamDevice = async function(key) {
+  window.tc_inlineSwitchCamDevice = async function(key) {
     if(!_inlineCamPreviewStream||_inlineCamPreviewKey!==key)return;
     const cs=document.getElementById(`inline-cam-sel-${key}`),ms=document.getElementById(`inline-mic-sel-${key}`);
     _inlineCamPreviewStream.getTracks().forEach(t=>t.stop());
     try{const stream=await navigator.mediaDevices.getUserMedia({video:cs?.value?{deviceId:{exact:cs.value}}:true,audio:ms?.value?{deviceId:{exact:ms.value}}:true});_inlineCamPreviewStream=stream;const preview=document.getElementById(`inline-cam-preview-${key}`);if(preview)preview.srcObject=stream;}catch(e){alert("Could not switch device: "+e.message);}
   };
-  window.inlineStartCamRecording = function(key) {
+  window.tc_inlineStartCamRecording = function(key) {
     if(!_inlineCamPreviewStream)return;
     const devs=document.getElementById(`inline-cam-devices-${key}`),actions=document.getElementById(`inline-cam-actions-${key}`),recBar=document.getElementById(`inline-cam-recbar-${key}`);
     if(devs)devs.style.display="none";if(actions)actions.style.display="none";if(recBar)recBar.style.display="";
@@ -1650,17 +1650,17 @@
     mr.start();_inlineRecStart[key]=Date.now();
     _inlineRecTimer[key]=setInterval(()=>{const s=Math.round((Date.now()-_inlineRecStart[key])/1000);const el=document.getElementById(`inline-cam-timer-${key}`);if(el)el.textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;},1000);
   };
-  window.inlineStopCamRecording = function(key) {
+  window.tc_inlineStopCamRecording = function(key) {
     if(_inlineCamRec&&_inlineCamKey===key&&_inlineCamRec.state!=="inactive")_inlineCamRec.stop();
   };
-  window.inlineCancelCamPreview = function(key) {
+  window.tc_inlineCancelCamPreview = function(key) {
     if(_inlineCamPreviewStream){_inlineCamPreviewStream.getTracks().forEach(t=>t.stop());_inlineCamPreviewStream=null;}_inlineCamPreviewKey=null;
     const preview=document.getElementById(`inline-cam-preview-${key}`),panel=document.getElementById(`inline-cam-panel-${key}`),btn=document.getElementById(`inline-camrec-btn-${key}`);
     if(preview)preview.srcObject=null;if(panel)panel.style.display="none";if(btn)btn.classList.remove("recording");
   };
 
   // Poll
-  window.toggleInlinePoll = function(key) {
+  window.tc_toggleInlinePoll = function(key) {
     const panel=document.getElementById(`inline-poll-${key}`);if(!panel)return;
     const open=panel.style.display==="none";
     if(open)_closeExcept(key,"poll");
@@ -1668,14 +1668,14 @@
     document.getElementById(`inline-poll-btn-${key}`)?.classList.toggle("recording",open);
     if(open)document.getElementById(`inline-poll-q-${key}`)?.focus();
   };
-  window.addInlinePollOption = function(key) {
+  window.tc_addInlinePollOption = function(key) {
     const list=document.getElementById(`inline-poll-opts-${key}`);if(!list)return;
     const count=list.querySelectorAll(".poll-option-input").length+1;
     const row=document.createElement("div");row.className="poll-option-row";
-    row.innerHTML=`<input class="poll-option-input" placeholder="Option ${count}"/><button class="poll-option-remove" onclick="removeInlinePollOption(this)">×</button>`;
+    row.innerHTML=`<input class="poll-option-input" placeholder="Option ${count}"/><button class="poll-option-remove" onclick="tc_removeInlinePollOption(this)">×</button>`;
     list.appendChild(row);
   };
-  window.removeInlinePollOption = function(btn) {
+  window.tc_removeInlinePollOption = function(btn) {
     const list=btn.closest(".poll-options-list");if(!list)return;
     if(list.querySelectorAll(".poll-option-row").length<=2)return;
     btn.closest(".poll-option-row").remove();
@@ -1702,15 +1702,15 @@
 
   // ── Backward-compat aliases (for existing pages like focus.html) ─────────────
   // These mirror the old function names so existing onclick handlers keep working.
-  window._inlineToolbarHtml = _toolbarHtml;
-  window._uploadInlineMedia = _uploadMedia;
-  window._clearInlineState  = _clearState;
-  window._readInlinePoll    = _readInlinePoll;
-  // Old image modal names still work (focus.html uses _commImgModalOpen etc.)
-  window._commImgModalOpen  = window._tcImgOpen;
-  window._commImgModalClose = window._tcImgClose;
-  window._commImgModalNav   = window._tcImgNav;
-  window._commImgGroupStore = _imgGroupStore;
+  window.tc_inlineToolbarHtml = _toolbarHtml;
+  window.tc_uploadInlineMedia = _uploadMedia;
+  window.tc_clearInlineState  = _clearState;
+  window.tc_readInlinePoll    = tc_readInlinePoll;
+  // Old image modal names still work (focus.html uses tc_commImgModalOpen etc.)
+  window.tc_commImgModalOpen  = window._tcImgOpen;
+  window.tc_commImgModalClose = window._tcImgClose;
+  window.tc_commImgModalNav   = window._tcImgNav;
+  window.tc_commImgGroupStore = _imgGroupStore;
   // Media renderer — used by content-feed.html to render post-card media
   window._tcRenderMedia = _renderCommentMedia;
 
