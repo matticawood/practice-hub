@@ -961,11 +961,28 @@
     .hist-month-hdr {
       display: flex; align-items: baseline; justify-content: space-between;
       gap: 10px; padding: 8px 2px 7px; margin-top: 10px;
-      position: sticky; top: 0; z-index: 6; background: var(--bg);
+      /* THE OFFSET IS MEASURED, NOT GUESSED. It used to be a hard-coded 54px
+         for "the sticky subnav", so any difference between that number and the
+         bar's real height showed as a gap between the two while scrolling.
+         _histStickyTop() sets --hist-sticky-top from the bar itself, on render
+         and on resize, and the 0 here is the desktop case where nothing above
+         it is sticky. */
+      position: sticky; top: var(--hist-sticky-top, 0px); z-index: 6;
+      /* AND THE BACKDROP COMES FROM WHAT IS BEHIND IT. A sticky header needs to
+         hide the rows passing under it, but this page's ground is not one flat
+         colour - it is a near-black with a gradient over it - so painting a
+         flat var(--bg) drew a visible black rectangle that moved down the page
+         as you scrolled. Tinting and blurring what is actually behind reads
+         correctly over either. */
+      background: color-mix(in srgb, var(--bg) 72%, transparent);
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    }
+    /* Where color-mix is not available, fall back to the old flat fill rather
+       than to no fill at all, which would let rows scroll through the text. */
+    @supports not (background: color-mix(in srgb, red 50%, transparent)) {
+      .hist-month-hdr { background: var(--bg); }
     }
     .hist-month-hdr:first-child { margin-top: 0; }
-    /* Mobile has a sticky subnav (54px) at the top — sit the month header below it */
-    @media (max-width: 768px) { .hist-month-hdr { top: 54px; } }
     .hist-month-name { font-size: .9rem; font-weight: 800; color: var(--text-main); letter-spacing: .01em; }
     body.hub-mode .hist-month-name { color: #1a1410; }
     .hist-month-total { font-size: .68rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
@@ -32571,6 +32588,30 @@ const _histDayId = (dk) => String(dk).replace(/[^0-9]/g, "");
 /* Opening a day keeps it open while you are on the page. It is not remembered
    across visits: the default - newest open, the rest closed - is the useful
    state to come back to, and a remembered scatter of half-open days is not. */
+/* How far down the month header has to stick so it meets the bar above it
+   rather than floating below it. Reads whatever is actually sticky at the top
+   of this page - the Progress sub-tabs, and the shared header above them on the
+   layouts that pin it - instead of assuming a number. Nothing sticky above
+   means 0, which is the desktop case. */
+function _histStickyTop() {
+  try {
+    const list = document.getElementById('sessions-list');
+    if (!list) return;
+    let bottom = 0;
+    ['#progress-tabs', '.sh-header', '#sh-header', 'header.sh-top'].forEach(sel => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'sticky' && cs.position !== 'fixed') return;
+      if (cs.display === 'none') return;
+      bottom = Math.max(bottom, Math.round(el.getBoundingClientRect().bottom));
+    });
+    list.style.setProperty('--hist-sticky-top', Math.max(0, bottom) + 'px');
+  } catch (e) {}
+}
+window._histStickyTop = _histStickyTop;
+window.addEventListener('resize', function () { _histStickyTop(); }, { passive: true });
+
 window._histToggleDay = function (dk) {
   const body = document.getElementById("hist-day-" + _histDayId(dk));
   const hdr  = document.querySelector(`.hist-day-hdr[data-day="${dk}"]`);
@@ -32878,6 +32919,9 @@ function renderSessions(resetPage) {
   try { _histRenderRail(filtered); } catch (e) {}
   list.innerHTML = html +
     (hasMore ? `<button class="see-more-btn" onclick="loadMoreSessions()">Show 10 more days <span style="opacity:.6">(${_daysLeft} remaining)</span></button>` : "");
+  /* The month headers stick against the bar above them, and that bar's height
+     is only knowable once this list exists on the page. */
+  try { _histStickyTop(); } catch (e) {}
 }
 
 /* ── WHAT IS IN VIEW, BESIDE WHAT IS IN VIEW ──────────────────────────────
