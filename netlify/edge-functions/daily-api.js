@@ -112,13 +112,19 @@ export default async (request) => {
   }
 
   // ── Helper: is admin? ──────────────────────────────────────────────────────
+  // Admin = the site owner, and only the owner. This previously queried
+  // allowed_emails for the caller's own email — but allowed_emails IS the
+  // membership list, so every member matched and isAdmin() returned true for
+  // everyone. The effect: get-room-token set isOwner = admin = true for any
+  // member, minting an is_owner:true Daily token AND skipping the canSend:[]
+  // view-only lock (isOwner ? undefined : {canSend:[]}). So any member who
+  // clicked "Join for real-time" got full camera/mic/screen broadcast rights on
+  // the live stream — which is how an uninvited member appeared on screen in the
+  // 2026-09-14 clinic. Owner identity matches the client (events.html OWNER_EMAIL)
+  // and every other Netlify function in this repo.
+  const OWNER_EMAIL = "matthew@matthewcawood.com";
   async function isAdmin() {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/allowed_emails?email=eq.${encodeURIComponent(userEmail)}&select=email`,
-      { headers: { "Authorization": `Bearer ${token}`, "apikey": SUPABASE_ANON } }
-    );
-    const rows = await res.json();
-    return Array.isArray(rows) && rows.length > 0;
+    return userEmail === OWNER_EMAIL;
   }
 
   // ── Action: search-members ────────────────────────────────────────────────
