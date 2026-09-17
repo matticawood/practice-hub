@@ -1,5 +1,5 @@
 // The Practice Room — Service Worker
-const CACHE = 'practice-room-v80';
+const CACHE = 'practice-room-v81';
 const PRECACHE = [
   '/',
   '/practice-log.html',
@@ -76,7 +76,7 @@ self.addEventListener('fetch', event => {
   // "I shipped the fix but the button does nothing" bug). They revalidate
   // cheaply via ETag, so always go to network and only fall back to cache when
   // genuinely offline.
-  const NETWORK_FIRST = ['/shared-header.js', '/live-session.js', '/shared-comments.js', '/data.js', '/email-templates.mjs', '/lessons-render.js', '/shared-achievements.js', '/book-render.js', '/shared-member-modal.js', '/shared-streak.js', '/shared-practice-autolog.js'];
+  const NETWORK_FIRST = ['/shared-header.js', '/live-session.js', '/shared-comments.js', '/data.js', '/email-templates.mjs', '/lessons-render.js', '/shared-achievements.js', '/book-render.js', '/shared-member-modal.js', '/shared-streak.js', '/shared-practice-autolog.js', '/course-catalogue.js', '/roadmap-levels.js'];
   if (NETWORK_FIRST.includes(url.pathname)) {
     event.respondWith(
       fetch(event.request).then(response => {

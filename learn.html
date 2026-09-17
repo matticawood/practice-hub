@@ -97,7 +97,11 @@
        through the page padding and up under the chrome. */
     margin:-22px calc(var(--gut) * -1) 18px;
     /* Height lives in a variable so the video can do its own cover maths. */
-    --bbh:clamp(22rem, 30vw, 30rem); border-radius:0; height:var(--bbh);
+    /* Floor raised from 22rem to 26rem: in the tablet band (roughly 700-1170px)
+       30vw sits below the floor, so the hero was stuck at its shortest while the
+       title still wrapped to two lines and clipped at the top. 26rem matches the
+       phone height below and gives a two-line title room. */
+    --bbh:clamp(26rem, 30vw, 30rem); border-radius:0; height:var(--bbh);
     /* So the settle into 16:9 when playback starts is a move, not a jump. */
     transition:height .55s cubic-bezier(.4,0,.2,1);
     text-decoration:none; color:#fff; background:#17171c;
@@ -801,20 +805,22 @@ const MARK = {
 const CMETA = [
   { key: "first-steps", label: "The Absolute Beginner Course", blurb: "Never played before? Start here and play your first pieces.", color: "#8b5cf6", audience: "Absolute beginners",
     icon: SVGI('<path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"/>') },
+  { key: "theory", label: "Music Theory", blurb: "How music works, from note names to harmony.", color: "#10b981", audience: "Absolute beginner to intermediate",
+    icon: SVGI('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>') },
   { key: "learn-your-first-piece", label: "Learn Your First Piece", blurb: "Ready for a real piece? Learn your first one, bar by bar.", color: "#2563eb", audience: "Beginners",
     format: "video", thumbId: "Uav7E8LAdqGDVIgS00iOsm91FYJ9vb4pNawk6KMwfchc", thumbTime: 21,
     icon: SVGI('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>') },
-  { key: "theory", label: "Music Theory", blurb: "How music works, from note names to harmony.", color: "#10b981", audience: "Absolute beginner to intermediate",
-    icon: SVGI('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>') },
   { key: "ear", label: "Ear Training", blurb: "Train your ear to recognise notes, intervals and chords.", color: "#ec4899", audience: "All levels",
     icon: SVGI('<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>') },
   { key: "improv", label: "Improvisation", blurb: "Start making up your own music at the keyboard.", color: "#f97316", audience: "Beginner and up",
     icon: SVGI('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>') },
   // Announced before they exist, so the course list never reads as a finished set.
   // `soon` is the line shown where the lesson count and CTA normally sit.
-  { key: "upper-intermediate-walkthrough", label: "Upper Intermediate Walkthrough", soon: "Coming in September",
+  { key: "upper-intermediate-walkthrough", label: "Upper Intermediate Walkthrough",
     blurb: "A full upper intermediate piece, bar by bar, including how to make decisions and learn effectively.",
     color: "#14b8a6", audience: "Upper intermediate",
+    format: "video", thumbId: "jM1dU54Lz00le01d61w9cD72wjBK2QjY2n9JQzrvzvshw", thumbTime: 2,
+    featuredUntil: "2026-10-17",
     icon: SVGI('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>') },
   { key: "sight-reading-beginners", label: "Sight Reading for Beginners", soon: "Coming in September",
     blurb: "Play music you have never seen before, with the exact formula for improvement.",
@@ -864,9 +870,16 @@ async function load() {
      queueing behind them. Left where it was, it did not even begin until
      2,462ms, which put the reveal at 5.6s; the reveal waits for it. */
   PICKS_READY = loadPicks();
+  /* Owner-only preview (?preview=1): include DRAFT lessons so an unpublished
+     course shows in the Library, its card and its launch-feature hero slide,
+     exactly as members will see it once published. Mirrors courses.html. */
+  const _lnOwner = (myEmail || "").toLowerCase() === OWNER_EMAIL.toLowerCase();
+  const _lnPreview = _lnOwner && new URLSearchParams(location.search).get("preview") === "1";
+  let _lessonsQ = db.from("lessons").select("id,course,title,level,est_minutes,status");
+  if (!_lnPreview) _lessonsQ = _lessonsQ.eq("status", "published");
   const [cs, ls, prog, sheets, read, evs, feed, mmt, ups, polls, sheetWords, vocab, tags, cmeta, mine] = await Promise.all([
     db.from("courses").select("key,title,status,sort").order("sort"),
-    db.from("lessons").select("id,course,title,level,est_minutes,status").eq("status","published"),
+    _lessonsQ,
     db.from("lesson_progress").select("lesson_id,completed").eq("email", myEmail),
     db.from("theory_sheets").select("id,title,slug,category,created_at").order("created_at",{ascending:false}),
     db.from("reading_list").select("sheet_id,status").eq("email", myEmail),
@@ -894,10 +907,20 @@ async function load() {
     return Object.assign({}, META[c.key], { n:mine.length, done:d,
       pct: mine.length ? Math.round(d / mine.length * 100) : 0 });
   }).filter(c => c.n > 0);
+  /* Order by the catalogue (CMETA) sequence, not the courses-table sort, so the
+     Library lists courses in the same learner-progression order as the Courses
+     page. Soon placeholders are pushed after, keeping them at the end. */
+  const _catIdx = CMETA.map(c => c.key);
+  COURSES.sort((a, b) => _catIdx.indexOf(a.key) - _catIdx.indexOf(b.key));
+  /* The Upper Intermediate Walkthrough shows as "coming soon" until it has
+     published lessons; once it does (or in owner preview, which loads drafts) it
+     is already in COURSES above as a real card, so the placeholder is skipped
+     and there is no duplicate. Self-coordinating: no manual removal at publish. */
+  if (!COURSES.some(c => c.key === "upper-intermediate-walkthrough"))
+    COURSES.push({ key:null, label:"Upper Intermediate Walkthrough", audience:"Upper intermediate", color:"#14b8a6",
+      soon:"Coming soon", icon:SVGI('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>'),
+      blurb:"A full upper intermediate piece, bar by bar, including how to make decisions and learn effectively." });
   COURSES.push(
-    { key:null, label:"Upper Intermediate Walkthrough", audience:"Upper intermediate", color:"#14b8a6",
-      soon:"Coming in September", icon:SVGI('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>'),
-      blurb:"A full upper intermediate piece, bar by bar, including how to make decisions and learn effectively." },
     { key:null, label:"Sight Reading for Beginners", audience:"Beginners", color:"#0ea5e9",
       soon:"Coming in September", icon:SVGI('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>'),
       blurb:"Play music you have never seen before, with the exact formula for improvement." });
@@ -1780,6 +1803,19 @@ function render() {
      that type where it does not, so the carousel is the same shape for a member
      it knows nothing about as for one it knows well. */
   const slides = [];
+  /* 0. A launch-featured course leads the whole hero (before the clinic) as an
+     EXTRA slide, until its featuredUntil date. It does not replace anything.
+     Skipped if the member is already part way through it (their Continue slide
+     in 2 covers it). Generic: set featuredUntil on any course to reuse this. */
+  const _lnFeat = COURSES.find(c => c.key && c.n > 0 && c.featuredUntil && new Date(c.featuredUntil) > new Date());
+  const _lnFeatCarry = _lnFeat && carry && carry.href === "/courses.html?course=" + _lnFeat.key;
+  if (_lnFeat && !_lnFeatCarry) slides.push({ kick:"New Course", title:_lnFeat.label, when:(_lnFeat.n || 0) + " lessons",
+    blurb:_lnFeat.blurb || "Start at the beginning and work through it.",
+    href:"/courses.html?course=" + _lnFeat.key, go:"Start",
+    img: _lnFeat.thumbId ? "https://image.mux.com/" + _lnFeat.thumbId
+        + "/thumbnail.webp?width=1600&height=900&fit_mode=smartcrop&time=" + (_lnFeat.thumbTime || 0) : "",
+    mux: _lnFeat.thumbId || null,
+    plate: _lnFeat.thumbId ? null : { colour:_lnFeat.color, icon:_lnFeat.icon } });
   const used = new Set();
   const pickOf = t => PICKS.find(p => p.type === t && !used.has(p.href) && (p.img || heroPlate(p)));
   const newestOf = t => everyone.filter(i => i.type === t && !used.has(i.href) && (i.img || heroPlate(i)))
@@ -1798,7 +1834,8 @@ function render() {
     when:lastClinic.meta, blurb:"An hour working through one topic, with the questions answered.",
     href:lastClinic.href, ...mediaOf(lastClinic), go:"Watch now" });
 
-  // 2. the course
+  // 2. the course slot: continue where you left off, or start one. (The launch-
+  //    featured course, if any, already led the hero as slide 0 above.)
   if (carry) slides.push({ kick:"Pick up where you left off", title:carry.t, when:carry.m,
     blurb:"You are part way through this one.", href:carry.href, go:"Continue",
     img: carry.mux ? "https://image.mux.com/" + carry.mux
@@ -1809,8 +1846,9 @@ function render() {
     plate: carry.mux ? null : { colour:carry.colour, icon:carry.icon } });
   else {
     /* Nothing started yet, so the course slot offers one rather than going
-       missing: this is the answer to "where do I begin". */
-    const c0 = COURSES.find(c => c.key);
+       missing: this is the answer to "where do I begin". Not the featured
+       course, which already has its own slide above. */
+    const c0 = COURSES.find(c => c.key && (!_lnFeat || c.key !== _lnFeat.key));
     if (c0) slides.push({ kick:"Start a course", title:c0.label, when:(c0.n || 0) + " lessons",
       blurb:c0.blurb || "Start at the beginning and work through it.",
       href:"/courses.html?course=" + c0.key, go:"Start",
@@ -1981,10 +2019,12 @@ function render() {
     }
     /* Courses are members-only in their entirety, so the row is the same in
        both views and holds the place it holds on the full page. */
+    /* rail:true so courses are always the horizontal scrolling rail, never the
+       wrapping grid the row() helper falls back to at four items or fewer. */
     html += row(onlyEx ? "Courses" : "Paths",
                 onlyEx ? COURSES.filter(c => c.key).reduce((a, c) => a + (c.n || 0), 0)
                          + " lessons across " + COURSES.filter(c => c.key).length + " courses"
-                       : "courses", COURSES, { course:true });
+                       : "courses", COURSES, { course:true, rail:true });
     const allClinics = flat.filter(i => i.type === "clinic").sort(byDate);
     html += row("Clinic replays", (counts.clinic || 0) + " sessions", allClinics.slice(0, 12),
       { seeAll:"clinic", all:allClinics });

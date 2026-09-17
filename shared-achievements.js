@@ -623,6 +623,8 @@ const ACHIEVEMENTS = [
   { id:"course_absbeg_complete", cat:"courses", icon:"🎓", name:"Absolute Beginner: Completed", desc:"Complete every lesson in The Absolute Beginner Course", check:(s,x)=>(x.absBegTotal||0)>0 && (x.absBegDone||0)>=(x.absBegTotal||0),  prog:(s,x)=>[x.absBegDone||0, x.absBegTotal||28] },
   { id:"course_firstpiece_start",    cat:"courses", icon:"🎹", name:"First Piece: Started",   desc:"Begin Learn Your First Piece",                    check:(s,x)=>(x.firstPieceDone||0)>=1,  prog:(s,x)=>[Math.min(x.firstPieceDone||0,1),1] },
   { id:"course_firstpiece_complete", cat:"courses", icon:"🎵", name:"First Piece: Learned",    desc:"Learn your first full piece with Learn Your First Piece", check:(s,x)=>(x.firstPieceTotal||0)>0 && (x.firstPieceDone||0)>=(x.firstPieceTotal||0),  prog:(s,x)=>[x.firstPieceDone||0, x.firstPieceTotal||19] },
+  { id:"course_upperint_start",    cat:"courses", icon:"🎼", name:"Upper Intermediate: Started",  desc:"Begin the Upper Intermediate Walkthrough",                    check:(s,x)=>(x.upperIntDone||0)>=1,  prog:(s,x)=>[Math.min(x.upperIntDone||0,1),1] },
+  { id:"course_upperint_complete", cat:"courses", icon:"🏆", name:"Upper Intermediate: Learned",  desc:"Learn a full upper intermediate piece with the Upper Intermediate Walkthrough", check:(s,x)=>(x.upperIntTotal||0)>0 && (x.upperIntDone||0)>=(x.upperIntTotal||0),  prog:(s,x)=>[x.upperIntDone||0, x.upperIntTotal||16] },
   { id:"course_theory_level1", cat:"courses", icon:"🎓", name:"Theory: Level 1",  desc:"Complete every lesson in Music Theory Level 1",  check:(s,x)=>(x.theoryL1Total||0)>0 && (x.theoryL1Done||0)>=(x.theoryL1Total||0),  prog:(s,x)=>[x.theoryL1Done||0, x.theoryL1Total||13] },
   // Level 2 is being drip-released. Guard against early-firing: only earn once the FULL
   // planned level (theoryL2Planned) is published AND all of it is done. Until then
@@ -980,7 +982,12 @@ async function loadAchievementExtras() {
     const fpids = (fp || []).map(r => r.id);
     _achExtras.firstPieceTotal = fpids.length;
     _achExtras.firstPieceDone  = fpids.filter(id => doneIds.has(id)).length;
-  } catch(e) { _achExtras.lessonsCompleted = 0; _achExtras.theoryL1Total = 0; _achExtras.theoryL1Done = 0; _achExtras.theoryL2Total = 0; _achExtras.theoryL2Done = 0; _achExtras.theoryL2Planned = 12; _achExtras.absBegTotal = 0; _achExtras.absBegDone = 0; _achExtras.firstPieceTotal = 0; _achExtras.firstPieceDone = 0; }
+    // Upper Intermediate Walkthrough (video course): started = 1+ lesson done, learned = all lessons done.
+    const { data: ui } = await db.from("lessons").select("id").eq("course", "upper-intermediate-walkthrough").eq("status", "published");
+    const uiids = (ui || []).map(r => r.id);
+    _achExtras.upperIntTotal = uiids.length;
+    _achExtras.upperIntDone  = uiids.filter(id => doneIds.has(id)).length;
+  } catch(e) { _achExtras.lessonsCompleted = 0; _achExtras.theoryL1Total = 0; _achExtras.theoryL1Done = 0; _achExtras.theoryL2Total = 0; _achExtras.theoryL2Done = 0; _achExtras.theoryL2Planned = 12; _achExtras.absBegTotal = 0; _achExtras.absBegDone = 0; _achExtras.firstPieceTotal = 0; _achExtras.firstPieceDone = 0; _achExtras.upperIntTotal = 0; _achExtras.upperIntDone = 0; }
 }
 
 function computeAchievements(sessions, dbEarned = new Set()) {

@@ -192,6 +192,7 @@
     ],
     [ // 5 Confident
       { icon: "piece",  group: "piece",  label: "Learn 6 Upper Intermediate pieces", type: "piece", tier: 3, count: 6 },
+      { icon: "piece",  group: "uiwcourse", label: "Learn an upper intermediate piece with the Upper Intermediate Walkthrough course", type: "course", course: "upper-intermediate-walkthrough", mode: "complete" },
       { icon: "scales", group: "scales", label: "All major scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-scales", all: true },
       { icon: "scales", group: "minors", label: "All minor scales, in every key, in sixteenth notes at 88 bpm, relaxed and musical", type: "self", key: "s5-minors", all: true },
       { icon: "scales", group: "arps",    label: "All major arpeggios, in every key", type: "self", key: "s5-arps", all: true },

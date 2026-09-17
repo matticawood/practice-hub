@@ -602,6 +602,7 @@ const COURSES = (window.PR_COURSES || []).map(c => ({ ...c, icon: SVG(c.icon) })
 // Course-level sheet music, shown as a download on EVERY lesson of the course.
 const SHEET_MUSIC = {
   "learn-your-first-piece": { url: "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/sheet-music/learn-your-first-piece/minuet-in-g-petzold.pdf", label: "Minuet in G sheet music (PDF)" },
+  "upper-intermediate-walkthrough": { url: "https://gyskfutmncprqxazgatv.supabase.co/storage/v1/object/public/sheet-music/upper-intermediate-walkthrough/reverie-debussy.pdf", label: "Rêverie sheet music (PDF)" },
 };
 const COURSE = Object.fromEntries(COURSES.map(c => [c.key, c]));
 // How many levels each course will eventually have, so we can show the
@@ -999,10 +1000,19 @@ function renderOverview(push) {
   LESSONS.forEach(l => { const p = prog[l.course] || (prog[l.course] = { total: 0, done: 0 });
     p.total++; if (PROGRESS[l.id] && PROGRESS[l.id].completed) p.done++; });
   const heroLive = COURSES.filter(c => !c.soon && prog[c.key]);
-  const heroPick = [
-    ...heroLive.filter(c => prog[c.key].done > 0).sort((a, b) => prog[b.key].done - prog[a.key].done),
-    ...heroLive.filter(c => !prog[c.key].done),
+  const _featured = c => c.featuredUntil && new Date(c.featuredUntil) > new Date();
+  const _feat = heroLive.find(_featured);
+  // The normal two picks, with the featured course held out so it is not shown
+  // twice.
+  const _rest = [
+    ...heroLive.filter(c => (!_feat || c.key !== _feat.key) && prog[c.key].done > 0).sort((a, b) => prog[b.key].done - prog[a.key].done),
+    ...heroLive.filter(c => (!_feat || c.key !== _feat.key) && !prog[c.key].done),
   ].slice(0, 2);
+  // A course inside its launch-feature window is added as an EXTRA slide in
+  // front of the normal picks, not in place of one. After the date it drops out
+  // and the hero returns to the normal two. Generic: set featuredUntil on any
+  // course to reuse this.
+  let heroPick = _feat ? [_feat, ..._rest] : _rest;
   const heroSoon = COURSES.find(c => c.soon);
   if (heroSoon) heroPick.push(heroSoon);
 
@@ -1033,6 +1043,8 @@ function renderOverview(push) {
       meta = `${prog[c.key].total} lessons${c.audience ? " &middot; " + escHtml(c.audience) : ""}`;
       acts = `<div class="cv-acts"><button class="cv-btn cv-btn-p" data-open="${c.key}">Start the course</button></div>`;
     }
+    // A launch-featured course is badged "New Course" in the pill.
+    if (!c.soon && _featured(c)) kick = "New Course";
     return `<div class="cv-slide${i ? "" : " on"}" style="--pc:${c.color}">${bd}<div class="cv-scrim"></div>
       <div class="cv-in"><span class="cv-kick">${kick}</span>
         <div class="cv-title">${title}</div><div class="cv-meta">${meta}</div>${extra}${acts}</div></div>`;
@@ -1231,7 +1243,7 @@ async function openLesson(id, courseKey, push) {
         const r = await window.PracticeAutolog.logAppActivity(db, {
           email: myEmail, source: "app-lesson", originRef: "lesson:" + id,
           // Learning a piece counts as repertoire; theory/ear courses count as musicianship.
-          minutes: lesson.est_minutes, itemType: lesson.course === "learn-your-first-piece" ? "piece" : "theory",
+          minutes: lesson.est_minutes, itemType: (lesson.course === "learn-your-first-piece" || lesson.course === "upper-intermediate-walkthrough") ? "piece" : "theory",
           items: lesson.course === "first-steps" ? _fsSplit(lesson.est_minutes) : null,
           label: lesson.title, notes: "Course lesson: " + lesson.title,
         });
