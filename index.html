@@ -637,7 +637,7 @@ function show(id, d="block") { document.getElementById(id).style.display = d; }
 
 // ── Login ─────────────────────────────────────────────────────
 const REVIEWER_EMAIL = "reviewer@matthewcawood.com";
-const REVIEWER_PASS = "ReviewPass2026!";
+// REVIEWER_PASS removed: the reviewer password lives in the server's environment
 let reviewerMode = false;
 let pendingLoginEmail = null;
 
@@ -752,18 +752,29 @@ async function attemptVerifyCode() {
   document.getElementById("login-otp-error").style.display = "none";
   const btn = document.getElementById("login-verify-btn");
 
-  // Reviewer bypass — verify hardcoded password
+  /* Reviewer sign-in. The password is checked on the server now: it used to be
+     a constant in this file, which every visitor downloads, so anyone who
+     viewed source could sign in as a member. Nothing changes for the reviewer,
+     who types the same password into the same box. */
   if (reviewerMode) {
     const pwd = document.getElementById("login-otp").value;
     btn.textContent = "Verifying…"; btn.disabled = true;
-    if (pwd !== REVIEWER_PASS) {
-      btn.textContent = "Verify & enter"; btn.disabled = false;
-      showOtpError("Invalid password.");
-      return;
-    }
     try {
-      const { error } = await db.auth.signInWithPassword({ email: REVIEWER_EMAIL, password: REVIEWER_PASS });
+      const res = await fetch("/.netlify/functions/reviewer-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwd })
+      });
+      const out = await res.json().catch(() => ({}));
       btn.textContent = "Verify & enter"; btn.disabled = false;
+      if (!res.ok || !out.access_token) {
+        showOtpError(res.status === 401 ? "Invalid password." : "Reviewer login failed.");
+        return;
+      }
+      const { error } = await db.auth.setSession({
+        access_token:  out.access_token,
+        refresh_token: out.refresh_token
+      });
       if (error) { showOtpError("Reviewer login failed: " + error.message); return; }
       setSession(REVIEWER_EMAIL);
       bootApp();

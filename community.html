@@ -3384,6 +3384,26 @@ function _postAuthorRowHTML(p, pt, timeAgo, extraHtml) {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let myEmail     = null;
+/* Reactions and likes used to carry the reactor's EMAIL, which is how a member
+   could read everyone's address off the feed. They carry an opaque member_key
+   now, and names, avatars and the initials colour come from member_directory().
+   Both are fetched once per page. */
+let myMemberKey = null;
+let _commDirPromise = null;
+function commMemberDirectory() {
+  if (!_commDirPromise) {
+    _commDirPromise = db.rpc("member_directory").then(r => {
+      const m = {};
+      (r && r.data || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, hue: x.hue }; });
+      return m;
+    }, () => ({}));
+  }
+  return _commDirPromise;
+}
+function commHueColour(hue) {
+  const h = (hue == null) ? 0 : hue;
+  return { bg: `hsl(${h},55%,72%)`, fg: `hsl(${h},45%,22%)` };
+}
 let myName      = null;
 let myAvatarUrl = null;
 let isAdmin = false;
@@ -3460,6 +3480,11 @@ let _feedItems = []; // all feed rows for detail view lookup
   if (!session) { window.location.href = "/practice-log.html"; return; }
 
   myEmail = session.user.email;
+  // my own key, for spotting my own reactions without comparing addresses
+  try {
+    const _pr = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr.data && _pr.data[0] && _pr.data[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
   const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName  = ae?.name || myEmail.split("@")[0];
   isAdmin = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
@@ -6681,11 +6706,11 @@ async function _hydratePosts(rows) {
   const ids = (rows || []).map(p => p.id);
   const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }, { data: postReactions }] = ids.length
     ? await Promise.all([
-        _inChunks(ids, c => db.from("community_post_likes").select("post_id,email").in("post_id", c)),
+        _inChunks(ids, c => db.from("community_post_likes").select("post_id,member_key").in("post_id", c)),
         _inChunks(ids, c => db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", c)),
         _inChunks(ids, c => db.from("community_post_comments").select("post_id").in("post_id", c)),
         _inChunks(ids, c => db.from("community_post_polls").select("post_id,question,id").in("post_id", c)),
-        _inChunks(ids, c => db.from("activity_reactions").select("item_id,email,emoji").eq("event_type","post").in("item_id", c))
+        _inChunks(ids, c => db.from("activity_reactions").select("item_id,member_key,emoji").eq("event_type","post").in("item_id", c))
       ])
     : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
@@ -6695,7 +6720,7 @@ async function _hydratePosts(rows) {
     if (!_postRxMap[rx.item_id]) _postRxMap[rx.item_id] = {};
     if (!_postRxMap[rx.item_id][rx.emoji]) _postRxMap[rx.item_id][rx.emoji] = { count: 0, mine: false };
     _postRxMap[rx.item_id][rx.emoji].count++;
-    if (rx.email === myEmail) _postRxMap[rx.item_id][rx.emoji].mine = true;
+    if (myMemberKey && rx.member_key === myMemberKey) _postRxMap[rx.item_id][rx.emoji].mine = true;
   });
 
   const likeCountMap    = {};
@@ -6750,22 +6775,34 @@ async function _hydratePosts(rows) {
     if (r.avatar_url) avatarUrlMap[r.email] = r.avatar_url;
     if (r.badge)      badgeMap[r.email]     = r.badge;
     if (r.name)       nameFromDbMap[r.email] = r.name;
-    _commLikerAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] };
+    if (r.member_key) _commLikerAvatarMap[r.member_key] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0], hue: null };
   });
 
   // Build _commRxLikersMap: emoji reactions (activity_reactions) + heart likes (community_post_likes)
 
   (postReactions || []).forEach(rx => {
     if (!_commRxLikersMap[rx.item_id]) _commRxLikersMap[rx.item_id] = [];
-    if (!_commRxLikersMap[rx.item_id].find(x => x.email === rx.email))
-      _commRxLikersMap[rx.item_id].push({ email: rx.email, emoji: rx.emoji || "❤️" });
+    if (!_commRxLikersMap[rx.item_id].find(x => x.key === rx.member_key))
+      _commRxLikersMap[rx.item_id].push({ key: rx.member_key, emoji: rx.emoji || "❤️" });
   });
   // Merge community_post_likes (used for imported Circle data and simple heart likes)
   (allLikes || []).forEach(l => {
     if (!_commRxLikersMap[l.post_id]) _commRxLikersMap[l.post_id] = [];
-    if (!_commRxLikersMap[l.post_id].find(x => x.email === l.email))
-      _commRxLikersMap[l.post_id].push({ email: l.email, emoji: "❤️" });
+    if (!_commRxLikersMap[l.post_id].find(x => x.key === l.member_key))
+      _commRxLikersMap[l.post_id].push({ key: l.member_key, emoji: "❤️" });
   });
+  /* Reactors are not necessarily post authors, so the avatar rows fetched above
+     do not cover them. Resolve every key on screen from the directory, which is
+     one cached call and carries the same colour the email used to produce. */
+  {
+    const needKeys = new Set();
+    Object.values(_commRxLikersMap).forEach(list =>
+      (list || []).forEach(x => { if (x.key && !_commLikerAvatarMap[x.key]) needKeys.add(x.key); }));
+    if (needKeys.size) {
+      const dir = await commMemberDirectory();
+      needKeys.forEach(k => { if (dir[k]) _commLikerAvatarMap[k] = dir[k]; });
+    }
+  }
 
   let out = rows.map(p => {
     const rxData = _postRxMap[p.id] || {};
@@ -7059,9 +7096,9 @@ function _commLikerChipsInner(postId) {
   const total  = (_commRxLikersMap[postId] || []).length;
   if (!total) return "";
   const chips = likers.map(item => {
-    const info  = _commLikerAvatarMap[item.email];
-    const name  = info?.name || item.email.split("@")[0];
-    const col   = avatarColour(item.email);
+    const info  = _commLikerAvatarMap[item.key];
+    const name  = info?.name || "Member";
+    const col   = (info && info.hue != null) ? commHueColour(info.hue) : avatarColour(name);
     const inner = info?.url
       ? `<img src="${escHtml(info.url)}" alt="${escHtml(name)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`
       : `<div style="width:100%;height:100%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</div>`;
@@ -7122,10 +7159,10 @@ function showCommentReactorsPopover(event, eventType, commentId) {
   _dismissReactorsPopover();
   const likers = _cmtReactorsMap[_commentReactKey(eventType, commentId)] || [];
   if (!likers.length) return;
-  const rows = likers.map(({ email, emoji }) => {
-    const info = _commLikerAvatarMap[email];
-    const name = info?.name || email.split("@")[0];
-    const col  = avatarColour(email);
+  const rows = likers.map(({ key, emoji }) => {
+    const info = _commLikerAvatarMap[key];
+    const name = info?.name || "Member";
+    const col  = (info && info.hue != null) ? commHueColour(info.hue) : avatarColour(name);
     const av   = info?.url
       ? `<div class="likers-popover-avatar"><img src="${escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
       : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
@@ -7147,10 +7184,10 @@ function showReactorsPopover(postId, event) {
   _dismissReactorsPopover();
   const likers = _commRxLikersMap[postId] || [];
   if (!likers.length) return;
-  const rows = likers.map(({email, emoji}) => {
-    const info = _commLikerAvatarMap[email];
-    const name = info?.name || email.split("@")[0];
-    const col  = avatarColour(email);
+  const rows = likers.map(({key, emoji}) => {
+    const info = _commLikerAvatarMap[key];
+    const name = info?.name || "Member";
+    const col  = (info && info.hue != null) ? commHueColour(info.hue) : avatarColour(name);
     const av   = info?.url
       ? `<div class="likers-popover-avatar"><img src="${escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
       : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
@@ -8891,7 +8928,7 @@ async function loadActivity() {
   if (validRows.length) {
     const itemIds = [...new Set(validRows.map(r => String(r.item_id)))];
     const [rxRes, cmtRes] = await Promise.all([
-      db.from("activity_reactions").select("event_type,item_id,email,emoji").in("item_id", itemIds),
+      db.from("activity_reactions").select("event_type,item_id,member_key,emoji").in("item_id", itemIds),
       db.from("activity_comments").select("event_type,item_id,id").in("item_id", itemIds),
     ]);
     for (const rx of (rxRes.data || [])) {
@@ -8899,7 +8936,7 @@ async function loadActivity() {
       if (!_rxMap[key]) _rxMap[key] = {};
       if (!_rxMap[key][rx.emoji]) _rxMap[key][rx.emoji] = { count: 0, mine: false };
       _rxMap[key][rx.emoji].count++;
-      if (rx.email === myEmail) _rxMap[key][rx.emoji].mine = true;
+      if (myMemberKey && rx.member_key === myMemberKey) _rxMap[key][rx.emoji].mine = true;
     }
     // Build _activityRxPersonMap for avatar chips
     _activityRxPersonMap = {};
@@ -8907,15 +8944,13 @@ async function loadActivity() {
     for (const rx of (rxRes.data || [])) {
       const key = `${rx.event_type}:${rx.item_id}`;
       if (!_activityRxPersonMap[key]) _activityRxPersonMap[key] = [];
-      if (!_activityRxPersonMap[key].find(x => x.email === rx.email))
-        _activityRxPersonMap[key].push({ email: rx.email, emoji: rx.emoji || "❤️" });
+      if (!_activityRxPersonMap[key].find(x => x.key === rx.member_key))
+        _activityRxPersonMap[key].push({ key: rx.member_key, emoji: rx.emoji || "❤️" });
     }
-    const rxEmails = [...new Set((rxRes.data || []).map(r => r.email))];
-    if (rxEmails.length) {
-      const { data: rxAvatarRows } = await db.from("allowed_emails").select("email,avatar_url,name").in("email", rxEmails);
-      (rxAvatarRows || []).forEach(r => {
-        _activityAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] };
-      });
+    const rxKeys = [...new Set((rxRes.data || []).map(r => r.member_key).filter(Boolean))];
+    if (rxKeys.length) {
+      const dir = await commMemberDirectory();
+      rxKeys.forEach(k => { if (dir[k]) _activityAvatarMap[k] = dir[k]; });
     }
     for (const c of (cmtRes.data || [])) {
       const key = `${c.event_type}:${c.item_id}`;
@@ -9005,8 +9040,8 @@ function _activityLikerChipsInner(key) {
   const people = (_activityRxPersonMap[key] || []).slice(0, 3);
   const total  = (_activityRxPersonMap[key] || []).length;
   if (!total) return "";
-  const chips = people.map(({email}) => {
-    const info  = _activityAvatarMap[email];
+  const chips = people.map(({key}) => {
+    const info  = _activityAvatarMap[key];
     const name  = info?.name || email.split("@")[0];
     const col   = avatarColour(email);
     const inner = info?.url
@@ -9023,10 +9058,10 @@ function showActivityReactorsPopover(key, event) {
   if (_activityReactorsPopover) { _activityReactorsPopover.remove(); _activityReactorsPopover = null; }
   const people = _activityRxPersonMap[key] || [];
   if (!people.length) return;
-  const rows = people.map(({email, emoji}) => {
-    const info = _activityAvatarMap[email];
-    const name = info?.name || email.split("@")[0];
-    const col  = avatarColour(email);
+  const rows = people.map(({key, emoji}) => {
+    const info = _activityAvatarMap[key];
+    const name = info?.name || "Member";
+    const col  = (info && info.hue != null) ? commHueColour(info.hue) : avatarColour(name);
     const av   = info?.url
       ? `<div class="likers-popover-avatar"><img src="${escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
       : `<div class="likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${name[0].toUpperCase()}</div>`;
@@ -9298,9 +9333,9 @@ function _commentReactBarHTML(eventType, commentId) {
   const reactors = _cmtReactorsMap[key] || [];
   const chips = reactors.length ? `<span class="cmt-reactors" onclick="showCommentReactorsPopover(event,'${eventType}','${String(commentId)}')" style="display:inline-flex;align-items:center;cursor:pointer;padding-left:6px" title="See who reacted">${
     reactors.slice(0, 3).map(r => {
-      const info = _commLikerAvatarMap[r.email];
-      const nm   = info?.name || r.email.split("@")[0];
-      const col  = avatarColour(r.email);
+      const info = _commLikerAvatarMap[r.key];
+      const nm   = info?.name || "Member";
+      const col  = (info && info.hue != null) ? commHueColour(info.hue) : avatarColour(nm);
       return info?.url
         ? `<img src="${escHtml(info.url)}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;margin-left:-4px;border:1.5px solid var(--surface);display:block">`
         : `<span style="width:18px;height:18px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.6rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-left:-4px;border:1.5px solid var(--surface)">${escHtml(nm[0].toUpperCase())}</span>`;
@@ -9333,7 +9368,7 @@ async function _loadCommentReactions(eventType, commentIds) {
   if (!commentIds.length) return;
   const ids = commentIds.map(String);
   const { data: rows } = await db.from("activity_reactions")
-    .select("item_id,email,emoji")
+    .select("item_id,member_key,emoji")
     .eq("event_type", eventType)
     .in("item_id", ids);
   // Clear any stale entries for these comments first.
@@ -9341,22 +9376,22 @@ async function _loadCommentReactions(eventType, commentIds) {
     delete _rxMap[_commentReactKey(eventType, id)];
     delete _cmtReactorsMap[_commentReactKey(eventType, id)];
   });
-  const reactorEmails = new Set();
+  const reactorKeys = new Set();
   (rows || []).forEach(r => {
     const k = _commentReactKey(eventType, r.item_id);
     if (!_rxMap[k]) _rxMap[k] = {};
     if (!_rxMap[k][r.emoji]) _rxMap[k][r.emoji] = { count: 0, mine: false };
     _rxMap[k][r.emoji].count++;
-    if (r.email === myEmail) _rxMap[k][r.emoji].mine = true;
-    (_cmtReactorsMap[k] = _cmtReactorsMap[k] || []).push({ email: r.email, emoji: r.emoji });
-    reactorEmails.add(r.email);
+    if (myMemberKey && r.member_key === myMemberKey) _rxMap[k][r.emoji].mine = true;
+    (_cmtReactorsMap[k] = _cmtReactorsMap[k] || []).push({ key: r.member_key, emoji: r.emoji });
+    if (r.member_key) reactorKeys.add(r.member_key);
   });
   // Pull names/avatars for any reactors we don't already know, so the
   // "who reacted" popover can show them.
-  const need = [...reactorEmails].filter(e => !_commLikerAvatarMap[e]);
+  const need = [...reactorKeys].filter(k => !_commLikerAvatarMap[k]);
   if (need.length) {
-    const { data: av } = await db.from("allowed_emails").select("email,name,avatar_url").in("email", need);
-    (av || []).forEach(r => { _commLikerAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] }; });
+    const dir = await commMemberDirectory();
+    need.forEach(k => { if (dir[k]) _commLikerAvatarMap[k] = dir[k]; });
   }
 }
 
@@ -9384,7 +9419,7 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
     _refreshLikeBtn(safeKey, key);
     _refreshPickerCounts(safeKey, key);
     // Sync _activityRxPersonMap
-    if (_activityRxPersonMap[key]) _activityRxPersonMap[key] = _activityRxPersonMap[key].filter(x => x.email !== myEmail);
+    if (_activityRxPersonMap[key]) _activityRxPersonMap[key] = _activityRxPersonMap[key].filter(x => x.key !== myMemberKey);
     const safeK2 = key.replace(/[^a-z0-9]/gi, "_");
     document.querySelectorAll(`.act-likers-${safeK2}`).forEach(el => {
       const inner = _activityLikerChipsInner(key);
@@ -9417,9 +9452,9 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
   _refreshPickerCounts(safeKey, key);
   // Sync _activityRxPersonMap
   if (!_activityRxPersonMap[key]) _activityRxPersonMap[key] = [];
-  if (!_activityAvatarMap[myEmail]) _activityAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
-  if (!_activityRxPersonMap[key].find(x => x.email === myEmail))
-    _activityRxPersonMap[key].unshift({ email: myEmail, emoji });
+  if (myMemberKey && !_activityAvatarMap[myMemberKey]) _activityAvatarMap[myMemberKey] = { url: myAvatarUrl, name: myName, hue: null };
+  if (!_activityRxPersonMap[key].find(x => x.key === myMemberKey))
+    _activityRxPersonMap[key].unshift({ key: myMemberKey, emoji });
   // Update chips
   const safeK2 = key.replace(/[^a-z0-9]/gi, "_");
   document.querySelectorAll(`.act-likers-${safeK2}`).forEach(el => {
@@ -9591,7 +9626,7 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
     _refreshPickerCounts(_detailSK, `post:${postId}`);
     // Remove from likers only if no remaining reaction
     if (!Object.values(_postRxMap[postId] || {}).some(d => d.mine)) {
-      if (_commRxLikersMap[postId]) _commRxLikersMap[postId] = _commRxLikersMap[postId].filter(x => x.email !== myEmail);
+      if (_commRxLikersMap[postId]) _commRxLikersMap[postId] = _commRxLikersMap[postId].filter(x => x.key !== myMemberKey);
     }
     _updateCommLikerChips(postId);
     await db.from("activity_reactions").delete()
@@ -9611,8 +9646,8 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
   _postRxMap[postId][emoji].count++;
   _rxMap[`post:${postId}`] = _postRxMap[postId];
   if (!_commRxLikersMap[postId]) _commRxLikersMap[postId] = [];
-  if (!_commLikerAvatarMap[myEmail]) _commLikerAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
-  if (!_commRxLikersMap[postId].find(x => x.email === myEmail)) _commRxLikersMap[postId].unshift({ email: myEmail, emoji });
+  if (myMemberKey && !_commLikerAvatarMap[myMemberKey]) _commLikerAvatarMap[myMemberKey] = { url: myAvatarUrl, name: myName, hue: null };
+  if (!_commRxLikersMap[postId].find(x => x.key === myMemberKey)) _commRxLikersMap[postId].unshift({ key: myMemberKey, emoji });
   _refreshPostLikeBtn(safeKey, postId);
   _refreshPickerCounts(_feedSK,   `post:${postId}`);
   _refreshPickerCounts(_detailSK, `post:${postId}`);

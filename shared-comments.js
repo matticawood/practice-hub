@@ -76,8 +76,40 @@
   let   _cmtOpenPicker = null;
   const _CMT_RX_EMOJIS = ["❤️","👏","🔥","🎉","💪","😂"];
   let _openPicker = null;
-  const _cmtReactorsList = {}; // commentId → [{email, emoji}] (for "who reacted")
-  const _cmtReactorInfo  = {}; // email → { name, url }
+  const _cmtReactorsList = {}; // commentId → [{key, emoji}] (for "who reacted")
+  const _cmtReactorInfo  = {}; // member_key → { name, url, hue }
+  /* Reactions used to carry the reactor's EMAIL, and the page then looked their
+     name and avatar up by it, which meant every member could read every other
+     member's address straight off a post. They carry an opaque member_key now.
+     Both of these are fetched once and cached: the key for spotting your own
+     reactions, the directory for drawing everyone else's. */
+  let _myKeyPromise = null;
+  function _myMemberKey() {
+    if (!_myKeyPromise) {
+      _myKeyPromise = _db().rpc("get_profile_row")
+        .then(r => (r && r.data && r.data[0] && r.data[0].member_key) || null, () => null);
+    }
+    return _myKeyPromise;
+  }
+  let _dirPromise = null;
+  function _memberDirectory() {
+    if (!_dirPromise) {
+      _dirPromise = _db().rpc("member_directory").then(r => {
+        const m = {};
+        (r && r.data || []).forEach(x => {
+          m[x.member_key] = { name: x.name, url: x.avatar_url || null, hue: x.hue };
+        });
+        return m;
+      }, () => ({}));
+    }
+    return _dirPromise;
+  }
+  // the colour the initials circle has always been, now from the hue the server
+  // computes with the same hash, so nobody's avatar changes colour
+  function _hueColour(hue) {
+    const h = (hue == null) ? 0 : hue;
+    return { bg: `hsl(${h},55%,72%)`, fg: `hsl(${h},45%,22%)` };
+  }
   let _cmtReactorsPopover = null;
 
   // Likers popover
@@ -770,24 +802,27 @@
     if (!eventType || !commentIds.length) return;
     const auth = _auth();
     const ids = commentIds.map(String);
-    const { data } = await _db().from("activity_reactions")
-      .select("item_id,email,emoji")
-      .eq("event_type", eventType)
-      .in("item_id", ids);
+    const [{ data }, myKey] = await Promise.all([
+      _db().from("activity_reactions")
+        .select("item_id,member_key,emoji")
+        .eq("event_type", eventType)
+        .in("item_id", ids),
+      _myMemberKey(),
+    ]);
     ids.forEach(id => { delete _cmtRxState[id]; delete _cmtReactorsList[id]; });
-    const reactorEmails = new Set();
+    const reactorKeys = new Set();
     (data || []).forEach(r => {
       if (!_cmtRxState[r.item_id]) _cmtRxState[r.item_id] = {};
       if (!_cmtRxState[r.item_id][r.emoji]) _cmtRxState[r.item_id][r.emoji] = { count: 0, mine: false };
       _cmtRxState[r.item_id][r.emoji].count++;
-      if (r.email === auth.email) _cmtRxState[r.item_id][r.emoji].mine = true;
-      (_cmtReactorsList[r.item_id] = _cmtReactorsList[r.item_id] || []).push({ email: r.email, emoji: r.emoji });
-      reactorEmails.add(r.email);
+      if (myKey && r.member_key === myKey) _cmtRxState[r.item_id][r.emoji].mine = true;
+      (_cmtReactorsList[r.item_id] = _cmtReactorsList[r.item_id] || []).push({ key: r.member_key, emoji: r.emoji });
+      if (r.member_key) reactorKeys.add(r.member_key);
     });
-    const need = [...reactorEmails].filter(e => !_cmtReactorInfo[e]);
+    const need = [...reactorKeys].filter(k => !_cmtReactorInfo[k]);
     if (need.length) {
-      const { data: av } = await _db().from("allowed_emails").select("email,name,avatar_url").in("email", need);
-      (av || []).forEach(r => { _cmtReactorInfo[r.email] = { name: r.name || r.email.split("@")[0], url: r.avatar_url || null }; });
+      const dir = await _memberDirectory();
+      need.forEach(k => { if (dir[k]) _cmtReactorInfo[k] = dir[k]; });
     }
   }
 
@@ -813,9 +848,9 @@
     const reactors = _cmtReactorsList[String(commentId)] || [];
     const chips = reactors.length ? `<span onclick="Comments.showCmtReactors(event,'${String(commentId)}')" style="display:inline-flex;align-items:center;cursor:pointer;padding-left:6px" title="See who reacted">${
       reactors.slice(0, 3).map(r => {
-        const info = _cmtReactorInfo[r.email];
-        const nm   = info?.name || r.email.split("@")[0];
-        const col  = _avatarColour(r.email);
+        const info = _cmtReactorInfo[r.key];
+        const nm   = info?.name || "Member";
+        const col  = _hueColour(info?.hue);
         return info?.url
           ? `<img src="${_escHtml(info.url)}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;margin-left:-4px;border:1.5px solid var(--surface);display:block">`
           : `<span style="width:18px;height:18px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.6rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-left:-4px;border:1.5px solid var(--surface)">${_escHtml(nm[0].toUpperCase())}</span>`;
@@ -1241,10 +1276,10 @@
       _dismissCmtReactorsPopover();
       const likers = _cmtReactorsList[String(commentId)] || [];
       if (!likers.length) return;
-      const rows = likers.map(({ email, emoji }) => {
-        const info = _cmtReactorInfo[email];
-        const name = info?.name || email.split("@")[0];
-        const col  = _avatarColour(email);
+      const rows = likers.map(({ key, emoji }) => {
+        const info = _cmtReactorInfo[key];
+        const name = info?.name || "Member";
+        const col  = _hueColour(info?.hue);
         const av   = info?.url
           ? `<img src="${_escHtml(info.url)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;display:block">`
           : `<span style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.8rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center">${_escHtml(name[0].toUpperCase())}</span>`;

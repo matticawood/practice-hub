@@ -2931,16 +2931,20 @@ function _evCmtSafeKey(commentId) {
 async function _evLoadCommentReactions(commentIds) {
   if (!commentIds.length) return;
   const ids = commentIds.map(String);
-  const { data: rows } = await db.from("activity_reactions")
-    .select("item_id,email,emoji")
-    .eq("event_type", "event_comment")
-    .in("item_id", ids);
+  /* Reactions carry an opaque member_key now, not the reactor's email. */
+  const [{ data: rows }, _myKey] = await Promise.all([
+    db.from("activity_reactions")
+      .select("item_id,member_key,emoji")
+      .eq("event_type", "event_comment")
+      .in("item_id", ids),
+    db.rpc("get_profile_row").then(r => (r && r.data && r.data[0] && r.data[0].member_key) || null, () => null),
+  ]);
   ids.forEach(id => { delete _evCmtRxMap[id]; });
   (rows || []).forEach(r => {
     if (!_evCmtRxMap[r.item_id]) _evCmtRxMap[r.item_id] = {};
     if (!_evCmtRxMap[r.item_id][r.emoji]) _evCmtRxMap[r.item_id][r.emoji] = { count: 0, mine: false };
     _evCmtRxMap[r.item_id][r.emoji].count++;
-    if (r.email === myEmail) _evCmtRxMap[r.item_id][r.emoji].mine = true;
+    if (_myKey && r.member_key === _myKey) _evCmtRxMap[r.item_id][r.emoji].mine = true;
   });
 }
 
