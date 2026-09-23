@@ -30,6 +30,26 @@ export default async (request) => {
   try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
   const { action } = body;
 
+  // ── Pre-auth: guest-request-status ───────────────────────────────────────
+  // The guest's own browser asks whether the host has let them in yet. It used
+  // to read event_guest_requests directly with the anon key, which meant the
+  // whole table was readable by anyone, tokens included: a Daily token is a key
+  // to the backstage room. The request id is the credential here, exactly as
+  // the invite token is above, and only that one row is ever returned.
+  if (action === "guest-request-status") {
+    const { requestId } = body;
+    if (!requestId) return json({ error: "requestId required" }, 400);
+    const SERVICE_KEY = Netlify.env.get("SUPABASE_SERVICE_KEY");
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/event_guest_requests?id=eq.${encodeURIComponent(requestId)}&select=status,daily_token,room_url`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    if (!res.ok) return json({ error: "Lookup failed" }, 502);
+    const rows = await res.json();
+    if (!Array.isArray(rows) || !rows.length) return json({ error: "Request not found" }, 404);
+    return json(rows[0]);
+  }
+
   // ── Pre-auth: request-guest-access ───────────────────────────────────────
   // No Supabase JWT required — the invite token IS the credential.
   // External guest (guest-join.html) calls this to request host approval.

@@ -589,23 +589,25 @@
         }
       }
 
-      // Primary: postgres_changes subscription (instant when realtime publication is configured)
-      _requestChannel = db.channel(`guest-req-${data.requestId}`)
-        .on("postgres_changes", {
-          event: "UPDATE", schema: "public", table: "event_guest_requests",
-          filter: `id=eq.${data.requestId}`
-        }, payload => { handleApproval(payload.new); })
-        .subscribe();
+      /* The realtime subscription is gone. It delivered rows straight from
+         event_guest_requests, which only worked because the table was readable
+         by anyone, tokens and all. Approval now arrives on the poll below,
+         within three seconds, through the edge function. */
 
-      // Fallback: poll the DB every 3 s in case realtime isn't set up
+      // Poll every 3 s for the host's decision
+
       _approvalPoller = setInterval(async () => {
         if (_approvalHandled) { clearInterval(_approvalPoller); _approvalPoller = null; return; }
         try {
-          const { data: row } = await db
-            .from("event_guest_requests")
-            .select("status, daily_token, room_url")
-            .eq("id", data.requestId)
-            .single();
+          /* Asked through the edge function rather than read from the table.
+             The row carries a Daily token, which is a key to the backstage
+             room, and the table used to be readable by anyone at all. */
+          const sres = await fetch("/api/daily", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "guest-request-status", requestId: data.requestId })
+          });
+          const row = sres.ok ? await sres.json() : null;
           if (row && (row.status === "approved" || row.status === "rejected")) {
             handleApproval(row);
           }
