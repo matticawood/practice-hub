@@ -593,7 +593,13 @@
   `;
 
   /* ────────────────────────────── modal logic ─────────────────────────────── */
-  let _mmEmail = null;
+  let _mmEmail = null;   // kept only for the legacy email entry point
+  /* The card is opened by an opaque member_key now. Avatars used to carry the
+     person's email in a data attribute, which is how a member could read
+     everyone's address straight off the page. Everything the card shows is
+     fetched by key through member_profile / member_card_* and no address is
+     returned by any of them. */
+  let _mmKey = null;
   const _MM_PAGE = 20;
   let _mmIO = null;
   let _mmPostsOffset = 0, _mmPostsDone = false, _mmPostsLoading = false;
@@ -634,7 +640,7 @@
   }
 
   async function loadMemberPosts(more) {
-    if (!_mmEmail) return;
+    if (!_mmKey) return;
     const panel = document.getElementById("mm-panel-posts");
     if (!more) {
       if (panel.querySelector(".mm-list")) { if (!_mmPostsDone) _mmObserve(panel, "posts"); return; }
@@ -643,7 +649,7 @@
     if (_mmPostsLoading || _mmPostsDone) return;
     _mmPostsLoading = true;
     const { data, error } = await _db.from("community_posts")
-      .select("id, type, title, content, created_at").eq("email", _mmEmail)
+      .select("id, type, title, content, created_at").eq("member_key", _mmKey)
       .order("created_at", { ascending: false })
       .range(_mmPostsOffset, _mmPostsOffset + _MM_PAGE - 1);
     _mmPostsLoading = false;
@@ -662,11 +668,11 @@
   }
 
   async function loadMemberAchievements() {
-    if (!_mmEmail) return;
+    if (!_mmKey) return;
     const panel = document.getElementById("mm-panel-achievements");
     if (!panel.querySelector(".mm-tab-loading")) return;
     const { data, error } = await _db.from("achievement_events")
-      .select("achievement_id, earned_at").eq("email", _mmEmail)
+      .select("achievement_id, earned_at").eq("member_key", _mmKey)
       .order("earned_at", { ascending: false }).limit(200);
     // Dedup by achievement_id so the count matches the badge leaderboard (which
     // counts DISTINCT) and no badge card ever appears twice.
@@ -731,13 +737,13 @@
   }
 
   async function loadMemberActivity(more) {
-    if (!_mmEmail) return;
+    if (!_mmKey) return;
     const panel = document.getElementById("mm-panel-activity");
     if (!more) {
       if (panel.querySelector(".mm-list")) { if (!_mmActDone) _mmObserve(panel, "activity"); return; }
       _mmActOffset = 0; _mmActDone = false; _mmActSessions = []; _mmActAch = [];
       const { data: ach } = await _db.from("achievement_events")
-        .select("achievement_id, earned_at").eq("email", _mmEmail)
+        .select("achievement_id, earned_at").eq("member_key", _mmKey)
         .order("earned_at", { ascending: false }).limit(200);
       _mmActAch = (ach || []).map(r => ({ type: "achievement", date: r.earned_at, data: r }));
     }
@@ -745,8 +751,8 @@
     _mmActLoading = true;
     /* Sessions are private now: own, Matthew's, or shared through a post. The
        card only ever showed day and length, so it asks for exactly that. */
-    const { data: sess } = await _db.rpc("get_member_recent_sessions",
-      { p_email: _mmEmail, p_offset: _mmActOffset, p_limit: _MM_PAGE });
+    const { data: sess } = await _db.rpc("member_card_recent",
+      { p_member_key: _mmKey, p_offset: _mmActOffset, p_limit: _MM_PAGE });
     _mmActLoading = false;
     const sessItems = (sess || []).map(r => ({ type: "session", date: r.session_date, data: r }));
     _mmActSessions.push(...sessItems);
@@ -772,7 +778,7 @@
     if (e && e.target !== document.getElementById("member-modal-backdrop")) return;
     document.getElementById("member-modal-backdrop").style.display = "none";
     document.body.style.overflow = "";
-    _mmEmail = null;
+    _mmEmail = null; _mmKey = null;
     if (_mmIO) { _mmIO.disconnect(); _mmIO = null; }
   }
 
@@ -835,6 +841,7 @@
     if (_streakEl) _streakEl.innerHTML = "";
 
     _mmEmail = m.email || null;
+    _mmKey   = m.member_key || null;
     _mmResetTabs();
   }
 
@@ -883,27 +890,22 @@
 
   // Fill the About stats strip + streak chip, and compute per-day minutes for the
   // heatmap. Cheap: one fetch of session (date+duration) + two head-count queries.
-  async function _loadStats(email) {
+  async function _loadStats(key) {
+    if (!key) return;
     let durs = [], pieceCount = 0, achCount = 0, learning = [];
     try {
-      const [dRes, pColRes, pCustomRes, aRes, learnRes] = await Promise.all([
-        _db.rpc("get_member_practice_days", { p_email: email }),
-        // Catalogue pieces in their collection (learning/completed, non-custom rows)…
-        _db.from("user_collections").select("id", { count: "exact", head: true }).eq("email", email).in("status", ["learning", "completed"]).is("user_piece_id", null),
-        // …plus every custom piece they've added (separate table). Summed so the
-        // collection's own custom rows aren't double-counted.
-        _db.from("user_pieces").select("id", { count: "exact", head: true }).eq("email", email),
-        _db.from("achievement_events").select("id", { count: "exact", head: true }).eq("email", email),
-        // A few pieces they're actively learning (catalogue or custom) for the "Now learning" preview.
-        _db.from("user_collections").select("created_at, pieces(title, composer), user_pieces(title, composer)").eq("email", email).eq("status", "learning").order("created_at", { ascending: false }).limit(4),
+      const [dRes, statRes, learnRes] = await Promise.all([
+        _db.rpc("member_card_days", { p_member_key: key }),
+        _db.rpc("member_card_stats", { p_member_key: key }),
+        _db.rpc("member_card_learning", { p_member_key: key }),
       ]);
       durs = dRes.data || [];
-      pieceCount = (pColRes.count || 0) + (pCustomRes.count || 0);
-      achCount = aRes.count || 0;
-      learning = (learnRes.data || []).map(r => r.pieces || r.user_pieces).filter(Boolean);
-    } catch (_) { /* leave skeleton */ return; }
-    if (_mmEmail !== email) return; // a newer profile was opened meanwhile
-
+      const st = (statRes.data && statRes.data[0]) || {};
+      pieceCount = Number(st.pieces_count || 0);
+      achCount   = Number(st.achievements_count || 0);
+      learning   = (learnRes.data || []).filter(r => r && r.title).map(r => ({ title: r.title, composer: r.composer }));
+    } catch (_) { return; }
+    if (_mmKey !== key) return; // a newer profile was opened meanwhile
     // Per-day practice minutes (drives the practice streak) + total practice time.
     _mmDayMin = {};
     let totalMin = 0;
@@ -915,8 +917,8 @@
     // Streak = the canonical server value (save-inclusive, member-local-tz), same as
     // the dashboard/leaderboard. Fall back to a local day-count only if the RPC fails.
     try {
-      const { data: sk, error: skErr } = await _db.rpc("get_member_streak", { p_email: email });
-      if (_mmEmail !== email) return;   // a newer profile was opened during the await
+      const { data: sk, error: skErr } = await _db.rpc("member_card_streak", { p_member_key: key });
+      if (_mmKey !== key) return;   // a newer profile was opened during the await
       const row = Array.isArray(sk) ? sk[0] : sk;
       _mmStreak = (!skErr && row)
         ? { current: row.current_streak || 0, best: row.best_streak || 0 }
@@ -960,16 +962,24 @@
   }
 
   let _openToken = 0;
-  async function open(email) {
-    if (!_booted || !email) return;
+  const _isKey = v => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+  async function open(who) {
+    if (!_booted || !who) return;
     const token = ++_openToken;
     let m = null;
     try {
-      const { data } = await _db
-        .from("allowed_emails")
-        .select("email, name, headline, location, instrument, avatar_url, badge, bio, website, instagram, twitter, youtube")
-        .eq("email", email).maybeSingle();
-      m = data;
+      if (_isKey(who)) {
+        const { data } = await _db.rpc("member_profile", { p_member_key: who });
+        m = Array.isArray(data) ? data[0] : data;
+      } else {
+        // legacy: opened by email, still used by surfaces not yet converted
+        const { data } = await _db
+          .from("allowed_emails")
+          .select("email, name, headline, location, instrument, avatar_url, badge, bio, website, instagram, twitter, youtube, member_key")
+          .eq("email", who).maybeSingle();
+        m = data;
+      }
     } catch (_) { /* ignore */ }
     if (token !== _openToken || !m) return;   // superseded by a newer open, or no row
     // Populate first, THEN reveal — so the entrance animation plays with content
@@ -984,7 +994,7 @@
     // value falls back to the stylesheet, which is `none` under reduced-motion.
     const card = bd.querySelector(".member-modal");
     if (card) { card.style.animation = "none"; void card.offsetWidth; card.style.animation = ""; }
-    _loadStats(m.email);
+    _loadStats(m.member_key);
   }
 
   /* ─────────────── delegated avatar click (capture phase) ──────────────────
@@ -992,13 +1002,14 @@
      it — clicking an avatar inside a post opens the person, not the post. */
   function _onDocClickCapture(e) {
     if (e.target.closest && e.target.closest("[data-tip]")) return; // tip clicks aren't avatar clicks
-    const el = e.target.closest && e.target.closest("[data-member-email]");
+    const el = e.target.closest && e.target.closest("[data-member-key], [data-member-email]");
     if (!el) return;
-    const email = el.getAttribute("data-member-email");
-    if (!email) return;
+    // a key if the surface has been converted, an address if it has not yet
+    const who = el.getAttribute("data-member-key") || el.getAttribute("data-member-email");
+    if (!who) return;
     e.preventDefault();
     e.stopPropagation();
-    open(email);
+    open(who);
   }
 
   /* ─────────────── tooltip for [data-tip] (hover + tap) ───────────────────── */
