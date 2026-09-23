@@ -2405,10 +2405,11 @@ window.shMyRow = function(db, email) {
   const key = String(email).toLowerCase();
   window.__shMyRow = window.__shMyRow || {};
   if (!window.__shMyRow[key]) {
-    window.__shMyRow[key] = db.from("allowed_emails")
-      .select("email,name,avatar_url,welcome_seen_at,info_seen_at")
-      .ilike("email", email).maybeSingle()
-      .then(r => (r && r.data) || null, () => null);
+    /* The seen-at stamps are no longer readable from the browser as columns:
+       other members could read them. The function returns the same union for
+       whoever the token says you are, so the shape here is unchanged. */
+    window.__shMyRow[key] = db.rpc("get_profile_row")
+      .then(r => (r && r.data && r.data[0]) || null, () => null);
   }
   return window.__shMyRow[key];
 };
@@ -2976,8 +2977,8 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     // treating every notification as new. Best-effort — falls back to localStorage.
     if (!_seenAt) {
       try {
-        const { data: me } = await db.from("allowed_emails")
-          .select("notif_seen_at").ilike("email", myEmail).maybeSingle();
+        const { data: _rows } = await db.rpc("get_profile_row");
+        const me = _rows && _rows[0];
         if (me?.notif_seen_at) {
           _seenAt = me.notif_seen_at;
           try { localStorage.setItem(_SEEN_KEY, _seenAt); } catch {}
