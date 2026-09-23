@@ -3918,9 +3918,51 @@ let nrMidiConnecting = false;
 let nrMidiDisabled   = false;  // user turned MIDI off; access is kept so it re-enables without another prompt
 let nrMidiSelectedId = null;   // null = any keyboard; otherwise a specific input id
 
-function nrMidiSupported() { return typeof navigator !== "undefined" && !!navigator.requestMIDIAccess; }
+/* ── Native MIDI bridge (iOS app only) ────────────────────────────────────
+   iOS WebKit has no Web MIDI, so on iPad/iPhone the PWAShell app reads MIDI
+   natively (CoreMIDI, see the app's NativeExtras.swift) and forwards notes and
+   the device list to the page as CustomEvents. Everything downstream (the chip,
+   the device picker, the exact-pitch scoring) is shared with the Web MIDI path;
+   only the source differs. On desktop/Android this stays dormant. */
+var NR_NATIVE = { ready: false, devices: [] };
+function nrNativeMode() { return !(typeof navigator !== "undefined" && navigator.requestMIDIAccess) && NR_NATIVE.ready; }
+function nrNativeSend(name, body) { try { window.webkit.messageHandlers[name].postMessage(body || {}); } catch (e) {} }
+(function nrNativeWire() {
+  window.addEventListener("pr-native-ready", function () {
+    NR_NATIVE.ready = true;
+    var wrap = document.getElementById("nr-midi"); if (wrap) wrap.style.display = "";
+    if (typeof nrMidiRefresh === "function") nrMidiRefresh();
+  });
+  window.addEventListener("pr-native-midi-devices", function (e) {
+    NR_NATIVE.ready = true;
+    NR_NATIVE.devices = (e && e.detail && e.detail.devices) || [];
+    var wrap = document.getElementById("nr-midi"); if (wrap && nrNativeMode()) wrap.style.display = "";
+    if (typeof nrMidiRefresh === "function") nrMidiRefresh();
+  });
+  window.addEventListener("pr-native-midi", function (e) { nrNativeNote((e && e.detail) || {}); });
+  // Ask the app to announce itself, whichever loaded first.
+  nrNativeSend("native-hello");
+})();
+
+// A note played on a native (iOS) keyboard, routed through the same exact-pitch
+// answer path as a tapped key or a Web MIDI note.
+function nrNativeNote(d) {
+  if (!d || d.on !== true || !d.velocity) return;     // note-on only
+  if (nrMidiDisabled) return;
+  if (nrMidiSelectedId) {                             // a specific device is chosen (matched by name on iOS)
+    var sel = nrMidiInputs().find(function (i) { return i.id === nrMidiSelectedId; });
+    if (sel && sel.name && d.name && sel.name !== d.name) return;
+  }
+  if (nrPhase !== "playing" || nrLocked) return;
+  var note = d.note | 0;
+  var el = document.querySelector('#nr-piano [data-midi="' + note + '"]');
+  nrAnswer(el, NR_PC_TO_NOTE[note % 12], note);
+}
+
+function nrMidiSupported() { return (typeof navigator !== "undefined" && !!navigator.requestMIDIAccess) || NR_NATIVE.ready; }
 
 function nrMidiInit() {
+  nrNativeSend("native-hello");   // ping the iOS app so it announces MIDI (no-op elsewhere)
   var wrap = document.getElementById("nr-midi");
   if (!nrMidiSupported()) { if (wrap) wrap.style.display = "none"; return; }
   if (wrap) wrap.style.display = "";
@@ -3937,6 +3979,7 @@ function nrMidiInit() {
 }
 
 function nrMidiInputs() {
+  if (nrNativeMode()) return NR_NATIVE.devices.slice();   // [{id, name}] from the app
   var list = [];
   if (nrMidiAccess) nrMidiAccess.inputs.forEach(function(inp) { if (inp.state === "connected") list.push(inp); });
   return list;
@@ -3997,6 +4040,9 @@ function nrMidiRefresh() {
 async function nrConnectMidi(silent) {
   if (!nrMidiSupported()) return;
   nrMidiDisabled = false;
+  // iOS native bridge: nothing to request (no permission prompt for MIDI input);
+  // devices arrive on their own, so just re-announce and refresh.
+  if (nrNativeMode()) { nrNativeSend("native-hello"); nrMidiRefresh(); return; }
   // Access already granted this session (including after a Disconnect): just
   // re-attach, no second permission prompt.
   if (nrMidiAccess) { nrMidiAttachAll(); return; }
@@ -4032,8 +4078,10 @@ function nrMidiDisconnect() {
 // Chip click: connect (or re-enable) when off, otherwise open the device picker.
 function nrMidiClick() {
   if (!nrMidiSupported()) return;
-  if (nrMidiOn) nrMidiToggleMenu();
-  else nrConnectMidi();
+  if (nrMidiOn) { nrMidiToggleMenu(); return; }
+  if (nrMidiDisabled) { nrConnectMidi(); return; }                     // re-enable after the user turned it off
+  if (nrNativeMode()) { nrNativeSend("midi-bluetooth-pair"); return; } // iOS, no device yet: pair a Bluetooth keyboard
+  nrConnectMidi();
 }
 
 function nrMidiToggleMenu(force) {
@@ -4068,6 +4116,10 @@ function nrMidiBuildMenu() {
   nrMidiInputs().forEach(function(i) {
     html += '<button class="nr-midi-item' + (nrMidiSelectedId === i.id ? ' sel' : '') + '" type="button" onclick="nrMidiSelect(&quot;' + esc(i.id) + '&quot;)">' + esc(i.name || "MIDI keyboard") + check + '</button>';
   });
+  if (nrNativeMode()) {
+    html += '<div class="nr-midi-sep"></div>';
+    html += '<button class="nr-midi-item" type="button" onclick="nrNativeSend(\'midi-bluetooth-pair\')">Pair Bluetooth keyboard</button>';
+  }
   html += '<div class="nr-midi-sep"></div>';
   html += '<button class="nr-midi-item nr-midi-disc" type="button" onclick="nrMidiDisconnect()">Disconnect keyboard</button>';
   menu.innerHTML = html;
