@@ -470,13 +470,17 @@ const OWNER_EMAIL = "matthew@matthewcawood.com";
 const db = supabase.createClient(SUPA_URL, SUPA_ANON);
 
 // ── Colour helpers (must match community.html exactly) ────────────────
+/* The eight avatar colours. avatarColour() hashes an address into this array;
+   the server hashes it the same way and returns just the index, so a profile
+   opened by key still shows the colour it always did. */
+const AVATAR_PALETTE = [
+  {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+  {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
+  {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+  {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+];
 function avatarColour(email) {
-  const P = [
-    {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
-    {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
-    {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
-    {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
-  ];
+  const P = AVATAR_PALETTE;
   let h = 0;
   for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
   return P[Math.abs(h) % P.length];
@@ -501,13 +505,23 @@ function relativeTime(ts) {
 
 // ── Routing ───────────────────────────────────────────────────────────
 const _urlParams  = new URLSearchParams(window.location.search);
-const _viewEmail  = _urlParams.get("u"); // present → public view mode
+const _viewEmail  = _urlParams.get("u"); // present → public view mode (legacy)
+/* Profiles are linked by an opaque key now. Links used to carry the person's
+   email in the URL, which put an address in every avatar link on every page.
+   The old ?u=<email> form still works so nothing that has not been converted
+   breaks. */
+const _viewKey    = _urlParams.get("k");
 let myEmail = null;
 let myName  = null;
 
 (async () => {
   const { data: { session } } = await db.auth.getSession();
   if (!session?.user?.email) { window.location.replace("/practice-log.html"); return; }
+  // my own key, so a profile opened by key can tell whether it is mine
+  try {
+    const { data: _pr } = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr[0] && _pr[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
 
   myEmail = session.user.email;
 
@@ -518,7 +532,9 @@ let myName  = null;
   const isAdmin = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
   initSharedHeader({ db, myEmail, myName, isAdmin, activePage: "community", avatarUrl: myData?.avatar_url || null });
 
-  if (_viewEmail) {
+  if (_viewKey) {
+    await _loadViewModeByKey(_viewKey);
+  } else if (_viewEmail) {
     await _loadViewMode(_viewEmail);
   } else {
     await _loadEditMode();
@@ -528,7 +544,27 @@ let myName  = null;
 // ══════════════════════════════════════════════════════════════════════
 // PUBLIC VIEW MODE
 // ══════════════════════════════════════════════════════════════════════
-let _viewingEmail = null; // used by badge save/clear
+let myMemberKey = null;   // my own key, for spotting my own profile
+/* An unknown member falls to index 0, which is what hashing an empty address
+   has always produced. */
+function palColour(pal) {
+  const n = AVATAR_PALETTE.length;
+  const i = (pal == null) ? 0 : ((pal % n) + n) % n;
+  return AVATAR_PALETTE[i];
+}
+let _viewingEmail = null; // used by badge save/clear (legacy email route)
+let _viewingKey   = null; // set when the profile was opened by key
+
+/* Opened by key: the same view, fetched through member_profile, which returns
+   no address. Everything below it renders from the same shape, so the page is
+   unchanged apart from where the identity came from. */
+async function _loadViewModeByKey(key) {
+  _viewingKey = key;
+  const { data } = await db.rpc("member_profile", { p_member_key: key });
+  const m = Array.isArray(data) ? data[0] : data;
+  if (!m) { window.location.replace("/practice-log.html"); return; }
+  await _renderViewMode(m, null, key);
+}
 
 async function _loadViewMode(email) {
   _viewingEmail = email;
@@ -536,8 +572,13 @@ async function _loadViewMode(email) {
   const { data: ae } = await db.from("allowed_emails")
     .select("name,headline,instrument,location,bio,website,instagram,youtube,twitter,avatar_url,badge")
     .eq("email", email).maybeSingle();
+  await _renderViewMode(ae, email, null);
+}
 
-  const name = ae?.name || email.split("@")[0];
+/* One renderer for both routes. `email` is null when the profile was opened by
+   key, and everything below either does not need it or has a key-based path. */
+async function _renderViewMode(ae, email, key) {
+  const name = ae?.name || (email ? email.split("@")[0] : "Member");
   document.title = name + " — The Practice Room";
 
   // ── Avatar ──
@@ -545,7 +586,9 @@ async function _loadViewMode(email) {
   if (ae?.avatar_url) {
     avEl.innerHTML = `<img src="${escHtml(ae.avatar_url)}" alt="" />`;
   } else {
-    const c = avatarColour(email);
+    // same colour as always: from the address when we have it, otherwise the
+    // palette index the server computed with the identical hash
+    const c = email ? avatarColour(email) : palColour(ae?.pal);
     avEl.style.background = c.bg;
     avEl.style.color = c.fg;
     avEl.textContent = initials(name);
@@ -573,7 +616,10 @@ async function _loadViewMode(email) {
   }
 
   // ── Edit button (own profile) ──
-  if (email.toLowerCase() === myEmail.toLowerCase()) {
+  const isMe = email
+    ? email.toLowerCase() === myEmail.toLowerCase()
+    : (key && key === myMemberKey);
+  if (isMe) {
     document.getElementById("pv-edit-btn").style.display = "";
   }
 
@@ -610,9 +656,9 @@ async function _loadViewMode(email) {
   }
 
   // ── Recent posts ──
-  const { data: posts } = await db.from("community_posts")
-    .select("id,type,title,content,created_at")
-    .eq("email", email)
+  const postsQuery = db.from("community_posts")
+    .select("id,type,title,content,created_at");
+  const { data: posts } = await (key ? postsQuery.eq("member_key", key) : postsQuery.eq("email", email))
     .order("created_at", { ascending: false })
     .limit(10);
 
@@ -744,7 +790,7 @@ async function saveProfile() {
 async function saveBadge() {
   const badge = document.getElementById("pv-badge-input")?.value.trim() || null;
   const { error } = await db.from("allowed_emails")
-    .update({ badge }).eq("email", _viewingEmail);
+    .update({ badge }).eq(_viewingKey ? "member_key" : "email", _viewingKey || _viewingEmail);
   if (error) { alert("Error: " + error.message); return; }
   const badgeEl = document.getElementById("pv-badge");
   if (badge) {
