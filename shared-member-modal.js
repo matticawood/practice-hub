@@ -743,10 +743,10 @@
     }
     if (_mmActLoading || _mmActDone) return;
     _mmActLoading = true;
-    const { data: sess } = await _db.from("practice_sessions")
-      .select("id, session_date, duration_minutes").eq("email", _mmEmail)
-      .order("session_date", { ascending: false })
-      .range(_mmActOffset, _mmActOffset + _MM_PAGE - 1);
+    /* Sessions are private now: own, Matthew's, or shared through a post. The
+       card only ever showed day and length, so it asks for exactly that. */
+    const { data: sess } = await _db.rpc("get_member_recent_sessions",
+      { p_email: _mmEmail, p_offset: _mmActOffset, p_limit: _MM_PAGE });
     _mmActLoading = false;
     const sessItems = (sess || []).map(r => ({ type: "session", date: r.session_date, data: r }));
     _mmActSessions.push(...sessItems);
@@ -887,7 +887,7 @@
     let durs = [], pieceCount = 0, achCount = 0, learning = [];
     try {
       const [dRes, pColRes, pCustomRes, aRes, learnRes] = await Promise.all([
-        _db.from("practice_sessions").select("duration_minutes, session_date").eq("email", email),
+        _db.rpc("get_member_practice_days", { p_email: email }),
         // Catalogue pieces in their collection (learning/completed, non-custom rows)…
         _db.from("user_collections").select("id", { count: "exact", head: true }).eq("email", email).in("status", ["learning", "completed"]).is("user_piece_id", null),
         // …plus every custom piece they've added (separate table). Summed so the
