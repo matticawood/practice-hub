@@ -16000,6 +16000,17 @@ function isOwner() { const s = getSession(); return s && s.email.toLowerCase() =
 
 // ── App state ─────────────────────────────────────────────────────
 let viewingEmail = null;   // whose log we're viewing
+/* The same two people, by key. The score tables are read by key now, so the
+   browser never has to name anybody by address to ask for their own numbers. */
+let myMemberKey = null, viewingMemberKey = null;
+async function _keyForEmail(email) {
+  if (!email) return null;
+  if (myEmail && email.toLowerCase() === myEmail.toLowerCase()) return myMemberKey;
+  try {
+    const { data } = await db.rpc("member_keys_for", { p_emails: [email] });
+    return (data && data[0] && data[0].member_key) || null;
+  } catch (e) { return null; }
+}
 let myEmail = null;        // the logged-in user's email
 let myName  = null;        // the logged-in user's display name (from allowed_emails.name)
 let _lastSavedSessionId = null; // id of the most recently saved session (for share modal)
@@ -16386,14 +16397,14 @@ async function loadData() {
     // Trainer scores, completed-piece tiers, theory progress — feed insights + roadmap goals.
     try {
       const [nr, cr, pg, er, uc, thL, thP, it, fsL, lypL, allL] = await Promise.all([
-        db.from("note_game_scores").select("score, attempts, created_at, clef, accidentals, key_signature, range").eq("email", viewingEmail),
-        db.from("chord_game_scores").select("score, attempts, created_at, tier, clef, mode, key_signature").eq("email", viewingEmail),
+        db.from("note_game_scores").select("score, attempts, created_at, clef, accidentals, key_signature, range").eq("member_key", viewingMemberKey),
+        db.from("chord_game_scores").select("score, attempts, created_at, tier, clef, mode, key_signature").eq("member_key", viewingMemberKey),
         db.from("passage_games").select("level, created_at").eq("email", viewingEmail),
-        db.from("ear_game_scores").select("score, attempts, created_at, chord_set, answer_type, key_signature").eq("email", viewingEmail),
+        db.from("ear_game_scores").select("score, attempts, created_at, chord_set, answer_type, key_signature").eq("member_key", viewingMemberKey),
         db.from("user_collections").select("status, created_at, piece_id, pieces(difficulty, kind), user_piece_id, user_pieces(id, title, difficulty, last_practiced_at, dormancy_acked_at)").eq("email", viewingEmail),
         db.from("lessons").select("id, level, sort_order, title, status").eq("course", "theory"),
         db.from("lesson_progress").select("lesson_id, completed, completed_at").eq("email", viewingEmail).eq("completed", true),
-        db.from("interval_game_scores").select("score, attempts, created_at, side, tier, key_mode, playback, key_signature").eq("email", (viewingEmail || "").toLowerCase()),
+        db.from("interval_game_scores").select("score, attempts, created_at, side, tier, key_mode, playback, key_signature").eq("member_key", viewingMemberKey),
         db.from("lessons").select("id, status, title, sort_order").eq("course", "first-steps"),
         db.from("lessons").select("id, status, title, sort_order").eq("course", "learn-your-first-piece"),
         // Every course in the catalogue, so the dashboard can tell which a
@@ -30605,7 +30616,7 @@ async function nrSaveScore() {
 
   // Previous best — for PB-triggered owner notification.
   const { data: prevRows } = await db.from("note_game_scores")
-    .select("score").eq("email", myEmail).order("score", { ascending: false }).limit(1);
+    .select("score").eq("member_key", myMemberKey).order("score", { ascending: false }).limit(1);
   const prevBest = prevRows?.[0]?.score ?? -1;
 
   const { error } = await db.from("note_game_scores").insert({
@@ -37796,6 +37807,7 @@ async function populateViewingDropdown() {
 
 async function switchViewingEmail(email) {
   viewingEmail = email;
+  viewingMemberKey = await _keyForEmail(email);
 
   // Sync both selects
   document.getElementById("viewing-select").value = email;
@@ -38189,6 +38201,11 @@ async function bootApp() {
 
   myEmail = session.email;
   viewingEmail = myEmail;
+  try {
+    const { data: _pr } = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr[0] && _pr[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
+  viewingMemberKey = myMemberKey;
 
   // Reveal the app chrome IMMEDIATELY from the cached session — do NOT wait on any
   // network call. Previously the header + log button were gated behind the auth
