@@ -3369,8 +3369,8 @@ function _postAuthorRowHTML(p, pt, timeAgo, extraHtml) {
     : "";
   return `
     <div class="post-author-row">
-      <a href="/profile.html?u=${encodeURIComponent(p.email)}" class="post-author-link" data-member-email="${escHtml(p.email || "")}" onclick="event.stopPropagation()">
-        ${avatarHtml(p.email, p.name, 36, p.avatarUrl)}
+      <a href="/profile.html?k=${encodeURIComponent(p.member_key || "")}" class="post-author-link" data-member-key="${escHtml(p.member_key || "")}" onclick="event.stopPropagation()">
+        ${avatarHtml(null, p.name, 36, p.avatarUrl, { key: p.member_key, pal: p.memberPal })}
         <span class="post-author-meta">
           <span class="post-author-name-line"><span class="post-author-name">${name}</span>${roleStar}</span>
           <span class="post-author-time">${timeAgo}${p.edited_at ? ' · <span class="post-edited-marker">edited</span>' : ""}</span>
@@ -3394,7 +3394,7 @@ function commMemberDirectory() {
   if (!_commDirPromise) {
     _commDirPromise = db.rpc("member_directory").then(r => {
       const m = {};
-      (r && r.data || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, pal: x.pal }; });
+      (r && r.data || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, pal: x.pal, badge: x.badge || null }; });
       return m;
     }, () => ({}));
   }
@@ -6792,7 +6792,6 @@ async function _hydratePosts(rows) {
     if (r.avatar_url) avatarUrlMap[r.email] = r.avatar_url;
     if (r.badge)      badgeMap[r.email]     = r.badge;
     if (r.name)       nameFromDbMap[r.email] = r.name;
-    if (r.member_key) _commLikerAvatarMap[r.member_key] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0], pal: commPalIndex(r.email) };
   });
 
   // Build _commRxLikersMap: emoji reactions (activity_reactions) + heart likes (community_post_likes)
@@ -6821,6 +6820,9 @@ async function _hydratePosts(rows) {
     }
   }
 
+  /* Every post author's identity, so a card can be drawn from a key alone:
+     the colour their address used to hash to now comes from the server. */
+  const _authorDir = await commMemberDirectory();
   let out = rows.map(p => {
     const rxData = _postRxMap[p.id] || {};
     let myEmoji = null, totalReactions = 0;
@@ -6837,6 +6839,7 @@ async function _hydratePosts(rows) {
       poll:           pollMap[p.id]         || null,
       avatarUrl:      avatarUrlMap[p.email] || null,
       badge:          badgeMap[p.email]     || null,
+      memberPal:      (p.member_key && _authorDir[p.member_key]) ? _authorDir[p.member_key].pal : null,
       myEmoji,
       totalReactions
     };
