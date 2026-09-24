@@ -2397,6 +2397,7 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
 });
 
 let myEmail = "";
+let myMemberKey = null;   // your own key: the score tables are read by key now
 let myName  = "";
 // Globals required by shared-achievements.js (engine reads these at call-time)
 let allSessions = [];
@@ -4814,7 +4815,7 @@ async function nrSaveScore() {
   // Look up the user's previous best so we can fire a "new personal best"
   // notification to the owner if this score beats it.
   const { data: prevRows } = await db.from("note_game_scores")
-    .select("score").eq("email", myEmail).order("score", { ascending: false }).limit(1);
+    .select("score").eq("member_key", myMemberKey).order("score", { ascending: false }).limit(1);
   const prevBest = prevRows?.[0]?.score ?? -1;
 
   const { error } = await db.from("note_game_scores").insert({
@@ -6431,7 +6432,7 @@ async function crSaveScore() {
     const lowerEmail = myEmail.toLowerCase();
     // Check previous best for PB-triggered owner notification.
     const { data: prevRows } = await db.from("chord_game_scores")
-      .select("score").eq("email", lowerEmail).order("score", { ascending: false }).limit(1);
+      .select("score").eq("member_key", myMemberKey).order("score", { ascending: false }).limit(1);
     const prevBest = prevRows?.[0]?.score ?? -1;
 
     await db.from("chord_game_scores").insert({
@@ -6512,19 +6513,21 @@ async function crLoadLeaderboard(rowsElId) {
   try {
     // Filter server-side so the 500-row limit applies to THIS board, not the global top
     // scores (a sparse board would otherwise be truncated below the cutoff and show empty).
-    let q = db.from("chord_game_scores")
-      .select("email,name,score,clef,tier,mode,key_signature,attempts")
-      .eq("tier",crGetTier()).eq("clef",crClef).eq("mode",crMode);
-    if (crMode==="key") q = q.eq("key_signature",crKeyId);
-    const {data,error} = await q.order("score",{ascending:false}).limit(500);
+    /* Served by the database now: a member can only read their own scores, so
+       the page cannot build this board itself. Same filtering, same ordering,
+       same 500-row limit, and no addresses. */
+    const {data,error} = await db.rpc("chord_board", {
+      p_tier: crGetTier(), p_clef: crClef, p_mode: crMode,
+      p_key_signature: crMode==="key" ? crKeyId : null,
+    });
     if (error||!data){el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>'; return;}
     const best={};
-    data.forEach(r=>{if(!best[r.email]||r.score>best[r.email].score)best[r.email]=r;});
+    data.forEach(r=>{if(!r.member_key)return; if(!best[r.member_key]||r.score>best[r.member_key].score)best[r.member_key]=r;});
     const rows=Object.values(best).sort((a,b)=>b.score-a.score).slice(0,10);
     if(!rows.length){el.innerHTML=cap+'<div class="nr-lb-empty">No scores yet. Be first!</div>'; return;}
     el.innerHTML=cap+rows.map((r,i)=>{
-      const mine=r.email===myEmail.toLowerCase();
-      return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||r.email.split("@")[0])}</span><span class="nr-lb-score">${r.score}</span></div>`;
+      const mine=r.member_key===myMemberKey;
+      return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||"Member")}</span><span class="nr-lb-score">${r.score}</span></div>`;
     }).join("");
   } catch(e){el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>';}
 }
@@ -7033,7 +7036,7 @@ async function etSaveScore(){
   if(!myEmail) return;
   try{
     const lower=myEmail.toLowerCase();
-    const { data:prev } = await db.from("ear_game_scores").select("score").eq("email",lower).order("score",{ascending:false}).limit(1);
+    const { data:prev } = await db.from("ear_game_scores").select("score").eq("member_key",myMemberKey).order("score",{ascending:false}).limit(1);
     const prevBest = prev?.[0]?.score ?? -1;
     await db.from("ear_game_scores").insert({
       email:lower, name:myName||null, score:etScore,
@@ -7095,16 +7098,16 @@ async function etLoadLeaderboard(rowsElId){
   try{
     // Filter server-side (incl. scope/key) so the 500-row limit applies to THIS board,
     // not the global top scores — otherwise a sparse board is truncated and shows empty.
-    let q=db.from("ear_game_scores")
-      .select("email,name,score,answer_type,chord_set,key_signature,attempts")
-      .eq("answer_type",etAnswerType).eq("chord_set",etChordSet);
-    q = etScope==="key" ? q.eq("key_signature",etKeyId) : q.is("key_signature",null);
-    const {data,error}=await q.order("score",{ascending:false}).limit(500);
+    /* Served by the database now, for the same reason as the chord board. */
+    const {data,error}=await db.rpc("ear_board", {
+      p_answer_type: etAnswerType, p_chord_set: etChordSet,
+      p_key_signature: etScope==="key" ? etKeyId : null,
+    });
     if(error||!data){ if(!hadRows) el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>'; return; }
-    const best={}; data.forEach(r=>{ if(!best[r.email]||r.score>best[r.email].score) best[r.email]=r; });
+    const best={}; data.forEach(r=>{ if(!r.member_key)return; if(!best[r.member_key]||r.score>best[r.member_key].score) best[r.member_key]=r; });
     const rows=Object.values(best).sort((a,b)=>b.score-a.score).slice(0,10);
     el.innerHTML = cap + (rows.length
-      ? rows.map((r,i)=>{ const mine=r.email===myEmail.toLowerCase(); return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||r.email.split("@")[0])}</span><span class="nr-lb-score">${r.score}</span></div>`; }).join("")
+      ? rows.map((r,i)=>{ const mine=r.member_key===myMemberKey; return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||"Member")}</span><span class="nr-lb-score">${r.score}</span></div>`; }).join("")
       : '<div class="nr-lb-empty">No scores yet. Be first!</div>');
   }catch(e){ if(!hadRows) el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>'; }
   finally{ _etLbInFlight[rowsElId]=false; }
@@ -7524,7 +7527,7 @@ async function itSaveScore(){
   if(!myEmail) return;
   try{
     const lower=myEmail.toLowerCase();
-    const { data:prev } = await db.from("interval_game_scores").select("score").eq("email",lower).order("score",{ascending:false}).limit(1);
+    const { data:prev } = await db.from("interval_game_scores").select("score").eq("member_key",myMemberKey).order("score",{ascending:false}).limit(1);
     const prevBest = prev?.[0]?.score ?? -1;
     await db.from("interval_game_scores").insert({
       email:lower, name:myName||null, score:itScore,
@@ -7625,6 +7628,10 @@ document.addEventListener("DOMContentLoaded", function() {
   if (!session) { window.location.href = "/"; return; }
 
   myEmail = session.user.email;
+  try {
+    const { data: _pr } = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr[0] && _pr[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
   const { data: ae } = await db.from("allowed_emails")
     .select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName = (ae && ae.name) || myEmail.split("@")[0];

@@ -787,6 +787,12 @@ let _achExtras = {
 async function loadAchievementExtras() {
   const email = (typeof viewingEmail !== "undefined" && viewingEmail) || myEmail;
   const isOwn = email === myEmail;
+  /* The same person, by key. The score tables are read by key now, so this no
+     longer has to name anybody by address to ask for their own numbers. Both
+     pages that use this define these; the fallback keeps it safe if one does
+     not yet. */
+  const memberKey = (typeof viewingMemberKey !== "undefined" && viewingMemberKey)
+    || (typeof myMemberKey !== "undefined" ? myMemberKey : null);
 
   const [readResult, gamesResult, colResult, nrResult, crResult, earResult, itResult] = await Promise.all([
     isOwn
@@ -798,11 +804,10 @@ async function loadAchievementExtras() {
     isOwn
       ? db.from("user_collections").select("piece_id, status").eq("email", email)
       : db.rpc("get_user_collection", { p_email: email }),
-    db.from("note_game_scores").select("score,clef,accidentals,key_signature").eq("email", email),
-    // Chord game scores are stored with a lowercased email and are world-readable.
-    db.from("chord_game_scores").select("score,clef,mode").eq("email", (email || "").toLowerCase()),
-    db.from("ear_game_scores").select("score,answer_type,chord_set,key_signature").eq("email", (email || "").toLowerCase()),
-    db.from("interval_game_scores").select("score,side,tier,key_mode").eq("email", (email || "").toLowerCase())
+    db.from("note_game_scores").select("score,clef,accidentals,key_signature").eq("member_key", memberKey),
+    db.from("chord_game_scores").select("score,clef,mode").eq("member_key", memberKey),
+    db.from("ear_game_scores").select("score,answer_type,chord_set,key_signature").eq("member_key", memberKey),
+    db.from("interval_game_scores").select("score,side,tier,key_mode").eq("member_key", memberKey)
   ]);
 
   const readRows  = readResult.data  || [];
