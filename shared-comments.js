@@ -979,25 +979,28 @@
       if(picker){picker.style.display="none";} _openPicker=null;
 
       const auth=_auth();
+      /* Your reaction row, found by key: one row per person per thing, which is
+         what the key pair indexes say too. */
+      const myKey=await _myMemberKey();
       if(wasPicked){
         const d=_rxState[parentId][emoji];
         if(d){d.mine=false;d.count=Math.max(0,d.count-1);}
         _refreshReactBtn(parentId,safeKey);
         _cfg?.onReactionChange?.(parentId);
-        await _db().from(_rTable()).delete().eq(_rParent(),parentId).eq("email",auth.email);
+        await _db().from(_rTable()).delete().eq(_rParent(),parentId).eq("member_key",myKey);
         return;
       }
       if(existingEmoji){
         const d=_rxState[parentId][existingEmoji];
         if(d){d.mine=false;d.count=Math.max(0,d.count-1);}
-        await _db().from(_rTable()).delete().eq(_rParent(),parentId).eq("email",auth.email);
+        await _db().from(_rTable()).delete().eq(_rParent(),parentId).eq("member_key",myKey);
       }
       if(!_rxState[parentId][emoji]) _rxState[parentId][emoji]={count:0,mine:false};
       _rxState[parentId][emoji].mine=true;
       _rxState[parentId][emoji].count++;
       _refreshReactBtn(parentId,safeKey);
       _cfg?.onReactionChange?.(parentId);
-      await _db().from(_rTable()).upsert({[_rParent()]:parentId,email:auth.email,emoji},{onConflict:`${_rParent()},email`});
+      await _db().from(_rTable()).upsert({[_rParent()]:parentId,email:auth.email,member_key:myKey,emoji},{onConflict:`${_rParent()},member_key`});
       // Notify the owner that someone reacted (skip self).
       const _rxOwner = await _ownerOf(parentId);
       if (_rxOwner
@@ -1082,7 +1085,7 @@
           const [{data:cOpts},{data:cAllVotes},{data:cMyVotes}]=await Promise.all([
             _db().from("tc_comment_poll_options").select("id,poll_id,label,position").in("poll_id",pollIds).order("position"),
             _db().from("tc_comment_poll_votes").select("poll_id,option_id").in("poll_id",pollIds),
-            _db().from("tc_comment_poll_votes").select("poll_id,option_id").eq("email",auth.email).in("poll_id",pollIds),
+            _db().from("tc_comment_poll_votes").select("poll_id,option_id").eq("member_key",await _myMemberKey()).in("poll_id",pollIds),
           ]);
           cPollRows.forEach(p=>{
             const opts=(cOpts||[]).filter(o=>o.poll_id===p.id);
@@ -1341,6 +1344,9 @@
       _cmtOpenPicker = null;
 
       const auth   = _auth();
+      /* Your own row on the reactions table, found by key. Resolved before the
+         first write so all three branches below name the same person. */
+      const myKey  = await _myMemberKey();
       const idStr  = String(commentId);
       if (!_cmtRxState[idStr]) _cmtRxState[idStr] = {};
       const data   = _cmtRxState[idStr];
@@ -1353,13 +1359,13 @@
         if (data[emoji]) { data[emoji].mine = false; data[emoji].count = Math.max(0, data[emoji].count - 1); }
         _cmtRefreshBtn(safeKey, idStr);
         await _db().from("activity_reactions").delete()
-          .eq("email", auth.email).eq("event_type", eventType).eq("item_id", idStr).eq("emoji", emoji);
+          .eq("member_key", myKey).eq("event_type", eventType).eq("item_id", idStr).eq("emoji", emoji);
         return;
       }
       if (existingEm) {
         if (data[existingEm]) { data[existingEm].mine = false; data[existingEm].count = Math.max(0, data[existingEm].count - 1); }
         await _db().from("activity_reactions").delete()
-          .eq("email", auth.email).eq("event_type", eventType).eq("item_id", idStr).eq("emoji", existingEm);
+          .eq("member_key", myKey).eq("event_type", eventType).eq("item_id", idStr).eq("emoji", existingEm);
       }
       pickerBtn.classList.add("picked");
       if (!data[emoji]) data[emoji] = { count: 0, mine: false };
@@ -1367,7 +1373,7 @@
       data[emoji].count++;
       _cmtRefreshBtn(safeKey, idStr);
       await _db().from("activity_reactions")
-        .insert({ email: auth.email, event_type: eventType, item_id: idStr, emoji });
+        .insert({ email: auth.email, member_key: myKey, event_type: eventType, item_id: idStr, emoji });
 
       // Notify the comment author (skip self). Resolve the author straight from
       // the DB so a missing client-side meta entry (e.g. reacting to a reply
@@ -1743,14 +1749,15 @@
   window.tcCastCommentPollVote = async function(pollId, optionId, parentId) {
     const auth=_auth();
     // Tap your current choice (or "Clear my vote") to remove it; otherwise (re)cast.
-    const {data:existing}=await _db().from("tc_comment_poll_votes").select("option_id").eq("poll_id",pollId).eq("email",auth.email).maybeSingle();
+    const myKey=await _myMemberKey();
+    const {data:existing}=await _db().from("tc_comment_poll_votes").select("option_id").eq("poll_id",pollId).eq("member_key",myKey).maybeSingle();
     if(existing && existing.option_id===optionId){
-      const {error}=await _db().from("tc_comment_poll_votes").delete().eq("poll_id",pollId).eq("email",auth.email);
+      const {error}=await _db().from("tc_comment_poll_votes").delete().eq("poll_id",pollId).eq("member_key",myKey);
       if(error){alert("Couldn't update vote: "+error.message);return;}
     } else {
       const {error}=await _db().from("tc_comment_poll_votes").upsert(
-        {poll_id:pollId, option_id:optionId, email:auth.email},
-        {onConflict:"poll_id,email"}
+        {poll_id:pollId, option_id:optionId, email:auth.email, member_key:myKey},
+        {onConflict:"poll_id,member_key"}
       );
       if(error){alert("Couldn't cast vote: "+error.message);return;}
     }
