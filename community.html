@@ -3358,7 +3358,7 @@ const POST_TYPES = {
 // Unified author row used by every post card: avatar + stacked name/time,
 // a subtle role marker (star), and the post-type badge (the key intent signal).
 function _postAuthorRowHTML(p, pt, timeAgo, extraHtml) {
-  const name = escHtml(p.name || (p.email ? p.email.split("@")[0] : "Member"));
+  const name = escHtml(p.name || "Member");
   const _badgeTip = String(p.badge || "").replace(/^[^\p{L}\p{N}]+/u, "").trim() || "Member";
   const roleStar = p.badge
     ? `<span class="post-author-role" data-tip="${escHtml(_badgeTip)}"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 7.1-1.01L12 2z"/></svg></span>`
@@ -3390,6 +3390,7 @@ let myEmail     = null;
 let myMemberKey = null;
 let _commDirPromise = null;
 let _commDirNow = {};   // the resolved directory, for synchronous renderers
+let _commOwnerKey = null;   // the owner's key, so his own cards need no address
 function commMemberDirectory() {
   if (!_commDirPromise) {
     _commDirPromise = db.rpc("member_directory").then(r => {
@@ -3537,11 +3538,11 @@ let _feedItems = []; // all feed rows for detail view lookup
          whose post it was nothing at all, which is why replies stopped reaching
          people on 29 August. The feed is checked first, then the database, so a
          post opened from a notification or a link still resolves. */
-      ownerEmailFn: async (postId) => {
+      ownerKeyFn: async (postId) => {
         const local = (_posts || []).find(p => String(p.id) === String(postId));
-        if (local?.email) return local.email;
-        const { data } = await db.from("community_posts").select("email").eq("id", postId).maybeSingle();
-        return data?.email || null;
+        if (local?.member_key) return local.member_key;
+        const { data } = await db.from("community_posts").select("member_key").eq("id", postId).maybeSingle();
+        return data?.member_key || null;
       },
       ownerNotifyTitleFn:   (name) => `${name} commented on your post`,
       ownerReactionTitleFn: (name, emoji) => `${name} reacted ${emoji} to your post`,
@@ -4363,7 +4364,7 @@ function _railTrendingCardHTML() {
     const pt = POST_TYPES[p.type] || POST_TYPES.post;
     const snippet = (p.title && p.title.trim()) || (p.content || "").replace(/\s+/g, " ").trim() || pt.label;
     const hearts = (p.likeCount || 0) + (p.totalReactions || 0);
-    const who = escHtml(p.name || (p.email ? p.email.split("@")[0] : "Member"));
+    const who = escHtml(p.name || "Member");
     const eng = [
       hearts ? `<span class="rail-meta-stat">${_RAIL_SVG.heart}${hearts}</span>` : "",
       p.commentCount ? `<span class="rail-meta-stat">${_RAIL_SVG.comment}${p.commentCount}</span>` : "",
@@ -6286,7 +6287,8 @@ async function _renderCfComments(postId) {
   _cfCommentsLoaded.add(postId);
   el.innerHTML = `<div style="padding:0 20px;color:var(--text-muted);font-size:.85rem">Loading…</div>`;
   const { data: comments } = await db.from("content_feed_comments")
-    .select("*").eq("post_id", postId).is("parent_comment_id", null)
+    .select("id,post_id,member_key,name,content,created_at,parent_comment_id")
+    .eq("post_id", postId).is("parent_comment_id", null)
     .order("created_at", { ascending: true });
   const list = (comments || []).map(c => {
     const cname = c.name || "Member";
@@ -6739,7 +6741,7 @@ async function _hydratePosts(rows) {
   });
 
   const likeCountMap    = {};
-  const likersMap       = {}; // post_id → [email, ...]  (up to 3)
+  const likersMap       = {}; // post_id → [member key, ...]  (up to 3)
   const commentCountMap = {};
   const pollMap         = {};
   const myLikeSet       = new Set((myLikes || []).map(l => l.post_id));
@@ -6747,7 +6749,7 @@ async function _hydratePosts(rows) {
   (allLikes || []).forEach(l => {
     likeCountMap[l.post_id] = (likeCountMap[l.post_id] || 0) + 1;
     if (!likersMap[l.post_id]) likersMap[l.post_id] = [];
-    if (likersMap[l.post_id].length < 3) likersMap[l.post_id].push(l.email);
+    if (likersMap[l.post_id].length < 3) likersMap[l.post_id].push(l.member_key);
   });
   (commentCounts|| []).forEach(c => commentCountMap[c.post_id] = (commentCountMap[c.post_id] || 0) + 1);
   (polls        || []).forEach(p => pollMap[p.post_id]         = { id: p.id, question: p.question });
@@ -6758,7 +6760,7 @@ async function _hydratePosts(rows) {
     const [{ data: optRows }, { data: voteRows }, { data: myVoteRows }] = await Promise.all([
       db.from("community_post_poll_options").select("id,poll_id,label,position").in("poll_id", pollIds).order("position"),
       db.from("community_post_poll_votes").select("poll_id,option_id").in("poll_id", pollIds),
-      db.from("community_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", pollIds)
+      db.from("community_post_poll_votes").select("poll_id,option_id").eq("member_key", myMemberKey).in("poll_id", pollIds)
     ]);
     const optsByPoll = {}, voteCountsByPoll = {}, totalByPoll = {}, myVoteByPoll = {};
     (optRows     || []).forEach(o => { (optsByPoll[o.poll_id] = optsByPoll[o.poll_id] || []).push(o); });
@@ -6777,10 +6779,9 @@ async function _hydratePosts(rows) {
     });
   }
 
-  /* Post authors' pictures, badges and names, from the directory by key. The
-     maps stay keyed by address because the post objects below are looked up
-     that way. Reactors and likers are resolved from the directory separately,
-     just below, so they no longer need fetching here either. */
+  /* Post authors' pictures, badges and names, from the directory, keyed the
+     way the posts themselves are. Reactors and likers are resolved from the
+     directory separately, just below. */
   const _hydrateDir   = await commMemberDirectory();
   const avatarUrlMap  = _avatarUrlMap;   // merged into, not replaced
   const badgeMap      = _badgeMap;
@@ -6789,16 +6790,18 @@ async function _hydratePosts(rows) {
   rows.forEach(p => {
     const info = p.member_key && _hydrateDir[p.member_key];
     if (!info) return;
-    if (info.url)   avatarUrlMap[p.email]  = info.url;
-    if (info.badge) badgeMap[p.email]      = info.badge;
-    if (info.name)  nameFromDbMap[p.email] = info.name;
+    if (info.url)   avatarUrlMap[p.member_key]  = info.url;
+    if (info.badge) badgeMap[p.member_key]      = info.badge;
+    if (info.name)  nameFromDbMap[p.member_key] = info.name;
   });
   /* The content feed cards show the owner. The directory says which entry is
-     his, so the page does not have to look him up by address. */
-  const _ownerInfo = Object.values(_hydrateDir).find(x => x && x.isOwner);
-  if (_ownerInfo) {
-    if (_ownerInfo.url)  avatarUrlMap['matthew@matthewcawood.com']  = _ownerInfo.url;
-    if (_ownerInfo.name) nameFromDbMap['matthew@matthewcawood.com'] = _ownerInfo.name;
+     his, and his key is how the maps hold him, the same as everybody else. */
+  const _ownerEntry = Object.entries(_hydrateDir).find(([, x]) => x && x.isOwner);
+  if (_ownerEntry) {
+    const [_ok, _oi] = _ownerEntry;
+    _commOwnerKey = _ok;
+    if (_oi.url)  avatarUrlMap[_ok]  = _oi.url;
+    if (_oi.name) nameFromDbMap[_ok] = _oi.name;
   }
 
   // Build _commRxLikersMap: emoji reactions (activity_reactions) + heart likes (community_post_likes)
@@ -6844,8 +6847,8 @@ async function _hydratePosts(rows) {
       iLiked:         myLikeSet.has(p.id),
       likers:         likersMap[p.id]       || [],
       poll:           pollMap[p.id]         || null,
-      avatarUrl:      avatarUrlMap[p.email] || null,
-      badge:          badgeMap[p.email]     || null,
+      avatarUrl:      avatarUrlMap[p.member_key] || null,
+      badge:          badgeMap[p.member_key]     || null,
       memberPal:      (p.member_key && _authorDir[p.member_key]) ? _authorDir[p.member_key].pal : null,
       myEmoji,
       totalReactions
@@ -7073,8 +7076,8 @@ async function loadPosts() {
     }
   }
 
-  const _matthewAvatar = _avatarUrlMap['matthew@matthewcawood.com'] || null;
-  const _matthewName   = _nameFromDbMap['matthew@matthewcawood.com'] || 'Matthew Cawood';
+  const _matthewAvatar = (_commOwnerKey && _avatarUrlMap[_commOwnerKey]) || null;
+  const _matthewName   = (_commOwnerKey && _nameFromDbMap[_commOwnerKey]) || 'Matthew Cawood';
   _contentFeedItems = cfPosts.map(p => {
     const rxData = _cfRxMap[p.id] || {};
     let myEmoji = null, totalReactions = 0;
@@ -7240,7 +7243,7 @@ function postCardHTML(p) {
   const _champ = (Array.isArray(p.media) ? p.media : []).find(m => m && m.type === "champions");
   if (_champ) return championsCardHTML(p, _champ);
   const pt      = POST_TYPES[p.type] || POST_TYPES.post;
-  const name    = escHtml(p.name || p.email.split("@")[0]);
+  const name    = escHtml(p.name || "Member");
   const timeAgo = relativeTime(p.created_at);
   const PREVIEW = 200;
   const content = p.content || "";
@@ -7707,7 +7710,7 @@ function _plInitCollapse() {
 }
 
 function practiceLogCardHTML(p) {
-  const name    = escHtml(p.name || p.email.split("@")[0]);
+  const name    = escHtml(p.name || "Member");
   const timeAgo = relativeTime(p.created_at);
   const safeKey = 'post_' + p.id.replace(/-/g,'_');
   const avatarHtml = p.avatarUrl
@@ -8140,7 +8143,7 @@ function renderDetail(postId) {
   }
 
   const pt     = POST_TYPES[p.type] || POST_TYPES.post;
-  const name   = escHtml(p.name || p.email.split("@")[0]);
+  const name   = escHtml(p.name || "Member");
 
   const isOwner   = p.email === myEmail;
   const canDelete = isAdmin || isOwner;
@@ -8200,7 +8203,7 @@ function renderDetail(postId) {
   }
 
   // Poll placeholder — loaded async
-  const pollPlaceholder = p.poll ? `<div id="detail-poll-area" data-poll-id="${escHtml(p.poll.id)}" data-author-email="${escHtml(p.email)}"><div style="text-align:center;padding:16px 0;color:var(--text-muted);font-size:.82rem"><div class="loading-spinner" style="margin:0 auto 8px;width:18px;height:18px"></div>Loading poll…</div></div>` : "";
+  const pollPlaceholder = p.poll ? `<div id="detail-poll-area" data-poll-id="${escHtml(p.poll.id)}" data-author-key="${escHtml(p.member_key || "")}"><div style="text-align:center;padding:16px 0;color:var(--text-muted);font-size:.82rem"><div class="loading-spinner" style="margin:0 auto 8px;width:18px;height:18px"></div>Loading poll…</div></div>` : "";
 
   // Structured practice log session card for detail view
   const sessionDetailHtml = p.type === "practice_log" ? _practiceLogSessionBodyHTML(p, true) : "";
@@ -8261,24 +8264,24 @@ async function loadPollDetail(pollId) {
   // Fetch options + votes in parallel
   const [{ data: opts }, { data: votes }, { data: pollRow }] = await Promise.all([
     db.from("community_post_poll_options").select("id,label,position").eq("poll_id", pollId).order("position"),
-    db.from("community_post_poll_votes").select("option_id,email").eq("poll_id", pollId),
+    db.from("community_post_poll_votes").select("option_id,member_key").eq("poll_id", pollId),
     db.from("community_post_polls").select("question").eq("id", pollId).single()
   ]);
 
   if (!opts || !pollRow) { area.innerHTML = ""; return; }
 
   const totalVotes = (votes || []).length;
-  const myVote     = (votes || []).find(v => v.email === myEmail);
+  const myVote     = (votes || []).find(v => v.member_key === myMemberKey);
   const myOptId    = myVote ? myVote.option_id : null;
   const voteCountMap = {};
   (votes || []).forEach(v => { voteCountMap[v.option_id] = (voteCountMap[v.option_id] || 0) + 1; });
 
-  const authorEmail = area.dataset.authorEmail || "";
-  _renderPollUI(area, pollId, pollRow.question, opts, voteCountMap, myOptId, totalVotes, authorEmail);
+  const authorKey = area.dataset.authorKey || "";
+  _renderPollUI(area, pollId, pollRow.question, opts, voteCountMap, myOptId, totalVotes, authorKey);
 }
 
-function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail) {
-  const hasVoted = !!myOptId || (!!authorEmail && authorEmail === myEmail);
+function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, totalVotes, authorKey) {
+  const hasVoted = !!myOptId || (!!authorKey && authorKey === myMemberKey);
   let html = `<div class="poll-card">
     <div class="poll-card-question">${escHtml(question)}</div>`;
 
@@ -8313,9 +8316,11 @@ function _renderPollUI(area, pollId, question, opts, voteCountMap, myOptId, tota
 }
 
 // Returns poll HTML string — used for comment/reply polls and shared by _renderPollUI
-function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail, voteFn) {
+function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorKey, voteFn) {
   voteFn = voteFn || "castCommentVote"; // activity-feed comments pass "castActivityCommentVote"
-  const hasVoted = !!myOptId || (!!authorEmail && authorEmail === myEmail);
+  /* Whoever wrote the poll sees the result without voting on it. Which person
+     that is, is a key now, same as everywhere else on the page. */
+  const hasVoted = !!myOptId || (!!authorKey && authorKey === myMemberKey);
   let html = `<div class="poll-card"><div class="poll-card-question">${escHtml(question)}</div>`;
   if (!hasVoted) {
     html += opts.map(o =>
@@ -8341,8 +8346,8 @@ function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVo
 
 async function castCommentVote(pollId, optionId) {
   const { error } = await db.from("community_post_poll_votes").upsert(
-    { poll_id: pollId, option_id: optionId, email: myEmail },
-    { onConflict: "poll_id,email" }
+    { poll_id: pollId, option_id: optionId, email: myEmail, member_key: myMemberKey },
+    { onConflict: "poll_id,member_key" }
   );
   if (error) { alert("Couldn't cast vote: " + error.message); return; }
   if (_currentPostId) await loadComments(_currentPostId);
@@ -8374,8 +8379,8 @@ async function changeDetailVote(pollId) {
 
 async function castVote(pollId, optionId) {
   const { error } = await db.from("community_post_poll_votes").upsert({
-    poll_id: pollId, option_id: optionId, email: myEmail
-  }, { onConflict: "poll_id,email" });
+    poll_id: pollId, option_id: optionId, email: myEmail, member_key: myMemberKey
+  }, { onConflict: "poll_id,member_key" });
   if (error) { alert("Couldn't cast vote: " + error.message); return; }
   await loadPollDetail(pollId);
 }
@@ -8393,21 +8398,21 @@ async function castCardVote(pollId, optionId, postId) {
   // Tap your current choice (or "Clear my vote") to remove it; otherwise (re)cast.
   const removing = post?.poll?.myVote === optionId;
   if (removing) {
-    const { error } = await db.from("community_post_poll_votes").delete().eq("poll_id", pollId).eq("email", myEmail);
+    const { error } = await db.from("community_post_poll_votes").delete().eq("poll_id", pollId).eq("member_key", myMemberKey);
     if (error) { alert("Couldn't update vote: " + error.message); return; }
   } else {
     const { error } = await db.from("community_post_poll_votes").upsert({
-      poll_id: pollId, option_id: optionId, email: myEmail
-    }, { onConflict: "poll_id,email" });
+      poll_id: pollId, option_id: optionId, email: myEmail, member_key: myMemberKey
+    }, { onConflict: "poll_id,member_key" });
     if (error) { alert("Couldn't cast vote: " + error.message); return; }
   }
   if (post?.poll) {
-    const { data: votes } = await db.from("community_post_poll_votes").select("option_id,email").eq("poll_id", pollId);
+    const { data: votes } = await db.from("community_post_poll_votes").select("option_id,member_key").eq("poll_id", pollId);
     const voteCounts = {};
     (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
     post.poll.voteCounts  = voteCounts;
     post.poll.totalVotes  = (votes || []).length;
-    post.poll.myVote      = (votes || []).find(v => v.email === myEmail)?.option_id || null;
+    post.poll.myVote      = (votes || []).find(v => v.member_key === myMemberKey)?.option_id || null;
     // Re-render just this card
     const cardEl = document.querySelector(`[onclick*="showDetail('${postId}')"]`);
     if (cardEl) cardEl.outerHTML = postCardHTML(post);
@@ -8570,9 +8575,11 @@ async function loadComments(postId) {
   const hdrEl  = document.getElementById("comments-hdr");
   listEl.innerHTML = '<div class="comments-empty"><div class="loading-spinner" style="margin:0 auto 8px;width:18px;height:18px"></div></div>';
 
+  /* Named columns, not everything: who wrote a comment is its member_key and
+     the page has no use for anybody's address. */
   const { data: comments, error } = await db
     .from("community_post_comments")
-    .select("*")
+    .select("id,post_id,member_key,name,content,created_at,parent_comment_id,reply_to_name,media,edited_at")
     .eq("post_id", postId)
     .order("created_at", { ascending: true });
 
@@ -8599,13 +8606,12 @@ async function loadComments(postId) {
 
   if (!count) { listEl.innerHTML = '<div class="comments-empty">No comments yet — be the first!</div>'; return; }
 
-  /* Comment authors' pictures, from the directory by key. Still keyed by
-     address so the rendering below is untouched. */
+  /* Comment authors' pictures, from the directory, keyed as the comments are. */
   const _cmtDir = await commMemberDirectory();
   const cmtAvatarMap = {};
   comments.forEach(c => {
     const info = c.member_key && _cmtDir[c.member_key];
-    if (info && info.url) cmtAvatarMap[c.email] = info.url;
+    if (info && info.url) cmtAvatarMap[c.member_key] = info.url;
   });
 
   // Pre-load any existing reactions on these comments so the heart buttons
@@ -8614,8 +8620,8 @@ async function loadComments(postId) {
   // Track each comment's author + link target so reaction handlers can fire
   // notifications.
   comments.forEach(c => _registerCommentMeta("community_comment", c.id, {
-    email:    c.email,
-    name:     c.name || c.email.split("@")[0],
+    key:      c.member_key,
+    name:     c.name || "Member",
     link_url: `/community.html?post=${postId}`,
   }));
 
@@ -8629,7 +8635,7 @@ async function loadComments(postId) {
     const [{ data: cOpts }, { data: cAllVotes }, { data: cMyVotes }] = await Promise.all([
       db.from("community_post_poll_options").select("id,poll_id,label,position").in("poll_id", pollIds).order("position"),
       db.from("community_post_poll_votes").select("poll_id,option_id").in("poll_id", pollIds),
-      db.from("community_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", pollIds),
+      db.from("community_post_poll_votes").select("poll_id,option_id").eq("member_key", myMemberKey).in("poll_id", pollIds),
     ]);
     cPollRows.forEach(p => {
       const opts = (cOpts || []).filter(o => o.poll_id === p.id);
@@ -8655,15 +8661,16 @@ async function loadComments(postId) {
     (repliesMap[root] = repliesMap[root] || []).push(c);
   });
 
-  function commentPollHtml(commentId, authorEmail) {
+  function commentPollHtml(commentId, authorKey) {
     const p = pollByComment[commentId];
     if (!p) return "";
-    return _commentPollHtml(p.pollId, p.question, p.opts, p.voteCountMap, p.myOptId, p.totalVotes, authorEmail);
+    return _commentPollHtml(p.pollId, p.question, p.opts, p.voteCountMap, p.myOptId, p.totalVotes, authorKey);
   }
 
   function commentHTML(c, isReply = false, threadId = null) {
-    const canDel   = isAdmin || c.email === myEmail;
-    const dispName = escHtml(c.name || c.email.split("@")[0]);
+    const isMine   = !!(c.member_key && c.member_key === myMemberKey);
+    const canDel   = isAdmin || isMine;
+    const dispName = escHtml(c.name || "Member");
     const rootId   = threadId || c.id;
     const replyPrefix = (isReply && c.reply_to_name)
       ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
@@ -8671,7 +8678,7 @@ async function loadComments(postId) {
     return `
       <div class="comment-item${isReply ? " is-reply" : ""}" id="comment-${c.id}">
         <a href="/profile.html?k=${encodeURIComponent(c.member_key || "")}" style="display:contents;text-decoration:none">
-          ${avatarHtml(null, c.name, 28, cmtAvatarMap[c.email] || null, { key: c.member_key, pal: (_commDirNow[c.member_key] || {}).pal })}
+          ${avatarHtml(null, c.name, 28, cmtAvatarMap[c.member_key] || null, { key: c.member_key, pal: (_commDirNow[c.member_key] || {}).pal })}
         </a>
         <div class="comment-body">
           <div class="comment-meta">
@@ -8679,13 +8686,13 @@ async function loadComments(postId) {
             <span class="comment-time">${relativeTime(c.created_at)}</span>
             ${c.edited_at ? `<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>` : ""}
             <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
-              ${c.email === myEmail ? `<button onclick="editCommunityComment('${c.id}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>` : ""}
+              ${isMine ? `<button onclick="editCommunityComment('${c.id}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>` : ""}
               ${canDel ? `<button onclick="deleteComment('${c.id}','${postId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>` : ""}
             </span>
           </div>
           ${c.content ? `<div class="comment-text">${replyPrefix}${renderUserContent(c.content)}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderCommentMedia(c)}
-          ${commentPollHtml(c.id, c.email)}
+          ${commentPollHtml(c.id, c.member_key)}
           <div class="comment-action-row">
             ${reactBar}
             <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.member_key || ""}')">Reply</button>
@@ -9512,22 +9519,22 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
   // activity feed) — that silent dependency was dropping reply-reaction notifs.
   if (eventType.endsWith("_comment")) {
     const _meta = _getCommentMeta(eventType, itemId);
-    let _authorEmail = _meta?.email;
+    let _authorKey   = _meta?.key || null;
     let _linkUrl     = _meta?.link_url || "/community.html";
     let _isReply     = false;
     {
       const _tbl = { community_comment: "community_post_comments", activity_comment: "activity_comments" }[eventType];
       if (_tbl) {
-        const { data: _crow } = await db.from(_tbl).select("email,parent_comment_id").eq("id", itemId).maybeSingle();
+        const { data: _crow } = await db.from(_tbl).select("member_key,parent_comment_id").eq("id", itemId).maybeSingle();
         if (_crow) {
-          if (!_authorEmail) _authorEmail = _crow.email;
+          if (!_authorKey) _authorKey = _crow.member_key;
           _isReply = !!_crow.parent_comment_id;
         }
       }
     }
-    if (_authorEmail && _authorEmail.toLowerCase() !== myEmail.toLowerCase()) {
+    if (_authorKey && _authorKey !== myMemberKey) {
       await db.from("notifications").insert({
-        email:    _authorEmail,
+        to_member_key: _authorKey,
         type:     "reaction",
         title:    `${myName || "Someone"} reacted ${emoji} to your ${_isReply ? "reply" : "comment"}`,
         body:     "",
@@ -9841,16 +9848,16 @@ async function loadActivityDetailComments(eventType, itemId) {
   listEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:.82rem">Loading…</div>`;
 
   const { data: comments, error } = await db.from("activity_comments")
-    .select("id,email,name,content,created_at,parent_comment_id,reply_to_name,media,edited_at")
+    .select("id,member_key,name,content,created_at,parent_comment_id,reply_to_name,media,edited_at")
     .eq("event_type", eventType).eq("item_id", String(itemId))
     .order("created_at", { ascending: true });
 
-  /* Pictures from the directory by key, same map shape as before. */
+  /* Pictures from the directory, keyed the same way the comments are. */
   const _adDir = await commMemberDirectory();
   const cmtAvatarMap = {};
   (comments||[]).forEach(c=>{
     const info = c.member_key && _adDir[c.member_key];
-    if (info && info.url) cmtAvatarMap[c.email] = info.url;
+    if (info && info.url) cmtAvatarMap[c.member_key] = info.url;
   });
 
   if (error || !comments) { listEl.innerHTML=""; return; }
@@ -9860,8 +9867,8 @@ async function loadActivityDetailComments(eventType, itemId) {
   await _loadCommentReactions("activity_comment", comments.map(c => c.id));
   // Track each comment's author + link target for reaction notifications.
   comments.forEach(c => _registerCommentMeta("activity_comment", c.id, {
-    email:    c.email,
-    name:     c.name || c.email.split("@")[0],
+    key:      c.member_key,
+    name:     c.name || "Member",
     link_url: `/community.html`,
   }));
 
@@ -9907,28 +9914,29 @@ async function loadActivityDetailComments(eventType, itemId) {
   });
 
   function acDetailCmtHTML(c, isReply=false, rootId=null) {
-    const canDel = isAdmin || c.email === myEmail;
-    const dispName = escHtml(c.name || c.email.split("@")[0]);
+    const isMine = !!(c.member_key && c.member_key === myMemberKey);
+    const canDel = isAdmin || isMine;
+    const dispName = escHtml(c.name || "Member");
     const threadId = rootId || c.id;
     const replyPrefix = (isReply && c.reply_to_name) ? `<span class="reply-to-name">@${escHtml(c.reply_to_name)}</span> ` : "";
     const media = c.media || [];
     let mediaHtml = "";
     if (media.length) mediaHtml = _renderCommentMedia(c);
     return `<div class="comment-item${isReply?" is-reply":""}" id="activity-comment-${c.id}">
-      ${avatarHtml(c.email, c.name, 28, cmtAvatarMap[c.email]||null)}
+      ${avatarHtml(null, c.name, 28, cmtAvatarMap[c.member_key]||null, { key: c.member_key, pal: (_adDir[c.member_key] || {}).pal })}
       <div class="comment-body">
         <div class="comment-meta">
           <a href="/profile.html?k=${encodeURIComponent(c.member_key || "")}" data-member-key="${escHtml(c.member_key || "")}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
           <span class="comment-time">${relativeTime(c.created_at)}</span>
           ${c.edited_at?`<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
           <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
-            ${c.email===myEmail?`<button onclick="editActivityComment('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>`:""}
+            ${isMine?`<button onclick="editActivityComment('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>`:""}
             ${canDel?`<button onclick="deleteActivityDetailComment('${c.id}','${eventType}','${String(itemId)}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
           </span>
         </div>
         ${c.content ? `<div class="comment-text">${replyPrefix}${renderUserContent(c.content)}</div>` : (replyPrefix?`<div class="comment-text">${replyPrefix}</div>`:"")}
         ${mediaHtml}
-        ${acPollByComment[c.id] ? _commentPollHtml(acPollByComment[c.id].pollId, acPollByComment[c.id].question, acPollByComment[c.id].opts, acPollByComment[c.id].voteCountMap, acPollByComment[c.id].myOptId, acPollByComment[c.id].totalVotes, c.email, "castActivityCommentVote") : ""}
+        ${acPollByComment[c.id] ? _commentPollHtml(acPollByComment[c.id].pollId, acPollByComment[c.id].question, acPollByComment[c.id].opts, acPollByComment[c.id].voteCountMap, acPollByComment[c.id].myOptId, acPollByComment[c.id].totalVotes, c.member_key, "castActivityCommentVote") : ""}
         <div class="comment-action-row">
           ${_commentReactBarHTML("activity_comment", c.id)}
           <button class="comment-reply-btn" onclick="startActivityDetailReply('${threadId}','${dispName.replace(/'/g,"\\'")}','${c.member_key || ""}','${eventType}','${String(itemId)}')">Reply</button>
