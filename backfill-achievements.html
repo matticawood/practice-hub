@@ -304,14 +304,22 @@ document.getElementById("btn-scan").addEventListener("click", async () => {
   log(`Found ${emails.length} users.`, "dim");
 
   // 2. Get all existing achievement_events
+  /* By key, then translated back through the owner's own key-to-address list,
+     so this page keeps working in addresses while the table stops handing one
+     out. owner_member_emails() answers Matthew and nobody else. */
   log("Fetching existing achievement records…", "dim");
   const { data: allEvents, error: evErr } = await db
-    .from("achievement_events").select("email, achievement_id");
+    .from("achievement_events").select("member_key, achievement_id");
   if (evErr) { log("Error: " + evErr.message, "err"); btn.disabled = false; return; }
+  const { data: ownerMap } = await db.rpc("owner_member_emails");
+  const emailForKey = {};
+  (ownerMap || []).forEach(r => { emailForKey[r.member_key] = r.email; });
   const existingByEmail = {};
   for (const ev of (allEvents || [])) {
-    if (!existingByEmail[ev.email]) existingByEmail[ev.email] = new Set();
-    existingByEmail[ev.email].add(ev.achievement_id);
+    const em = emailForKey[ev.member_key];
+    if (!em) continue;
+    if (!existingByEmail[em]) existingByEmail[em] = new Set();
+    existingByEmail[em].add(ev.achievement_id);
   }
 
   // 3. Get streak tokens for all users (for sv achievements)

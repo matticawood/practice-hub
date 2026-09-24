@@ -1792,13 +1792,26 @@ async function _deleteMembers(emails) {
   // Tables with foreign key constraints on email → allowed_emails.email
   // must be cleared before the parent row can be deleted.
   const fkTables = [
-    "achievement_events",
     "notifications",
     "streak_tokens",
   ];
   for (const table of fkTables) {
     const { error } = await db.from(table).delete().in("email", emails);
     if (error) return error;
+  }
+  /* The badges go by key. Their table no longer hands out an address, so the
+     address column cannot be named in a filter; owner_member_emails() is the
+     owner's own list, which turns these addresses into keys. */
+  {
+    const { data: map } = await db.rpc("owner_member_emails");
+    const lower = emails.map(e => String(e).toLowerCase());
+    const keys = (map || [])
+      .filter(r => lower.includes(String(r.email).toLowerCase()))
+      .map(r => r.member_key);
+    if (keys.length) {
+      const { error } = await db.from("achievement_events").delete().in("member_key", keys);
+      if (error) return error;
+    }
   }
   const { error } = await db.from("allowed_emails").delete().in("email", emails);
   return error || null;
