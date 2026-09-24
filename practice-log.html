@@ -17245,25 +17245,59 @@ async function checkLeaderboardTop3() {
   _setRankCache(newCache);
 }
 
+/* The eight avatar colours. avatarColour() hashes an address into this array;
+   the server hashes it the same way and hands back only the index, so a row
+   that carries a key instead of an address shows the same colour as always. */
+const AVATAR_PALETTE = [
+  { bg:"rgba(59,130,246,.2)",  fg:"#93c5fd" },
+  { bg:"rgba(245,158,11,.18)", fg:"#fcd34d" },
+  { bg:"rgba(16,185,129,.18)", fg:"#6ee7b7" },
+  { bg:"rgba(139,92,246,.2)",  fg:"#c4b5fd" },
+  { bg:"rgba(249,115,22,.18)", fg:"#fdba74" },
+  { bg:"rgba(236,72,153,.18)", fg:"#f9a8d4" },
+  { bg:"rgba(6,182,212,.18)",  fg:"#67e8f9" },
+  { bg:"rgba(132,204,22,.18)", fg:"#bef264" },
+];
+function lbPalColour(pal) {
+  const n = AVATAR_PALETTE.length;
+  const i = (pal == null) ? 0 : ((pal % n) + n) % n;
+  return AVATAR_PALETTE[i];
+}
+
 function lbDisplayName(row) {
   return row.name || (row.email ? row.email.split("@")[0] : "Member");
 }
 
-// Load every member avatar once into the shared map so leaderboard rows can show
-// faces (cached after the first call).
+/* Everyone who can appear on a board, by key. This used to fetch every
+   member's address to find their picture; the directory carries the picture
+   and the colour index instead, and no address. */
+let _lbDir = {};
 let _lbAvatarsLoaded = false;
 async function _lbLoadAllAvatars() {
   if (_lbAvatarsLoaded) return;
   try {
-    const { data } = await db.from("allowed_emails").select("email,avatar_url");
-    (data || []).forEach(r => { if (!(r.email in _feedAvatarMap)) _feedAvatarMap[r.email] = r.avatar_url || null; });
+    const { data } = await db.rpc("member_directory");
+    const m = {};
+    (data || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, pal: x.pal }; });
+    _lbDir = m;
     _lbAvatarsLoaded = true;
   } catch (e) { /* avatars are best-effort */ }
 }
 
-// Avatar for a leaderboard row (reuses the feed avatar renderer + colour map).
+// Avatar for a leaderboard row, addressed by key. Same markup and same colour
+// as before; clicking it opens the member card exactly as it always did.
 function _lbAvatar(row, size) {
-  return _feedAvatarHTML(row.email, lbDisplayName(row), size || 30);
+  const info     = _lbDir[row.member_key] || {};
+  const name     = lbDisplayName(row);
+  const colour   = lbPalColour(info.pal);
+  const initials = (name || "Member").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+  const sz       = size || 30;
+  const key      = row.member_key || "";
+  const hook     = key ? ` data-member-key="${escHtml(key)}" style="cursor:pointer;` : ` style="`;
+  if (info.url) {
+    return `<img src="${info.url}" class="feed-avatar feed-avatar-img"${key ? ` data-member-key="${escHtml(key)}"` : ""} width="${sz}" height="${sz}" alt="${escHtml(name)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0${key ? ";cursor:pointer" : ""}" onerror="this.outerHTML='<div class=\\'feed-avatar\\' style=\\'background:${colour.bg};color:${colour.fg}\\'>${initials}</div>'">`;
+  }
+  return `<div class="feed-avatar"${hook}background:${colour.bg};color:${colour.fg}">${initials}</div>`;
 }
 
 function lbRankClass(rank) {
@@ -30318,16 +30352,7 @@ async function toggleReaction(btn, eventType, itemId) {
 
 // Deterministic avatar colour from email string
 function avatarColour(email) {
-  const PALETTES = [
-    { bg:"rgba(59,130,246,.2)",  fg:"#93c5fd" },
-    { bg:"rgba(245,158,11,.18)", fg:"#fcd34d" },
-    { bg:"rgba(16,185,129,.18)", fg:"#6ee7b7" },
-    { bg:"rgba(139,92,246,.2)",  fg:"#c4b5fd" },
-    { bg:"rgba(249,115,22,.18)", fg:"#fdba74" },
-    { bg:"rgba(236,72,153,.18)", fg:"#f9a8d4" },
-    { bg:"rgba(6,182,212,.18)",  fg:"#67e8f9" },
-    { bg:"rgba(132,204,22,.18)", fg:"#bef264" },
-  ];
+  const PALETTES = AVATAR_PALETTE;
   let hash = 0;
   for (const c of (email || "")) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
   return PALETTES[Math.abs(hash) % PALETTES.length];
