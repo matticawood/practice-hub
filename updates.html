@@ -556,6 +556,19 @@ let _toolbarInjected = false;
   await loadFeed(deepId);
 })();
 
+/* Everyone's picture and name, by key, fetched once. No addresses. */
+let _updDirPromise = null;
+function _updMemberDirectory() {
+  if (!_updDirPromise) {
+    _updDirPromise = db.rpc("member_directory").then(r => {
+      const m = {};
+      ((r && r.data) || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, hue: x.hue, pal: x.pal }; });
+      return m;
+    }, () => ({}));
+  }
+  return _updDirPromise;
+}
+
 function _likerChipsInner(updateId) {
   const likers = (_upLikersMap[updateId] || []).slice(0, 3);
   const total  = (_upLikersMap[updateId] || []).length;
@@ -608,7 +621,7 @@ async function loadFeed(deepId = null) {
 
   const ids = rows.map(r => r.id);
   const [{ data: allLikes }, { data: cmtRows }] = await Promise.all([
-    db.from("practice_room_update_likes").select("update_id,email,emoji").in("update_id", ids),
+    db.from("practice_room_update_likes").select("update_id,email,emoji,member_key").in("update_id", ids),
     db.from("practice_room_update_comments").select("update_id").in("update_id", ids),
   ]);
 
@@ -624,11 +637,14 @@ async function loadFeed(deepId = null) {
   });
   (cmtRows || []).forEach(c => cmtCountMap[c.update_id] = (cmtCountMap[c.update_id] || 0) + 1);
 
-  const likerEmails = [...new Set((allLikes || []).map(l => l.email))];
-  if (likerEmails.length) {
-    const { data: likerRows } = await db.from("allowed_emails")
-      .select("email,avatar_url,name").in("email", likerEmails);
-    (likerRows || []).forEach(r => { _likerAvatarMap[r.email] = { url: r.avatar_url, name: r.name }; });
+  /* Liker chips, from the directory by key; the map stays keyed by address so
+     the rendering below is untouched. */
+  {
+    const _dir = await _updMemberDirectory();
+    (allLikes || []).forEach(l => {
+      const info = l.member_key && _dir[l.member_key];
+      if (info) _likerAvatarMap[l.email] = { url: info.url, name: info.name };
+    });
   }
 
   _updates = rows.map(r => {

@@ -1115,7 +1115,7 @@ async function loadFocuses() {
 
   const ids = rows.map(r => r.id);
   const [{ data: allLikes }, { data: cmtCounts }, { data: doneRows }] = await Promise.all([
-    db.from("weekly_focus_likes").select("focus_id,email,emoji").in("focus_id", ids),
+    db.from("weekly_focus_likes").select("focus_id,email,emoji,member_key").in("focus_id", ids),
     db.from("weekly_focus_comments").select("focus_id").in("focus_id", ids),
     // RLS only ever returns this member's own rows, so no email filter is needed
     db.from("weekly_focus_done").select("focus_id"),
@@ -1133,13 +1133,16 @@ async function loadFocuses() {
   });
   (cmtCounts || []).forEach(c => cmtCountMap[c.focus_id] = (cmtCountMap[c.focus_id] || 0) + 1);
 
-  // Fetch avatar URLs for liker chips — include current user so their avatar shows
-  const likerEmails = [...new Set([myEmail, ...(allLikes || []).map(l => l.email)])];
+  /* Liker chips, from the directory by key. The map stays keyed by address so
+     the rendering below is untouched, and your own entry is added directly. */
   const likerAvatarMap = {};
-  if (likerEmails.length) {
-    const { data: likerRows } = await db.from("allowed_emails")
-      .select("email,avatar_url,name").in("email", likerEmails);
-    (likerRows || []).forEach(r => { likerAvatarMap[r.email] = { url: r.avatar_url || null, name: r.name || r.email.split("@")[0] }; });
+  {
+    const _dir = await _focusMemberDirectory();
+    (allLikes || []).forEach(l => {
+      const info = l.member_key && _dir[l.member_key];
+      if (info) likerAvatarMap[l.email] = { url: info.url || null, name: info.name || "Member" };
+    });
+    if (!likerAvatarMap[myEmail]) likerAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
   }
 
   _focuses = rows.map((r, i) => {
@@ -1832,6 +1835,19 @@ function formatFocusDate(ts) {
 function autoResizeCmt(el) {
   el.style.height = "auto";
   el.style.height = Math.min(el.scrollHeight, 160) + "px";
+}
+
+/* Everyone's picture and name, by key, fetched once. No addresses. */
+let _focusDirPromise = null;
+function _focusMemberDirectory() {
+  if (!_focusDirPromise) {
+    _focusDirPromise = db.rpc("member_directory").then(r => {
+      const m = {};
+      ((r && r.data) || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, hue: x.hue, pal: x.pal }; });
+      return m;
+    }, () => ({}));
+  }
+  return _focusDirPromise;
 }
 
 function escHtml(str) {
