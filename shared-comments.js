@@ -84,14 +84,24 @@
      Both of these are fetched once and cached: the key for spotting your own
      reactions, the directory for drawing everyone else's. */
   let _myKeyPromise = null;
+  let _myKeyNow = null;    // resolved, so the composer can draw your own avatar by key
   function _myMemberKey() {
     if (!_myKeyPromise) {
       _myKeyPromise = _db().rpc("get_profile_row")
-        .then(r => (r && r.data && r.data[0] && r.data[0].member_key) || null, () => null);
+        .then(r => {
+          _myKeyNow = (r && r.data && r.data[0] && r.data[0].member_key) || null;
+          return _myKeyNow;
+        }, () => null);
     }
     return _myKeyPromise;
   }
+  /* Your own identity, for your own avatar in the composer. Falls back to the
+     address if it has not resolved yet, which renders exactly as it always did. */
+  function _meWho() {
+    return _myKeyNow ? { key: _myKeyNow, hue: (_dirNow[_myKeyNow] || {}).hue } : null;
+  }
   let _dirPromise = null;
+  let _dirNow = {};        // the resolved directory, for synchronous rendering
   function _memberDirectory() {
     if (!_dirPromise) {
       _dirPromise = _db().rpc("member_directory").then(r => {
@@ -99,6 +109,7 @@
         (r && r.data || []).forEach(x => {
           m[x.member_key] = { name: x.name, url: x.avatar_url || null, hue: x.hue };
         });
+        _dirNow = m;
         return m;
       }, () => ({}));
     }
@@ -150,13 +161,18 @@
     const hue = Math.abs(h) % 360;
     return { bg: `hsl(${hue},55%,72%)`, fg: `hsl(${hue},45%,22%)` };
   }
-  function _avatarHtml(email, name, size=32, url=null) {
-    const col = _avatarColour(email||"");
+  /* `who` is the member's identity from the directory: { key, hue }. Given it,
+     the avatar carries the opaque key instead of the address and takes the
+     colour the address used to hash to. Callers that omit it are unchanged. */
+  function _avatarHtml(email, name, size=32, url=null, who=null) {
+    const col = who ? _hueColour(who.hue) : _avatarColour(email||"");
     const ini = _initials(name || (email||"").split("@")[0]);
     const r   = Math.round(size/2);
     // Clicking a commenter's avatar opens the shared member-profile modal
-    // (handled by shared-member-modal.js via the [data-member-email] hook).
-    const hook = email ? ` data-member-email="${_escHtml(email)}" style="cursor:pointer;` : ` style="`;
+    // (handled by shared-member-modal.js via the key or address hook).
+    const hook = who?.key
+      ? ` data-member-key="${_escHtml(who.key)}" style="cursor:pointer;`
+      : (email ? ` data-member-email="${_escHtml(email)}" style="cursor:pointer;` : ` style="`);
     if (url) return `<div${hook}width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex-shrink:0"><img src="${_escHtml(url)}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>`;
     return `<div${hook}width:${size}px;height:${size}px;border-radius:50%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:${Math.round(size*0.3)}px;font-weight:800;flex-shrink:0;font-family:inherit">${ini}</div>`;
   }
@@ -740,15 +756,16 @@
     const media=_renderCommentMedia(c);
     const p=_pollByComment[c.id];
     const pollHtml=p?_commentPollHtml(p.pollId,p.question,p.opts,p.voteCountMap,p.myOptId,p.totalVotes,c.email,parentId):"";
-    const profileLink=`/profile.html?u=${encodeURIComponent(c.email)}`;
+    const _who = c.member_key ? { key: c.member_key, hue: (_dirNow[c.member_key]||{}).hue } : null;
+    const profileLink = c.member_key ? `/profile.html?k=${encodeURIComponent(c.member_key)}` : "#";
     return `
       <div class="tc-comment-item${isReply?" is-reply":""}" id="tc-cmt-${c.id}">
         <a href="${profileLink}" style="display:contents;text-decoration:none">
-          ${_avatarHtml(c.email,c.name,28,avatarMap[c.email])}
+          ${_avatarHtml(c.email,c.name,28,avatarMap[c.email],_who)}
         </a>
         <div class="tc-comment-body">
           <div class="tc-comment-meta">
-            <a href="${profileLink}" data-member-email="${_escHtml(c.email||"")}" style="text-decoration:none"><span class="tc-comment-name" style="cursor:pointer">${dispName}</span></a>
+            <a href="${profileLink}" data-member-key="${_escHtml(c.member_key||"")}" style="text-decoration:none"><span class="tc-comment-name" style="cursor:pointer">${dispName}</span></a>
             <span class="tc-comment-time">${_relativeTime(c.created_at)}</span>
             ${c.edited_at?`<span class="tc-comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
             <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
@@ -822,6 +839,7 @@
     const need = [...reactorKeys].filter(k => !_cmtReactorInfo[k]);
     if (need.length) {
       const dir = await _memberDirectory();
+      _myMemberKey();
       need.forEach(k => { if (dir[k]) _cmtReactorInfo[k] = dir[k]; });
     }
   }
@@ -1029,7 +1047,7 @@
       const key=`${parentId}_main`;
       return `
         <div class="tc-comment-form">
-          ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl)}
+          ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl,_meWho())}
           <div class="tc-comment-form-body">
             <div class="tc-comment-form-top">
               <textarea id="tc-cmt-input-${parentId}" rows="1" data-mention
@@ -1108,7 +1126,7 @@
         const replyComposer=`
           <div id="tc-reply-composer-${c.id}" class="tc-reply-composer" style="display:none">
             <div class="tc-reply-composer-inner">
-            ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl)}
+            ${_avatarHtml(auth.email,auth.name,28,auth.avatarUrl,_meWho())}
             <div class="tc-reply-composer-body">
               <textarea placeholder="Write a reply…" rows="1" data-mention
                 oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
