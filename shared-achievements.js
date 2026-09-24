@@ -2,6 +2,26 @@
 // Classic (non-module) script. Extracted VERBATIM from practice-log.html.
 // Top-level declarations become page globals shared across classic scripts on a page.
 
+/* The signed-in member's own key. Most pages that load this file already have
+   it as myMemberKey; the rest (learn, events, focus, updates, resources, the
+   content feed) do not, so ask the database once and keep the answer. Achievement
+   checks run on all of them, and they must not depend on the address. */
+let _achKeyPromise = null;
+async function _achMyKey() {
+  if (typeof myMemberKey !== "undefined" && myMemberKey) return myMemberKey;
+  if (!_achKeyPromise) {
+    _achKeyPromise = (async () => {
+      /* No .catch() on the builder: supabase-js v2 builders have .then but no
+         .catch, so chaining it throws before the call is ever sent. */
+      try {
+        const { data } = await db.rpc("get_profile_row");
+        return (data && data[0] && data[0].member_key) || null;
+      } catch (e) { return null; }
+    })();
+  }
+  return _achKeyPromise;
+}
+
 function _achTotalMins(s) {
   return s.reduce((t, ss) => t + (ss.duration_minutes || 0), 0);
 }
@@ -1021,7 +1041,7 @@ async function checkNewAchievements() {
   // localStorage is cleared or the user logs in on a different device/browser
   if (newOnes.length > 0) {
     const { data: dbRows } = await db.from("achievement_events")
-      .select("achievement_id").eq("email", myEmail);
+      .select("achievement_id").eq("member_key", await _achMyKey());
     const dbKnown = new Set((dbRows || []).map(r => r.achievement_id));
     newOnes = newOnes.filter(id => !dbKnown.has(id));
   }
@@ -1228,7 +1248,7 @@ async function tcReconcileAchievements() {
       computeAchievements(allSessions, new Set()).filter(a => a.earned).map(a => a.id)
     );
     const { data: dbRows, error: dbErr } = await db.from("achievement_events")
-      .select("achievement_id").eq("email", myEmail);
+      .select("achievement_id").eq("member_key", await _achMyKey());
     if (dbErr || !dbRows) return;
     const toRevoke = [...new Set(dbRows.map(r => r.achievement_id))]
       .filter(id => !earnedByCheck.has(id));

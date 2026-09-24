@@ -1007,6 +1007,8 @@ const OWNER_EMAIL = "matthew@matthewcawood.com";
 let myEmail    = null;
 let myName     = null;
 let myAvatarUrl = null;
+/* Who you are on this page, the way everyone else on it is named: by key. */
+let myMemberKey = null;
 let isAdmin    = false;
 let _focuses   = [];      // loaded focus rows + metadata
 let _currentDetailId = null;
@@ -1018,6 +1020,10 @@ let _stepCount = 0;         // for unique step IDs in form
   if (!session) { window.location.href = "/practice-log.html"; return; }
 
   myEmail = session.user.email;
+  try {
+    const { data: _pr } = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr[0] && _pr[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
   const { data: ae } = await db.from("allowed_emails")
     .select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName      = ae?.name || myEmail.split("@")[0];
@@ -1048,10 +1054,10 @@ let _stepCount = 0;         // for unique step IDs in form
       // Keep f.likers in sync and refresh avatar chips
       if (f) {
         const iLiked = Object.values(rxData).some(d => d.mine);
-        if (iLiked && !f.likers.includes(myEmail)) {
-          f.likers = [myEmail, ...f.likers].slice(0, 3);
+        if (iLiked && myMemberKey && !f.likers.includes(myMemberKey)) {
+          f.likers = [myMemberKey, ...f.likers].slice(0, 3);
         } else if (!iLiked) {
-          f.likers = f.likers.filter(e => e !== myEmail);
+          f.likers = f.likers.filter(k => k !== myMemberKey);
         }
         const chipsHTML = _focusLikerChips(f);
         document.querySelectorAll(`.focus-chips-${parentId}`).forEach(el => {
@@ -1115,7 +1121,7 @@ async function loadFocuses() {
 
   const ids = rows.map(r => r.id);
   const [{ data: allLikes }, { data: cmtCounts }, { data: doneRows }] = await Promise.all([
-    db.from("weekly_focus_likes").select("focus_id,email,emoji,member_key").in("focus_id", ids),
+    db.from("weekly_focus_likes").select("focus_id,emoji,member_key").in("focus_id", ids),
     db.from("weekly_focus_comments").select("focus_id").in("focus_id", ids),
     // RLS only ever returns this member's own rows, so no email filter is needed
     db.from("weekly_focus_done").select("focus_id"),
@@ -1129,20 +1135,22 @@ async function loadFocuses() {
   const cmtCountMap = {}, likersMap = {};
   (allLikes || []).forEach(l => {
     if (!likersMap[l.focus_id]) likersMap[l.focus_id] = [];
-    if (likersMap[l.focus_id].length < 3) likersMap[l.focus_id].push(l.email);
+    if (likersMap[l.focus_id].length < 3) likersMap[l.focus_id].push(l.member_key);
   });
   (cmtCounts || []).forEach(c => cmtCountMap[c.focus_id] = (cmtCountMap[c.focus_id] || 0) + 1);
 
-  /* Liker chips, from the directory by key. The map stays keyed by address so
-     the rendering below is untouched, and your own entry is added directly. */
+  /* Liker chips, from the directory by key: who liked, their picture, their name
+     and their colour, with nobody's address involved. */
   const likerAvatarMap = {};
   {
     const _dir = await _focusMemberDirectory();
     (allLikes || []).forEach(l => {
       const info = l.member_key && _dir[l.member_key];
-      if (info) likerAvatarMap[l.email] = { url: info.url || null, name: info.name || "Member" };
+      if (info) likerAvatarMap[l.member_key] = { url: info.url || null, name: info.name || "Member", pal: info.pal };
     });
-    if (!likerAvatarMap[myEmail]) likerAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
+    if (myMemberKey && !likerAvatarMap[myMemberKey]) {
+      likerAvatarMap[myMemberKey] = { url: myAvatarUrl, name: myName, pal: (_dir[myMemberKey] || {}).pal };
+    }
   }
 
   _focuses = rows.map((r, i) => {
@@ -1316,10 +1324,10 @@ function _focusLikerChips(f) {
   const likerAvatarMap = window._likerAvatarMap || {};
   const likers = (f.likers || []).slice(0, 3);
   if (!likers.length) return "";
-  const chips = likers.map(email => {
-    const info = likerAvatarMap[email];
-    const name = info?.name || email.split("@")[0];
-    const col  = avatarColour(email);
+  const chips = likers.map(key => {
+    const info = likerAvatarMap[key];
+    const name = info?.name || "Member";
+    const col  = fxPalColour(info?.pal);
     const inner = info?.url
       ? `<img src="${escHtml(info.url)}" alt="${escHtml(name)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`
       : `<div style="width:100%;height:100%;background:${col.bg};color:${col.fg};display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</div>`;
@@ -1857,16 +1865,21 @@ function initials(name) {
   if (!name) return "?";
   return name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
+const AVATAR_PALETTE = [
+  {bg:"rgba(59,130,246,.2)",fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+  {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)",fg:"#c4b5fd"},
+  {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+  {bg:"rgba(6,182,212,.18)",fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+];
+/* The same eight colours, picked by the index the directory carries rather than
+   by hashing an address. The index is that hash, worked out server-side. */
+function fxPalColour(i) {
+  return AVATAR_PALETTE[(Number.isInteger(i) ? i : 0) % AVATAR_PALETTE.length];
+}
 function avatarColour(email) {
-  const P = [
-    {bg:"rgba(59,130,246,.2)",fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
-    {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)",fg:"#c4b5fd"},
-    {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
-    {bg:"rgba(6,182,212,.18)",fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
-  ];
   let h = 0;
   for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
-  return P[Math.abs(h) % P.length];
+  return AVATAR_PALETTE[Math.abs(h) % AVATAR_PALETTE.length];
 }
 function avatarHtml(email, name, size = 32, avatarUrl = null) {
   const style = `width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;`;

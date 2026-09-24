@@ -926,8 +926,12 @@
       // discarding it, which is how this went unnoticed on a grown feed.
       const slices = [];
       for (let i = 0; i < parentIds.length; i += 100) slices.push(parentIds.slice(i, i + 100));
+      /* Who reacted is only ever asked so the button can say whether YOU did.
+         That is a comparison between two people, which the key answers, so the
+         addresses never have to leave the database. */
+      const myKey = await _myMemberKey();
       const data = (await Promise.all(slices.map(slice =>
-        _db().from(_rTable()).select(`${_rParent()},email,emoji`).in(_rParent(), slice)
+        _db().from(_rTable()).select(`${_rParent()},member_key,emoji`).in(_rParent(), slice)
           .then(({ data: part, error }) => {
             if (error) { console.error("loadReactions chunk failed:", error.message || error); return []; }
             return part || [];
@@ -942,7 +946,7 @@
         const em=l.emoji||"❤️";
         if(!_rxState[pid][em]) _rxState[pid][em]={count:0,mine:false};
         _rxState[pid][em].count++;
-        if(l.email===auth.email) _rxState[pid][em].mine=true;
+        if(myKey && l.member_key===myKey) _rxState[pid][em].mine=true;
       });
     },
 
