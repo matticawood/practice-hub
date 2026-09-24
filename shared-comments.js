@@ -999,18 +999,17 @@
     async showLikers(parentId, event) {
       event.stopPropagation();
       if(_likersPopover){_likersPopover.remove();_likersPopover=null;}
-      const {data:likes}=await _db().from(_rTable()).select("email,emoji").eq(_rParent(),parentId);
+      const {data:likes}=await _db().from(_rTable()).select("member_key,emoji").eq(_rParent(),parentId);
       if(!likes?.length)return;
-      const emails=likes.map(l=>l.email);
-      const {data:nameRows}=await _db().from("allowed_emails").select("email,name,avatar_url").in("email",emails);
-      const infoMap={};(nameRows||[]).forEach(r=>{infoMap[r.email]=r;});
-      const emojiMap={};(likes||[]).forEach(l=>{emojiMap[l.email]=l.emoji||"❤️";});
-      const rows=emails.map(e=>{
-        const info=infoMap[e]||{};
-        const name=info.name||e.split("@")[0];
-        const col=_avatarColour(e);
-        const av=info.avatar_url?`<div class="tc-likers-popover-avatar"><img src="${_escHtml(info.avatar_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`:`<div class="tc-likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${_initials(name)}</div>`;
-        return`<div class="tc-likers-popover-row">${av}<span class="tc-likers-popover-name">${_escHtml(name)}</span><span style="margin-left:auto;font-size:1rem">${emojiMap[e]||"❤️"}</span></div>`;
+      /* Who reacted comes from the directory by key, which carries the same
+         name, picture and colour the address used to resolve to. */
+      const dir=await _memberDirectory();
+      const rows=likes.map(l=>{
+        const info=dir[l.member_key]||{};
+        const name=info.name||"Member";
+        const col=_hueColour(info.hue);
+        const av=info.url?`<div class="tc-likers-popover-avatar"><img src="${_escHtml(info.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`:`<div class="tc-likers-popover-avatar" style="background:${col.bg};color:${col.fg}">${_initials(name)}</div>`;
+        return`<div class="tc-likers-popover-row">${av}<span class="tc-likers-popover-name">${_escHtml(name)}</span><span style="margin-left:auto;font-size:1rem">${l.emoji||"❤️"}</span></div>`;
       }).join("");
       const pop=document.createElement("div");
       pop.className="tc-likers-popover";
@@ -1018,7 +1017,7 @@
       document.body.appendChild(pop);
       _likersPopover=pop;
       const {clientX:x,clientY:y}=event;
-      const pw=220,ph=48+emails.length*38;
+      const pw=220,ph=48+likes.length*38;
       pop.style.left=Math.min(x,window.innerWidth-pw-12)+"px";
       pop.style.top =Math.min(y+8,window.innerHeight-ph-12)+"px";
       setTimeout(()=>document.addEventListener("click",()=>{if(_likersPopover){_likersPopover.remove();_likersPopover=null;}},{once:true}),0);
@@ -1087,10 +1086,11 @@
           parentId: parentId,
         };
       });
-      const emails=[...new Set(comments.map(c=>c.email))];
-      const {data:avRows}=await _db().from("allowed_emails").select("email,avatar_url").in("email",emails);
+      /* Commenters' pictures come from the directory by key. The map stays
+         keyed by address so everything downstream is untouched. */
+      const _cdir=await _memberDirectory();
       const avatarMap={};
-      (avRows||[]).forEach(r=>{if(r.avatar_url)avatarMap[r.email]=r.avatar_url;});
+      comments.forEach(c=>{const i=c.member_key&&_cdir[c.member_key];if(i&&i.url)avatarMap[c.email]=i.url;});
       const byId={}; comments.forEach(c=>byId[c.id]=c);
       // Resolve each comment's top-level ancestor so a reply-to-a-reply stays in
       // the same thread (flat, YouTube-style with an @mention) rather than being
