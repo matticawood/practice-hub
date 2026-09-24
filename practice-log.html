@@ -20501,12 +20501,13 @@ async function renderDashboard() {
       // Populate _feedAvatarMap so feedItemHTML() can render real avatars,
       // not just initials. (Main renderCommunityFeed does this too — but
       // here we run before it.)
-      const emails = [...new Set(raw.map(r => r.email).filter(Boolean))];
-      if (emails.length) {
-        const { data: avRows } = await db.from("allowed_emails")
-          .select("email,avatar_url").in("email", emails);
-        (avRows || []).forEach(r => {
-          if (r.avatar_url) _feedAvatarMap[r.email] = r.avatar_url;
+      /* Pictures from the directory by key. Still keyed by address below, so
+         feedItemHTML() is untouched. */
+      if (raw.length) {
+        await _lbLoadAllAvatars();
+        raw.forEach(r => {
+          const info = r.member_key && _lbDir[r.member_key];
+          if (info && info.url) _feedAvatarMap[r.email] = info.url;
         });
       }
       feedRows = groupFeedEvents(raw);
@@ -20533,17 +20534,20 @@ async function renderDashboard() {
     const postsEl = document.getElementById('dash-posts-preview');
     if (postsEl) {
       const { data: pdata } = await db.from("community_posts")
-        .select("id,email,name,type,content,created_at,media")
+        .select("id,email,name,type,content,created_at,media,member_key")
         .neq("type", "practice_log")
         .order("created_at", { ascending: false })
         .limit(20);
       const postRows = pdata || [];
 
-      // Ensure avatar map has entries for these emails
-      const newEmails = postRows.map(r => r.email).filter(e => e && !_feedAvatarMap[e]);
-      if (newEmails.length) {
-        const { data: av } = await db.from("allowed_emails").select("email,avatar_url").in("email", newEmails);
-        (av || []).forEach(r => { if (r.avatar_url) _feedAvatarMap[r.email] = r.avatar_url; });
+      // Ensure the avatar map covers these posts too, resolved by key
+      if (postRows.length) {
+        await _lbLoadAllAvatars();
+        postRows.forEach(r => {
+          if (_feedAvatarMap[r.email]) return;
+          const info = r.member_key && _lbDir[r.member_key];
+          if (info && info.url) _feedAvatarMap[r.email] = info.url;
+        });
       }
 
       // Pull a thumbnail out of a post's media[] (video preferred), else null.
@@ -30002,7 +30006,7 @@ async function renderCommunityFeed() {
     db.rpc("get_activity_feed_v2"),
     championsPromise,
     db.from("community_posts")
-      .select("id,email,name,type,content,created_at")
+      .select("id,email,name,type,content,created_at,member_key")
       .order("created_at", { ascending: false })
       .limit(5),
   ]);
@@ -30018,17 +30022,15 @@ async function renderCommunityFeed() {
 
   // Fetch avatar URLs for everyone appearing in either dataset
   const postRows = (postsResult.data || []);
-  const allEmails = [...new Set([
-    ...(feedResult.data || []).map(r => r.email).filter(Boolean),
-    ...postRows.map(r => r.email).filter(Boolean),
-  ])];
-  if (allEmails.length) {
-    const { data: avatarRows } = await db
-      .from("allowed_emails")
-      .select("email,avatar_url")
-      .in("email", allEmails);
+  /* Pictures for everyone in either dataset, from the directory by key. The map
+     stays keyed by address so the renderers below are untouched. */
+  {
+    await _lbLoadAllAvatars();
     _feedAvatarMap = {};
-    (avatarRows || []).forEach(r => { if (r.avatar_url) _feedAvatarMap[r.email] = r.avatar_url; });
+    [...(feedResult.data || []), ...postRows].forEach(r => {
+      const info = r && r.member_key && _lbDir[r.member_key];
+      if (info && info.url && r.email) _feedAvatarMap[r.email] = info.url;
+    });
   }
 
   // Build community posts strip HTML
