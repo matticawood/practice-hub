@@ -3105,12 +3105,14 @@ async function loadComments(eventId) {
     return;
   }
 
-  // Fetch avatar URLs for comment authors
-  const commentEmails = [...new Set(comments.map(c => c.email))];
-  const { data: avatarRows } = await db.from("allowed_emails")
-    .select("email,avatar_url").in("email", commentEmails);
+  /* Comment authors' pictures, from the directory by key. The map stays keyed
+     by address so everything below it is unchanged. */
+  const _evDir = await _evMemberDirectory();
   const avatarMap = {};
-  (avatarRows || []).forEach(r => { if (r.avatar_url) avatarMap[r.email] = r.avatar_url; });
+  comments.forEach(c => {
+    const info = c.member_key && _evDir[c.member_key];
+    if (info && info.url) avatarMap[c.email] = info.url;
+  });
 
   // Pre-load existing reactions on these event comments.
   await _evLoadCommentReactions(comments.map(c => c.id));
@@ -4160,11 +4162,13 @@ async function loadAttendees(eventId) {
     el.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem">No RSVPs yet.</p>`;
     return;
   }
-  const rsvpEmails = data.map(r => r.email).filter(Boolean);
-  const { data: avRows } = await db.from("allowed_emails")
-    .select("email,avatar_url").in("email", rsvpEmails);
+  /* RSVP pictures, from the directory by key, same map shape as before. */
+  const _rsvpDir = await _evMemberDirectory();
   const avMap = {};
-  (avRows || []).forEach(r => { if (r.avatar_url) avMap[r.email] = r.avatar_url; });
+  data.forEach(r => {
+    const info = r.member_key && _rsvpDir[r.member_key];
+    if (info && info.url) avMap[r.email] = info.url;
+  });
   el.innerHTML = data.map(r => {
     const name = r.name || r.email?.split("@")[0] || "Member";
     return `<div class="attendee-row">
@@ -8526,6 +8530,20 @@ function avatarColor(email) {
   let h = 0;
   for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
   return P[Math.abs(h) % P.length];
+}
+
+/* Everyone's picture, by key, fetched once. The directory carries no address,
+   so a list can show faces without asking who anybody is. */
+let _evDirPromise = null;
+function _evMemberDirectory() {
+  if (!_evDirPromise) {
+    _evDirPromise = db.rpc("member_directory").then(r => {
+      const m = {};
+      ((r && r.data) || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, pal: x.pal }; });
+      return m;
+    }, () => ({}));
+  }
+  return _evDirPromise;
 }
 
 function avatarHtml(name, email, size = 36, avatarUrl = null) {
