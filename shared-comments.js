@@ -654,9 +654,8 @@
   }
 
   // Render a poll in a comment — mirrors community.html _commentPollHtml exactly
-  function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorEmail, parentId) {
-    const auth=_auth();
-    const hasVoted=!!myOptId||(!!authorEmail&&authorEmail===auth.email);
+  function _commentPollHtml(pollId, question, opts, voteCountMap, myOptId, totalVotes, authorKey, parentId) {
+    const hasVoted=!!myOptId||(!!authorKey&&authorKey===_myKeyNow);
     const pid=_escHtml(parentId||"");
     const COLORS=["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"]; // site category palette
     let html=`<div class="poll-card"><div class="poll-card-question">${_escHtml(question)}</div>`;
@@ -750,18 +749,19 @@
   // ── Comment HTML ─────────────────────────────────────────────────────────────
   function _commentHtml(c, isReply, avatarMap, parentId, rootId) {
     const auth=_auth();
-    const dispName=_escHtml(c.name||c.email.split("@")[0]);
-    const canDel=auth.isAdmin||c.email===auth.email;
+    const dispName=_escHtml(c.name||"Member");
+    const isMine=!!(c.member_key&&_myKeyNow&&c.member_key===_myKeyNow);
+    const canDel=auth.isAdmin||isMine;
     const replyPrefix=(isReply&&c.reply_to_name)?`<span class="tc-reply-to-name">@${_escHtml(c.reply_to_name)}</span> `:"";
     const media=_renderCommentMedia(c);
     const p=_pollByComment[c.id];
-    const pollHtml=p?_commentPollHtml(p.pollId,p.question,p.opts,p.voteCountMap,p.myOptId,p.totalVotes,c.email,parentId):"";
+    const pollHtml=p?_commentPollHtml(p.pollId,p.question,p.opts,p.voteCountMap,p.myOptId,p.totalVotes,c.member_key,parentId):"";
     const _who = c.member_key ? { key: c.member_key, hue: (_dirNow[c.member_key]||{}).hue } : null;
     const profileLink = c.member_key ? `/profile.html?k=${encodeURIComponent(c.member_key)}` : "#";
     return `
       <div class="tc-comment-item${isReply?" is-reply":""}" id="tc-cmt-${c.id}">
         <a href="${profileLink}" style="display:contents;text-decoration:none">
-          ${_avatarHtml(c.email,c.name,28,avatarMap[c.email],_who)}
+          ${_avatarHtml(null,c.name,28,avatarMap[c.member_key],_who)}
         </a>
         <div class="tc-comment-body">
           <div class="tc-comment-meta">
@@ -769,7 +769,7 @@
             <span class="tc-comment-time">${_relativeTime(c.created_at)}</span>
             ${c.edited_at?`<span class="tc-comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
             <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
-              ${c.email===auth.email?`<button onclick="Comments.editComment('${c.id}','${parentId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>`:""}
+              ${isMine?`<button onclick="Comments.editComment('${c.id}','${parentId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>`:""}
               ${canDel?`<button onclick="Comments.deleteComment('${c.id}','${parentId}')" style="background:none;border:none;cursor:pointer;font-size:.7rem;color:var(--text-muted);padding:0;font-family:inherit" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">Delete</button>`:""}
             </span>
           </div>
@@ -778,7 +778,7 @@
           ${pollHtml}
           <div class="tc-comment-action-row">
             ${_cmtReactBarHTML(c.id)}
-            <button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${rootId||c.id}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
+            <button class="tc-comment-reply-btn" onclick="Comments.startReply('${parentId}','${rootId||c.id}','${dispName.replace(/'/g,"\\'")}','${c.member_key||""}')">Reply</button>
           </div>
         </div>
       </div>`;
@@ -794,11 +794,34 @@
      is owned by the member who wrote it, so that config passes ownerEmailFn
      instead and this resolves it per thread. Returning nothing means nobody is
      notified as owner, which is right for a thread with no owner. */
+  /* Who owns the thing being commented on, as { key, email }. A page whose
+     posts belong to members answers with a key (ownerKeyFn), which is all a
+     notification needs and gives away nobody's address. Pages whose content is
+     Matthew's own still answer with his address, which is a constant in their
+     config rather than anything read out of the database. */
   async function _ownerOf(parentId){
     try{
-      if(typeof _cfg?.ownerEmailFn==="function"){ return (await _cfg.ownerEmailFn(parentId)) || null; }
+      if(typeof _cfg?.ownerKeyFn==="function"){
+        const k = await _cfg.ownerKeyFn(parentId);
+        return k ? { key: k, email: null } : null;
+      }
+      if(typeof _cfg?.ownerEmailFn==="function"){
+        const e = await _cfg.ownerEmailFn(parentId);
+        return e ? { key: null, email: e } : null;
+      }
     }catch(e){ console.warn("owner lookup failed:", e); return null; }
-    return _cfg?.ownerEmail || null;
+    return _cfg?.ownerEmail ? { key: null, email: _cfg.ownerEmail } : null;
+  }
+  /* Is that owner you? Compared however they were identified. */
+  async function _ownerIsMe(owner){
+    if(!owner) return false;
+    if(owner.key) return owner.key === (await _myMemberKey());
+    const auth=_auth();
+    return !!(owner.email && auth.email && owner.email.toLowerCase()===auth.email.toLowerCase());
+  }
+  /* The address-or-key half of a notification row, whichever the owner carries. */
+  function _notifyTo(owner){
+    return owner.key ? { to_member_key: owner.key } : { email: owner.email };
   }
 
   /* Write one notification. A notification is a side effect: it must never throw
@@ -1003,13 +1026,11 @@
       await _db().from(_rTable()).upsert({[_rParent()]:parentId,email:auth.email,member_key:myKey,emoji},{onConflict:`${_rParent()},member_key`});
       // Notify the owner that someone reacted (skip self).
       const _rxOwner = await _ownerOf(parentId);
-      if (_rxOwner
-          && auth.email
-          && auth.email.toLowerCase() !== _rxOwner.toLowerCase()) {
+      if (_rxOwner && !(await _ownerIsMe(_rxOwner))) {
         const titleFn = _cfg.ownerReactionTitleFn
           || ((name, em) => `${name} reacted ${em} to your post`);
         await _notify({
-          email:    _rxOwner,
+          ..._notifyTo(_rxOwner),
           type:     "reaction",
           title:    titleFn(auth.name || "Someone", emoji),
           body:     "",
@@ -1072,7 +1093,11 @@
       const listEl=document.getElementById(`tc-comments-list-${parentId}`);
       const hdrEl =document.getElementById(`tc-comments-hdr-${parentId}`);
       if(!listEl)return;
-      const {data:comments}=await _db().from(_cTable()).select("*").eq(_cParent(),parentId).order("created_at",{ascending:true});
+      /* Named columns rather than everything: a comment's author is its
+         member_key, and the address column is nobody else's business. The six
+         comment tables this module is pointed at all carry exactly these. */
+      const _cCols=`id,name,content,created_at,media,reply_to_name,edited_at,member_key,${_cParent()},${_cReply()}`;
+      const {data:comments}=await _db().from(_cTable()).select(_cCols).eq(_cParent(),parentId).order("created_at",{ascending:true});
 
       // Fetch polls attached to comments — mirrors community.html loadComments() pattern
       _pollByComment={};
@@ -1106,16 +1131,15 @@
       // Track each comment's author + parentId for notification routing on reaction.
       (comments || []).forEach(c => {
         _cmtMetaMap[String(c.id)] = {
-          email:    c.email,
-          name:     c.name || c.email.split("@")[0],
+          key:      c.member_key,
+          name:     c.name || "Member",
           parentId: parentId,
         };
       });
-      /* Commenters' pictures come from the directory by key. The map stays
-         keyed by address so everything downstream is untouched. */
+      /* Commenters' pictures come from the directory, by key throughout. */
       const _cdir=await _memberDirectory();
       const avatarMap={};
-      comments.forEach(c=>{const i=c.member_key&&_cdir[c.member_key];if(i&&i.url)avatarMap[c.email]=i.url;});
+      comments.forEach(c=>{const i=c.member_key&&_cdir[c.member_key];if(i&&i.url)avatarMap[c.member_key]=i.url;});
       const byId={}; comments.forEach(c=>byId[c.id]=c);
       // Resolve each comment's top-level ancestor so a reply-to-a-reply stays in
       // the same thread (flat, YouTube-style with an @mention) rather than being
@@ -1182,14 +1206,12 @@
         // content-feed posts) about new top-level comments. Skipped when the
         // commenter IS the owner. Config: ownerEmail + ownerNotifyTitleFn(name).
         const _cOwner = await _ownerOf(parentId);
-        if (_cOwner
-            && auth.email
-            && auth.email.toLowerCase() !== _cOwner.toLowerCase()) {
+        if (_cOwner && !(await _ownerIsMe(_cOwner))) {
           const title = (typeof _cfg.ownerNotifyTitleFn === "function")
             ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
             : `${auth.name || "Someone"} left a new comment`;
           await _notify({
-            email:    _cOwner,
+            ..._notifyTo(_cOwner),
             type:     "new_comment",
             title,
             body:     (content || "Sent an attachment").slice(0, 120),
@@ -1223,7 +1245,7 @@
       const poll=_inlinePollOpen[commentId]?tc_readInlinePoll(commentId):null;
       if(!content&&!media.length&&!poll)return;
       const replyToName =composerEl?.dataset.replyToName||null;
-      const replyToEmail=composerEl?.dataset.replyToEmail||null;
+      const replyToKey=composerEl?.dataset.replyToKey||null;
       if(ta)ta.disabled=true;
       if(btn){btn.disabled=true;btn.textContent="Sending…";}
       const _resetReply=()=>{ if(ta)ta.disabled=false; if(btn){btn.disabled=false;btn.textContent="Send";} };
@@ -1244,26 +1266,25 @@
             await _db().from("tc_comment_poll_options").insert(poll.options.map((label,i)=>({poll_id:pollRow.id,label,position:i})));
           }
         }
-        if(replyToEmail&&replyToEmail!==auth.email){
-          await _notify({email:replyToEmail,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}});
+        if(replyToKey&&replyToKey!==(await _myMemberKey())){
+          await _notify({to_member_key:replyToKey,type:"comment_reply",title:`${auth.name||"Someone"} replied to your comment`,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}});
         }
         /* A reply is still activity on somebody's thread. Whoever owns it hears
            about it too, unless they wrote the reply or were already told as the
            person being replied to. */
         const _rOwner = await _ownerOf(parentId);
-        if(_rOwner
-           && auth.email && _rOwner.toLowerCase()!==auth.email.toLowerCase()
-           && (!replyToEmail || _rOwner.toLowerCase()!==replyToEmail.toLowerCase())){
+        const _rOwnerIsReplyTo = !!(_rOwner && _rOwner.key && replyToKey && _rOwner.key === replyToKey);
+        if(_rOwner && !(await _ownerIsMe(_rOwner)) && !_rOwnerIsReplyTo){
           const title = (typeof _cfg.ownerNotifyTitleFn === "function")
             ? _cfg.ownerNotifyTitleFn(auth.name || "Someone")
             : `${auth.name || "Someone"} replied on your post`;
-          await _notify({email:_rOwner,type:"new_comment",title,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}});
+          await _notify({..._notifyTo(_rOwner),type:"new_comment",title,body:(content||"Sent an attachment").slice(0,120),link_url:_notifyLink(parentId),metadata:{}});
         }
         window.Mentions?.notify(content, {
           fromName: auth.name || "Someone",
           body:     content,
           linkUrl:  _notifyLink(parentId),
-          exclude:  [replyToEmail].filter(Boolean),
+          excludeKeys: [replyToKey].filter(Boolean),
         });
       } catch(e){ console.warn("reply side-effects failed:", e); }
       window.tcCheckAchievements?.();  // replying can earn engagement achievements
@@ -1379,19 +1400,19 @@
       // the DB so a missing client-side meta entry (e.g. reacting to a reply
       // that wasn't in the rendered thread) can't silently drop the notification.
       const meta = _cmtMetaMap[idStr];
-      let authorEmail = meta?.email;
+      let authorKey = meta?.key || null;
       let isReply = false;
       let parentId = meta?.parentId || null;
       {
         const { data: crow } = await _db().from(_cTable())
-          .select(`email,${_cReply()},${_cParent()}`).eq("id", idStr).maybeSingle();
+          .select(`member_key,${_cReply()},${_cParent()}`).eq("id", idStr).maybeSingle();
         if (crow) {
-          if (!authorEmail) authorEmail = crow.email;
+          if (!authorKey) authorKey = crow.member_key;
           isReply = !!crow[_cReply()];
           if (!parentId) parentId = crow[_cParent()];
         }
       }
-      if (authorEmail && authorEmail.toLowerCase() !== auth.email.toLowerCase()) {
+      if (authorKey && authorKey !== myKey) {
         const fallbackLink = (() => {
           switch (eventType) {
             case "focus_comment":  return "/focus.html";
@@ -1404,7 +1425,7 @@
           ? _cfg.replyNotificationLinkFn(parentId)
           : fallbackLink;
         await _db().from("notifications").insert({
-          email:    authorEmail,
+          to_member_key: authorKey,
           type:     "reaction",
           title:    `${auth.name || "Someone"} reacted ${emoji} to your ${isReply ? "reply" : "comment"}`,
           body:     "",
@@ -1416,13 +1437,13 @@
     },
 
     // Show reply composer for a comment
-    startReply(parentId, commentId, authorName, authorEmail) {
+    startReply(parentId, commentId, authorName, authorKey) {
       document.querySelectorAll("[id^='tc-reply-composer-']").forEach(el=>{ if(el.style.display!=="none")el.style.display="none"; });
       const composer=document.getElementById(`tc-reply-composer-${commentId}`);
       if(!composer)return;
       composer.style.display="flex";
       composer.dataset.replyToName =authorName;
-      composer.dataset.replyToEmail=authorEmail;
+      composer.dataset.replyToKey=authorKey||"";
       const ta=composer.querySelector("textarea");
       if(ta){ta.value="";ta.focus();}
     },

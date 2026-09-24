@@ -6234,19 +6234,19 @@ async function pickCfReaction(event, safeKey, postId, emoji) {
     const d = _cfRxMap[postId][emoji];
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
     _refreshCfLikeBtn(safeKey, postId);
-    await db.from("content_feed_likes").delete().eq("email", myEmail).eq("post_id", postId);
+    await db.from("content_feed_likes").delete().eq("member_key", myMemberKey).eq("post_id", postId);
     return;
   }
   if (existingEmoji) {
     const d = _cfRxMap[postId][existingEmoji];
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
-    await db.from("content_feed_likes").delete().eq("email", myEmail).eq("post_id", postId);
+    await db.from("content_feed_likes").delete().eq("member_key", myMemberKey).eq("post_id", postId);
   }
   if (!_cfRxMap[postId][emoji]) _cfRxMap[postId][emoji] = { count: 0, mine: false };
   _cfRxMap[postId][emoji].mine  = true;
   _cfRxMap[postId][emoji].count++;
   _refreshCfLikeBtn(safeKey, postId);
-  await db.from("content_feed_likes").upsert({ post_id: postId, email: myEmail, emoji }, { onConflict: "post_id,email" });
+  await db.from("content_feed_likes").upsert({ post_id: postId, email: myEmail, member_key: myMemberKey, emoji }, { onConflict: "post_id,member_key" });
 }
 
 function _refreshCfLikeBtn(safeKey, postId) {
@@ -6381,20 +6381,20 @@ async function castCfCommVote(ev, pollId, optionId, postId) {
   const post = (_contentFeedItems || []).find(p => p.id === postId);
   const removing = post?.poll?.myVote === optionId; // tap your choice (or "Clear") to remove it
   if (removing) {
-    const { error } = await db.from("content_feed_post_poll_votes").delete().eq("poll_id", pollId).eq("email", myEmail);
+    const { error } = await db.from("content_feed_post_poll_votes").delete().eq("poll_id", pollId).eq("member_key", myMemberKey);
     if (error) { alert("Couldn't update vote: " + error.message); return; }
   } else {
     const { error } = await db.from("content_feed_post_poll_votes").upsert(
-      { poll_id: pollId, option_id: optionId, email: myEmail }, { onConflict: "poll_id,email" });
+      { poll_id: pollId, option_id: optionId, email: myEmail, member_key: myMemberKey }, { onConflict: "poll_id,member_key" });
     if (error) { alert("Couldn't cast vote: " + error.message); return; }
   }
   if (post?.poll) {
-    const { data: votes } = await db.from("content_feed_post_poll_votes").select("option_id,email").eq("poll_id", pollId);
+    const { data: votes } = await db.from("content_feed_post_poll_votes").select("option_id,member_key").eq("poll_id", pollId);
     const voteCounts = {};
     (votes || []).forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
     post.poll.voteCounts = voteCounts;
     post.poll.totalVotes = (votes || []).length;
-    post.poll.myVote     = (votes || []).find(v => v.email === myEmail)?.option_id || null;
+    post.poll.myVote     = (votes || []).find(v => v.member_key === myMemberKey)?.option_id || null;
     if (cardEl) cardEl.outerHTML = contentFeedCardHTML(post);
   }
 }
@@ -6660,19 +6660,19 @@ async function pickUpReaction(event, safeKey, updateId, emoji) {
     const d = _urxMap[updateId][emoji];
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
     _refreshUpLikeBtn(safeKey, updateId);
-    await db.from("practice_room_update_likes").delete().eq("email", myEmail).eq("update_id", updateId);
+    await db.from("practice_room_update_likes").delete().eq("member_key", myMemberKey).eq("update_id", updateId);
     return;
   }
   if (existingEmoji) {
     const d = _urxMap[updateId][existingEmoji];
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
-    await db.from("practice_room_update_likes").delete().eq("email", myEmail).eq("update_id", updateId);
+    await db.from("practice_room_update_likes").delete().eq("member_key", myMemberKey).eq("update_id", updateId);
   }
   if (!_urxMap[updateId][emoji]) _urxMap[updateId][emoji] = { count: 0, mine: false };
   _urxMap[updateId][emoji].mine  = true;
   _urxMap[updateId][emoji].count++;
   _refreshUpLikeBtn(safeKey, updateId);
-  await db.from("practice_room_update_likes").upsert({ update_id: updateId, email: myEmail, emoji }, { onConflict: "update_id,email" });
+  await db.from("practice_room_update_likes").upsert({ update_id: updateId, email: myEmail, member_key: myMemberKey, emoji }, { onConflict: "update_id,member_key" });
 }
 
 function _refreshUpLikeBtn(safeKey, updateId) {
@@ -6722,7 +6722,7 @@ async function _hydratePosts(rows) {
   const [{ data: allLikes }, { data: myLikes }, { data: commentCounts }, { data: polls }, { data: postReactions }] = ids.length
     ? await Promise.all([
         _inChunks(ids, c => db.from("community_post_likes").select("post_id,member_key").in("post_id", c)),
-        _inChunks(ids, c => db.from("community_post_likes").select("post_id").eq("email", myEmail).in("post_id", c)),
+        _inChunks(ids, c => db.from("community_post_likes").select("post_id").eq("member_key", myMemberKey).in("post_id", c)),
         _inChunks(ids, c => db.from("community_post_comments").select("post_id").in("post_id", c)),
         _inChunks(ids, c => db.from("community_post_polls").select("post_id,question,id").in("post_id", c)),
         _inChunks(ids, c => db.from("activity_reactions").select("item_id,member_key,emoji").eq("event_type","post").in("item_id", c))
@@ -7021,7 +7021,7 @@ async function loadPosts() {
   const cfIds = cfPosts.map(p => p.id);
   const [{ data: cfLikes }, { data: cfComments }] = cfIds.length
     ? await Promise.all([
-        db.from("content_feed_likes").select("post_id,email,emoji").in("post_id", cfIds),
+        db.from("content_feed_likes").select("post_id,member_key,emoji").in("post_id", cfIds),
         db.from("content_feed_comments").select("post_id").in("post_id", cfIds),
       ])
     : [{ data: [] }, { data: [] }];
@@ -7033,7 +7033,7 @@ async function loadPosts() {
     if (!_cfRxMap[l.post_id]) _cfRxMap[l.post_id] = {};
     if (!_cfRxMap[l.post_id][l.emoji]) _cfRxMap[l.post_id][l.emoji] = { count: 0, mine: false };
     _cfRxMap[l.post_id][l.emoji].count++;
-    if (l.email === myEmail) _cfRxMap[l.post_id][l.emoji].mine = true;
+    if (l.member_key === myMemberKey) _cfRxMap[l.post_id][l.emoji].mine = true;
   });
   (cfComments || []).forEach(c => { cfCommentCountMap[c.post_id] = (cfCommentCountMap[c.post_id] || 0) + 1; });
 
@@ -7047,24 +7047,28 @@ async function loadPosts() {
     if (cfPollIds.length) {
       const [{ data: cfo }, { data: cfv }, { data: cfmv }] = await Promise.all([
         db.from("content_feed_post_poll_options").select("id,poll_id,label,position").in("poll_id", cfPollIds).order("position"),
-        db.from("content_feed_post_poll_votes").select("poll_id,option_id,email").in("poll_id", cfPollIds),
-        db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", cfPollIds),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id,member_key").in("poll_id", cfPollIds),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("member_key", myMemberKey).in("poll_id", cfPollIds),
       ]);
       const ob = {}, vc = {}, tot = {}, my = {}, voters = {};
       (cfo  || []).forEach(x => { (ob[x.poll_id] = ob[x.poll_id] || []).push(x); });
       (cfv  || []).forEach(x => {
         if (!vc[x.poll_id]) vc[x.poll_id] = {}; vc[x.poll_id][x.option_id] = (vc[x.poll_id][x.option_id] || 0) + 1; tot[x.poll_id] = (tot[x.poll_id] || 0) + 1;
-        if (!voters[x.poll_id]) voters[x.poll_id] = {}; (voters[x.poll_id][x.option_id] = voters[x.poll_id][x.option_id] || []).push(x.email);
+        if (!voters[x.poll_id]) voters[x.poll_id] = {}; (voters[x.poll_id][x.option_id] = voters[x.poll_id][x.option_id] || []).push(x.member_key);
       });
       (cfmv || []).forEach(x => { my[x.poll_id] = x.option_id; });
+      /* Who voted for what, for the owner's eyes. Names come from the
+         directory by key, which is the same list without the addresses. */
       const cfVoterNames = {};
       if (isAdmin) {
-        const ve = [...new Set((cfv || []).map(x => x.email))];
-        if (ve.length) { const { data: nr } = await db.from("allowed_emails").select("email,name").in("email", ve); (nr || []).forEach(r => { cfVoterNames[r.email] = r.name || r.email.split("@")[0]; }); }
+        const _dir = await commMemberDirectory();
+        [...new Set((cfv || []).map(x => x.member_key))].forEach(k => {
+          cfVoterNames[k] = (_dir[k] || {}).name || "Member";
+        });
       }
       Object.values(cfPollMap).forEach(pm => {
         pm.options = ob[pm.id] || []; pm.voteCounts = vc[pm.id] || {}; pm.totalVotes = tot[pm.id] || 0; pm.myVote = my[pm.id] || null;
-        if (isAdmin) { pm.voters = {}; const vb = voters[pm.id] || {}; Object.keys(vb).forEach(oid => { pm.voters[oid] = vb[oid].map(e => cfVoterNames[e] || e.split("@")[0]); }); }
+        if (isAdmin) { pm.voters = {}; const vb = voters[pm.id] || {}; Object.keys(vb).forEach(oid => { pm.voters[oid] = vb[oid].map(k => cfVoterNames[k] || "Member"); }); }
       });
     }
   }
@@ -7091,7 +7095,7 @@ async function loadPosts() {
   const upIds = updatePosts.map(p => p.id);
   const [{ data: upLikes }, { data: upComments }] = upIds.length
     ? await Promise.all([
-        db.from("practice_room_update_likes").select("update_id,email,emoji").in("update_id", upIds),
+        db.from("practice_room_update_likes").select("update_id,member_key,emoji").in("update_id", upIds),
         db.from("practice_room_update_comments").select("update_id").in("update_id", upIds),
       ])
     : [{ data: [] }, { data: [] }];
@@ -7103,7 +7107,7 @@ async function loadPosts() {
     if (!_urxMap[l.update_id]) _urxMap[l.update_id] = {};
     if (!_urxMap[l.update_id][l.emoji]) _urxMap[l.update_id][l.emoji] = { count: 0, mine: false };
     _urxMap[l.update_id][l.emoji].count++;
-    if (l.email === myEmail) _urxMap[l.update_id][l.emoji].mine = true;
+    if (l.member_key === myMemberKey) _urxMap[l.update_id][l.emoji].mine = true;
   });
   (upComments || []).forEach(c => { upCommentCountMap[c.update_id] = (upCommentCountMap[c.update_id] || 0) + 1; });
 
@@ -7452,8 +7456,8 @@ async function toggleLike(btn, postId) {
   _updateLikeUI(btn, newLiked, newCount, postId);
 
   const { error } = newLiked
-    ? await db.from("community_post_likes").insert({ post_id: postId, email: myEmail })
-    : await db.from("community_post_likes").delete().eq("post_id", postId).eq("email", myEmail);
+    ? await db.from("community_post_likes").insert({ post_id: postId, email: myEmail, member_key: myMemberKey })
+    : await db.from("community_post_likes").delete().eq("post_id", postId).eq("member_key", myMemberKey);
 
   if (error) {
     // Revert
@@ -8348,8 +8352,8 @@ async function castCommentVote(pollId, optionId) {
 // tc_comment_polls tables, keyed by the activity comment id).
 async function castActivityCommentVote(pollId, optionId) {
   const { error } = await db.from("tc_comment_poll_votes").upsert(
-    { poll_id: pollId, option_id: optionId, email: myEmail },
-    { onConflict: "poll_id,email" }
+    { poll_id: pollId, option_id: optionId, email: myEmail, member_key: myMemberKey },
+    { onConflict: "poll_id,member_key" }
   );
   if (error) { alert("Couldn't cast vote: " + error.message); return; }
   if (_currentActivityDetail) await loadActivityDetailComments(_currentActivityDetail.eventType, _currentActivityDetail.itemId);
@@ -9462,7 +9466,7 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
       el.style.display = inner ? "" : "none";
     });
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", eventType)
+      .eq("member_key", myMemberKey).eq("event_type", eventType)
       .eq("item_id", String(itemId)).eq("emoji", emoji);
     return;
   }
@@ -9474,7 +9478,7 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
     const d = _rxMap[key][existingEmoji];
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", eventType)
+      .eq("member_key", myMemberKey).eq("event_type", eventType)
       .eq("item_id", String(itemId)).eq("emoji", existingEmoji);
   }
 
@@ -9499,7 +9503,7 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
   });
 
   await db.from("activity_reactions")
-    .insert({ email: myEmail, event_type: eventType, item_id: String(itemId), emoji });
+    .insert({ email: myEmail, member_key: myMemberKey, event_type: eventType, item_id: String(itemId), emoji });
   window.tcCheckAchievements?.();  // reaction-count achievements
 
   // Comment/reply reactions notify the comment author rather than an activity row.
@@ -9665,7 +9669,7 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
     }
     _updateCommLikerChips(postId);
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", "post").eq("item_id", postId).eq("emoji", emoji);
+      .eq("member_key", myMemberKey).eq("event_type", "post").eq("item_id", postId).eq("emoji", emoji);
     return;
   }
 
@@ -9673,7 +9677,7 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
     const d = _postRxMap[postId][existingEmoji];
     if (d) { d.mine = false; d.count = Math.max(0, d.count - 1); }
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", "post").eq("item_id", postId).eq("emoji", existingEmoji);
+      .eq("member_key", myMemberKey).eq("event_type", "post").eq("item_id", postId).eq("emoji", existingEmoji);
   }
 
   if (!_postRxMap[postId][emoji]) _postRxMap[postId][emoji] = { count: 0, mine: false };
@@ -9689,7 +9693,7 @@ async function pickPostReaction(event, safeKey, postId, emoji) {
   _updateCommLikerChips(postId);
 
   await db.from("activity_reactions")
-    .insert({ email: myEmail, event_type: "post", item_id: postId, emoji });
+    .insert({ email: myEmail, member_key: myMemberKey, event_type: "post", item_id: postId, emoji });
   window.tcCheckAchievements?.();  // reaction-count achievements
 
   // Notify the post author when someone reacts to their post (skip self).
@@ -9881,7 +9885,7 @@ async function loadActivityDetailComments(eventType, itemId) {
     const [{ data: _opts }, { data: _allV }, { data: _myV }] = await Promise.all([
       db.from("tc_comment_poll_options").select("id,poll_id,label,position").in("poll_id", _pollIds).order("position"),
       db.from("tc_comment_poll_votes").select("poll_id,option_id").in("poll_id", _pollIds),
-      db.from("tc_comment_poll_votes").select("poll_id,option_id").eq("email", myEmail).in("poll_id", _pollIds),
+      db.from("tc_comment_poll_votes").select("poll_id,option_id").eq("member_key", myMemberKey).in("poll_id", _pollIds),
     ]);
     _acPolls.forEach(p => {
       const opts = (_opts || []).filter(o => o.poll_id === p.id);
@@ -10587,13 +10591,13 @@ async function _openConversation(chatIdOrEmail, otherName) {
   const allMsgIds = _chatMessages.map(m => m.id);
   if (allMsgIds.length) {
     const { data: rxRows } = await db.from("community_chat_reactions")
-      .select("message_id,email,emoji").in("message_id", allMsgIds);
+      .select("message_id,member_key,emoji").in("message_id", allMsgIds);
     (rxRows || []).forEach(r => {
       if (!_chatRxMap[r.message_id]) _chatRxMap[r.message_id] = {};
-      if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, emails: [] };
+      if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, keys: [] };
       _chatRxMap[r.message_id][r.emoji].count++;
-      _chatRxMap[r.message_id][r.emoji].emails.push(r.email);
-      if (r.email === myEmail) _chatRxMap[r.message_id][r.emoji].mine = true;
+      _chatRxMap[r.message_id][r.emoji].keys.push(r.member_key);
+      if (r.member_key === myMemberKey) _chatRxMap[r.message_id][r.emoji].mine = true;
     });
   }
 
@@ -10605,9 +10609,11 @@ async function _openConversation(chatIdOrEmail, otherName) {
 
 const CHAT_EMOJIS = ["❤️","👍","😂","🔥","💪","👏","😮"];
 
-function _rxNames(emails) {
-  return (emails || []).map(e =>
-    e === myEmail ? "You" : ((_allMembers || []).find(m => m.email === e)?.name || e.split("@")[0])
+/* Who reacted, named from the directory by key. "You" for yourself, everyone
+   else by the name they go by, and no address anywhere near it. */
+function _rxNames(keys) {
+  return (keys || []).map(k =>
+    k === myMemberKey ? "You" : ((_commDirNow[k] || {}).name || "Member")
   ).join(", ");
 }
 
@@ -10616,7 +10622,7 @@ function _chatRxHtml(msgId) {
   return Object.entries(rx)
     .filter(([, d]) => d.count > 0)
     .map(([emoji, d]) => {
-      const names = _rxNames(d.emails);
+      const names = _rxNames(d.keys);
       return `<button class="chat-rx-pill${d.mine ? " mine" : ""}" data-names="${escHtml(names)}" onclick="pickChatReaction('${escHtml(msgId)}','${emoji}')">${emoji}${d.count > 1 ? `<span>${d.count}</span>` : ""}</button>`;
     }).join("");
 }
@@ -10654,24 +10660,24 @@ async function pickChatReaction(msgId, emoji) {
     // Toggle off
     _chatRxMap[msgId][emoji].mine = false;
     _chatRxMap[msgId][emoji].count = Math.max(0, _chatRxMap[msgId][emoji].count - 1);
-    _chatRxMap[msgId][emoji].emails = (_chatRxMap[msgId][emoji].emails || []).filter(e => e !== myEmail);
+    _chatRxMap[msgId][emoji].keys = (_chatRxMap[msgId][emoji].keys || []).filter(k => k !== myMemberKey);
     await db.from("community_chat_reactions").delete()
-      .eq("message_id", msgId).eq("email", myEmail);
+      .eq("message_id", msgId).eq("member_key", myMemberKey);
   } else {
     // Remove previous reaction if any
     if (existingEmoji) {
       _chatRxMap[msgId][existingEmoji].mine = false;
       _chatRxMap[msgId][existingEmoji].count = Math.max(0, _chatRxMap[msgId][existingEmoji].count - 1);
-      _chatRxMap[msgId][existingEmoji].emails = (_chatRxMap[msgId][existingEmoji].emails || []).filter(e => e !== myEmail);
+      _chatRxMap[msgId][existingEmoji].keys = (_chatRxMap[msgId][existingEmoji].keys || []).filter(k => k !== myMemberKey);
       await db.from("community_chat_reactions").delete()
-        .eq("message_id", msgId).eq("email", myEmail);
+        .eq("message_id", msgId).eq("member_key", myMemberKey);
     }
-    if (!_chatRxMap[msgId][emoji]) _chatRxMap[msgId][emoji] = { count: 0, mine: false, emails: [] };
+    if (!_chatRxMap[msgId][emoji]) _chatRxMap[msgId][emoji] = { count: 0, mine: false, keys: [] };
     _chatRxMap[msgId][emoji].mine = true;
     _chatRxMap[msgId][emoji].count++;
-    _chatRxMap[msgId][emoji].emails = [...(_chatRxMap[msgId][emoji].emails || []), myEmail];
+    _chatRxMap[msgId][emoji].keys = [...(_chatRxMap[msgId][emoji].keys || []), myMemberKey];
     await db.from("community_chat_reactions")
-      .upsert({ message_id: msgId, email: myEmail, emoji }, { onConflict: "message_id,email" });
+      .upsert({ message_id: msgId, email: myEmail, member_key: myMemberKey, emoji }, { onConflict: "message_id,member_key" });
   }
 
   _refreshChatRx(msgId);
@@ -10694,13 +10700,13 @@ function _refreshChatRx(msgId) {
 
 async function _refreshChatRxFromDb(msgId) {
   const { data: rxRows } = await db.from("community_chat_reactions")
-    .select("email,emoji").eq("message_id", msgId);
+    .select("member_key,emoji").eq("message_id", msgId);
   _chatRxMap[msgId] = {};
   (rxRows || []).forEach(r => {
-    if (!_chatRxMap[msgId][r.emoji]) _chatRxMap[msgId][r.emoji] = { count: 0, mine: false, emails: [] };
+    if (!_chatRxMap[msgId][r.emoji]) _chatRxMap[msgId][r.emoji] = { count: 0, mine: false, keys: [] };
     _chatRxMap[msgId][r.emoji].count++;
-    _chatRxMap[msgId][r.emoji].emails.push(r.email);
-    if (r.email === myEmail) _chatRxMap[msgId][r.emoji].mine = true;
+    _chatRxMap[msgId][r.emoji].keys.push(r.member_key);
+    if (r.member_key === myMemberKey) _chatRxMap[msgId][r.emoji].mine = true;
   });
   _refreshChatRx(msgId);
 }
