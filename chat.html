@@ -1511,7 +1511,32 @@ const db = supabase.createClient(SUPA_URL, SUPA_ANON);
 const OWNER_EMAIL = "matthew@matthewcawood.com";
 
 let myEmail = null, myName = null, myAvatarUrl = null, isAdmin = false;
+let myMemberKey = null;   // your own key, so the picker can leave you out of it
 let _allMembers = [], _membersLoaded = false;
+/* Everyone appearing in your own conversations, by address: the other half of a
+   direct message, the participants of your rooms, the authors of the messages in
+   front of you. Resolved from addresses this page already holds, never by
+   reading the membership. */
+let _chatPeople = {};
+async function _resolveChatPeople(emails) {
+  const want = [...new Set((emails || []).filter(e => e && !(e in _chatPeople)))];
+  if (!want.length) return;
+  want.forEach(e => { _chatPeople[e] = null; });   // asked once
+  try {
+    const { data } = await db.rpc("member_cards_for", { p_emails: want });
+    (data || []).forEach(r => { _chatPeople[r.email] = { name: r.name, avatar_url: r.avatar_url }; });
+  } catch (e) { /* names fall back to the address prefix, as they always did */ }
+}
+function _chatPalColour(pal) {
+  const P = [
+    {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+    {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
+    {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+    {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+  ];
+  const i = (pal == null) ? 0 : ((pal % P.length) + P.length) % P.length;
+  return P[i];
+}
 
 // Inline media state
 const _inlineMedia    = {};
@@ -3170,6 +3195,12 @@ async function _loadConversationsList() {
     .select("room_id")
     .eq("email", myEmail);
   const myRoomIds = new Set((participantRows || []).map(r => r.room_id));
+  /* Resolve everyone appearing in these conversations before drawing them:
+     the message authors, and the other half of every direct-message id. */
+  await _resolveChatPeople([
+    ...(msgs || []).map(m => m.email),
+    ...(msgs || []).flatMap(m => String(m.chat_id || "").includes("|") ? String(m.chat_id).split("|") : []),
+  ]);
 
   // 3. Deduplicate by chat_id — keep first (most recent) occurrence
   //    Also count unread messages using DB-backed read timestamps
@@ -3233,7 +3264,7 @@ async function _loadConversationsList() {
     for (const r of (rooms || [])) {
       const pEmails = (participants || []).filter(p => p.room_id === r.id).map(p => p.email).filter(e => e !== myEmail);
       roomNames[r.id] = r.name || pEmails.map(e => {
-        const m = (_allMembers || []).find(m => m.email === e);
+        const m = _chatPeople[e];
         return m ? m.name : e.split("@")[0];
       }).join(", ") || "Group";
     }
@@ -3268,7 +3299,7 @@ function _renderConvList(convList, roomNames) {
     } else if (cid.includes("|")) {
       // DM
       const otherEmail = cid.split("|").find(e => e !== myEmail) || cid.split("|")[0];
-      const member = (_allMembers || []).find(m => m.email === otherEmail);
+      const member = _chatPeople[otherEmail];
       name = _isSelfChat(cid) ? SELF_CHAT_NAME : (member ? member.name : (otherEmail.split("@")[0]));
       avatarEl = avatarHtml(otherEmail, member?.name || name, 44,
                             (_isSelfChat(cid) ? myAvatarUrl : null) || member?.avatar_url || null);
@@ -3335,6 +3366,7 @@ async function _setChatHeaderAvatar(chatId) {
     emails = chatId.split("|").filter(e => e && e !== myEmail);
   } else if (/^[0-9a-f-]{36}$/i.test(chatId)) {
     const { data } = await db.from("community_chat_participants").select("email").eq("room_id", chatId);
+    await _resolveChatPeople((data || []).map(p => p.email));
     if (_currentChatId !== chatId) return; // conversation switched while fetching
     emails = (data || []).map(p => p.email).filter(e => e && e !== myEmail);
   } else {
@@ -3345,7 +3377,7 @@ async function _setChatHeaderAvatar(chatId) {
   const extra = emails.length - shown.length;
   el.className = "chat-hdr-stack";
   el.innerHTML = shown.map(e => {
-    const m = (_allMembers || []).find(mm => mm.email === e);
+    const m = _chatPeople[e];
     const nm = m ? m.name : e.split("@")[0];
     return `<span class="chat-hdr-stack-item">${avatarHtml(e, nm, 30, m?.avatar_url || null)}</span>`;
   }).join("") + (extra > 0 ? `<span class="chat-hdr-stack-more">+${extra}</span>` : "");
@@ -3360,7 +3392,7 @@ async function _openConversation(chatIdOrEmail, otherName) {
     chatId = chatIdOrEmail;
     const parts = chatId.split("|");
     const other = parts.find(e => e !== myEmail) || parts[0];
-    const member = (_allMembers || []).find(m => m.email === other);
+    const member = _chatPeople[other];
     title = _isSelfChat(chatId) ? SELF_CHAT_NAME
           : (otherName || (member ? member.name : other.split("@")[0]));
   } else if (/^[0-9a-f-]{36}$/i.test(chatIdOrEmail)) {
@@ -3370,7 +3402,7 @@ async function _openConversation(chatIdOrEmail, otherName) {
   } else {
     // Raw email — DM (your own address included: that is the self chat)
     chatId = _dmChatId(chatIdOrEmail);
-    const member = (_allMembers || []).find(m => m.email === chatIdOrEmail);
+    const member = _chatPeople[chatIdOrEmail];
     title  = _isSelfChat(chatId) ? SELF_CHAT_NAME
            : (otherName || (member ? member.name : chatIdOrEmail.split("@")[0]));
   }
@@ -3415,6 +3447,7 @@ async function _openConversation(chatIdOrEmail, otherName) {
     .eq("chat_id", chatId)
     .order("created_at", { ascending: false })
     .limit(CHAT_PAGE_SIZE + 1);
+    await _resolveChatPeople((data || []).map(m => m.email));
 
   if (error) {
     document.getElementById("chat-messages").innerHTML =
@@ -3456,6 +3489,7 @@ async function _fetchPollsAndReactions(msgIds, reset = false) {
 
   const fetches = [
     db.from("community_chat_reactions").select("message_id,email,emoji").in("message_id", msgIds)
+      .then(async r => { await _resolveChatPeople(((r && r.data) || []).map(x => x.email)); return r; })
   ];
   if (pollMsgIds.length) {
     fetches.push(
@@ -3501,6 +3535,7 @@ async function _loadMoreMessages() {
     .lt("created_at", oldest)
     .order("created_at", { ascending: false })
     .limit(CHAT_PAGE_SIZE + 1);
+    await _resolveChatPeople((data || []).map(m => m.email));
 
   const rows = data || [];
   if (rows.length > CHAT_PAGE_SIZE) { _chatHasMore = true; rows.pop(); }
@@ -3541,7 +3576,7 @@ const CHAT_EMOJIS = ["❤️","👍","😂","🔥","💪","👏","😮"];
 
 function _rxNames(emails) {
   return (emails || []).map(e =>
-    e === myEmail ? "You" : ((_allMembers || []).find(m => m.email === e)?.name || e.split("@")[0])
+    e === myEmail ? "You" : (_chatPeople[e]?.name || e.split("@")[0])
   ).join(", ");
 }
 
@@ -3964,7 +3999,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const nonPollMedia = rawMedia.filter(m => m.type !== "poll");
 
   // Look up proper display name + avatar — use stored myAvatarUrl for own messages
-  const member    = (_allMembers || []).find(m => m.email === msg.email);
+  const member    = _chatPeople[msg.email];
   const dispName  = member?.name || msg.name || msg.email?.split("@")[0] || "Member";
   const avatarUrl = isMine ? (myAvatarUrl || member?.avatar_url || null) : (member?.avatar_url || null);
   const name      = escHtml(dispName);
@@ -4568,11 +4603,11 @@ function _onPeopleSearch(q) {
   const acEl = document.getElementById("chat-autocomplete");
   if (!q.trim()) { acEl.style.display = "none"; return; }
   const lq = q.toLowerCase();
-  const selectedEmails = new Set(_newChatSelected.map(s => s.email));
+  const selectedKeys = new Set(_newChatSelected.map(s => s.key));
   const results = (_allMembers || []).filter(m =>
-    m.email !== myEmail &&
-    !selectedEmails.has(m.email) &&
-    ((m.name || "").toLowerCase().includes(lq) || (m.email || "").toLowerCase().includes(lq))
+    m.member_key !== myMemberKey &&
+    !selectedKeys.has(m.member_key) &&
+    (m.name || "").toLowerCase().includes(lq)
   ).slice(0, 8);
 
   /* Searching your own name, or "note", should find the self chat: the row above
@@ -4590,9 +4625,9 @@ function _onPeopleSearch(q) {
 
   acEl.style.display = "block";
   acEl.innerHTML = selfRow + results.map(m => `
-    <div class="chat-ac-item" onclick="_selectPerson('${escHtml(m.email)}','${escHtml(m.name || "")}','${escHtml(m.avatar_url || "")}')">
-      ${avatarHtml(m.email, m.name, 36, m.avatar_url || null)}
-      <span class="chat-ac-name">${escHtml(m.name || m.email)}</span>
+    <div class="chat-ac-item" onclick="_selectPerson('${escHtml(m.member_key)}','${escHtml(m.name || "")}','${escHtml(m.avatar_url || "")}',${Number(m.pal) || 0})">
+      ${_pickerAvatar(m, 36)}
+      <span class="chat-ac-name">${escHtml(m.name || "Member")}</span>
     </div>`).join("");
 }
 
@@ -4602,8 +4637,16 @@ function _onPeopleKeydown(event) {
   }
 }
 
-function _selectPerson(email, name, avatarUrl) {
-  _newChatSelected.push({ email, name, avatarUrl });
+/* The picker holds keys, not addresses. The conversation itself is created on
+   the server from those keys. */
+function _pickerAvatar(m, size) {
+  if (m.avatar_url) return `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex-shrink:0"><img src="${escHtml(m.avatar_url)}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`;
+  const c = _chatPalColour(m.pal);
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;background:${c.bg};color:${c.fg};display:flex;align-items:center;justify-content:center;font-size:${Math.round(size*0.34)}px;font-weight:800">${initials(m.name || "?")}</div>`;
+}
+
+function _selectPerson(key, name, avatarUrl, pal) {
+  _newChatSelected.push({ key, name, avatarUrl, pal });
   document.getElementById("chat-people-input").value = "";
   document.getElementById("chat-autocomplete").style.display = "none";
   _renderNewChatChips();
@@ -4611,8 +4654,8 @@ function _selectPerson(email, name, avatarUrl) {
   document.getElementById("chat-people-input").focus();
 }
 
-function _removeNewChatPerson(email) {
-  _newChatSelected = _newChatSelected.filter(s => s.email !== email);
+function _removeNewChatPerson(key) {
+  _newChatSelected = _newChatSelected.filter(s => s.key !== key);
   _renderNewChatChips();
   document.getElementById("chat-start-btn").disabled = _newChatSelected.length === 0;
 }
@@ -4621,9 +4664,9 @@ function _renderNewChatChips() {
   const el = document.getElementById("chat-selected-chips");
   el.innerHTML = _newChatSelected.map(s => `
     <div class="chat-chip">
-      ${avatarHtml(s.email, s.name, 22, s.avatarUrl || null)}
-      <span>${escHtml(s.name || s.email)}</span>
-      <button class="chat-chip-remove" onclick="_removeNewChatPerson('${escHtml(s.email)}')" title="Remove">×</button>
+      ${_pickerAvatar({ avatar_url: s.avatarUrl, name: s.name, pal: s.pal }, 22)}
+      <span>${escHtml(s.name || "Member")}</span>
+      <button class="chat-chip-remove" onclick="_removeNewChatPerson('${escHtml(s.key)}')" title="Remove">×</button>
     </div>`).join("");
 }
 
@@ -4633,32 +4676,22 @@ async function startNewChat() {
   btn.disabled = true;
   btn.textContent = "Starting…";
 
-  const allParticipants = [myEmail, ..._newChatSelected.map(s => s.email)];
-
-  if (_newChatSelected.length === 1) {
-    // Simple DM
-    const email = _newChatSelected[0].email;
-    const name  = _newChatSelected[0].name;
-    _showChatView();
-    _subscribeGlobalRealtime();
-    await _openConversation(email, name);
-  } else {
-    // Group DM — create a room
-    const { data: room, error: roomErr } = await db.from("community_chat_rooms").insert({
-      created_by: myEmail
-    }).select().single();
-    if (roomErr) { alert("Could not create group chat."); btn.disabled = false; btn.textContent = "Start Chat"; return; }
-
-    const { error: partErr } = await db.from("community_chat_participants").insert(
-      allParticipants.map(email => ({ room_id: room.id, email }))
-    );
-    if (partErr) { console.error("participants insert error", partErr); }
-
-    const names = _newChatSelected.map(s => s.name || s.email.split("@")[0]).join(", ");
-    _showChatView();
-    _subscribeGlobalRealtime();
-    await _openConversation(room.id, names);
+  /* The conversation is created on the server from the keys you picked: one
+     person gives the same direct-message id the page used to build, several
+     create the room and its participants. Either way this page never needs an
+     address to start talking to somebody. */
+  const { data: chatId, error: createErr } = await db.rpc("chat_create", {
+    p_member_keys: _newChatSelected.map(s => s.key),
+  });
+  if (createErr || !chatId) {
+    alert("Could not start the chat.");
+    btn.disabled = false; btn.textContent = "Start Chat";
+    return;
   }
+  const names = _newChatSelected.map(s => s.name || "Member").join(", ");
+  _showChatView();
+  _subscribeGlobalRealtime();
+  await _openConversation(chatId, _newChatSelected.length === 1 ? (_newChatSelected[0].name || names) : names);
 }
 
 // ── Mux aspect ratio correction ───────────────────────────────────────────────
@@ -4707,12 +4740,11 @@ function _hideChatView() { /* no-op on chat.html — this IS the chat page */ }
 
 async function _loadAllMembers() {
   _membersLoaded = true;
-  const { data } = await db
-    .from("allowed_emails")
-    .select("email, name, headline, avatar_url")
-    .eq("subscription_status", "active")
-    .eq("onboarded", true)
-    .order("name", { ascending: true });
+  /* Who you can start a conversation with: the same people, in the same order,
+     with the same filtering, decided on the server and carrying no addresses.
+     The colour index comes with it so the initials circles look as they always
+     have. */
+  const { data } = await db.rpc("member_list");
   _allMembers = (data || []).filter(m => m.name && m.name.trim());
   // Re-render chat messages now that member names/avatars are available
   if (_chatMessages.length) {
@@ -4727,6 +4759,10 @@ async function _loadAllMembers() {
   if (!session) { window.location.href = "/practice-log.html"; return; }
 
   myEmail = session.user.email;
+  try {
+    const { data: _pr } = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr[0] && _pr[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
   const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName      = ae?.name || myEmail.split("@")[0];
   isAdmin     = myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();

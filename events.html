@@ -2098,7 +2098,7 @@ let isRecording  = false;
   // Get display name + avatar for current user, and owner profile in parallel
   const [{ data: ae }, { data: oe }] = await Promise.all([
     db.from("allowed_emails").select("name, avatar_url").eq("email", myEmail).maybeSingle(),
-    db.from("allowed_emails").select("name, avatar_url").eq("email", OWNER_EMAIL).maybeSingle(),
+    _evCardFor(OWNER_EMAIL),
   ]);
   myName         = ae?.name || myEmail.split("@")[0];
   myAvatarUrl    = ae?.avatar_url || null;
@@ -5212,7 +5212,7 @@ function appendChatMsg(msg, skipUnread = false) {
   // Fetch avatar if not cached yet (fills in on next message from same user)
   if (!_streamAvatarCache.hasOwnProperty(msg.email)) {
     _streamAvatarCache[msg.email] = null; // mark as fetching
-    db.from("allowed_emails").select("avatar_url").eq("email", msg.email).maybeSingle()
+    _evCardFor(msg.email)
       .then(({ data }) => {
         _streamAvatarCache[msg.email] = data?.avatar_url || null;
         // Update existing avatar elements for this user
@@ -5392,7 +5392,7 @@ function _setFeaturedQA(q) {
   // Fetch avatar if not yet cached, then backfill
   if (q.email && _streamAvatarCache && !_streamAvatarCache.hasOwnProperty(q.email)) {
     _streamAvatarCache[q.email] = null;
-    db.from("allowed_emails").select("avatar_url").eq("email", q.email).maybeSingle()
+    _evCardFor(q.email)
       .then(({ data }) => {
         if (_streamAvatarCache) _streamAvatarCache[q.email] = data?.avatar_url || null;
         // Only update if this question is still the one showing
@@ -5431,7 +5431,7 @@ function buildQAEl(q) {
   const av = avatarHtml(displayName, q.email || "", 26, cachedUrl);
   if (q.email && !_streamAvatarCache.hasOwnProperty(q.email)) {
     _streamAvatarCache[q.email] = null; // mark as fetching
-    db.from("allowed_emails").select("avatar_url").eq("email", q.email).maybeSingle()
+    _evCardFor(q.email)
       .then(({ data }) => {
         _streamAvatarCache[q.email] = data?.avatar_url || null;
         if (data?.avatar_url) {
@@ -6181,19 +6181,11 @@ async function _joinRoomImpl(eventId) {
   // 11. Initial grid render
   _renderBsGrid(call);
 
-  // 11b. Pre-load all member avatar URLs into cache (same bulk-fetch community.html uses)
-  //      so the watching list shows real profile photos as soon as viewers appear.
-  db.from("allowed_emails").select("email, avatar_url")
-    .then(({ data }) => {
-      if (!data || !_streamAvatarCache) return;
-      data.forEach(row => {
-        // Only fill in missing entries — don't overwrite values already set at startup
-        if (row.email && !_streamAvatarCache.hasOwnProperty(row.email)) {
-          _streamAvatarCache[row.email] = row.avatar_url || null;
-        }
-      });
-      if (window._backstageCall) _renderBsGrid(window._backstageCall);
-    });
+  /* 11b. There used to be a bulk fetch of every member's address here, warming
+     the avatar cache before anyone had joined. The grid already resolves each
+     person the moment they appear and re-renders when their picture lands, so
+     warming it for people who may never arrive bought nothing and meant asking
+     for the whole membership. */
 
   // 12. Device controls
   await _initBsCallControls(call);
@@ -6719,7 +6711,7 @@ function _renderBsGrid(call) {
           const cachedUrl = _streamAvatarCache?.[email] || null;
           if (email && _streamAvatarCache && !_streamAvatarCache.hasOwnProperty(email)) {
             _streamAvatarCache[email] = null;
-            db.from("allowed_emails").select("avatar_url").eq("email", email).maybeSingle()
+            _evCardFor(email)
               .then(({ data }) => {
                 if (_streamAvatarCache) _streamAvatarCache[email] = data?.avatar_url || null;
                 if (window._backstageCall) _renderBsGrid(window._backstageCall);
@@ -6748,7 +6740,7 @@ function _renderBsGrid(call) {
         const email = p.user_id || "";
         if (!email || _streamAvatarCache?.hasOwnProperty(email)) return;
         if (_streamAvatarCache) _streamAvatarCache[email] = null; // mark as loading
-        db.from("allowed_emails").select("avatar_url").eq("email", email).maybeSingle()
+        _evCardFor(email)
           .then(({ data }) => {
             if (_streamAvatarCache) _streamAvatarCache[email] = data?.avatar_url || null;
             if (window._backstageCall) _renderBsGrid(window._backstageCall);
@@ -7509,8 +7501,7 @@ async function inviteToBackstage() {
   if (existing) { alert(`${email} is already invited.`); return; }
 
   // Check if this is a registered member
-  const { data: member } = await db.from("allowed_emails")
-    .select("name").eq("email", email).maybeSingle();
+  const { data: member } = await _evCardFor(email);
 
   if (member) {
     // Member → DB insert + email notification
@@ -7831,7 +7822,7 @@ function _refreshPeopleTab() {
     const cachedUrl = email ? (_streamAvatarCache?.[email] ?? null) : null;
     if (email && _streamAvatarCache && !_streamAvatarCache.hasOwnProperty(email)) {
       _streamAvatarCache[email] = null; // mark as loading so we don't double-fetch
-      db.from("allowed_emails").select("avatar_url").eq("email", email).maybeSingle()
+      _evCardFor(email)
         .then(({ data }) => {
           if (_streamAvatarCache) _streamAvatarCache[email] = data?.avatar_url || null;
           _refreshPeopleTab(); // re-render with real photo
@@ -8549,6 +8540,17 @@ function _evMemberDirectory() {
     }, () => ({}));
   }
   return _evDirPromise;
+}
+
+/* The name and picture of somebody already in front of you: the author of a
+   message on screen, a person in your room, someone you typed in to invite.
+   Resolved from an address this page already holds, and only for the addresses
+   it passes, so it cannot be used to read the membership. Returns the same
+   single row shape the table read returned, so callers are unchanged. */
+function _evCardFor(email) {
+  return db.rpc("member_cards_for", { p_emails: [email] })
+    .then(r => ({ data: ((r && r.data) || [])[0] || null }),
+          ()  => ({ data: null }));
 }
 
 function avatarHtml(name, email, size = 36, avatarUrl = null) {
