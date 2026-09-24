@@ -3471,7 +3471,7 @@ let   _inlineCamPreviewKey    = null; // key that owns the open preview panel
 
 // Activity feed state
 let _feedRows = [], _feedPage = 1;
-let _feedAvatarMap = {};  // email → avatar_url (for feed cards + activity detail)
+let _feedAvatarMap = {};  // member key → avatar_url (for feed cards + activity detail)
 let _feedPostMap = {};    // post_id → {title,content,type} — enriches post/comment/reply feed bodies
 let _feedCommentMap = {}; // comment_id → content — enriches comment/reply feed bodies
 const FEED_PER_PAGE = 20;
@@ -6289,9 +6289,10 @@ async function _renderCfComments(postId) {
     .select("*").eq("post_id", postId).is("parent_comment_id", null)
     .order("created_at", { ascending: true });
   const list = (comments || []).map(c => {
-    const col = avatarColour(c.email);
-    const av  = `<div style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${escHtml((c.name||c.email).slice(0,1).toUpperCase())}</div>`;
-    return `<div style="display:flex;gap:10px;margin-bottom:14px">${av}<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.84rem;color:var(--text)">${escHtml(c.name||c.email.split("@")[0])}</div><div style="font-size:.88rem;color:var(--text);margin-top:2px;line-height:1.5;white-space:pre-wrap">${renderUserContent(c.content)}</div><div style="font-size:.72rem;color:var(--text-muted);margin-top:4px">${relativeTime(c.created_at)}</div></div></div>`;
+    const cname = c.name || "Member";
+    const col = _commColour(c.member_key);
+    const av  = `<div style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.fg};font-size:.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${escHtml(cname.slice(0,1).toUpperCase())}</div>`;
+    return `<div style="display:flex;gap:10px;margin-bottom:14px">${av}<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.84rem;color:var(--text)">${escHtml(cname)}</div><div style="font-size:.88rem;color:var(--text);margin-top:2px;line-height:1.5;white-space:pre-wrap">${renderUserContent(c.content)}</div><div style="font-size:.72rem;color:var(--text-muted);margin-top:4px">${relativeTime(c.created_at)}</div></div></div>`;
   }).join("") || `<div style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">No comments yet — be the first!</div>`;
   const tid = `cf-ci-${postId.replace(/-/g,"_")}`;
   el.innerHTML = `<div style="padding:0 20px 10px">${list}</div>
@@ -8938,7 +8939,8 @@ async function loadActivity() {
 
   const champHTML = _activityChampsHTML(champResult.data);
 
-  _feedRows = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+  /* the feed function already leaves the owner and system accounts out */
+  _feedRows = (feedResult.data || []);
   _feedItems = _feedRows;
 
   /* Feed avatars, from the directory by key. The feed carries each row's key
@@ -8948,7 +8950,7 @@ async function loadActivity() {
     _feedAvatarMap = {};
     _feedRows.forEach(r => {
       const info = r.member_key && _feedDir[r.member_key];
-      if (info && info.url) _feedAvatarMap[r.email] = info.url;
+      if (info && info.url) _feedAvatarMap[r.member_key] = info.url;
     });
   }
 
@@ -9109,10 +9111,13 @@ function showActivityReactorsPopover(key, event) {
   setTimeout(() => document.addEventListener("click", () => { if (_activityReactorsPopover) { _activityReactorsPopover.remove(); _activityReactorsPopover = null; } }, { once: true }), 0);
 }
 
+// A person's colour in the feed, by key, from the same palette as everywhere else.
+function _commColour(memberKey) { return commPalColour((_commDirNow[memberKey] || {}).pal); }
+
 function feedItemHTML(row) {
-  const name    = row.name || row.email.split("@")[0];
+  const name    = row.name || "Member";
   const ini     = initials(name);
-  const colour  = avatarColour(row.email);
+  const colour  = _commColour(row.member_key);
   const timeAgo = relativeTime(row.created_at || row.session_date);
 
   // Build per-item reaction + comment footer
@@ -9164,8 +9169,8 @@ function feedItemHTML(row) {
   const wrap = (verbLine, bodyHtml, openHref) => {
     const click = openHref ? ` style="cursor:pointer" onclick="${openHref}"` : "";
     return `<div class="feed-item"${click}>
-      ${_feedAvatarMap[row.email]
-        ? `<div class="feed-avatar" data-member-key="${escHtml(row.member_key || "")}" style="overflow:hidden;padding:0;cursor:pointer"><img src="${escHtml(_feedAvatarMap[row.email])}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
+      ${_feedAvatarMap[row.member_key]
+        ? `<div class="feed-avatar" data-member-key="${escHtml(row.member_key || "")}" style="overflow:hidden;padding:0;cursor:pointer"><img src="${escHtml(_feedAvatarMap[row.member_key])}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
         : `<div class="feed-avatar" data-member-key="${escHtml(row.member_key || "")}" style="background:${colour.bg};color:${colour.fg};cursor:pointer">${ini}</div>`}
       <div class="feed-body">
         ${verbLine}
@@ -9531,18 +9536,18 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
 
   // Notify the activity item's owner (skip self).
   const _row = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId));
-  let _ownerEmail = _row?.email;
-  let _postId     = _row?.post_id;
+  let _ownerKey = _row?.member_key;
+  let _postId   = _row?.post_id;
   // For comment/reply reactions the item lives in community_post_comments even
   // when it isn't in the loaded feed window — resolve the author from the DB so
   // the notification still fires (this was the gap that dropped reply notifs).
-  if (!_ownerEmail && (eventType === "comment" || eventType === "reply")) {
+  if (!_ownerKey && (eventType === "comment" || eventType === "reply")) {
     const { data: _crow } = await db.from("community_post_comments")
-      .select("email,post_id").eq("id", itemId).maybeSingle();
-    _ownerEmail = _crow?.email;
-    _postId     = _postId || _crow?.post_id;
+      .select("member_key,post_id").eq("id", itemId).maybeSingle();
+    _ownerKey = _crow?.member_key;
+    _postId   = _postId || _crow?.post_id;
   }
-  if (_ownerEmail && _ownerEmail.toLowerCase() !== myEmail.toLowerCase()) {
+  if (_ownerKey && _ownerKey !== myMemberKey) {
     const _kind = ({
       session:         "practice session",
       achievement:     "achievement",
@@ -9560,7 +9565,7 @@ async function pickReaction(event, safeKey, eventType, itemId, emoji) {
       ? `/community.html?post=${_postId}`
       : `/community.html`;
     await db.from("notifications").insert({
-      email:    _ownerEmail,
+      to_member_key: _ownerKey,
       type:     "reaction",
       title:    `${myName || "Someone"} reacted ${emoji} to your ${_kind}`,
       body:     "",
@@ -9756,8 +9761,8 @@ async function showActivityDetail(eventType, itemId, skipPush) {
   const detailArea = document.getElementById("activity-detail-area");
 
   if (row) {
-    const name = row.name || row.email?.split("@")[0] || "Member";
-    const colour = avatarColour(row.email || "");
+    const name = row.name || "Member";
+    const colour = _commColour(row.member_key);
     const ini = initials(name);
     const timeAgo = relativeTime(row.created_at || row.session_date);
 
@@ -9788,7 +9793,7 @@ async function showActivityDetail(eventType, itemId, skipPush) {
 
     detailArea.innerHTML = `<div class="detail-card">
       <div class="post-author-row" style="margin-bottom:4px">
-        ${avatarHtml(row.email, name, 28, _feedAvatarMap[row.email] || null)}
+        ${avatarHtml(null, name, 28, _feedAvatarMap[row.member_key] || null, { key: row.member_key, pal: (_commDirNow[row.member_key] || {}).pal })}
         <span class="post-author-name">${escHtml(name)}</span>
         <span class="post-author-time" style="margin-left:auto">${timeAgo}</span>
       </div>
@@ -9984,10 +9989,10 @@ async function submitActivityDetailComment() {
         );
       }
     }
-    const owner = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId))?.email;
-    if (owner && owner !== myEmail) {
+    const ownerKey = _feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId))?.member_key;
+    if (ownerKey && ownerKey !== myMemberKey) {
       await db.from("notifications").insert({
-        email:    owner,
+        to_member_key: ownerKey,
         type:     "new_comment",
         title:    `${myName || "Someone"} commented on your activity`,
         body:     (content || "Sent an attachment").slice(0, 120),

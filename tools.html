@@ -4889,32 +4889,28 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
   // browser, so a sparse board (e.g. a single key in key mode, whose scores are low)
   // was truncated below the global top 500 and never fetched — which is why a key that
   // had been played showed no scores at all.
-  // Reads note_game_leaderboard (best row per player per board variant) rather than
-  // the raw note_game_scores. The raw table fetched the global top-500 BY SCORE and
-  // deduped in-browser, so once a few players logged hundreds of games, lower players
-  // fell below the 500-row cutoff and vanished even though they ranked in the Top 10.
-  let q = db.from("note_game_leaderboard")
-    .select("email, name, score, clef, accidentals, key_signature, range, attempts, created_at");
-  q = q.eq("range", filterRange);                          // range is its own board variant
-  if (filterKey !== null) {
-    q = q.eq("key_signature", filterKey);                  // key mode: separate board per key AND clef
-    if (filterClef !== null) q = q.eq("clef", filterClef);
-  } else {
-    q = q.is("key_signature", null);                       // normal mode: exclude key-mode scores
-    if (filterClef !== null) q = q.eq("clef", filterClef);
-    if (filterAcc  !== null) q = q.eq("accidentals", filterAcc);
-  }
-  const { data: rawData, error: lbErr } = await q.order("score", { ascending: false }).limit(500);
+  // note_board() gives the best row per player per board variant (the same thing
+  // the note_game_leaderboard view gave), filtered server-side so the row limit
+  // applies to the relevant subset. It answers in member keys: a board needs to
+  // know who is who and who is you, and never needs anybody's address.
+  // In key mode the accidentals facet does not apply, so nothing is passed for it.
+  const { data: rawData, error: lbErr } = await db.rpc("note_board", {
+    p_range:         filterRange,                        // range is its own board variant
+    p_key_signature: filterKey !== null ? filterKey : null,
+    p_clef:          filterClef !== null ? filterClef : null,
+    p_accidentals:   filterKey !== null ? null : (filterAcc !== null ? filterAcc : null),
+  });
   if (lbErr) console.warn("nrLoadLeaderboard query error:", lbErr);
 
-  const bestByEmail = new Map();
+  const bestByPlayer = new Map();
   (rawData || []).forEach(function(r) {
-    const key = r.email.toLowerCase();
-    if (!bestByEmail.has(key) || r.score > bestByEmail.get(key).score) {
-      bestByEmail.set(key, r);
+    const key = r.member_key;
+    if (!key) return;
+    if (!bestByPlayer.has(key) || r.score > bestByPlayer.get(key).score) {
+      bestByPlayer.set(key, r);
     }
   });
-  const data = Array.from(bestByEmail.values())
+  const data = Array.from(bestByPlayer.values())
     .sort(function(a, b) { return b.score - a.score; })
     .slice(0, 10);
 
@@ -4939,12 +4935,11 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
 
   function nrLbRow(r, rank, extraClass) {
     extraClass = extraClass || "";
-    const raw     = r.email.split("@")[0];
-    const name    = r.name || (raw.charAt(0).toUpperCase() + raw.slice(1));
+    const name    = r.name || "Member";
     const clefTag = r.clef === "mixed" ? "Mixed" : r.clef.charAt(0).toUpperCase() + r.clef.slice(1);
     const accTag  = r.accidentals ? "♯♭" : "";
     const rangeTag = NR_RANGE_LABEL[r.range] || "";
-    const mine    = myEmail && r.email.toLowerCase() === myEmail.toLowerCase();
+    const mine    = myMemberKey && r.member_key === myMemberKey;
     return '<div class="nr-lb-row' + (mine ? " nr-lb-mine" : "") + (extraClass ? " " + extraClass : "") + '">' +
       '<span class="nr-lb-rank">' + rank + '</span>' +
       '<span class="nr-lb-name">' + name + '</span>' +
@@ -4956,8 +4951,8 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
   }
 
   let html = "";
-  const myTopIdx = myEmail
-    ? data.findIndex(function(r) { return r.email.toLowerCase() === myEmail.toLowerCase(); })
+  const myTopIdx = myMemberKey
+    ? data.findIndex(function(r) { return r.member_key === myMemberKey; })
     : -1;
 
   if (justPlayedScore !== null && myEmail) {
@@ -4981,7 +4976,7 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore, filterClef, filterAc
 
   if (justPlayedScore === null && myEmail && myTopIdx === -1) {
     const myBestRaw = (rawData || [])
-      .filter(function(r) { return r.email.toLowerCase() === myEmail.toLowerCase(); })
+      .filter(function(r) { return r.member_key === myMemberKey; })
       .reduce(function(best, r) { return (r.score > ((best && best.score) || 0) ? r : best); }, null);
     if (myBestRaw) {
       html += '<div class="nr-lb-you-label">Your best</div>' +
@@ -7598,7 +7593,7 @@ async function itLoadLeaderboard(rowsElId){
     if(error||!data){ if(!hadRows) el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>'; return; }
     const rows=data;   // already deduped, sorted, top 10
     el.innerHTML = cap + (rows.length
-      ? rows.map((r,i)=>{ const mine=r.email===myEmail.toLowerCase(); return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||r.email.split("@")[0])}</span><span class="nr-lb-score">${r.score}</span></div>`; }).join("")
+      ? rows.map((r,i)=>{ const mine=myMemberKey && r.member_key===myMemberKey; return `<div class="nr-lb-row${mine?" nr-lb-mine":""}"><span class="nr-lb-rank">${i+1}</span><span class="nr-lb-name">${escHtml(r.name||"Member")}</span><span class="nr-lb-score">${r.score}</span></div>`; }).join("")
       : '<div class="nr-lb-empty">No scores yet. Be first!</div>');
   }catch(e){ if(!hadRows) el.innerHTML=cap+'<div class="nr-lb-empty">Unable to load</div>'; }
   finally{ _itLbInFlight[rowsElId]=false; }

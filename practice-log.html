@@ -20442,7 +20442,7 @@ async function renderDashboard() {
 
   // ── Async: user's leaderboard ranks (all boards) ────────────────
   try {
-    const target = (viewingEmail || myEmail)?.toLowerCase() || '';
+    const target = _lbViewedKey();   // whose ranks these are, by key
     const [ranksRes, piecesRes, scalesRes, streakRes] = await Promise.all([
       db.rpc("get_my_leaderboard_ranks", { p_email: viewingEmail || myEmail }),
       db.rpc("get_piece_leaderboard"),
@@ -20456,14 +20456,14 @@ async function renderDashboard() {
     const streakRows = (streakRes.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.best_streak) > 0);
     let myStreakRank = null;
     for (let i = 0; i < streakRows.length; i++) {
-      if (streakRows[i].email?.toLowerCase() === target) { myStreakRank = i + 1; break; }
+      if (streakRows[i].member_key === target) { myStreakRank = i + 1; break; }
     }
 
     // Piece rank
     const pieceRows = (piecesRes.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.total_minutes) > 0);
     let myPieceRank = null;
     for (let i = 0; i < pieceRows.length; i++) {
-      if (pieceRows[i].email?.toLowerCase() === target) { myPieceRank = i + 1; break; }
+      if (pieceRows[i].member_key === target) { myPieceRank = i + 1; break; }
     }
 
     // Scale rank
@@ -20480,7 +20480,7 @@ async function renderDashboard() {
     scaleRows.sort((a, b) => b.cnt - a.cnt);
     let myScaleRank = null;
     for (let i = 0; i < scaleRows.length; i++) {
-      if (scaleRows[i].email?.toLowerCase() === target) { myScaleRank = i + 1; break; }
+      if (scaleRows[i].member_key === target) { myScaleRank = i + 1; break; }
     }
 
     const CATS = [
@@ -20513,7 +20513,7 @@ async function renderDashboard() {
     let feedRows = _feedRows; // already-grouped if main feed loaded
     if (!_feedLoaded) {
       const { data } = await db.rpc("get_activity_feed_v2");
-      const raw = (data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+      const raw = (data || []);   // the feed function already excludes the owner and system accounts
       // Populate _feedAvatarMap so feedItemHTML() can render real avatars,
       // not just initials. (Main renderCommunityFeed does this too — but
       // here we run before it.)
@@ -20523,7 +20523,7 @@ async function renderDashboard() {
         await _lbLoadAllAvatars();
         raw.forEach(r => {
           const info = r.member_key && _lbDir[r.member_key];
-          if (info && info.url) _feedAvatarMap[r.email] = info.url;
+          if (info && info.url) _feedAvatarMap[r.member_key] = info.url;
         });
       }
       feedRows = groupFeedEvents(raw);
@@ -20550,7 +20550,7 @@ async function renderDashboard() {
     const postsEl = document.getElementById('dash-posts-preview');
     if (postsEl) {
       const { data: pdata } = await db.from("community_posts")
-        .select("id,email,name,type,content,created_at,media,member_key")
+        .select("id,name,type,content,created_at,media,member_key")
         .neq("type", "practice_log")
         .order("created_at", { ascending: false })
         .limit(20);
@@ -20560,9 +20560,9 @@ async function renderDashboard() {
       if (postRows.length) {
         await _lbLoadAllAvatars();
         postRows.forEach(r => {
-          if (_feedAvatarMap[r.email]) return;
+          if (_feedAvatarMap[r.member_key]) return;
           const info = r.member_key && _lbDir[r.member_key];
-          if (info && info.url) _feedAvatarMap[r.email] = info.url;
+          if (info && info.url) _feedAvatarMap[r.member_key] = info.url;
         });
       }
 
@@ -20587,7 +20587,7 @@ async function renderDashboard() {
           `<div style="font-size:.82rem;color:var(--text-muted);padding:12px 16px">No posts yet.</div>`;
       } else {
         const rowsHTML = postRows.map(p => {
-          const name = escHtml(p.name || (p.email || "").split("@")[0]);
+          const name = escHtml(p.name || "Member");
           const badge = TYPE_LABELS[p.type] || "Post";
           const body  = (p.content || "").trim().replace(/\s+/g, " ");
           const snippet = body.length > 90 ? body.slice(0, 90).trimEnd() + "…" : body;
@@ -20601,9 +20601,9 @@ async function renderDashboard() {
           const thumb = t
             ? `<span class="dfm-thumb feed-post-thumb">${t.src ? `<img src="${escHtml(t.src)}" alt="" loading="lazy" onerror="this.style.display='none'"/>` : ""}${t.video ? playIc : ""}</span>`
             : "";
-          const colour = avatarColour(p.email || "");
+          const colour = _feedColour(p.member_key);
           return `<a class="feed-item feed-item--post" data-ts="${p.created_at}" href="/community.html">
-            ${_feedAvatarHTML(p.email, p.name || (p.email || "").split("@")[0])}
+            ${_feedAvatarHTML(p.member_key, p.name || "Member")}
             <div class="feed-body">
               <div class="feed-text"><strong style="color:${colour.fg}">${name}</strong><span class="feed-postbadge">${escHtml(badge)}</span></div>
               ${snippet ? `<div class="feed-post-snip">${escHtml(snippet)}</div>` : ""}
@@ -29998,7 +29998,7 @@ let _feedPage = 1;
 const FEED_PER_PAGE = 20;
 
 let _monthlyChampionsHTML = null;
-let _feedAvatarMap = {};       // email → avatar_url
+let _feedAvatarMap = {};       // member key → avatar_url
 let _communityPostsHTML = "";  // rendered HTML for the posts strip
 
 async function renderCommunityFeed() {
@@ -30022,7 +30022,7 @@ async function renderCommunityFeed() {
     db.rpc("get_activity_feed_v2"),
     championsPromise,
     db.from("community_posts")
-      .select("id,email,name,type,content,created_at,member_key")
+      .select("id,name,type,content,created_at,member_key")
       .order("created_at", { ascending: false })
       .limit(5),
   ]);
@@ -30038,14 +30038,13 @@ async function renderCommunityFeed() {
 
   // Fetch avatar URLs for everyone appearing in either dataset
   const postRows = (postsResult.data || []);
-  /* Pictures for everyone in either dataset, from the directory by key. The map
-     stays keyed by address so the renderers below are untouched. */
+  /* Pictures for everyone in either dataset, looked up in the directory by key. */
   {
     await _lbLoadAllAvatars();
     _feedAvatarMap = {};
     [...(feedResult.data || []), ...postRows].forEach(r => {
       const info = r && r.member_key && _lbDir[r.member_key];
-      if (info && info.url && r.email) _feedAvatarMap[r.email] = info.url;
+      if (info && info.url && r.member_key) _feedAvatarMap[r.member_key] = info.url;
     });
   }
 
@@ -30071,7 +30070,7 @@ async function renderCommunityFeed() {
           ${champs.map((r, i) => `
             <div class="monthly-champ-row">
               <span class="monthly-champ-medal" style="color:${MEDAL_COLOURS[i]}">${MEDALS[i]}</span>
-              <span class="monthly-champ-name">${escHtml(r.name || r.email.split("@")[0])}</span>
+              <span class="monthly-champ-name">${escHtml(r.name || "Member")}</span>
               <span class="monthly-champ-time">${formatMinutes(Number(r.total_minutes) || 0)}</span>
             </div>`).join("")}
         </div>
@@ -30081,7 +30080,7 @@ async function renderCommunityFeed() {
     _monthlyChampionsHTML = null;
   }
 
-  const rawFeed = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
+  const rawFeed = (feedResult.data || []);   // the feed function already excludes them
   // Group consecutive same-person events into single summary cards
   _feedRows = groupFeedEvents(rawFeed);
   _feedPage = 1;
@@ -30097,13 +30096,13 @@ function groupFeedEvents(rows) {
   rows.forEach(row => {
     const t = new Date(row.created_at || row.session_date).getTime();
     const cur = groups[groups.length - 1];
-    if (cur && cur.email === row.email && Math.abs(cur.latestTime - t) <= GROUP_WINDOW_MS) {
+    if (cur && cur.member_key === row.member_key && Math.abs(cur.latestTime - t) <= GROUP_WINDOW_MS) {
       cur.events.push(row);
       cur.latestTime = Math.max(cur.latestTime, t);
     } else {
       groups.push({
-        email: row.email,
-        name: row.name || (row.email || "").split("@")[0],
+        member_key: row.member_key,
+        name: row.name || "Member",
         latestTime: t,
         latest_created_at: row.created_at || row.session_date,
         events: [row],
@@ -30139,14 +30138,17 @@ function loadMoreFeed() {
   if (btn) btn.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-function _feedAvatarHTML(email, name, size) {
-  const avatarUrl = _feedAvatarMap[email];
-  const colour    = avatarColour(email);
-  const initials  = (name || email.split("@")[0]).split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+// A feed row's colour, by key. Same palette the boards and the profile use.
+function _feedColour(memberKey) { return lbPalColour((_lbDir[memberKey] || {}).pal); }
+
+function _feedAvatarHTML(memberKey, name, size) {
+  const avatarUrl = _feedAvatarMap[memberKey];
+  const colour    = _feedColour(memberKey);
+  const initials  = (name || "Member").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
   const sz = size || 34;
-  const hook = email ? ` data-member-email="${escHtml(email)}" style="cursor:pointer;` : ` style="`;
+  const hook = memberKey ? ` data-member-key="${escHtml(memberKey)}" style="cursor:pointer;` : ` style="`;
   if (avatarUrl) {
-    return `<img src="${avatarUrl}" class="feed-avatar feed-avatar-img"${email ? ` data-member-email="${escHtml(email)}"` : ""} width="${sz}" height="${sz}" alt="${escHtml(name)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0${email ? ";cursor:pointer" : ""}" onerror="this.outerHTML='<div class=\\'feed-avatar\\' style=\\'background:${colour.bg};color:${colour.fg}\\'>${initials}</div>'">`;
+    return `<img src="${avatarUrl}" class="feed-avatar feed-avatar-img"${memberKey ? ` data-member-key="${escHtml(memberKey)}"` : ""} width="${sz}" height="${sz}" alt="${escHtml(name)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0${memberKey ? ";cursor:pointer" : ""}" onerror="this.outerHTML='<div class=\\'feed-avatar\\' style=\\'background:${colour.bg};color:${colour.fg}\\'>${initials}</div>'">`;
   }
   return `<div class="feed-avatar"${hook}background:${colour.bg};color:${colour.fg}">${initials}</div>`;
 }
@@ -30157,15 +30159,15 @@ function feedItemHTML(group) {
   // Backward compat: if a single raw event row was passed, wrap it as a 1-event group
   if (!group.events) {
     group = {
-      email: group.email,
-      name: group.name || (group.email || "").split("@")[0],
+      member_key: group.member_key,
+      name: group.name || "Member",
       latestTime: new Date(group.created_at || group.session_date).getTime(),
       latest_created_at: group.created_at || group.session_date,
       events: [group],
     };
   }
-  const name    = group.name || (group.email || "").split("@")[0];
-  const colour  = avatarColour(group.email || "");
+  const name    = group.name || "Member";
+  const colour  = _feedColour(group.member_key);
   const timeAgo = feedRelativeTime(new Date(group.latestTime).toISOString());
 
   // Tally — keep only ONE highest score per game per group (de-noising)
@@ -30294,7 +30296,7 @@ function feedItemHTML(group) {
   }
 
   return `<div class="feed-item" data-ts="${new Date(group.latestTime).toISOString()}">
-    ${_feedAvatarHTML(group.email, name)}
+    ${_feedAvatarHTML(group.member_key, name)}
     <div class="feed-body">
       ${leadVerbLine}
       ${badgesHTML}
@@ -30305,10 +30307,10 @@ function feedItemHTML(group) {
 }
 
 function communityPostStripHTML(p) {
-  const name     = p.name || p.email.split("@")[0];
-  const colour   = avatarColour(p.email);
+  const name     = p.name || "Member";
+  const colour   = _feedColour(p.member_key);
   const timeAgo  = feedRelativeTime(p.created_at);
-  const avatarEl = _feedAvatarHTML(p.email, name, 32);
+  const avatarEl = _feedAvatarHTML(p.member_key, name, 32);
 
   // Badge label
   const TYPE_LABELS = {
@@ -30698,14 +30700,15 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore = null, filterClef = 
   );
 
   // Deduplicate: keep only each player's best score
-  const bestByEmail = new Map();
+  const bestByPlayer = new Map();
   (rawData || []).forEach(r => {
-    const key = r.email.toLowerCase();
-    if (!bestByEmail.has(key) || r.score > bestByEmail.get(key).score) {
-      bestByEmail.set(key, r);
+    const key = r.member_key;
+    if (!key) return;
+    if (!bestByPlayer.has(key) || r.score > bestByPlayer.get(key).score) {
+      bestByPlayer.set(key, r);
     }
   });
-  const data = [...bestByEmail.values()]
+  const data = [...bestByPlayer.values()]
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 
@@ -30722,11 +30725,10 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore = null, filterClef = 
   }
 
   function nrLbRow(r, rank, extraClass = "") {
-    const raw     = r.email.split("@")[0];
-    const name    = r.name || (raw.charAt(0).toUpperCase() + raw.slice(1));
+    const name    = r.name || "Member";
     const clefTag = r.clef === "mixed" ? "Mixed" : r.clef.charAt(0).toUpperCase() + r.clef.slice(1);
     const accTag  = r.accidentals ? "♯♭" : "";
-    const mine    = myEmail && r.email.toLowerCase() === myEmail.toLowerCase();
+    const mine    = myMemberKey && r.member_key === myMemberKey;
     return `<div class="nr-lb-row${mine ? " nr-lb-mine" : ""}${extraClass ? " " + extraClass : ""}">
       <span class="nr-lb-rank">${rank}</span>
       <span class="nr-lb-name">${name}</span>
@@ -30739,8 +30741,8 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore = null, filterClef = 
   let html = "";
 
   // Find the current user's entry in the deduplicated top-10 list
-  const myTopIdx = myEmail
-    ? data.findIndex(r => r.email.toLowerCase() === myEmail.toLowerCase())
+  const myTopIdx = myMemberKey
+    ? data.findIndex(r => r.member_key === myMemberKey)
     : -1;
 
   // On the results screen, pin the just-played score at the very top
@@ -30768,7 +30770,7 @@ async function nrLoadLeaderboard(rowsElId, justPlayedScore = null, filterClef = 
   if (justPlayedScore === null && myEmail && myTopIdx === -1) {
     // Find the user's best score in raw data for this filter
     const myBestRaw = (rawData || [])
-      .filter(r => r.email.toLowerCase() === myEmail.toLowerCase())
+      .filter(r => r.member_key === myMemberKey)
       .reduce((best, r) => (r.score > (best?.score || 0) ? r : best), null);
     if (myBestRaw) {
       html += `<div class="nr-lb-you-label">Your best</div>`;
