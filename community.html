@@ -8672,7 +8672,7 @@ async function loadComments(postId) {
           ${commentPollHtml(c.id, c.email)}
           <div class="comment-action-row">
             ${reactBar}
-            <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}')">Reply</button>
+            <button class="comment-reply-btn" onclick="startReply('${rootId}','${dispName.replace(/'/g,"\\'")}','${c.member_key || ""}')">Reply</button>
           </div>
         </div>
       </div>`;
@@ -8710,7 +8710,7 @@ function cancelReply(commentId) {
   _clearInlineState(commentId);
 }
 
-function startReply(commentId, authorName, authorEmail) {
+function startReply(commentId, authorName, authorKey) {
   // Hide any other open reply composers and clear their state
   document.querySelectorAll("[id^='reply-composer-']").forEach(el => {
     if (el.style.display !== "none") {
@@ -8723,7 +8723,7 @@ function startReply(commentId, authorName, authorEmail) {
   if (!composer) return;
   composer.style.display = "flex";
   composer.dataset.replyToName  = authorName;
-  composer.dataset.replyToEmail = authorEmail;
+  composer.dataset.replyToKey   = authorKey;
   const ta = composer.querySelector("textarea");
   ta.value = ""; ta.focus();
 }
@@ -8743,7 +8743,7 @@ async function submitReply(parentCommentId, textarea) {
   if (replyToName && content.startsWith(`@${replyToName}`)) {
     content = content.slice(replyToName.length + 1).trimStart();
   }
-  const replyToEmail = composer?.dataset.replyToEmail || null;
+  const replyToKey = composer?.dataset.replyToKey || null;
 
   textarea.disabled = true;
   if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
@@ -8783,9 +8783,9 @@ async function submitReply(parentCommentId, textarea) {
         );
       }
     }
-    if (replyToEmail && replyToEmail !== myEmail) {
+    if (replyToKey && replyToKey !== myMemberKey) {
       await db.from("notifications").insert({
-        email:    replyToEmail,
+        to_member_key: replyToKey,
         type:     "comment_reply",
         title:    `${myName || "Someone"} replied to your comment`,
         body:     (content || "Sent an attachment").slice(0, 120),
@@ -8797,7 +8797,7 @@ async function submitReply(parentCommentId, textarea) {
       fromName: myName || "Someone",
       body:     content,
       linkUrl:  `/community.html?post=${_currentPostId}`,
-      exclude:  [replyToEmail].filter(Boolean),
+      excludeKeys: [replyToKey].filter(Boolean),
     });
   } catch (e) { console.warn("reply side-effects failed:", e); }
 
@@ -8852,9 +8852,9 @@ async function submitComment() {
       }
     }
     const post = _posts.find(p => p.id === _currentPostId);
-    if (post && post.email && post.email !== myEmail) {
+    if (post && post.member_key && post.member_key !== myMemberKey) {
       await db.from("notifications").insert({
-        email:    post.email,
+        to_member_key: post.member_key,
         type:     "new_comment",
         title:    `${myName || "Someone"} commented on your post`,
         body:     (content || "Sent an attachment").slice(0, 120),
@@ -8866,7 +8866,7 @@ async function submitComment() {
       fromName: myName || "Someone",
       body:     content,
       linkUrl:  `/community.html?post=${_currentPostId}`,
-      exclude:  [post?.email].filter(Boolean),
+      excludeKeys: [post?.member_key].filter(Boolean),
     });
   } catch (e) { console.warn("comment side-effects failed:", e); }
 
@@ -9906,7 +9906,7 @@ async function loadActivityDetailComments(eventType, itemId) {
         ${acPollByComment[c.id] ? _commentPollHtml(acPollByComment[c.id].pollId, acPollByComment[c.id].question, acPollByComment[c.id].opts, acPollByComment[c.id].voteCountMap, acPollByComment[c.id].myOptId, acPollByComment[c.id].totalVotes, c.email, "castActivityCommentVote") : ""}
         <div class="comment-action-row">
           ${_commentReactBarHTML("activity_comment", c.id)}
-          <button class="comment-reply-btn" onclick="startActivityDetailReply('${threadId}','${dispName.replace(/'/g,"\\'")}','${c.email.replace(/'/g,"\\'")}','${eventType}','${String(itemId)}')">Reply</button>
+          <button class="comment-reply-btn" onclick="startActivityDetailReply('${threadId}','${dispName.replace(/'/g,"\\'")}','${c.member_key || ""}','${eventType}','${String(itemId)}')">Reply</button>
         </div>
       </div>
     </div>`;
@@ -9983,7 +9983,7 @@ async function submitActivityDetailComment() {
       fromName: myName || "Someone",
       body:     content,
       linkUrl:  `/community.html`,
-      exclude:  [_feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId))?.email].filter(Boolean),
+      excludeKeys: [_feedItems?.find(r => r.event_type === eventType && String(r.item_id) === String(itemId))?.member_key].filter(Boolean),
     });
   } catch (e) { console.warn("activity comment side-effects failed:", e); }
 
@@ -9997,7 +9997,7 @@ async function submitActivityDetailComment() {
   catch (e) { console.warn("activity comment reload failed:", e); }
 }
 
-function startActivityDetailReply(commentId, authorName, authorEmail, eventType, itemId) {
+function startActivityDetailReply(commentId, authorName, authorKey, eventType, itemId) {
   document.querySelectorAll("[id^='activity-reply-composer-']").forEach(el => {
     if (el.id !== `activity-reply-composer-${commentId}`) {
       el.style.display = "none";
@@ -10009,7 +10009,7 @@ function startActivityDetailReply(commentId, authorName, authorEmail, eventType,
   if (!composer) return;
   composer.style.display = "flex";
   composer.dataset.replyTo = authorName;
-  composer.dataset.replyToEmail = authorEmail;
+  composer.dataset.replyToKey = authorKey;
   composer.querySelector("textarea")?.focus();
 }
 
@@ -10034,7 +10034,7 @@ async function submitActivityDetailReply(parentId, eventType, itemId) {
   const btn = document.getElementById(`activity-reply-send-btn-${parentId}`);
   if (btn && btn.disabled) return; // already submitting — guard against duplicates
   const replyToName  = composer.dataset.replyTo || "";
-  const replyToEmail = composer.dataset.replyToEmail || null;
+  const replyToKey = composer.dataset.replyToKey || null;
 
   if (ta) ta.disabled = true;
   if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
@@ -10060,9 +10060,9 @@ async function submitActivityDetailReply(parentId, eventType, itemId) {
         );
       }
     }
-    if (replyToEmail && replyToEmail !== myEmail) {
+    if (replyToKey && replyToKey !== myMemberKey) {
       await db.from("notifications").insert({
-        email:    replyToEmail,
+        to_member_key: replyToKey,
         type:     "comment_reply",
         title:    `${myName || "Someone"} replied to your comment`,
         body:     (content || "Sent an attachment").slice(0, 120),
@@ -10074,7 +10074,7 @@ async function submitActivityDetailReply(parentId, eventType, itemId) {
       fromName: myName || "Someone",
       body:     content,
       linkUrl:  `/community.html`,
-      exclude:  [replyToEmail].filter(Boolean),
+      excludeKeys: [replyToKey].filter(Boolean),
     });
   } catch (e) { console.warn("activity reply side-effects failed:", e); }
 
@@ -10136,14 +10136,21 @@ function avatarColour(email) {
   return P[Math.abs(h) % P.length];
 }
 
-function avatarHtml(email, name, size = 32, avatarUrl = null) {
+/* `who` is the member's identity from the directory: { key, pal }. When it is
+   given the avatar carries the opaque key instead of the address, and takes its
+   colour from the palette index the server computed with the page's own hash.
+   Callers that do not pass it behave exactly as before, so surfaces convert one
+   at a time. */
+function avatarHtml(email, name, size = 32, avatarUrl = null, who = null) {
   const style = `width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;`;
   // Clicking any author avatar opens the shared member-profile modal.
-  const hook = email ? ` data-member-email="${escHtml(email)}" style="${style}cursor:pointer;` : ` style="${style}`;
+  const hook = who?.key
+    ? ` data-member-key="${escHtml(who.key)}" style="${style}cursor:pointer;`
+    : (email ? ` data-member-email="${escHtml(email)}" style="${style}cursor:pointer;` : ` style="${style}`);
   if (avatarUrl) {
     return `<div${hook}overflow:hidden"><img src="${escHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" /></div>`;
   }
-  const c = avatarColour(email);
+  const c = who ? commPalColour(who.pal) : avatarColour(email);
   const ini = initials(name || email?.split("@")[0] || "?");
   const fontSize = Math.round(size * 0.34);
   return `<div${hook}background:${c.bg};color:${c.fg};display:flex;align-items:center;justify-content:center;font-size:${fontSize}px;font-weight:800">${ini}</div>`;

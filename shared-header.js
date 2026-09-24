@@ -863,16 +863,13 @@ window.linkifyText = function(raw) {
 // One shared module powering @-autocomplete in every composer, plus mention
 // extraction (for notifications) and rendering (clickable tags). Pages opt a
 // textarea in by giving it the attribute `data-mention`. Members are loaded
-// once from allowed_emails. initSharedHeader() wires in the db + current user.
+// once from member_directory, which carries no addresses. initSharedHeader()
+// wires in the db + current user.
 window.Mentions = (function() {
   const NAME_FRAG = /@([\w\sÀ-ÿ\-.']{0,40})$/;      // the @word being typed before the caret
-  // System / burner / reviewer accounts — never surfaced as taggable people.
-  const HIDDEN = new Set([
-    "reviewer@matthewcawood.com",
-    "enquiries@matthewcawood.com",
-    "mcawoodcanada@gmail.com",
-  ]);
-  let _db = null, _me = "", _members = [], _loaded = false;
+  // System / burner / reviewer accounts are excluded by the server, through
+  // member_directory's `mentionable` flag, so no address is needed here.
+  let _db = null, _me = "", _meKey = null, _members = [], _loaded = false;
   let _rawMap = {};      // raw name  → member (for extract)
   let _escMap = {};      // escaped name → member (for render)
   let _ta = null, _idx = -1, _matches = [], _open = false;
@@ -884,13 +881,22 @@ window.Mentions = (function() {
   }
   function _reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
+  /* The taggable people come from the directory, which carries no addresses.
+     Who is taggable is decided on the server by `mentionable`: a current
+     member, with a name, excluding the system and reviewer accounts, which is
+     exactly the list this built from allowed_emails before. */
   async function _ensure() {
     if (_loaded || !_db) return;
     _loaded = true;
     try {
-      const { data } = await _db.from("allowed_emails").select("email,name,avatar_url");
-      _members = (data || []).filter(m =>
-        m.name && m.name.trim() && !HIDDEN.has((m.email || "").toLowerCase()));
+      const [dirRes, meRes] = await Promise.all([
+        _db.rpc("member_directory"),
+        _db.rpc("get_profile_row"),
+      ]);
+      _meKey = (meRes && meRes.data && meRes.data[0] && meRes.data[0].member_key) || null;
+      _members = ((dirRes && dirRes.data) || [])
+        .filter(m => m.mentionable && m.name && m.name.trim())
+        .map(m => ({ key: m.member_key, name: m.name, avatar_url: m.avatar_url || null }));
       _rawMap = {}; _escMap = {};
       _members.forEach(m => { _rawMap[m.name] = m; _escMap[_esc(m.name)] = m; });
     } catch (e) { _members = []; }
@@ -992,7 +998,7 @@ window.Mentions = (function() {
       const names = _members.map(m => m.name).sort((a, b) => b.length - a.length);
       const re = new RegExp("@(" + names.map(_reEsc).join("|") + ")(?![\\w])", "g");
       const found = new Map(); let m;
-      while ((m = re.exec(text))) { const mem = _rawMap[m[1]]; if (mem) found.set(mem.email, mem); }
+      while ((m = re.exec(text))) { const mem = _rawMap[m[1]]; if (mem) found.set(mem.key, mem); }
       return [...found.values()];
     },
 
@@ -1006,22 +1012,35 @@ window.Mentions = (function() {
       return escapedHtml.replace(re, (mm, p1) => {
         const mem = _escMap[p1];
         if (!mem) return mm;
-        return `<a href="/profile.html?u=${encodeURIComponent(mem.email)}" class="mention-tag" onclick="event.stopPropagation()">@${p1}</a>`;
+        return `<a href="/profile.html?k=${encodeURIComponent(mem.key)}" class="mention-tag" onclick="event.stopPropagation()">@${p1}</a>`;
       });
     },
 
     // Extract mentions from `text` and insert "mention" notifications (skips the
-    // author and any emails in `exclude`). Best-effort, never throws.
-    async notify(text, { fromName, body, linkUrl, exclude } = {}) {
+    // author and anyone in `excludeKeys`, who is already being notified another
+    // way). The recipient is named by key; the server resolves it, so no
+    // address is needed to notify someone. Best-effort, never throws.
+    async notify(text, { fromName, body, linkUrl, excludeKeys, exclude } = {}) {
       try {
         if (!_db) return;
         const mems = this.extract(text);
         if (!mems.length) return;
-        const ex = new Set([_me, ...((exclude || []).map(e => (e || "").toLowerCase()))]);
+        const ex = new Set([_meKey, ...(excludeKeys || [])].filter(Boolean));
+        /* Callers that have not converted yet still hand over an address for
+           someone they have already notified another way. Turn it into a key so
+           that person is still not notified twice. Drops out once every caller
+           carries keys. */
+        const legacy = (exclude || []).filter(Boolean);
+        if (legacy.length) {
+          try {
+            const { data } = await _db.rpc("member_keys_for", { p_emails: legacy });
+            (data || []).forEach(r => { if (r.member_key) ex.add(r.member_key); });
+          } catch (e) { /* best-effort */ }
+        }
         const rows = mems
-          .filter(m => m.email && !ex.has(m.email.toLowerCase()))
+          .filter(m => m.key && !ex.has(m.key))
           .map(m => ({
-            email: m.email, type: "mention",
+            to_member_key: m.key, type: "mention",
             title: `${fromName || "Someone"} mentioned you`,
             body: (body || "").slice(0, 120),
             link_url: linkUrl || "",
