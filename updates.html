@@ -487,9 +487,11 @@ const SVG_CMT    = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" 
 const SVG_EDIT   = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-1px;margin-right:3px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 9.5-9.5z"/></svg>`;
 
 let myEmail = null, myName = null, myAvatarUrl = null, isAdmin = false;
+/* Who you are on this page, the way everyone else on it is named: by key. */
+let myMemberKey = null;
 let _updates        = [];
 let _likerAvatarMap = {};
-let _upLikersMap    = {}; // updateId → [email, ...]
+let _upLikersMap    = {}; // updateId → [member key, ...]
 let _editUpdateId   = null;
 let _toolbarInjected = false;
 
@@ -499,6 +501,10 @@ let _toolbarInjected = false;
   if (!session) { window.location.href = "/practice-log.html"; return; }
 
   myEmail    = session.user.email;
+  try {
+    const { data: _pr } = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr[0] && _pr[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
   const { data: ae } = await db.from("allowed_emails")
     .select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName      = ae?.name || myEmail.split("@")[0];
@@ -526,11 +532,11 @@ let _toolbarInjected = false;
       const cc = u?.commentCount || 0;
       _setMeta(parentId, total, cc);
       if (!_upLikersMap[parentId]) _upLikersMap[parentId] = [];
-      if (iMine && !_upLikersMap[parentId].includes(myEmail)) {
-        if (!_likerAvatarMap[myEmail]) _likerAvatarMap[myEmail] = { url: myAvatarUrl, name: myName };
-        _upLikersMap[parentId].unshift(myEmail);
+      if (iMine && myMemberKey && !_upLikersMap[parentId].includes(myMemberKey)) {
+        if (!_likerAvatarMap[myMemberKey]) _likerAvatarMap[myMemberKey] = { url: myAvatarUrl, name: myName };
+        _upLikersMap[parentId].unshift(myMemberKey);
       } else if (!iMine) {
-        _upLikersMap[parentId] = _upLikersMap[parentId].filter(e => e !== myEmail);
+        _upLikersMap[parentId] = _upLikersMap[parentId].filter(k => k !== myMemberKey);
       }
       _updateLikerChips(parentId);
     },
@@ -573,10 +579,10 @@ function _likerChipsInner(updateId) {
   const likers = (_upLikersMap[updateId] || []).slice(0, 3);
   const total  = (_upLikersMap[updateId] || []).length;
   if (!total) return "";
-  const chips = likers.map(email => {
-    const info  = _likerAvatarMap[email];
-    const name  = info?.name || email.split("@")[0];
-    const col   = _avatarColour(email);
+  const chips = likers.map(key => {
+    const info  = _likerAvatarMap[key];
+    const name  = info?.name || "Member";
+    const col   = _palColour(info?.pal);
     const inner = info?.url
       ? `<img src="${_esc(info.url)}" alt="${_esc(name)}">`
       : `<span style="background:${col.bg};color:${col.fg};width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</span>`;
@@ -621,7 +627,7 @@ async function loadFeed(deepId = null) {
 
   const ids = rows.map(r => r.id);
   const [{ data: allLikes }, { data: cmtRows }] = await Promise.all([
-    db.from("practice_room_update_likes").select("update_id,email,emoji,member_key").in("update_id", ids),
+    db.from("practice_room_update_likes").select("update_id,emoji,member_key").in("update_id", ids),
     db.from("practice_room_update_comments").select("update_id").in("update_id", ids),
   ]);
 
@@ -631,19 +637,18 @@ async function loadFeed(deepId = null) {
   _upLikersMap = {};
   (allLikes || []).forEach(l => {
     if (!likersMap[l.update_id]) likersMap[l.update_id] = [];
-    if (likersMap[l.update_id].length < 3) likersMap[l.update_id].push(l.email);
+    if (likersMap[l.update_id].length < 3) likersMap[l.update_id].push(l.member_key);
     if (!_upLikersMap[l.update_id]) _upLikersMap[l.update_id] = [];
-    if (!_upLikersMap[l.update_id].includes(l.email)) _upLikersMap[l.update_id].push(l.email);
+    if (!_upLikersMap[l.update_id].includes(l.member_key)) _upLikersMap[l.update_id].push(l.member_key);
   });
   (cmtRows || []).forEach(c => cmtCountMap[c.update_id] = (cmtCountMap[c.update_id] || 0) + 1);
 
-  /* Liker chips, from the directory by key; the map stays keyed by address so
-     the rendering below is untouched. */
+  /* Liker chips, from the directory by key: picture, name and colour. */
   {
     const _dir = await _updMemberDirectory();
     (allLikes || []).forEach(l => {
       const info = l.member_key && _dir[l.member_key];
-      if (info) _likerAvatarMap[l.email] = { url: info.url, name: info.name };
+      if (info) _likerAvatarMap[l.member_key] = { url: info.url, name: info.name, pal: info.pal };
     });
   }
 
@@ -686,10 +691,10 @@ function upCardHTML(u) {
   const safeKey  = `up_${u.id.replace(/-/g,'_')}`;
   const reactBtn = Comments.reactBtnHtml(u.id, safeKey);
 
-  const likerChips = (u.likers || []).map(email => {
-    const info  = _likerAvatarMap[email];
-    const name  = info?.name || email.split("@")[0];
-    const col   = _avatarColour(email);
+  const likerChips = (u.likers || []).map(key => {
+    const info  = _likerAvatarMap[key];
+    const name  = info?.name || "Member";
+    const col   = _palColour(info?.pal);
     const inner = info?.url
       ? `<img src="${_esc(info.url)}" alt="${_esc(name)}">`
       : `<span style="background:${col.bg};color:${col.fg};width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:800;border-radius:50%">${name[0].toUpperCase()}</span>`;
@@ -993,16 +998,16 @@ function _esc(str) {
   return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-function _avatarColour(email) {
-  const P = [
-    {bg:"rgba(59,130,246,.2)",fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
-    {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)",fg:"#c4b5fd"},
-    {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
-    {bg:"rgba(6,182,212,.18)",fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
-  ];
-  let h = 0;
-  for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
-  return P[Math.abs(h) % P.length];
+const AVATAR_PALETTE = [
+  {bg:"rgba(59,130,246,.2)",fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+  {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)",fg:"#c4b5fd"},
+  {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+  {bg:"rgba(6,182,212,.18)",fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+];
+/* The same eight colours, picked by the index the directory carries. That index
+   is the address hash, worked out once in the database. */
+function _palColour(i) {
+  return AVATAR_PALETTE[(Number.isInteger(i) ? i : 0) % AVATAR_PALETTE.length];
 }
 </script>
 

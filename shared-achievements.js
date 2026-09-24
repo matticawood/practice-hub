@@ -949,7 +949,7 @@ async function loadAchievementExtras() {
   // Most comments on any single one of the user's own posts (Conversation Starter)
   try {
     const { data: myPosts } = await db.from("community_posts")
-      .select("id").ilike("email", email);
+      .select("id").eq("member_key", memberKey);
     const postIds = (myPosts || []).map(p => p.id);
     if (postIds.length) {
       const { data: cmts } = await db.from("community_post_comments")

@@ -770,6 +770,19 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
   auth: { autoRefreshToken:true, persistSession:true, detectSessionInUrl:false }
 });
 let myEmail = "", myName = "";
+/* Who you are on this page, by key: how everybody else on it is named. Asked
+   for once, and awaited by anything that compares you with somebody else. */
+let myMemberKey = null;
+let _learnMyKeyPromise = null;
+function _learnMyKey() {
+  if (!_learnMyKeyPromise) {
+    _learnMyKeyPromise = db.rpc("get_profile_row").then(r => {
+      myMemberKey = (r && r.data && r.data[0] && r.data[0].member_key) || null;
+      return myMemberKey;
+    }, () => null);
+  }
+  return _learnMyKeyPromise;
+}
 
 const SVGI = inner => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + "</svg>";
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -1309,9 +1322,9 @@ function likerChips(p) {
   const all = p._likers || [];
   if (!all.length) return "";
   const info = p._likerInfo || {};
-  const chips = all.slice(0, 3).map(em => {
-    const r = info[em] || {};
-    const name = r.name || em.split("@")[0];
+  const chips = all.slice(0, 3).map(k => {
+    const r = info[k] || {};
+    const name = r.name || "Member";
     const inner = r.avatar_url
       ? '<img src="' + esc(r.avatar_url) + '" alt="' + esc(name) + '">'
       : '<span style="background:var(--surface-2);color:var(--text-muted);width:100%;height:100%;display:flex;'
@@ -1489,21 +1502,20 @@ async function openPost(postId) {
     const [polls, cmtRows, likes] = await Promise.all([
       db.from("content_feed_post_polls").select("id,post_id,question").eq("post_id", postId),
       db.from("content_feed_comments").select("post_id").eq("post_id", postId),
-      db.from("content_feed_likes").select("email,member_key").eq("post_id", postId),
+      db.from("content_feed_likes").select("member_key").eq("post_id", postId),
     ]);
     if (LB_OPEN !== postId) return;                  // they closed it, or opened another
     p.commentCount = (cmtRows.data || []).length;
 
-    const emails = [...new Set((likes.data || []).map(l => l.email))];
-    p._likers = emails;
-    if (emails.length) {
-      /* Liker names and pictures from the directory by key. The map stays keyed
-         by address so the rendering below is untouched. */
+    const likerKeys = [...new Set((likes.data || []).map(l => l.member_key).filter(Boolean))];
+    p._likers = likerKeys;
+    if (likerKeys.length) {
+      /* Liker names and pictures from the directory, keyed the way the rows are. */
       const _dir = await _learnMemberDirectory();
       p._likerInfo = {};
-      (likes.data || []).forEach(l => {
-        const info = l.member_key && _dir[l.member_key];
-        if (info) p._likerInfo[l.email] = { email: l.email, avatar_url: info.url, name: info.name };
+      likerKeys.forEach(k => {
+        const info = _dir[k];
+        if (info) p._likerInfo[k] = { key: k, avatar_url: info.url, name: info.name, pal: info.pal };
       });
     }
 
@@ -1511,8 +1523,8 @@ async function openPost(postId) {
     if (pr) {
       const [opts, votes, mine] = await Promise.all([
         db.from("content_feed_post_poll_options").select("id,poll_id,label,position").eq("poll_id", pr.id).order("position"),
-        db.from("content_feed_post_poll_votes").select("poll_id,option_id,email").eq("poll_id", pr.id),
-        db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pr.id).eq("email", myEmail),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id,member_key").eq("poll_id", pr.id),
+        db.from("content_feed_post_poll_votes").select("poll_id,option_id").eq("poll_id", pr.id).eq("member_key", await _learnMyKey()),
       ]);
       const counts = {}; let total = 0;
       (votes.data || []).forEach(v => { counts[v.option_id] = (counts[v.option_id] || 0) + 1; total++; });
@@ -2501,6 +2513,7 @@ window.addEventListener("pageshow", e => {
   performance.mark("B_session");
   if (!session) { window.location.href = "/"; return; }
   myEmail = session.user.email;
+  _learnMyKey();   // start resolving your own key; anything that needs it awaits it
   /* Started here, not after the header. load() needs nothing but myEmail, which
      we now have - checked: it touches no myName, iAmOwner or avatar - and
      everything between this point and where it used to be called is about a
