@@ -10740,7 +10740,7 @@
     .lb-move-down { color: #ef4444; }
     .lb-move-same { color: var(--text-muted); opacity: .6; }
     .lb-move-new { color: var(--lb-active-color, #f5c518); font-size: .56rem; letter-spacing: .03em; }
-    .lb-row[data-lb-email], .lb-podium-place[data-lb-email] { cursor: pointer; }
+    .lb-row[data-lb-key], .lb-podium-place[data-lb-key] { cursor: pointer; }
     /* ── "Your position" pinned row ── */
     .lb-you-pin { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
     body.hub-mode .lb-you-pin { border-top-color: #e3e1e6; }
@@ -17200,27 +17200,27 @@ async function checkLeaderboardTop3() {
     {
       key: "monthly",
       label: "Monthly practice",
-      rows: (monthly.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.total_minutes) > 0),
+      rows: (monthly.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.total_minutes) > 0),
     },
     {
       key: "streak",
       label: "Streak",
-      rows: (streak.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.best_streak) > 0),
+      rows: (streak.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.best_streak) > 0),
     },
     {
       key: "pieces",
       label: "Pieces practice",
-      rows: (pieces.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.total_minutes) > 0),
+      rows: (pieces.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.total_minutes) > 0),
     },
     {
       key: "scales",
       label: "Scales practice",
-      rows: (scales.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.session_count) > 0),
+      rows: (scales.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.session_count) > 0),
     },
     {
       key: "badges",
       label: "Badges",
-      rows: (badges.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.achievement_count) > 0),
+      rows: (badges.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.achievement_count) > 0),
     },
   ];
 
@@ -17234,7 +17234,7 @@ async function checkLeaderboardTop3() {
     // Notify only when newly entering top 3 (prev was null or >3, new is ≤3)
     if (rank !== null && rank <= 3 && (prev === null || prev > 3)) {
       const rankLabel = RANK_LABELS[rank] || `#${rank}`;
-      const myRow = rows.find(r => r.email?.toLowerCase() === me);
+      const myRow = rows.find(r => r.member_key && r.member_key === myMemberKey);
       const subLabel = key === "pieces"
         ? ` — ${myRow?.piece_name || ""}`
         : key === "scales"
@@ -17276,7 +17276,7 @@ function lbPalColour(pal) {
 }
 
 function lbDisplayName(row) {
-  return row.name || (row.email ? row.email.split("@")[0] : "Member");
+  return row.name || "Member";
 }
 
 /* Everyone who can appear on a board, by key. This used to fetch every
@@ -17338,9 +17338,9 @@ function lbPodiumHTML(top, valueFn) {
   const crown = `<span class="lb-podium-crown"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M2 8l4.5 4L12 4l5.5 8L22 8l-2.2 11H4.2L2 8z"/><circle cx="2" cy="8" r="1.4"/><circle cx="12" cy="4" r="1.5"/><circle cx="22" cy="8" r="1.4"/></svg></span>`;
   const place = idx => {
     const row  = top[idx], rank = idx + 1;
-    const isMe = row.email && row.email.toLowerCase() === myEmail.toLowerCase();
+    const isMe = row.member_key && row.member_key === myMemberKey;
     const name = lbDisplayName(row);
-    return `<div class="lb-podium-place lb-pod-${cls[idx]}${rank === 1 ? " is-first" : ""}" data-lb-email="${escHtml(row.email || "")}">
+    return `<div class="lb-podium-place lb-pod-${cls[idx]}${rank === 1 ? " is-first" : ""}" data-lb-key="${escHtml(row.member_key || "")}">
       <div class="lb-podium-av">${rank === 1 ? crown : ""}${_lbAvatar(row, rank === 1 ? 58 : 46)}</div>
       <div class="lb-podium-name${isMe ? " is-me" : ""}" title="${escHtml(name)}">${escHtml(name)}${isMe ? " (you)" : ""}</div>
       <div class="lb-podium-val">${valueFn(row, rank)}</div>
@@ -17395,6 +17395,11 @@ function _lbFig(label, value) {
    place still keyed to the signed-in account, so switching to a member showed
    their sessions and their achievements next to the owner's own blank
    standing. */
+/* Whose position the boards should point at, by key. The boards name people by
+   key now, so nothing here needs an address. */
+function _lbViewedKey() {
+  return viewingMemberKey || myMemberKey || null;
+}
 function _lbViewedEmail() {
   const v = (typeof viewingEmail === "string" && viewingEmail) ? viewingEmail : myEmail;
   return (v || "").toLowerCase();
@@ -17420,13 +17425,13 @@ async function _lbAllBoards() {
     db.rpc("get_achievement_leaderboard"),
   ]);
   const keep = (res, num) => (res.data || [])
-    .filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && num(r) > 0);
+    .filter(r => !r.is_owner_account && !r.is_reviewer && num(r) > 0);
   /* the scales board lists one row per member and technique, exactly as its own
      tab builds it, so a member's position there is their best scale */
   const scaleRows = [];
   const standard = new Set(typeof TECHNIQUE_ITEMS !== "undefined" ? TECHNIQUE_ITEMS : []);
   for (const row of (scales.data || [])) {
-    if (LB_EXCLUDED.has(row.email?.toLowerCase())) continue;
+    if ((row.is_owner_account || row.is_reviewer)) continue;
     for (const part of String(row.technique_name || "").split(",").map(x => x.trim())) {
       if (!standard.has(part)) continue;
       const cnt = Number(row.session_count) || 0;
@@ -17458,7 +17463,7 @@ async function _lbFillAcross(activeTab) {
   try { boards = await _lbAllBoards(); } catch (e) { box.remove(); return; }
   const me = _lbViewedEmail();
   const lines = boards.map(b => {
-    const idx = b.rows.findIndex(r => r.email && r.email.toLowerCase() === me);
+    const idx = b.rows.findIndex(r => r.member_key && r.member_key === _lbViewedKey());
     const on  = idx >= 0;
     return `<button type="button" class="lb-across-row${b.tab === activeTab ? " is-on" : ""}"
         onclick="switchLbTab('${b.tab}')">
@@ -17478,7 +17483,7 @@ function _lbRailHTML(rows, o) {
   const me  = _lbViewedEmail();
   const other = !!(myEmail && me && me !== myEmail.toLowerCase());
 
-  const idx = rows.findIndex(r => r.email && r.email.toLowerCase() === me);
+  const idx = rows.findIndex(r => r.member_key && r.member_key === _lbViewedKey());
 
   let standing;
   if (idx < 0) {
@@ -17557,9 +17562,9 @@ function _lbShell(head, rail, board) {
 }
 
 // Rank movement vs a previous-period rank map (email→rank). SVG arrows, no emoji.
-function _lbMoveHTML(email, rank, prevMap) {
+function _lbMoveHTML(memberKey, rank, prevMap) {
   if (!prevMap) return "";
-  const e = email && email.toLowerCase();
+  const e = memberKey || null;
   const up = `<svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 14 12 8 18 14"/></svg>`;
   const dn = `<svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 10 12 16 18 10"/></svg>`;
   /* NEW means what it says now. The map used to be built from the top-three
@@ -17601,7 +17606,7 @@ function lbPaginatedHTML(allRows, rowFn, idxOffset) {
 // A pinned "Your position" row when the viewer ranks below the visible page.
 function _lbYourPin() {
   if (!myEmail) return "";
-  const idx = _lbAllRows.findIndex(r => r.email && r.email.toLowerCase() === myEmail.toLowerCase());
+  const idx = _lbAllRows.findIndex(r => r.member_key && r.member_key === myMemberKey);
   if (idx < 0 || idx < _lbShown) return "";
   return `<div class="lb-you-pin"><div class="lb-you-pin-label">Your position</div>${_lbRowFn(_lbAllRows[idx], _lbIdxOffset + idx)}</div>`;
 }
@@ -17625,7 +17630,7 @@ function lbShowMore() {
   btn.insertAdjacentHTML("beforebegin", newHTML);
   btn.outerHTML = lbMoreBtn();
   // If the viewer is now visible, drop the pinned "your position" row.
-  const meIdx = _lbAllRows.findIndex(r => r.email && r.email.toLowerCase() === myEmail.toLowerCase());
+  const meIdx = _lbAllRows.findIndex(r => r.member_key && r.member_key === myMemberKey);
   if (meIdx >= 0 && meIdx < _lbShown) { const pin = el.querySelector(".lb-you-pin"); if (pin) pin.remove(); }
 }
 
@@ -19344,11 +19349,11 @@ async function renderLeaderboard(tab) {
     el.dataset.lbProfileBound = "1";
     el.addEventListener("click", ev => {
       if (ev.target.closest("a,button,.lvl-badge,.lb-show-more-btn")) return;
-      const card = ev.target.closest("[data-lb-email]");
-      const email = card && card.getAttribute("data-lb-email");
-      if (!email) return;
-      if (window.MemberModal) MemberModal.open(email);
-      else location.href = "/profile.html?u=" + encodeURIComponent(email);
+      const card = ev.target.closest("[data-lb-key]");
+      const key = card && card.getAttribute("data-lb-key");
+      if (!key) return;
+      if (window.MemberModal) MemberModal.open(key);
+      else location.href = "/profile.html?k=" + encodeURIComponent(key);
     });
   }
   // Update inner type tabs
@@ -19407,7 +19412,7 @@ async function renderLbOverall(el) {
     const { data, error } = await db.rpc("get_alltime_leaderboard");
     if (error) { el.innerHTML = lbModeToggleHTML() + lbSetupNote("get_alltime_leaderboard"); return; }
     const filtered = (data || []).filter(row =>
-      !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0
+      !row.is_owner_account && !row.is_reviewer && (Number(row.total_minutes) || 0) > 0
     );
     if (!filtered.length) { el.innerHTML = lbModeToggleHTML() + `<div class="lb-empty">No practice data yet.</div>`; return; }
     const valueFn = r => formatMinutes(Number(r.total_minutes) || 0);
@@ -19417,9 +19422,9 @@ async function renderLbOverall(el) {
       const rank = i + 1;
       const mins = Number(row.total_minutes) || 0;
       const lvl  = getLevel(mins, PLAYER_LEVELS);
-      const isMe = row.email?.toLowerCase() === myEmail.toLowerCase();
+      const isMe = row.member_key === myMemberKey;
       return `
-        <div class="lb-row ${lbRankClass(rank)}" data-lb-email="${escHtml(row.email || "")}">
+        <div class="lb-row ${lbRankClass(rank)}" data-lb-key="${escHtml(row.member_key || "")}">
           ${lbRankHTML(rank)}
           ${_lbAvatar(row, 30)}
           <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
@@ -19445,12 +19450,12 @@ async function renderLbOverall(el) {
   if (monthResult.error) { el.innerHTML = lbModeToggleHTML() + lbSetupNote(); return; }
 
   const filtered = (monthResult.data || []).filter(row =>
-    !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0
+    !row.is_owner_account && !row.is_reviewer && (Number(row.total_minutes) || 0) > 0
   );
 
   // Last month podium (top 3)
   const lastTop = (lastResult.data || [])
-    .filter(row => !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0)
+    .filter(row => !row.is_owner_account && !row.is_reviewer && (Number(row.total_minutes) || 0) > 0)
     .slice(0, 3);
   const MEDAL_CLASS = ['gold','silver','bronze'];
   const lastMonthHTML = lastTop.length ? `
@@ -19472,9 +19477,9 @@ async function renderLbOverall(el) {
 
   // Build last-month rank map (email→rank) for movement arrows.
   const _prevRanked = (lastResult.data || [])
-    .filter(row => !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0);
+    .filter(row => !row.is_owner_account && !row.is_reviewer && (Number(row.total_minutes) || 0) > 0);
   const _prevMap = {};
-  _prevRanked.forEach((row, i) => { if (row.email) _prevMap[row.email.toLowerCase()] = i + 1; });
+  _prevRanked.forEach((row, i) => { if (row.member_key) _prevMap[row.member_key] = i + 1; });
 
   const valueFn = r => formatMinutes(Number(r.total_minutes) || 0);
   const _pod = lbPodiumHTML(filtered.slice(0, 3), valueFn);
@@ -19485,13 +19490,13 @@ async function renderLbOverall(el) {
   el.innerHTML = _lbShell(lbModeToggleHTML(), _rail, _pod + lbPaginatedHTML(_pod ? filtered.slice(3) : filtered, (row, i) => {
     const rank = i + 1;
     const mins = Number(row.total_minutes) || 0;
-    const isMe = row.email?.toLowerCase() === myEmail.toLowerCase();
+    const isMe = row.member_key === myMemberKey;
     return `
-      <div class="lb-row ${lbRankClass(rank)}" data-lb-email="${escHtml(row.email || "")}">
+      <div class="lb-row ${lbRankClass(rank)}" data-lb-key="${escHtml(row.member_key || "")}">
         ${lbRankHTML(rank)}
         ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
-        ${_lbMoveHTML(row.email, rank, _prevMap)}
+        ${_lbMoveHTML(row.member_key, rank, _prevMap)}
         <div class="lb-time">${formatMinutes(mins)}</div>
       </div>`;
   }, _pod ? 3 : 0) + lastMonthHTML);
@@ -19534,7 +19539,7 @@ async function renderLbPieces(el) {
   if (error) { el.innerHTML = toggle + lbSetupNote(rpcName); return; }
   renderLbLegend(PIECE_LEVELS, "hours");
   const filtered = (data || []).filter(row =>
-    !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.total_minutes) || 0) > 0
+    !row.is_owner_account && !row.is_reviewer && (Number(row.total_minutes) || 0) > 0
   );
   if (!filtered.length) { el.innerHTML = toggle + `<div class="lb-empty">No piece practice data yet${_lbPiecesMode === 'month' ? ' this month' : ''}.</div>`; return; }
   const valueFn = r => formatMinutes(Number(r.total_minutes) || 0);
@@ -19548,9 +19553,9 @@ async function renderLbPieces(el) {
     const rank = i + 1;
     const mins = Number(row.total_minutes) || 0;
     const lvl  = getLevel(mins, PIECE_LEVELS);
-    const isMe = row.email?.toLowerCase() === myEmail.toLowerCase();
+    const isMe = row.member_key === myMemberKey;
     return `
-      <div class="lb-row ${lbRankClass(rank)}" data-lb-email="${escHtml(row.email || "")}">
+      <div class="lb-row ${lbRankClass(rank)}" data-lb-key="${escHtml(row.member_key || "")}">
         ${lbRankHTML(rank)}
         ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">
@@ -19570,7 +19575,7 @@ async function renderLbStreak(el) {
   const lbBtn = document.getElementById("lb-legend-btn");
   if (lbBtn) lbBtn.style.display = "none";
   const filtered = (data || []).filter(row =>
-    !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.best_streak) || 0) > 0
+    !row.is_owner_account && !row.is_reviewer && (Number(row.best_streak) || 0) > 0
   );
   if (!filtered.length) { el.innerHTML = `<div class="lb-empty">No streaks recorded yet.</div>`; return; }
   const _pod = lbPodiumHTML(filtered.slice(0, 3), r => `${Number(r.best_streak) || 0}d`);
@@ -19579,9 +19584,9 @@ async function renderLbStreak(el) {
   el.innerHTML = _lbShell("", _rail, _pod + lbPaginatedHTML(_pod ? filtered.slice(3) : filtered, (row, i) => {
     const rank  = i + 1;
     const days  = Number(row.best_streak) || 0;
-    const isMe  = row.email?.toLowerCase() === myEmail.toLowerCase();
+    const isMe  = row.member_key === myMemberKey;
     return `
-      <div class="lb-row ${lbRankClass(rank)}" data-lb-email="${escHtml(row.email || "")}">
+      <div class="lb-row ${lbRankClass(rank)}" data-lb-key="${escHtml(row.member_key || "")}">
         ${lbRankHTML(rank)}
         ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
@@ -19599,7 +19604,7 @@ async function renderLbScales(el) {
   const standardSet = new Set(TECHNIQUE_ITEMS);
   const rows = [];
   for (const row of (data || [])) {
-    if (LB_EXCLUDED.has(row.email?.toLowerCase())) continue;
+    if ((row.is_owner_account || row.is_reviewer)) continue;
     const parts = (row.technique_name || "").split(",").map(s => s.trim());
     for (const part of parts) {
       if (!standardSet.has(part)) continue;
@@ -19621,9 +19626,9 @@ async function renderLbScales(el) {
     const rank = i + 1;
     const cnt  = row.cnt;
     const lvl  = getLevel(cnt, SCALE_LEVELS);
-    const isMe = row.email?.toLowerCase() === myEmail.toLowerCase();
+    const isMe = row.member_key === myMemberKey;
     return `
-      <div class="lb-row ${lbRankClass(rank)}" data-lb-email="${escHtml(row.email || "")}">
+      <div class="lb-row ${lbRankClass(rank)}" data-lb-key="${escHtml(row.member_key || "")}">
         ${lbRankHTML(rank)}
         ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">
@@ -19643,7 +19648,7 @@ async function renderLbAchievements(el) {
   if (error) { el.innerHTML = lbSetupNote("get_achievement_leaderboard"); return; }
   const TOTAL_ACH = ACHIEVEMENTS.length;
   const filtered = (data || []).filter(row =>
-    !LB_EXCLUDED.has(row.email?.toLowerCase()) && (Number(row.achievement_count) || 0) > 0
+    !row.is_owner_account && !row.is_reviewer && (Number(row.achievement_count) || 0) > 0
   );
   if (!filtered.length) { el.innerHTML = `<div class="lb-empty">No achievements earned yet.</div>`; return; }
   const _pod = lbPodiumHTML(filtered.slice(0, 3), r => `${Number(r.achievement_count) || 0}<span style="opacity:.55;font-weight:600">/${TOTAL_ACH}</span>`);
@@ -19653,9 +19658,9 @@ async function renderLbAchievements(el) {
     const rank  = i + 1;
     const count = Number(row.achievement_count) || 0;
     const pct   = Math.round((count / TOTAL_ACH) * 100);
-    const isMe  = row.email?.toLowerCase() === myEmail.toLowerCase();
+    const isMe  = row.member_key === myMemberKey;
     return `
-      <div class="lb-row ${lbRankClass(rank)}" data-lb-email="${escHtml(row.email || "")}">
+      <div class="lb-row ${lbRankClass(rank)}" data-lb-key="${escHtml(row.member_key || "")}">
         ${lbRankHTML(rank)}
         ${_lbAvatar(row, 30)}
         <div class="lb-name ${isMe ? "is-me" : ""}">${escHtml(lbDisplayName(row))}${isMe ? " <span class='lb-you'>(you)</span>" : ""}</div>
@@ -19699,14 +19704,14 @@ function buildDashLbRows(data, tab) {
   const me     = myEmail?.toLowerCase() || '';
   const MEDALS = ['🥇','🥈','🥉'];
   const rows   = (data[tab] || []).filter(r =>
-    !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r[def.valueKey]) > 0
+    !r.is_owner_account && !r.is_reviewer && Number(r[def.valueKey]) > 0
   );
-  const myIdx  = rows.findIndex(r => r.email?.toLowerCase() === me);
+  const myIdx  = rows.findIndex(r => r.member_key === _lbViewedKey());
   const myRank = myIdx === -1 ? null : myIdx + 1;
   const top3   = rows.slice(0, 3);
   const rowsHTML = top3.length
     ? top3.map((r, i) => {
-        const isMe = r.email?.toLowerCase() === me;
+        const isMe = r.member_key === _lbViewedKey();
         return `<div class="dash-lb-row${isMe?' dash-lb-me':''}">
           <span class="dash-lb-medal">${MEDALS[i]}</span>
           <span class="dash-lb-name">${escHtml(lbDisplayName(r))}${isMe?` <span class="lb-you">(you)</span>`:''}</span>
@@ -20448,14 +20453,14 @@ async function renderDashboard() {
     const ranks = Object.fromEntries((ranksRes.data || []).map(r => [r.board, r]));
 
     // Streak rank — computed from best_streak leaderboard
-    const streakRows = (streakRes.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.best_streak) > 0);
+    const streakRows = (streakRes.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.best_streak) > 0);
     let myStreakRank = null;
     for (let i = 0; i < streakRows.length; i++) {
       if (streakRows[i].email?.toLowerCase() === target) { myStreakRank = i + 1; break; }
     }
 
     // Piece rank
-    const pieceRows = (piecesRes.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()) && Number(r.total_minutes) > 0);
+    const pieceRows = (piecesRes.data || []).filter(r => !r.is_owner_account && !r.is_reviewer && Number(r.total_minutes) > 0);
     let myPieceRank = null;
     for (let i = 0; i < pieceRows.length; i++) {
       if (pieceRows[i].email?.toLowerCase() === target) { myPieceRank = i + 1; break; }
@@ -20465,7 +20470,7 @@ async function renderDashboard() {
     const standardSet = new Set(TECHNIQUE_ITEMS);
     const scaleRows = [];
     for (const row of (scalesRes.data || [])) {
-      if (LB_EXCLUDED.has(row.email?.toLowerCase())) continue;
+      if ((row.is_owner_account || row.is_reviewer)) continue;
       const parts = (row.technique_name || "").split(",").map(s => s.trim());
       for (const part of parts) {
         const cnt = Number(row.session_count) || 0;
@@ -24438,7 +24443,7 @@ function renderDeepDive() {
       try {
         const { data } = await db.rpc('get_leaderboard');
         const rows = (data || []).filter(r => (Number(r.total_minutes) || 0) > 0
-          && !(typeof LB_EXCLUDED !== 'undefined' && LB_EXCLUDED.has((r.email || '').toLowerCase())));
+          && !r.is_owner_account && !r.is_reviewer);
         if (!rows.length) return;
         window._ddRoom = { mins: rows.map(r => Number(r.total_minutes) || 0).sort((x, y) => x - y) };
         if (document.getElementById('stats-deep-dive')) _ddRerender();
@@ -30052,7 +30057,7 @@ async function renderCommunityFeed() {
   }
 
   // Build champions card HTML
-  const champs = (champResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase())).slice(0, 3);
+  const champs = (champResult.data || []).filter(r => !r.is_owner_account && !r.is_reviewer).slice(0, 3);
   if (champs.length > 0) {
     const now = new Date();
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
