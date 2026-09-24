@@ -3076,7 +3076,6 @@ const db = supabase.createClient(SUPA_URL, SUPA_ANON);
 const OWNER_EMAIL = "matthew@matthewcawood.com";
 const LB_EXCLUDED = new Set(["matthew@matthewcawood.com", "mcawoodcanada@gmail.com"]);
 // Members directory: hide test/reviewer + secondary owner accounts (keep Matthew's main).
-const MEMBER_EXCLUDED = new Set(["mcawoodcanada@gmail.com", "reviewer@matthewcawood.com", "enquiries@matthewcawood.com"]);
 
 // Compact achievement lookup — id → {icon, name, desc}
 const ACH = {
@@ -3390,11 +3389,13 @@ let myEmail     = null;
    Both are fetched once per page. */
 let myMemberKey = null;
 let _commDirPromise = null;
+let _commDirNow = {};   // the resolved directory, for synchronous renderers
 function commMemberDirectory() {
   if (!_commDirPromise) {
     _commDirPromise = db.rpc("member_directory").then(r => {
       const m = {};
-      (r && r.data || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, pal: x.pal, badge: x.badge || null }; });
+      (r && r.data || []).forEach(x => { m[x.member_key] = { name: x.name, url: x.avatar_url || null, pal: x.pal, badge: x.badge || null, isOwner: !!x.is_owner }; });
+      _commDirNow = m;
       return m;
     }, () => ({}));
   }
@@ -3719,22 +3720,18 @@ function _memberInitials(name) {
 async function loadMembers() {
   _membersLoaded = true;
   document.getElementById("members-grid").innerHTML = _membersSkeletonHTML(8);
-  const { data, error } = await db
-    .from("allowed_emails")
-    .select("email, name, headline, location, instrument, avatar_url, badge, bio, website, instagram, twitter, youtube")
-    .eq("subscription_status", "active")
-    .eq("onboarded", true)
-    .order("name", { ascending: true });
+  /* The grid, exactly as it is drawn: picture, name, badge, headline, location,
+     instrument and the links people chose to publish. No addresses, because the
+     grid never shows one. The filtering that used to happen here now happens on
+     the server, over the same rules. */
+  const { data, error } = await db.rpc("member_list");
 
   if (error || !data) {
     document.getElementById("members-grid").innerHTML =
       `<div class="posts-empty" style="grid-column:1/-1"><div class="posts-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>Couldn't load members — please try again.</div>`;
     return;
   }
-  _allMembers = data.filter(m =>
-    m.name && m.name.trim()
-    && !MEMBER_EXCLUDED.has((m.email || "").toLowerCase())
-    && (m.badge || "").trim().toLowerCase() !== "reviewer");
+  _allMembers = data;
   renderMembers(_allMembers);
 }
 
@@ -3773,7 +3770,7 @@ function renderMembers(members, showSections = true) {
       const L = /[A-Z]/.test(first) ? first : "#";
       if (L !== _lastLetter) { divider = `<div class="member-divider">${L}</div>`; _lastLetter = L; }
     }
-    return `${divider}<div class="member-row" data-member-email="${escHtml(m.email || "")}" style="cursor:pointer">
+    return `${divider}<div class="member-row" data-member-key="${escHtml(m.member_key || "")}" style="cursor:pointer">
       ${avatarHTML}
       <div class="member-row-body">
         <div class="member-name"><span class="member-name-txt">${escHtml(name)}</span>${starHTML}${badgeHTML}</div>
@@ -6779,20 +6776,29 @@ async function _hydratePosts(rows) {
     });
   }
 
-  // Fetch avatar URLs + badges for all post authors AND likers (community_post_likes)
-  const rxEmails    = (postReactions || []).map(r => r.email);
-  const likerEmails = (allLikes      || []).map(l => l.email);
-  const allEmails   = [...new Set([...rows.map(p => p.email), 'matthew@matthewcawood.com', ...rxEmails, ...likerEmails])];
-  const { data: avatarRows } = await _inChunks(allEmails, c => db.from("allowed_emails").select("email,avatar_url,badge,name").in("email", c));
+  /* Post authors' pictures, badges and names, from the directory by key. The
+     maps stay keyed by address because the post objects below are looked up
+     that way. Reactors and likers are resolved from the directory separately,
+     just below, so they no longer need fetching here either. */
+  const _hydrateDir   = await commMemberDirectory();
   const avatarUrlMap  = _avatarUrlMap;   // merged into, not replaced
   const badgeMap      = _badgeMap;
   const nameFromDbMap = _nameFromDbMap;
 
-  (avatarRows || []).forEach(r => {
-    if (r.avatar_url) avatarUrlMap[r.email] = r.avatar_url;
-    if (r.badge)      badgeMap[r.email]     = r.badge;
-    if (r.name)       nameFromDbMap[r.email] = r.name;
+  rows.forEach(p => {
+    const info = p.member_key && _hydrateDir[p.member_key];
+    if (!info) return;
+    if (info.url)   avatarUrlMap[p.email]  = info.url;
+    if (info.badge) badgeMap[p.email]      = info.badge;
+    if (info.name)  nameFromDbMap[p.email] = info.name;
   });
+  /* The content feed cards show the owner. The directory says which entry is
+     his, so the page does not have to look him up by address. */
+  const _ownerInfo = Object.values(_hydrateDir).find(x => x && x.isOwner);
+  if (_ownerInfo) {
+    if (_ownerInfo.url)  avatarUrlMap['matthew@matthewcawood.com']  = _ownerInfo.url;
+    if (_ownerInfo.name) nameFromDbMap['matthew@matthewcawood.com'] = _ownerInfo.name;
+  }
 
   // Build _commRxLikersMap: emoji reactions (activity_reactions) + heart likes (community_post_likes)
 
@@ -7393,18 +7399,17 @@ async function showLikersPopover(postId, event) {
 
   // Fetch all likers + their names
   const { data: likes } = await db.from("community_post_likes")
-    .select("email").eq("post_id", postId);
+    .select("member_key").eq("post_id", postId);
   if (!likes?.length) return;
 
-  const emails = likes.map(l => l.email);
-  const { data: nameRows } = await db.from("allowed_emails")
-    .select("email,name").in("email", emails);
-  const nameMap = {};
-  (nameRows || []).forEach(r => { nameMap[r.email] = r.name; });
+  /* Who liked it, from the directory by key: the same names, and the same
+     colour their address used to hash to. */
+  const _likerDir = await commMemberDirectory();
 
-  const rows = emails.map(e => {
-    const name = nameMap[e] || e.split("@")[0];
-    const c = avatarColour(e);
+  const rows = likes.map(l => {
+    const info = _likerDir[l.member_key] || {};
+    const name = info.name || "Member";
+    const c = commPalColour(info.pal);
     return `<div class="likers-popover-row">
       <div class="likers-popover-avatar" style="background:${c.bg};color:${c.fg}">${name[0].toUpperCase()}</div>
       <span class="likers-popover-name">${escHtml(name)}</span>
@@ -7419,7 +7424,7 @@ async function showLikersPopover(postId, event) {
 
   // Position near the click, keeping it on screen
   const { clientX: x, clientY: y } = event;
-  const pw = 220, ph = 48 + emails.length * 38;
+  const pw = 220, ph = 48 + likes.length * 38;
   const left = Math.min(x, window.innerWidth  - pw - 12);
   const top  = Math.min(y + 8, window.innerHeight - ph - 12);
   pop.style.left = left + "px";
@@ -7892,7 +7897,8 @@ function _champFmtVal(v) {
 function _acChampAvatar(r) {
   const name = ((r && r.name) || "?").trim();
   if (r && r.avatar) return `<img class="ac-champ-av" src="${escHtml(r.avatar)}" alt="" loading="lazy">`;
-  const col = r && r.email ? avatarColour(r.email) : { bg: "#e3e1e6", fg: "#8a7868" };
+  const _ci = r && r.member_key ? _commDirNow[r.member_key] : null;
+  const col = _ci ? commPalColour(_ci.pal) : { bg: "#e3e1e6", fg: "#8a7868" };
   return `<span class="ac-champ-av" style="background:${col.bg};color:${col.fg}">${escHtml((name[0] || "?").toUpperCase())}</span>`;
 }
 
@@ -7903,7 +7909,7 @@ function _activityChampsHTML(champ) {
   const rows = champ.sections.map(s => {
     const r = (s.rows || [])[0];
     if (!r) return "";
-    const href = r.email ? `/profile.html?u=${encodeURIComponent(r.email)}` : "#";
+    const href = r.member_key ? `/profile.html?k=${encodeURIComponent(r.member_key)}` : "#";
     return `<a class="ac-champ-row" href="${href}" onclick="event.stopPropagation()">
       ${_acChampAvatar(r)}
       <span class="ac-champ-meta">
@@ -7943,7 +7949,7 @@ function championsCardHTML(p, champ, isDetail) {
             ${r.sub ? `<span class="champ-rowsub">${escHtml(r.sub)}</span>` : ""}
           </span>`;
       const linked = r.email
-        ? `<a class="champ-rowlink" href="/profile.html?u=${encodeURIComponent(r.email)}" data-member-email="${escHtml(r.email || "")}" onclick="event.stopPropagation()">${inner}</a>`
+        ? `<a class="champ-rowlink" href="/profile.html?k=${encodeURIComponent(r.member_key || "")}" data-member-key="${escHtml(r.member_key || "")}" onclick="event.stopPropagation()">${inner}</a>`
         : `<span class="champ-rowlink">${inner}</span>`;
       return `
         <div class="champ-row champ-rank-${i + 1}" style="--champ-d:${d}ms">
@@ -8588,12 +8594,14 @@ async function loadComments(postId) {
 
   if (!count) { listEl.innerHTML = '<div class="comments-empty">No comments yet — be the first!</div>'; return; }
 
-  // Fetch avatar URLs for comment authors
-  const commentEmails = [...new Set(comments.map(c => c.email))];
-  const { data: cmtAvatarRows } = await db.from("allowed_emails")
-    .select("email,avatar_url").in("email", commentEmails);
+  /* Comment authors' pictures, from the directory by key. Still keyed by
+     address so the rendering below is untouched. */
+  const _cmtDir = await commMemberDirectory();
   const cmtAvatarMap = {};
-  (cmtAvatarRows || []).forEach(r => { if (r.avatar_url) cmtAvatarMap[r.email] = r.avatar_url; });
+  comments.forEach(c => {
+    const info = c.member_key && _cmtDir[c.member_key];
+    if (info && info.url) cmtAvatarMap[c.email] = info.url;
+  });
 
   // Pre-load any existing reactions on these comments so the heart buttons
   // render with correct counts/state on first paint.
@@ -8657,12 +8665,12 @@ async function loadComments(postId) {
     const reactBar = _commentReactBarHTML("community_comment", c.id);
     return `
       <div class="comment-item${isReply ? " is-reply" : ""}" id="comment-${c.id}">
-        <a href="/profile.html?u=${encodeURIComponent(c.email)}" style="display:contents;text-decoration:none">
-          ${avatarHtml(c.email, c.name, 28, cmtAvatarMap[c.email] || null)}
+        <a href="/profile.html?k=${encodeURIComponent(c.member_key || "")}" style="display:contents;text-decoration:none">
+          ${avatarHtml(null, c.name, 28, cmtAvatarMap[c.email] || null, { key: c.member_key, pal: (_commDirNow[c.member_key] || {}).pal })}
         </a>
         <div class="comment-body">
           <div class="comment-meta">
-            <a href="/profile.html?u=${encodeURIComponent(c.email)}" data-member-email="${escHtml(c.email || "")}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
+            <a href="/profile.html?k=${encodeURIComponent(c.member_key || "")}" data-member-key="${escHtml(c.member_key || "")}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
             <span class="comment-time">${relativeTime(c.created_at)}</span>
             ${c.edited_at ? `<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>` : ""}
             <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
@@ -8933,13 +8941,15 @@ async function loadActivity() {
   _feedRows = (feedResult.data || []).filter(r => !LB_EXCLUDED.has(r.email?.toLowerCase()));
   _feedItems = _feedRows;
 
-  // Fetch avatar URLs for every email appearing in the feed
-  const feedEmails = [...new Set(_feedRows.map(r => r.email).filter(Boolean))];
-  if (feedEmails.length) {
-    const { data: avRows } = await db.from("allowed_emails")
-      .select("email,avatar_url").in("email", feedEmails);
+  /* Feed avatars, from the directory by key. The feed carries each row's key
+     now, so no address has to be sent to find a picture. */
+  if (_feedRows.length) {
+    const _feedDir = await commMemberDirectory();
     _feedAvatarMap = {};
-    (avRows || []).forEach(r => { if (r.avatar_url) _feedAvatarMap[r.email] = r.avatar_url; });
+    _feedRows.forEach(r => {
+      const info = r.member_key && _feedDir[r.member_key];
+      if (info && info.url) _feedAvatarMap[r.email] = info.url;
+    });
   }
 
   // Bulk-load reactions + comment counts for all feed items that have an item_id
@@ -9155,8 +9165,8 @@ function feedItemHTML(row) {
     const click = openHref ? ` style="cursor:pointer" onclick="${openHref}"` : "";
     return `<div class="feed-item"${click}>
       ${_feedAvatarMap[row.email]
-        ? `<div class="feed-avatar" data-member-email="${escHtml(row.email || "")}" style="overflow:hidden;padding:0;cursor:pointer"><img src="${escHtml(_feedAvatarMap[row.email])}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
-        : `<div class="feed-avatar" data-member-email="${escHtml(row.email || "")}" style="background:${colour.bg};color:${colour.fg};cursor:pointer">${ini}</div>`}
+        ? `<div class="feed-avatar" data-member-key="${escHtml(row.member_key || "")}" style="overflow:hidden;padding:0;cursor:pointer"><img src="${escHtml(_feedAvatarMap[row.email])}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block"></div>`
+        : `<div class="feed-avatar" data-member-key="${escHtml(row.member_key || "")}" style="background:${colour.bg};color:${colour.fg};cursor:pointer">${ini}</div>`}
       <div class="feed-body">
         ${verbLine}
         ${bodyHtml || ""}
@@ -9826,10 +9836,13 @@ async function loadActivityDetailComments(eventType, itemId) {
     .eq("event_type", eventType).eq("item_id", String(itemId))
     .order("created_at", { ascending: true });
 
-  const { data: avatarRows } = await db.from("allowed_emails")
-    .select("email,avatar_url").in("email", [...new Set((comments||[]).map(c=>c.email))]);
+  /* Pictures from the directory by key, same map shape as before. */
+  const _adDir = await commMemberDirectory();
   const cmtAvatarMap = {};
-  (avatarRows||[]).forEach(r=>{ if(r.avatar_url) cmtAvatarMap[r.email]=r.avatar_url; });
+  (comments||[]).forEach(c=>{
+    const info = c.member_key && _adDir[c.member_key];
+    if (info && info.url) cmtAvatarMap[c.email] = info.url;
+  });
 
   if (error || !comments) { listEl.innerHTML=""; return; }
 
@@ -9896,7 +9909,7 @@ async function loadActivityDetailComments(eventType, itemId) {
       ${avatarHtml(c.email, c.name, 28, cmtAvatarMap[c.email]||null)}
       <div class="comment-body">
         <div class="comment-meta">
-          <a href="/profile.html?u=${encodeURIComponent(c.email)}" data-member-email="${escHtml(c.email || "")}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
+          <a href="/profile.html?k=${encodeURIComponent(c.member_key || "")}" data-member-key="${escHtml(c.member_key || "")}" style="text-decoration:none"><span class="comment-name" style="cursor:pointer">${dispName}</span></a>
           <span class="comment-time">${relativeTime(c.created_at)}</span>
           ${c.edited_at?`<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>`:""}
           <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
