@@ -554,17 +554,31 @@ async function loadAnalytics() {
 
   // Community-health data: membership, community engagement, events, roadmap baseline.
   const _safe = async (p) => { try { return (await p).data || []; } catch (e) { console.warn("load failed:", e); return []; } };
+
+  /* The content tables no longer hand out an address, to anybody, including the
+     owner's own pages: the column belongs to the role, and the owner signs in as
+     an ordinary member like everyone else. This page still shows addresses,
+     which is what an admin page is for, so it reads those tables by member key
+     and puts the address back from owner_member_emails(), which answers Matthew
+     and nobody else. Everything downstream is untouched: the rows arrive with
+     the same `email` field they always had. */
+  const _ownerMap = {};
+  try {
+    const { data: _om } = await db.rpc("owner_member_emails");
+    (_om || []).forEach(r => { _ownerMap[r.member_key] = r.email; });
+  } catch (e) { console.warn("owner address map unavailable:", e); }
+  const _withEmail = rows => (rows || []).map(r => ({ ...r, email: _ownerMap[r.member_key] || null }));
   const [aeRows, posts, comments, likes, rsvps, attendance, events, baseline] = await Promise.all([
     // Stripe identifiers are no longer readable from the browser by anyone: the
     // columns were revoked from `authenticated` after a member demonstrated he
     // could read every member's customer and subscription ids. This function
     // returns the same two fields and checks that the caller is the owner.
     _safe(db.rpc("admin_billing_customer_map")),
-    _safe(db.from("community_posts").select("email, type, created_at")),
-    _safe(db.from("community_post_comments").select("email, created_at")),
-    _safe(db.from("community_post_likes").select("email, created_at")),
-    _safe(db.from("event_rsvps").select("event_id, email")),
-    _safe(db.from("event_attendance").select("event_id, email, joined_at")),
+    _withEmail(await _safe(db.from("community_posts").select("member_key, type, created_at"))),
+    _withEmail(await _safe(db.from("community_post_comments").select("member_key, created_at"))),
+    _withEmail(await _safe(db.from("community_post_likes").select("member_key, created_at"))),
+    _withEmail(await _safe(db.from("event_rsvps").select("event_id, member_key"))),
+    _withEmail(await _safe(db.from("event_attendance").select("event_id, member_key, joined_at"))),
     _safe(db.from("live_events").select("id, title, scheduled_at, status")),
     _safe(db.from("practice_baseline").select("email, total_minutes")),
   ]);
@@ -575,15 +589,15 @@ async function loadAnalytics() {
     _safe(db.from("note_game_scores").select("email, created_at")),
     _safe(db.from("chord_game_scores").select("email, created_at")),
     _safe(db.from("content_feed_posts").select("id, type, created_at")),
-    _safe(db.from("content_feed_comments").select("email, created_at")),
-    _safe(db.from("content_feed_likes").select("email")),
-    _safe(db.from("activity_comments").select("email, created_at")),
-    _safe(db.from("activity_reactions").select("email")),
+    _withEmail(await _safe(db.from("content_feed_comments").select("member_key, created_at"))),
+    _withEmail(await _safe(db.from("content_feed_likes").select("member_key"))),
+    _withEmail(await _safe(db.from("activity_comments").select("member_key, created_at"))),
+    _withEmail(await _safe(db.from("activity_reactions").select("member_key"))),
     _safe(db.from("saved_posts").select("email, post_type, created_at")),
     /* By key: this page never reads an address off a content table now, and
        nothing downstream uses this one - it is passed through and ignored. */
     _safe(db.from("achievement_events").select("member_key, achievement_id")),
-    _safe(db.from("feedback").select("email, type, created_at")),
+    _withEmail(await _safe(db.from("feedback").select("member_key, type, created_at"))),
   ]);
 
   // Email campaign performance (owner-read).
@@ -1283,6 +1297,15 @@ async function renderFunnels() {
   const el = document.getElementById("analytics-content");
   if (!el) return;
   const safe = async (p) => { try { return (await p).data || []; } catch (e) { console.warn("funnel load failed:", e); return []; } };
+  /* Same translation as above: the community tables are read by key and the
+     address is put back from the owner's own list, so everything below keeps
+     working in addresses. */
+  const _fOwnerMap = {};
+  try {
+    const { data: _om } = await db.rpc("owner_member_emails");
+    (_om || []).forEach(r => { _fOwnerMap[r.member_key] = r.email; });
+  } catch (e) { console.warn("owner address map unavailable:", e); }
+  const _fWithEmail = rows => (rows || []).map(r => ({ ...r, email: _fOwnerMap[r.member_key] || null }));
   const [se, ordersRaw, leadsRaw, bookingsRaw, elog, eclicks] = await Promise.all([
     safe(db.from("site_events").select("event,vid,path,dur_ms,device,country,referrer,utm_source,scroll_pct,slug,value_minor,currency,ts")),
     safe(db.from("store_orders").select("slug,kind,amount_minor,currency,vid,created_at,email,stripe_session_id")),
@@ -1441,8 +1464,8 @@ async function renderFunnels() {
   const [members, psessions, cposts, ccomments, fusage, presence, sev, sconv] = await Promise.all([
     safe(db.from("allowed_emails").select("email")),
     safe(db.from("practice_sessions").select("email,session_date")),
-    safe(db.from("community_posts").select("email,created_at")),
-    safe(db.from("community_post_comments").select("email,created_at")),
+    _fWithEmail(await safe(db.from("community_posts").select("member_key,created_at"))),
+    _fWithEmail(await safe(db.from("community_post_comments").select("member_key,created_at"))),
     safe(db.from("feature_usage").select("email,day,seconds")),
     safe(db.from("user_presence").select("email,last_seen_at")),
     safe(db.from("signup_events").select("vid,event")),
