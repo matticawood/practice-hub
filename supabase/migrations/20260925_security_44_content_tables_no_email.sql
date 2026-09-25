@@ -28,7 +28,10 @@
 --   event_chat, event_qa - read with select("*") on the live-clinic pages and by
 --                        guests, who have no membership and so no key. Those
 --                        paths cannot be exercised without a clinic running.
---   feedback           - the board still notifies repliers by address.
+--
+-- The feedback board is included, but only closes fully alongside migration 45:
+-- it keeps addresses inside two JSON columns as well as in the column, and a
+-- column revoke does not reach inside JSON. Run 45 with this one.
 
 do $$
 declare
@@ -40,7 +43,8 @@ declare
     'activity_reactions', 'content_feed_comments', 'content_feed_likes',
     'content_feed_post_poll_votes', 'weekly_focus_likes', 'weekly_focus_comments',
     'practice_room_update_comments', 'practice_room_update_likes',
-    'event_comments', 'event_rsvps', 'event_attendance', 'tc_comment_poll_votes'
+    'event_comments', 'event_rsvps', 'event_attendance', 'tc_comment_poll_votes',
+    'feedback'
   ];
 begin
   foreach t in array tables loop

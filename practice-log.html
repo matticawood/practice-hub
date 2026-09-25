@@ -30997,9 +30997,11 @@ async function loadFbItems() {
   document.getElementById("fb-cards").style.display   = "none";
   document.getElementById("fb-empty").style.display   = "none";
 
+  /* Named columns, not everything: who posted an item is its member_key, and
+     the board shows the name they chose. */
   const { data, error } = await db
     .from("feedback")
-    .select("*")
+    .select("id, member_key, display_name, category, title, body, status, admin_note, upvotes, upvoted_by, created_at, updated_at, replies")
     .order("upvotes",     { ascending: false })
     .order("created_at",  { ascending: false });
 
@@ -31059,9 +31061,13 @@ function renderFbItems() {
   const ST_LABEL  = { open: "Open", planned: "Planned", added: "Added", fixed: "Fixed", declined: "Declined" };
 
   cardsEl.innerHTML = items.map(fb => {
+    /* Who upvoted is a list of member keys. Older rows still hold addresses
+       until they are rewritten, so either counts as your vote and the order the
+       two land in does not matter. */
     const upvotedBy = Array.isArray(fb.upvoted_by) ? fb.upvoted_by : [];
-    const hasVoted  = myEmail && upvotedBy.includes(myEmail);
-    const name = fb.display_name || (fb.email?.split("@")[0] ?? "Anonymous");
+    const hasVoted  = (myMemberKey && upvotedBy.includes(myMemberKey))
+                   || (myEmail && upvotedBy.includes(myEmail));
+    const name = fb.display_name || "Anonymous";
     const date = new Date(fb.created_at).toLocaleDateString("en-GB", { day:"numeric", month:"short" });
     const adminRow = isOwner() ? `
       <div class="fb-admin-row">
@@ -31119,10 +31125,10 @@ async function toggleFbVote(id) {
   if (upvoted) {
     fb.upvotes++;
     if (!fb.upvoted_by) fb.upvoted_by = [];
-    if (!fb.upvoted_by.includes(myEmail)) fb.upvoted_by.push(myEmail);
+    if (myMemberKey && !fb.upvoted_by.includes(myMemberKey)) fb.upvoted_by.push(myMemberKey);
   } else {
     fb.upvotes = Math.max(0, fb.upvotes - 1);
-    fb.upvoted_by = (fb.upvoted_by || []).filter(e => e !== myEmail);
+    fb.upvoted_by = (fb.upvoted_by || []).filter(v => v !== myMemberKey && v !== myEmail);
   }
   if (btn) { btn.disabled = false; btn.classList.toggle("voted", !!upvoted); }
   if (num) num.textContent = fb.upvotes;
@@ -31760,7 +31766,7 @@ function _fbEsc(s) {
 function _fbRepliesHTML(feedbackId) {
   const replies = _fbReplies[feedbackId] || [];
   const replyItems = replies.map(r => {
-    const rName = _fbEsc(r.display_name || r.email?.split("@")[0] || "Anonymous");
+    const rName = _fbEsc(r.display_name || "Anonymous");
     const rDate = new Date(r.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     const ownerClass = r.is_owner ? " fb-reply-owner" : "";
     const deleteBtn  = isOwner()
@@ -31838,14 +31844,23 @@ async function submitFbReply(feedbackId) {
 
     // Collect unique emails: original poster + everyone who replied before this reply
     const previousReplies = _fbReplies[feedbackId]?.slice(0, -1) || []; // exclude the one just added
-    const toNotify = new Set();
-    if (origPost.email) toNotify.add(origPost.email.toLowerCase());
-    previousReplies.forEach(r => { if (r.email) toNotify.add(r.email.toLowerCase()); });
-    toNotify.delete(myEmail.toLowerCase()); // don't notify yourself
+    /* Everyone already in the thread, by key: whoever raised it and whoever
+       replied before. Older replies still carry an address instead, so those
+       are addressed the old way until they are rewritten. */
+    const toKeys = new Set(), toEmails = new Set();
+    if (origPost.member_key) toKeys.add(origPost.member_key);
+    previousReplies.forEach(r => {
+      if (r.member_key) toKeys.add(r.member_key);
+      else if (r.email) toEmails.add(r.email.toLowerCase());
+    });
+    toKeys.delete(myMemberKey);                       // don't notify yourself
+    toEmails.delete((myEmail || "").toLowerCase());
+    const targets = [...[...toKeys].map(k => ({ to_member_key: k })),
+                     ...[...toEmails].map(e => ({ email: e }))];
 
-    for (const email of toNotify) {
+    for (const target of targets) {
       await db.from("notifications").insert({
-        email:    email,
+        ...target,
         type:     "app_update",
         title:    `${replierName} replied to a thread you're in`,
         body:     notifBody,
