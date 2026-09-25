@@ -3248,6 +3248,19 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     }
   };
 
+  /* Your own key, asked for once, for the two places the badge has to tell
+     your messages from everybody else's. */
+  let _shMyKeyNow = null, _shMyKeyPromise = null;
+  function _shMyKey() {
+    if (!_shMyKeyPromise) {
+      _shMyKeyPromise = db.rpc("get_profile_row").then(r => {
+        _shMyKeyNow = (r && r.data && r.data[0] && r.data[0].member_key) || null;
+        return _shMyKeyNow;
+      }, () => null);
+    }
+    return _shMyKeyPromise;
+  }
+
   async function _shLoadChatBadge() {
     if (!myEmail || !db) return;
 
@@ -3262,10 +3275,13 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     _shChatReads = {};
     (reads || []).forEach(r => { _shChatReads[r.chat_id] = r.last_read_at; });
 
-    // Recent messages not from me — count those newer than last read per chat
+    /* Recent messages not from me — count those newer than last read per chat.
+       "Not from me" is a comparison between two people, so it is asked by key
+       and the message rows never carry anybody's address. */
+    const _badgeKey = await _shMyKey();
     const { data: msgs } = await db.from("community_messages")
-      .select("chat_id, email, created_at")
-      .neq("email", myEmail)
+      .select("chat_id, member_key, created_at")
+      .neq("member_key", _badgeKey)
       .order("created_at", { ascending: false })
       .limit(400);
 
@@ -3288,7 +3304,7 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "community_messages" },
       payload => {
         const msg = payload.new;
-        if (!msg || msg.email === myEmail) return;
+        if (!msg || msg.member_key === _shMyKeyNow) return;
         // Let chat.html own the badge when it's the active page
         if (window._chatPageActive) return;
         const cid  = msg.chat_id;

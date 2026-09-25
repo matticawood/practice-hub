@@ -3391,6 +3391,24 @@ let myMemberKey = null;
 let _commDirPromise = null;
 let _commDirNow = {};   // the resolved directory, for synchronous renderers
 let _commOwnerKey = null;   // the owner's key, so his own cards need no address
+/* A direct-message id is the two people joined, so its halves are addresses.
+   These turn those halves into keys, so the chat can name everybody from the
+   directory - which is how the rest of this page already works - rather than
+   from a members list that carries no address at all. */
+let _chatKeyFor = {};
+async function _resolveChatKeys(emails) {
+  const want = [...new Set((emails || []).filter(e => e && !(e in _chatKeyFor)))];
+  if (!want.length) return;
+  want.forEach(e => { _chatKeyFor[e] = null; });
+  try {
+    const { data } = await db.rpc("member_keys_for", { p_emails: want });
+    (data || []).forEach(r => { _chatKeyFor[r.email] = r.member_key; });
+  } catch (e) { /* an unresolved half draws as "Member" */ }
+}
+function _chatWho(email) {
+  const k = _chatKeyFor[email];
+  return (k && _commDirNow[k]) || null;
+}
 function commMemberDirectory() {
   if (!_commDirPromise) {
     _commDirPromise = db.rpc("member_directory").then(r => {
@@ -10372,7 +10390,7 @@ async function _loadConversationsList() {
   //    We fetch the last 200 messages and group client-side (simple approach)
   const { data: msgs, error } = await db
     .from("community_messages")
-    .select("chat_id, content, email, name, created_at, media")
+    .select("chat_id, content, member_key, name, created_at, media")
     .order("created_at", { ascending: false })
     .limit(400);
 
@@ -10387,6 +10405,12 @@ async function _loadConversationsList() {
     .select("room_id")
     .eq("email", myEmail);
   const myRoomIds = new Set((participantRows || []).map(r => r.room_id));
+
+  /* Everyone the list is about: the directory by key for the message authors,
+     and the halves of each direct-message id turned into keys. */
+  await commMemberDirectory();
+  await _resolveChatKeys((msgs || [])
+    .flatMap(m => String(m.chat_id || "").includes("|") ? String(m.chat_id).split("|") : []));
 
   // 3. Deduplicate by chat_id — keep first (most recent) occurrence
   const seen = new Map(); // chat_id -> msg
@@ -10403,14 +10427,14 @@ async function _loadConversationsList() {
 
   // Always include group chat even if no messages
   if (!seen.has("group")) {
-    seen.set("group", { chat_id: "group", content: "", email: "", name: "", created_at: null });
+    seen.set("group", { chat_id: "group", content: "", member_key: null, name: "", created_at: null });
   }
 
   // Always pin a DM with Matt (owner) for non-owner members
   if (myEmail && myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
     const mattDmId = _dmChatId(OWNER_EMAIL);
     if (!seen.has(mattDmId)) {
-      seen.set(mattDmId, { chat_id: mattDmId, content: "", email: OWNER_EMAIL, name: "Matthew", created_at: null });
+      seen.set(mattDmId, { chat_id: mattDmId, content: "", member_key: null, name: "Matthew", created_at: null });
     }
   }
 
@@ -10428,9 +10452,10 @@ async function _loadConversationsList() {
       .in("room_id", roomIds);
     for (const r of (rooms || [])) {
       const pEmails = (participants || []).filter(p => p.room_id === r.id).map(p => p.email).filter(e => e !== myEmail);
+      await _resolveChatKeys(pEmails);
       roomNames[r.id] = r.name || pEmails.map(e => {
-        const m = (_allMembers || []).find(m => m.email === e);
-        return m ? m.name : e.split("@")[0];
+        const m = _chatWho(e);
+        return m ? m.name : "Member";
       }).join(", ") || "Group";
     }
   }
@@ -10463,8 +10488,8 @@ function _renderConvList(convList, roomNames) {
     } else if (cid.includes("|")) {
       // DM
       const otherEmail = cid.split("|").find(e => e !== myEmail) || cid.split("|")[0];
-      const member = (_allMembers || []).find(m => m.email === otherEmail);
-      name = member ? member.name : (otherEmail.split("@")[0]);
+      const member = _chatWho(otherEmail);
+      name = member ? member.name : "Member";
       avatarEl = avatarHtml(otherEmail, name, 44, member?.avatar_url || null);
     } else {
       // Group DM room
@@ -10514,8 +10539,8 @@ async function _openConversation(chatIdOrEmail, otherName) {
     chatId = chatIdOrEmail;
     const parts = chatId.split("|");
     const other = parts.find(e => e !== myEmail) || parts[0];
-    const member = (_allMembers || []).find(m => m.email === other);
-    title = otherName || (member ? member.name : other.split("@")[0]);
+    const member = _chatWho(other);
+    title = otherName || (member ? member.name : "Member");
   } else if (/^[0-9a-f-]{36}$/i.test(chatIdOrEmail)) {
     // UUID — group DM room
     chatId = chatIdOrEmail;
@@ -10523,8 +10548,8 @@ async function _openConversation(chatIdOrEmail, otherName) {
   } else {
     // Raw email — DM
     chatId = _dmChatId(chatIdOrEmail);
-    const member = (_allMembers || []).find(m => m.email === chatIdOrEmail);
-    title  = otherName || (member ? member.name : chatIdOrEmail.split("@")[0]);
+    const member = _chatWho(chatIdOrEmail);
+    title  = otherName || (member ? member.name : "Member");
   }
 
   _currentChatId   = chatId;
@@ -10560,7 +10585,7 @@ async function _openConversation(chatIdOrEmail, otherName) {
 
   const { data, error } = await db
     .from("community_messages")
-    .select("*")
+    .select("id, chat_id, member_key, name, content, media, created_at")
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true })
     .limit(200);
@@ -10733,14 +10758,15 @@ function _broadcastTyping() {
   _typingThrottle = now;
   _chatRealtimeSub.send({
     type: "broadcast", event: "typing",
-    payload: { email: myEmail, name: myName || myEmail.split("@")[0], chat_id: _currentChatId }
+    /* A key, not an address: this goes out to everyone in the conversation. */
+    payload: { key: myMemberKey, name: myName || "Member", chat_id: _currentChatId }
   });
 }
 
-function _showTyping(email, name) {
-  if (email === myEmail) return;
+function _showTyping(key, name) {
+  if (!key || key === myMemberKey) return;
   // Clear previous timer for this user
-  clearTimeout(_typingTimers[email]);
+  clearTimeout(_typingTimers[key]);
   const el    = document.getElementById("chat-typing");
   const label = document.getElementById("chat-typing-label");
   if (!el || !label) return;
@@ -10751,7 +10777,7 @@ function _showTyping(email, name) {
   el.style.display = "flex";
   _scrollChatToBottom();
   // Auto-hide after 4s silence
-  _typingTimers[email] = setTimeout(() => {
+  _typingTimers[key] = setTimeout(() => {
     _showTyping._active?.delete(name);
     if (!_showTyping._active?.size) {
       if (el) el.style.display = "none";
@@ -10896,10 +10922,10 @@ function _renderChatMessages() {
     return;
   }
   container.innerHTML = "";
-  let lastEmail = null;
+  let lastKey = null;
   _chatMessages.forEach(msg => {
-    const isMine  = msg.email === myEmail;
-    const isGroup = msg.email === lastEmail;
+    const isMine  = msg.member_key === myMemberKey;
+    const isGroup = msg.member_key === lastKey;
     container.insertAdjacentHTML("beforeend", _chatMsgHtml(msg, isMine, !isGroup));
     lastEmail = msg.email;
   });
@@ -10929,8 +10955,8 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const nonPollMedia = rawMedia.filter(m => m.type !== "poll");
 
   // Look up proper display name + avatar — use stored myAvatarUrl for own messages
-  const member    = (_allMembers || []).find(m => m.email === msg.email);
-  const dispName  = member?.name || msg.name || msg.email?.split("@")[0] || "Member";
+  const member    = _commDirNow[msg.member_key] || null;
+  const dispName  = member?.name || msg.name || "Member";
   const avatarUrl = isMine ? (myAvatarUrl || member?.avatar_url || null) : (member?.avatar_url || null);
   const name      = escHtml(dispName);
   const timeStr   = _chatTime(msg.created_at);
@@ -10970,7 +10996,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     </div>`;
   })() : "";
 
-  const avatarEl = avatarHtml(msg.email, dispName, 34, avatarUrl);
+  const avatarEl = avatarHtml(null, dispName, 34, avatarUrl, { key: msg.member_key, pal: member?.pal });
   const metaHtml = showMeta
     ? `<div class="chat-msg-meta"><span class="chat-msg-name">${name}</span><span class="chat-msg-time">${timeStr}</span></div>`
     : "";
@@ -11007,9 +11033,9 @@ function _appendChatMessage(msg) {
   const container = document.getElementById("chat-messages");
   const emptyEl = document.getElementById("chat-empty");
   if (emptyEl) emptyEl.remove();
-  const isMine  = msg.email === myEmail;
+  const isMine  = msg.member_key === myMemberKey;
   const prevMsg = _chatMessages[_chatMessages.length - 2];
-  const isGroup = prevMsg && prevMsg.email === msg.email;
+  const isGroup = prevMsg && prevMsg.member_key === msg.member_key;
   container.insertAdjacentHTML("beforeend", _chatMsgHtml(msg, isMine, !isGroup));
 }
 
@@ -11060,6 +11086,7 @@ async function sendChatMessage() {
   const { data: inserted, error } = await db.from("community_messages").insert({
     chat_id: _currentChatId,
     email:   myEmail,
+    member_key: myMemberKey,
     name:    myName,
     content,
     media

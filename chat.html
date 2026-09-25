@@ -1513,19 +1513,40 @@ const OWNER_EMAIL = "matthew@matthewcawood.com";
 let myEmail = null, myName = null, myAvatarUrl = null, isAdmin = false;
 let myMemberKey = null;   // your own key, so the picker can leave you out of it
 let _allMembers = [], _membersLoaded = false;
-/* Everyone appearing in your own conversations, by address: the other half of a
-   direct message, the participants of your rooms, the authors of the messages in
-   front of you. Resolved from addresses this page already holds, never by
-   reading the membership. */
+/* Everyone, by key: their name, their picture and their colour. A message says
+   who wrote it with a key, so this is all the page needs to draw a conversation
+   and nobody's address comes into it. Asked for once. */
 let _chatPeople = {};
-async function _resolveChatPeople(emails) {
-  const want = [...new Set((emails || []).filter(e => e && !(e in _chatPeople)))];
+let _chatDirPromise = null;
+function _chatDirectory() {
+  if (!_chatDirPromise) {
+    _chatDirPromise = db.rpc("member_directory").then(r => {
+      ((r && r.data) || []).forEach(x => {
+        _chatPeople[x.member_key] = { name: x.name, avatar_url: x.avatar_url || null, pal: x.pal };
+      });
+      return _chatPeople;
+    }, () => _chatPeople);
+  }
+  return _chatDirPromise;
+}
+/* The one place an address still appears is inside a direct-message id, which is
+   literally the two people joined - your own conversations, and only yours.
+   These turn those halves into keys so the rest of the page never handles one. */
+let _chatKeyFor = {};
+/* The person on the other end of an id, looked up through that bridge, so the
+   five places that still hold an address never index the directory with one. */
+function _chatWho(email) {
+  const k = _chatKeyFor[email];
+  return (k && _chatPeople[k]) || null;
+}
+async function _resolveChatKeys(emails) {
+  const want = [...new Set((emails || []).filter(e => e && !(e in _chatKeyFor)))];
   if (!want.length) return;
-  want.forEach(e => { _chatPeople[e] = null; });   // asked once
+  want.forEach(e => { _chatKeyFor[e] = null; });   // asked once
   try {
-    const { data } = await db.rpc("member_cards_for", { p_emails: want });
-    (data || []).forEach(r => { _chatPeople[r.email] = { name: r.name, avatar_url: r.avatar_url }; });
-  } catch (e) { /* names fall back to the address prefix, as they always did */ }
+    const { data } = await db.rpc("member_keys_for", { p_emails: want });
+    (data || []).forEach(r => { _chatKeyFor[r.email] = r.member_key; });
+  } catch (e) { /* an unresolved half simply draws as "Member", as it would have */ }
 }
 function _chatPalColour(pal) {
   const P = [
@@ -2935,12 +2956,14 @@ function avatarColour(email) {
   return P[Math.abs(h) % P.length];
 }
 
-function avatarHtml(email, name, size = 32, avatarUrl = null) {
+function avatarHtml(email, name, size = 32, avatarUrl = null, pal = null) {
   const style = `width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;`;
   if (avatarUrl) {
     return `<div style="${style}overflow:hidden"><img src="${escHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" /></div>`;
   }
-  const c = avatarColour(email);
+  /* The colour comes from the directory's index where there is one; the address
+     hash is only still here for the few callers that have an address. */
+  const c = Number.isInteger(pal) ? _chatPalColour(pal) : avatarColour(email);
   const ini = initials(name || email?.split("@")[0] || "?");
   const fontSize = Math.round(size * 0.34);
   return `<div style="${style}background:${c.bg};color:${c.fg};display:flex;align-items:center;justify-content:center;font-size:${fontSize}px;font-weight:800">${ini}</div>`;
@@ -3180,7 +3203,7 @@ async function _loadConversationsList() {
   //    We fetch the last 200 messages and group client-side (simple approach)
   const { data: msgs, error } = await db
     .from("community_messages")
-    .select("chat_id, content, email, name, created_at, media")
+    .select("chat_id, content, member_key, name, created_at, media")
     .order("created_at", { ascending: false })
     .limit(400);
 
@@ -3197,10 +3220,9 @@ async function _loadConversationsList() {
   const myRoomIds = new Set((participantRows || []).map(r => r.room_id));
   /* Resolve everyone appearing in these conversations before drawing them:
      the message authors, and the other half of every direct-message id. */
-  await _resolveChatPeople([
-    ...(msgs || []).map(m => m.email),
-    ...(msgs || []).flatMap(m => String(m.chat_id || "").includes("|") ? String(m.chat_id).split("|") : []),
-  ]);
+  await _chatDirectory();
+  await _resolveChatKeys(
+    (msgs || []).flatMap(m => String(m.chat_id || "").includes("|") ? String(m.chat_id).split("|") : []));
 
   // 3. Deduplicate by chat_id — keep first (most recent) occurrence
   //    Also count unread messages using DB-backed read timestamps
@@ -3215,7 +3237,7 @@ async function _loadConversationsList() {
     const isMine = cid === "group" || isDM || isRoom;
     if (!isMine) continue;
     // Count unread (messages not from me, newer than last read)
-    if (msg.email !== myEmail) {
+    if (msg.member_key !== myMemberKey) {
       const lastRead = reads[cid];
       if (!lastRead || msg.created_at > lastRead) {
         unreadTally[cid] = (unreadTally[cid] || 0) + 1;
@@ -3230,14 +3252,14 @@ async function _loadConversationsList() {
 
   // Always include group chat even if no messages
   if (!seen.has("group")) {
-    seen.set("group", { chat_id: "group", content: "", email: "", name: "", created_at: null });
+    seen.set("group", { chat_id: "group", content: "", member_key: null, name: "", created_at: null });
   }
 
   // Always pin a DM with Matt (owner) for non-owner members
   if (myEmail && myEmail.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
     const mattDmId = _dmChatId(OWNER_EMAIL);
     if (!seen.has(mattDmId)) {
-      seen.set(mattDmId, { chat_id: mattDmId, content: "", email: OWNER_EMAIL, name: "Matthew", created_at: null });
+      seen.set(mattDmId, { chat_id: mattDmId, content: "", member_key: null, name: "Matthew", created_at: null });
     }
   }
 
@@ -3246,7 +3268,7 @@ async function _loadConversationsList() {
   // for everyone, from the first time they open chat.
   const _selfId = _selfChatId();
   if (_selfId && !seen.has(_selfId)) {
-    seen.set(_selfId, { chat_id: _selfId, content: "", email: myEmail, name: myName || "", created_at: null });
+    seen.set(_selfId, { chat_id: _selfId, content: "", member_key: myMemberKey, name: myName || "", created_at: null });
   }
 
   // 4. Fetch room names for group DMs
@@ -3264,8 +3286,8 @@ async function _loadConversationsList() {
     for (const r of (rooms || [])) {
       const pEmails = (participants || []).filter(p => p.room_id === r.id).map(p => p.email).filter(e => e !== myEmail);
       roomNames[r.id] = r.name || pEmails.map(e => {
-        const m = _chatPeople[e];
-        return m ? m.name : e.split("@")[0];
+        const m = _chatWho(e);
+        return m ? m.name : "Member";
       }).join(", ") || "Group";
     }
   }
@@ -3299,10 +3321,11 @@ function _renderConvList(convList, roomNames) {
     } else if (cid.includes("|")) {
       // DM
       const otherEmail = cid.split("|").find(e => e !== myEmail) || cid.split("|")[0];
-      const member = _chatPeople[otherEmail];
-      name = _isSelfChat(cid) ? SELF_CHAT_NAME : (member ? member.name : (otherEmail.split("@")[0]));
-      avatarEl = avatarHtml(otherEmail, member?.name || name, 44,
-                            (_isSelfChat(cid) ? myAvatarUrl : null) || member?.avatar_url || null);
+      const member = _chatWho(otherEmail);
+      name = _isSelfChat(cid) ? SELF_CHAT_NAME : (member ? member.name : "Member");
+      avatarEl = avatarHtml(null, member?.name || name, 44,
+                            (_isSelfChat(cid) ? myAvatarUrl : null) || member?.avatar_url || null,
+                            member?.pal);
     } else {
       // Group DM room
       name = roomNames && roomNames[cid] ? roomNames[cid] : "Group";
@@ -3366,7 +3389,7 @@ async function _setChatHeaderAvatar(chatId) {
     emails = chatId.split("|").filter(e => e && e !== myEmail);
   } else if (/^[0-9a-f-]{36}$/i.test(chatId)) {
     const { data } = await db.from("community_chat_participants").select("email").eq("room_id", chatId);
-    await _resolveChatPeople((data || []).map(p => p.email));
+    await _resolveChatKeys((data || []).map(p => p.email));
     if (_currentChatId !== chatId) return; // conversation switched while fetching
     emails = (data || []).map(p => p.email).filter(e => e && e !== myEmail);
   } else {
@@ -3377,13 +3400,19 @@ async function _setChatHeaderAvatar(chatId) {
   const extra = emails.length - shown.length;
   el.className = "chat-hdr-stack";
   el.innerHTML = shown.map(e => {
-    const m = _chatPeople[e];
-    const nm = m ? m.name : e.split("@")[0];
-    return `<span class="chat-hdr-stack-item">${avatarHtml(e, nm, 30, m?.avatar_url || null)}</span>`;
+    const m = _chatWho(e);
+    const nm = m ? m.name : "Member";
+    return `<span class="chat-hdr-stack-item">${avatarHtml(null, nm, 30, m?.avatar_url || null, m?.pal)}</span>`;
   }).join("") + (extra > 0 ? `<span class="chat-hdr-stack-more">+${extra}</span>` : "");
 }
 
 async function _openConversation(chatIdOrEmail, otherName) {
+  /* A deep link can land here before the conversation list has run, so make
+     sure the people this is about are known before the title is drawn. */
+  await _chatDirectory();
+  await _resolveChatKeys(String(chatIdOrEmail || "").includes("|")
+    ? String(chatIdOrEmail).split("|")
+    : (String(chatIdOrEmail || "").includes("@") ? [chatIdOrEmail] : []));
   let chatId, title;
   if (!chatIdOrEmail || chatIdOrEmail === "group") {
     chatId = "group";
@@ -3392,9 +3421,9 @@ async function _openConversation(chatIdOrEmail, otherName) {
     chatId = chatIdOrEmail;
     const parts = chatId.split("|");
     const other = parts.find(e => e !== myEmail) || parts[0];
-    const member = _chatPeople[other];
+    const member = _chatWho(other);
     title = _isSelfChat(chatId) ? SELF_CHAT_NAME
-          : (otherName || (member ? member.name : other.split("@")[0]));
+          : (otherName || (member ? member.name : "Member"));
   } else if (/^[0-9a-f-]{36}$/i.test(chatIdOrEmail)) {
     // UUID — group DM room
     chatId = chatIdOrEmail;
@@ -3402,9 +3431,9 @@ async function _openConversation(chatIdOrEmail, otherName) {
   } else {
     // Raw email — DM (your own address included: that is the self chat)
     chatId = _dmChatId(chatIdOrEmail);
-    const member = _chatPeople[chatIdOrEmail];
+    const member = _chatWho(chatIdOrEmail);
     title  = _isSelfChat(chatId) ? SELF_CHAT_NAME
-           : (otherName || (member ? member.name : chatIdOrEmail.split("@")[0]));
+           : (otherName || (member ? member.name : "Member"));
   }
 
   _currentChatId   = chatId;
@@ -3443,11 +3472,11 @@ async function _openConversation(chatIdOrEmail, otherName) {
 
   const { data, error } = await db
     .from("community_messages")
-    .select("*")
+    .select("id, chat_id, member_key, name, content, media, created_at")
     .eq("chat_id", chatId)
     .order("created_at", { ascending: false })
     .limit(CHAT_PAGE_SIZE + 1);
-    await _resolveChatPeople((data || []).map(m => m.email));
+    await _chatDirectory();
 
   if (error) {
     document.getElementById("chat-messages").innerHTML =
@@ -3488,8 +3517,8 @@ async function _fetchPollsAndReactions(msgIds, reset = false) {
     .map(m => m.id);
 
   const fetches = [
-    db.from("community_chat_reactions").select("message_id,email,emoji").in("message_id", msgIds)
-      .then(async r => { await _resolveChatPeople(((r && r.data) || []).map(x => x.email)); return r; })
+    db.from("community_chat_reactions").select("message_id,member_key,emoji").in("message_id", msgIds)
+      .then(async r => { await _chatDirectory(); return r; })
   ];
   if (pollMsgIds.length) {
     fetches.push(
@@ -3504,10 +3533,10 @@ async function _fetchPollsAndReactions(msgIds, reset = false) {
 
   rxRows.forEach(r => {
     if (!_chatRxMap[r.message_id]) _chatRxMap[r.message_id] = {};
-    if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, emails: [] };
+    if (!_chatRxMap[r.message_id][r.emoji]) _chatRxMap[r.message_id][r.emoji] = { count: 0, mine: false, keys: [] };
     _chatRxMap[r.message_id][r.emoji].count++;
-    _chatRxMap[r.message_id][r.emoji].emails.push(r.email);
-    if (r.email === myEmail) _chatRxMap[r.message_id][r.emoji].mine = true;
+    _chatRxMap[r.message_id][r.emoji].keys.push(r.member_key);
+    if (r.member_key === myMemberKey) _chatRxMap[r.message_id][r.emoji].mine = true;
   });
   allVotes.forEach(v => {
     if (!_chatPollVotes[v.message_id]) _chatPollVotes[v.message_id] = { myVote: null, counts: {} };
@@ -3530,12 +3559,12 @@ async function _loadMoreMessages() {
   const oldest = _chatMessages[0].created_at;
   const { data } = await db
     .from("community_messages")
-    .select("*")
+    .select("id, chat_id, member_key, name, content, media, created_at")
     .eq("chat_id", _currentChatId)
     .lt("created_at", oldest)
     .order("created_at", { ascending: false })
     .limit(CHAT_PAGE_SIZE + 1);
-    await _resolveChatPeople((data || []).map(m => m.email));
+    await _chatDirectory();
 
   const rows = data || [];
   if (rows.length > CHAT_PAGE_SIZE) { _chatHasMore = true; rows.pop(); }
@@ -3574,9 +3603,11 @@ function _chatLoadMoreSentinelHtml() {
 
 const CHAT_EMOJIS = ["❤️","👍","😂","🔥","💪","👏","😮"];
 
-function _rxNames(emails) {
-  return (emails || []).map(e =>
-    e === myEmail ? "You" : (_chatPeople[e]?.name || e.split("@")[0])
+/* Who reacted, named from the directory by key. "You" for yourself, everyone
+   else by the name they go by. */
+function _rxNames(keys) {
+  return (keys || []).map(k =>
+    k === myMemberKey ? "You" : (_chatPeople[k]?.name || "Member")
   ).join(", ");
 }
 
@@ -3585,7 +3616,7 @@ function _chatRxHtml(msgId) {
   return Object.entries(rx)
     .filter(([, d]) => d.count > 0)
     .map(([emoji, d]) => {
-      const names = _rxNames(d.emails);
+      const names = _rxNames(d.keys);
       return `<button class="chat-rx-pill${d.mine ? " mine" : ""}" data-names="${escHtml(names)}" onclick="pickChatReaction('${escHtml(msgId)}','${emoji}')">${emoji}${d.count > 1 ? `<span>${d.count}</span>` : ""}</button>`;
     }).join("");
 }
@@ -3728,13 +3759,13 @@ function _refreshChatRx(msgId) {
 
 async function _refreshChatRxFromDb(msgId) {
   const { data: rxRows } = await db.from("community_chat_reactions")
-    .select("email,emoji").eq("message_id", msgId);
+    .select("member_key,emoji").eq("message_id", msgId);
   _chatRxMap[msgId] = {};
   (rxRows || []).forEach(r => {
-    if (!_chatRxMap[msgId][r.emoji]) _chatRxMap[msgId][r.emoji] = { count: 0, mine: false, emails: [] };
+    if (!_chatRxMap[msgId][r.emoji]) _chatRxMap[msgId][r.emoji] = { count: 0, mine: false, keys: [] };
     _chatRxMap[msgId][r.emoji].count++;
-    _chatRxMap[msgId][r.emoji].emails.push(r.email);
-    if (r.email === myEmail) _chatRxMap[msgId][r.emoji].mine = true;
+    _chatRxMap[msgId][r.emoji].keys.push(r.member_key);
+    if (r.member_key === myMemberKey) _chatRxMap[msgId][r.emoji].mine = true;
   });
   _refreshChatRx(msgId);
 }
@@ -3750,14 +3781,16 @@ function _broadcastTyping() {
   _typingThrottle = now;
   _chatRealtimeSub.send({
     type: "broadcast", event: "typing",
-    payload: { email: myEmail, name: myName || myEmail.split("@")[0], chat_id: _currentChatId }
+    /* A key, not an address: this goes out over the channel to everyone in the
+       conversation, and the other end only needs to know it is not you. */
+    payload: { key: myMemberKey, name: myName || "Member", chat_id: _currentChatId }
   });
 }
 
-function _showTyping(email, name) {
-  if (email === myEmail) return;
+function _showTyping(key, name) {
+  if (!key || key === myMemberKey) return;
   // Clear previous timer for this user
-  clearTimeout(_typingTimers[email]);
+  clearTimeout(_typingTimers[key]);
   const el    = document.getElementById("chat-typing");
   const label = document.getElementById("chat-typing-label");
   if (!el || !label) return;
@@ -3771,7 +3804,7 @@ function _showTyping(email, name) {
   el.style.display = "flex";
   if (nearBottom) _scrollChatToBottom();
   // Auto-hide after 4s silence
-  _typingTimers[email] = setTimeout(() => {
+  _typingTimers[key] = setTimeout(() => {
     _showTyping._active?.delete(name);
     if (!_showTyping._active?.size) {
       if (el) el.style.display = "none";
@@ -3922,7 +3955,7 @@ function _subscribeGlobalRealtime() {
     })
     .on("broadcast", { event: "typing" }, ({ payload }) => {
       if (!payload || payload.chat_id !== _currentChatId) return;
-      _showTyping(payload.email, payload.name);
+      _showTyping(payload.key, payload.name);
     })
     .on("broadcast", { event: "delete_message" }, ({ payload }) => {
       if (!payload?.id) return;
@@ -3944,7 +3977,7 @@ function _renderChatMessages() {
     return;
   }
   container.innerHTML = _chatHasMore ? _chatLoadMoreSentinelHtml() : "";
-  let lastEmail = null, lastDayKey = null, section = null;
+  let lastKey = null, lastDayKey = null, section = null;
   _chatMessages.forEach(msg => {
     const dayKey = _chatDayKey(msg.created_at);
     if (dayKey !== lastDayKey || !section) {
@@ -3954,12 +3987,12 @@ function _renderChatMessages() {
       section.innerHTML = _chatDayDivHtml(msg.created_at);
       container.appendChild(section);
       lastDayKey = dayKey;
-      lastEmail = null; // first message of a new day always shows its name/time
+      lastKey = null; // first message of a new day always shows its name/time
     }
-    const isMine  = msg.email === myEmail;
-    const isGroup = msg.email === lastEmail;
+    const isMine  = msg.member_key === myMemberKey;
+    const isGroup = msg.member_key === lastKey;
     section.insertAdjacentHTML("beforeend", _chatMsgHtml(msg, isMine, !isGroup));
-    lastEmail = msg.email;
+    lastKey = msg.member_key;
   });
 
   // Aspect-ratio is stored on new messages so mux-player never needs to resize.
@@ -3999,8 +4032,8 @@ function _chatMsgHtml(msg, isMine, showMeta) {
   const nonPollMedia = rawMedia.filter(m => m.type !== "poll");
 
   // Look up proper display name + avatar — use stored myAvatarUrl for own messages
-  const member    = _chatPeople[msg.email];
-  const dispName  = member?.name || msg.name || msg.email?.split("@")[0] || "Member";
+  const member    = _chatPeople[msg.member_key];
+  const dispName  = member?.name || msg.name || "Member";
   const avatarUrl = isMine ? (myAvatarUrl || member?.avatar_url || null) : (member?.avatar_url || null);
   const name      = escHtml(dispName);
   const timeStr   = _chatTime(msg.created_at);
@@ -4049,7 +4082,7 @@ function _chatMsgHtml(msg, isMine, showMeta) {
     </div>`;
   })() : "";
 
-  const avatarEl = avatarHtml(msg.email, dispName, 34, avatarUrl);
+  const avatarEl = avatarHtml(null, dispName, 34, avatarUrl, member?.pal);
   const metaHtml = showMeta
     ? `<div class="chat-msg-meta"><span class="chat-msg-name">${name}</span><span class="chat-msg-time">${timeStr}</span></div>`
     : "";
@@ -4105,7 +4138,7 @@ function _appendChatMessage(msg) {
     section.innerHTML = _chatDayDivHtml(msg.created_at);
     container.appendChild(section);
   }
-  const isGroup = !newDay && prevMsg && prevMsg.email === msg.email;
+  const isGroup = !newDay && prevMsg && prevMsg.member_key === msg.member_key;
   section.insertAdjacentHTML("beforeend", _chatMsgHtml(msg, isMine, !isGroup));
   // Live-appended messages gently animate in (initial full render does not)
   const grp = section.lastElementChild;
@@ -4412,7 +4445,7 @@ async function _deleteChatMessage(msgId) {
   const { count, error } = await db.from("community_messages")
     .delete({ count: "exact" })
     .eq("id", msgId)
-    .eq("email", myEmail);
+    .eq("member_key", myMemberKey);
   if (error) { console.error("Delete failed:", error); return; }
   if (!count) { console.warn("Delete blocked — 0 rows affected (RLS?)"); return; }
   // Remove locally
