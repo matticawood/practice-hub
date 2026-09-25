@@ -1979,6 +1979,8 @@ const OWNER_EMAIL = "matthew@matthewcawood.com";
 // (audience experience) without being admins. Members never see test events.
 const REVIEWER_EMAILS = ["enquiries@matthewcawood.com"];
 let myEmail      = null;
+/* Who you are, by key: how everyone else on this page is named. */
+let myMemberKey  = null;
 let myName       = null;
 let myAvatarUrl  = null;
 let isAdmin      = false;
@@ -2093,6 +2095,10 @@ let isRecording  = false;
   if (!session) { window.location.href = "/practice-log.html"; return; }
 
   myEmail   = session.user.email;
+  try {
+    const { data: _pr } = await db.rpc("get_profile_row");
+    myMemberKey = (_pr && _pr[0] && _pr[0].member_key) || null;
+  } catch (e) { myMemberKey = null; }
   authToken = session.access_token;
 
   // Get display name + avatar for current user, and owner profile in parallel
@@ -2396,7 +2402,7 @@ async function renderDetailView(ev) {
 
   // RSVP status
   const { data: rsvpRow } = await db.from("event_rsvps")
-    .select("id").eq("event_id", ev.id).eq("email", myEmail).maybeSingle();
+    .select("id").eq("event_id", ev.id).eq("member_key", myMemberKey).maybeSingle();
   const hasRsvp = !!rsvpRow;
 
   // RSVP count
@@ -2882,6 +2888,7 @@ async function addRsvp(eventId) {
   const { error } = await db.from("event_rsvps").insert({
     event_id: eventId,
     email: myEmail,
+    member_key: myMemberKey,
     name: myName
   });
   if (error) {
@@ -2905,7 +2912,7 @@ async function addRsvp(eventId) {
 }
 async function removeRsvp(eventId) {
   const { error } = await db.from("event_rsvps").delete()
-    .eq("event_id", eventId).eq("email", myEmail);
+    .eq("event_id", eventId).eq("member_key", myMemberKey);
   if (error) {
     console.error("Remove RSVP error:", error);
     alert("Could not remove your RSVP: " + (error.message || JSON.stringify(error)));
@@ -3034,19 +3041,22 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
   // Notify the comment author (skip self). Resolve from the DB so a missing
   // client meta entry can't silently drop the notification (esp. for replies).
   const meta = _evCmtMetaMap[idStr];
-  let authorEmail = meta?.email;
+  let authorKey = meta?.key || null;
   let isReply = false;
   {
     const { data: crow } = await db.from("event_comments")
-      .select("email,parent_comment_id").eq("id", idStr).maybeSingle();
+      /* parent_id, not parent_comment_id: this table calls it parent_id, and
+         asking for a column that does not exist made the whole query fail, so
+         this fallback never once ran. */
+      .select("member_key,parent_id").eq("id", idStr).maybeSingle();
     if (crow) {
-      if (!authorEmail) authorEmail = crow.email;
-      isReply = !!crow.parent_comment_id;
+      if (!authorKey) authorKey = crow.member_key;
+      isReply = !!crow.parent_id;
     }
   }
-  if (authorEmail && authorEmail.toLowerCase() !== myEmail.toLowerCase()) {
+  if (authorKey && authorKey !== myMemberKey) {
     await db.from("notifications").insert({
-      email:    authorEmail,
+      to_member_key: authorKey,
       type:     "reaction",
       title:    `${myName || "Someone"} reacted ${emoji} to your ${isReply ? "reply" : "comment"}`,
       body:     "",
@@ -3088,8 +3098,9 @@ async function loadComments(eventId) {
   const hdrEl  = document.getElementById("comments-hdr");
   if (listEl) listEl.innerHTML = '<div class="comments-empty">Loading…</div>';
 
+  /* Named columns rather than everything: a comment's author is its key. */
   const { data: comments, error } = await db.from("event_comments")
-    .select("*")
+    .select("id,event_id,member_key,name,content,created_at,parent_id,attachment_url,attachment_type,attachment_name,attachment_size,media,reply_to_name,edited_at")
     .eq("event_id", eventId)
     .order("created_at", { ascending: true });
 
@@ -3105,13 +3116,12 @@ async function loadComments(eventId) {
     return;
   }
 
-  /* Comment authors' pictures, from the directory by key. The map stays keyed
-     by address so everything below it is unchanged. */
+  /* Comment authors' pictures, from the directory, keyed as the comments are. */
   const _evDir = await _evMemberDirectory();
   const avatarMap = {};
   comments.forEach(c => {
     const info = c.member_key && _evDir[c.member_key];
-    if (info && info.url) avatarMap[c.email] = info.url;
+    if (info && info.url) avatarMap[c.member_key] = info.url;
   });
 
   // Pre-load existing reactions on these event comments.
@@ -3119,8 +3129,8 @@ async function loadComments(eventId) {
   // Track each comment's author for reaction notifications.
   comments.forEach(c => {
     _evCmtMetaMap[String(c.id)] = {
-      email: c.email,
-      name:  c.name || c.email.split("@")[0],
+      key:  c.member_key,
+      name: c.name || "Member",
     };
   });
 
@@ -3143,27 +3153,28 @@ async function loadComments(eventId) {
   });
 
   function commentItemHTML(c, isReply = false) {
-    const canDel  = isAdmin || c.email === myEmail;
-    const dispName = esc(c.name || c.email.split("@")[0]);
+    const isMine  = !!(c.member_key && c.member_key === myMemberKey);
+    const canDel  = isAdmin || isMine;
+    const dispName = esc(c.name || "Member");
     const replyPrefix = (isReply && c.reply_to_name)
       ? `<span class="reply-to-name">@${esc(c.reply_to_name)}</span> ` : "";
     const poll = pollByComment[c.id] || null;
     return `
       <div class="comment-item${isReply ? " is-reply" : ""}" id="comment-${c.id}">
-        ${avatarHtml(c.name, c.email, 28, avatarMap[c.email] || null)}
+        ${avatarHtml(c.name, null, 28, avatarMap[c.member_key] || null, (_evDir[c.member_key] || {}).pal)}
         <div class="comment-body">
           <div class="comment-meta">
             <span class="comment-name">${dispName}</span>
             <span class="comment-time">${timeAgo(c.created_at)}</span>
             ${c.edited_at ? `<span class="comment-edited" style="font-size:.66rem;color:var(--text-muted);font-style:italic">(edited)</span>` : ""}
             <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
-              ${c.email === myEmail ? `<button class="delete-btn" style="margin-left:0" onclick="editEvComment('${c.id}','${eventId}')" title="Edit" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>` : ""}
+              ${isMine ? `<button class="delete-btn" style="margin-left:0" onclick="editEvComment('${c.id}','${eventId}')" title="Edit" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">Edit</button>` : ""}
               ${canDel ? `<button class="delete-btn" style="margin-left:0" onclick="deleteComment('${c.id}','${eventId}')" title="Delete">Delete</button>` : ""}
             </span>
           </div>
           ${c.content ? `<div class="comment-text">${replyPrefix}${(window.renderUserContent?renderUserContent(c.content):esc(c.content))}</div>` : (replyPrefix ? `<div class="comment-text">${replyPrefix}</div>` : "")}
           ${_renderAttHtml(c)}
-          ${poll ? _renderPollHtml(poll, c.id, c.email) : ""}
+          ${poll ? _renderPollHtml(poll, c.id, c.member_key) : ""}
           <div class="comment-action-row">
             ${_evCommentReactBarHTML(c.id)}
             ${!isReply ? `<button class="comment-reply-btn" onclick="startEvReply('${c.id}','${dispName.replace(/'/g,"\\'")}')">Reply</button>` : ""}
@@ -3247,11 +3258,11 @@ async function evSubmitReply(parentCommentId, textarea) {
   if (error) { alert("Couldn't post reply: " + error.message); return; }
 
   // Notify the original commenter (unless replying to yourself)
-  const { data: parent } = await db.from("event_comments").select("email,name").eq("id", parentCommentId).single();
-  if (parent?.email && parent.email !== myEmail) {
+  const { data: parent } = await db.from("event_comments").select("member_key,name").eq("id", parentCommentId).single();
+  if (parent?.member_key && parent.member_key !== myMemberKey) {
     const evTitle = currentEvent?.title || "an event";
     await db.from("notifications").insert({
-      email:    parent.email,
+      to_member_key: parent.member_key,
       type:     "comment_reply",
       title:    `${myName || "Someone"} replied to your comment`,
       body:     (content || "Sent an attachment").slice(0, 120),
@@ -4068,13 +4079,13 @@ function _renderAttHtml(c) {
   }
 }
 
-function _renderPollHtml(poll, commentId, authorEmail) {
+function _renderPollHtml(poll, commentId, authorKey) {
   if (!poll) return "";
   const opts      = typeof poll.options === "string" ? JSON.parse(poll.options) : (poll.options || []);
   const votes     = poll.event_comment_poll_votes || [];
   const total     = votes.length;
   const myVoteIdx = votes.find(v => v.email === myEmail)?.option_index ?? null;
-  const hasVoted  = myVoteIdx !== null || (!!authorEmail && authorEmail === myEmail);
+  const hasVoted  = myVoteIdx !== null || (!!authorKey && authorKey === myMemberKey);
 
   const COLORS = ["#8b5cf6","#f59e0b","#3b82f6","#ec4899","#10b981","#f97316","#06b6d4","#ef4444"]; // site category palette
   let html = `<div class="poll-card"><div class="poll-card-question">${esc(poll.question)}</div>`;
@@ -4327,13 +4338,13 @@ async function startStream(eventId) {
 
     // Notify everyone who RSVPed (except the host) — but never for a test event.
     const { data: rsvps } = currentEvent?.test ? { data: [] }
-      : await db.from("event_rsvps").select("email").eq("event_id", eventId);
+      : await db.from("event_rsvps").select("member_key").eq("event_id", eventId);
     if (rsvps?.length) {
       const evTitle = currentEvent?.title || "an event";
       const notifs = rsvps
-        .filter(r => r.email && r.email.toLowerCase() !== myEmail.toLowerCase())
+        .filter(r => r.member_key && r.member_key !== myMemberKey)
         .map(r => ({
-          email:    r.email,
+          to_member_key: r.member_key,
           type:     "event_live",
           title:    `${evTitle} is live now!`,
           body:     "Join the session — it's happening right now.",
@@ -8516,16 +8527,22 @@ function getInitials(name) {
   return name.trim().split(/\s+/).map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
 
+const AVATAR_PALETTE = [
+  {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
+  {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
+  {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
+  {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
+];
+/* The same eight colours, picked by the index the directory carries rather than
+   by hashing an address. That index is the same hash, worked out in the
+   database, so a person keeps exactly the colour they had. */
+function evPalColour(i) {
+  return AVATAR_PALETTE[(Number.isInteger(i) ? i : 0) % AVATAR_PALETTE.length];
+}
 function avatarColor(email) {
-  const P = [
-    {bg:"rgba(59,130,246,.2)", fg:"#93c5fd"},{bg:"rgba(245,158,11,.18)",fg:"#fcd34d"},
-    {bg:"rgba(16,185,129,.18)",fg:"#6ee7b7"},{bg:"rgba(139,92,246,.2)", fg:"#c4b5fd"},
-    {bg:"rgba(249,115,22,.18)",fg:"#fdba74"},{bg:"rgba(236,72,153,.18)",fg:"#f9a8d4"},
-    {bg:"rgba(6,182,212,.18)", fg:"#67e8f9"},{bg:"rgba(132,204,22,.18)",fg:"#bef264"},
-  ];
   let h = 0;
   for (const c of (email||"")) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
-  return P[Math.abs(h) % P.length];
+  return AVATAR_PALETTE[Math.abs(h) % AVATAR_PALETTE.length];
 }
 
 /* Everyone's picture, by key, fetched once. The directory carries no address,
@@ -8553,13 +8570,15 @@ function _evCardFor(email) {
           ()  => ({ data: null }));
 }
 
-function avatarHtml(name, email, size = 36, avatarUrl = null) {
+function avatarHtml(name, email, size = 36, avatarUrl = null, pal = null) {
   const style = `width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;`;
   if (avatarUrl) {
     return `<div style="${style}overflow:hidden"><img src="${esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" /></div>`;
   }
   const initials = getInitials(name || email?.split("@")[0]);
-  const colour = avatarColor(email || "");
+  /* A colour from the directory's index where there is one, and from the
+     address only where the caller still has one (a guest at a live event). */
+  const colour = Number.isInteger(pal) ? evPalColour(pal) : avatarColor(email || "");
   return `<div class="member-avatar" style="width:${size}px;height:${size}px;background:${colour.bg};color:${colour.fg};font-size:${Math.round(size*0.38)}px">${initials}</div>`;
 }
 
