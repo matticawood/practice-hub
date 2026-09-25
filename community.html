@@ -6867,16 +6867,18 @@ async function _hydratePosts(rows) {
        sharer's address. The function answers with exactly the rows the table
        answered with, so the card is unchanged. */
     const { data: sessionRows } = await _inChunks(sessionIds, c => db.rpc("shared_practice_log", { p_session_ids: c }));
-    // IMPORTANT: page the practice_items fetch. A busy feed (300 posts) can
-    // reference more than PostgREST's default 1000-row cap of items; the old
-    // single unbounded query silently truncated at 1000 and, because it ordered
-    // by sort_order, dropped the *later* items of the *largest* sessions, so big
-    // logs showed only their first few items in the feed (they were all still in
-    // the member's own history). Page by session_id+sort_order until exhausted.
+    // IMPORTANT: page the items fetch. A busy feed (300 posts) can reference
+    // more than the 1000-row cap on any one answer; an unpaged query silently
+    // truncated at 1000 and, because it ordered by sort_order, dropped the
+    // *later* items of the *largest* sessions, so big logs showed only their
+    // first few items in the feed (they were all still in the member's own
+    // history). The offset goes to the function rather than into a Range
+    // header: measured against this function a Range header does not advance
+    // at all, and the same thousand rows come back every time.
     const itemRows = [];
     for (let from = 0; ; from += 1000) {
-      const { data: page, error } = await db.rpc("shared_practice_items", { p_session_ids: sessionIds })
-        .range(from, from + 999);
+      const { data: page, error } = await db.rpc("shared_practice_items",
+        { p_session_ids: sessionIds, p_offset: from, p_limit: 1000 });
       if (error || !page || !page.length) break;
       itemRows.push(...page);
       if (page.length < 1000) break;
