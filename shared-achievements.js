@@ -889,34 +889,40 @@ async function loadAchievementExtras() {
   // Community engagement + live attendance. These span several tables, so we
   // sum cheap head-only count queries. Each is wrapped so a missing table or a
   // tighter RLS policy degrades to 0 rather than breaking the whole page.
-  // Email casing is inconsistent across legacy rows, so match case-insensitively.
-  const _cnt = async (table, col, val) => {
+  /* Counted by key, and counting a named column rather than everything. Both
+     matter: a table that no longer hands out an address cannot be filtered on
+     one, and a head count that asks for "*" is refused outright when any column
+     is withheld - measured, not assumed. Every one of these tables carries a
+     key on every row, so the count is the same count. */
+  const _cnt = async (table) => {
     try {
+      if (!memberKey) return 0;
       const { count } = await db.from(table)
-        .select("*", { count: "exact", head: true }).ilike(col, val);
+        .select("member_key", { count: "exact", head: true }).eq("member_key", memberKey);
       return count || 0;
     } catch { return 0; }
   };
   const _eventIds = async (table) => {
     try {
-      const { data } = await db.from(table).select("event_id").ilike("email", email);
+      if (!memberKey) return [];
+      const { data } = await db.from(table).select("event_id").eq("member_key", memberKey);
       return (data || []).map(r => r.event_id);
     } catch { return []; }
   };
   const [postCount, commentCounts, reactionCounts, chatEvents, qaEvents, attendEvents] = await Promise.all([
-    _cnt("community_posts", "email", email),
+    _cnt("community_posts"),
     Promise.all([
-      _cnt("community_post_comments",       "email", email),
-      _cnt("activity_comments",             "email", email),
-      _cnt("content_feed_comments",         "email", email),
-      _cnt("practice_room_update_comments", "email", email),
+      _cnt("community_post_comments"),
+      _cnt("activity_comments"),
+      _cnt("content_feed_comments"),
+      _cnt("practice_room_update_comments"),
     ]),
     Promise.all([
-      _cnt("community_post_likes",          "email", email),
-      _cnt("activity_reactions",            "email", email),
-      _cnt("content_feed_likes",            "email", email),
-      _cnt("practice_room_update_likes",    "email", email),
-      _cnt("community_chat_reactions",      "email", email),
+      _cnt("community_post_likes"),
+      _cnt("activity_reactions"),
+      _cnt("content_feed_likes"),
+      _cnt("practice_room_update_likes"),
+      _cnt("community_chat_reactions"),
     ]),
     _eventIds("event_chat"),
     _eventIds("event_qa"),

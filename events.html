@@ -2012,7 +2012,9 @@ let _pendingStageInvite = null;  // { eventId, token, roomUrl } when a stage inv
 let _invitedSessionIds    = new Set(); // sessionIds where host has sent a stage invite (pending)
 let _recordingWatcher   = null;
 let _recordingPoller    = null;
-let _streamAvatarCache  = {};   // email → avatar_url (null = no avatar)
+/* member key -> avatar_url (null = none). A guest at a live clinic has no
+   membership and so no key; they are drawn from the name they gave. */
+let _streamAvatarCache  = {};
 let _wmBgCache          = null; // cached watermark background CSS (built once)
 
 // Builds and caches the diagonal "The Practice Room" watermark.
@@ -3022,13 +3024,13 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
     if (data[emoji]) { data[emoji].mine = false; data[emoji].count = Math.max(0, data[emoji].count - 1); }
     _evRefreshCmtBtn(safeKey, idStr);
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", emoji);
+      .eq("member_key", myMemberKey).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", emoji);
     return;
   }
   if (existingEmoji) {
     if (data[existingEmoji]) { data[existingEmoji].mine = false; data[existingEmoji].count = Math.max(0, data[existingEmoji].count - 1); }
     await db.from("activity_reactions").delete()
-      .eq("email", myEmail).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", existingEmoji);
+      .eq("member_key", myMemberKey).eq("event_type", "event_comment").eq("item_id", idStr).eq("emoji", existingEmoji);
   }
   pickerBtn.classList.add("picked");
   if (!data[emoji]) data[emoji] = { count: 0, mine: false };
@@ -3036,7 +3038,7 @@ async function _evPickCmtReaction(event, safeKey, commentId, emoji) {
   data[emoji].count++;
   _evRefreshCmtBtn(safeKey, idStr);
   await db.from("activity_reactions")
-    .insert({ email: myEmail, event_type: "event_comment", item_id: idStr, emoji });
+    .insert({ email: myEmail, member_key: myMemberKey, event_type: "event_comment", item_id: idStr, emoji });
 
   // Notify the comment author (skip self). Resolve from the DB so a missing
   // client meta entry can't silently drop the notification (esp. for replies).
@@ -4165,7 +4167,7 @@ async function loadAttendees(eventId) {
   const el = document.getElementById("attendee-list");
   if (!el) return;
   const { data, error } = await db.from("event_rsvps")
-    .select("*")
+    .select("id, event_id, member_key, name, created_at")
     .eq("event_id", eventId)
     .limit(10);
   if (error) console.error("loadAttendees error:", error);
@@ -4173,17 +4175,13 @@ async function loadAttendees(eventId) {
     el.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem">No RSVPs yet.</p>`;
     return;
   }
-  /* RSVP pictures, from the directory by key, same map shape as before. */
+  /* RSVP pictures, from the directory, keyed the way the rows are. */
   const _rsvpDir = await _evMemberDirectory();
-  const avMap = {};
-  data.forEach(r => {
-    const info = r.member_key && _rsvpDir[r.member_key];
-    if (info && info.url) avMap[r.email] = info.url;
-  });
   el.innerHTML = data.map(r => {
-    const name = r.name || r.email?.split("@")[0] || "Member";
+    const info = (r.member_key && _rsvpDir[r.member_key]) || null;
+    const name = r.name || info?.name || "Member";
     return `<div class="attendee-row">
-      ${avatarHtml(name, r.email, 32, avMap[r.email] || null)}
+      ${avatarHtml(name, null, 32, info?.url || null, info?.pal)}
       <span class="attendee-name">${esc(name)}</span>
     </div>`;
   }).join("");
@@ -5042,8 +5040,7 @@ function setupRealtimeStream(ev) {
   // Seed avatar cache with known users
   _streamAvatarCache = {};
   _chatUnread = 0; _qaUnread = 0;
-  if (myEmail)    _streamAvatarCache[myEmail]    = myAvatarUrl;
-  if (OWNER_EMAIL) _streamAvatarCache[OWNER_EMAIL] = ownerAvatarUrl;
+  if (myMemberKey) _streamAvatarCache[myMemberKey] = myAvatarUrl;
 
   // Reset typing state so stale flags don't suppress the next broadcast
   _typingActive   = false;
@@ -5214,21 +5211,23 @@ function appendChatMsg(msg, skipUnread = false) {
   // Deduplicate — the same message can arrive via both the realtime INSERT
   // listener and the history reload in the subscribe callback
   if (el.querySelector(`[data-id="${msg.id}"]`)) return;
-  const mine = msg.email === myEmail;
+  const mine = !!(msg.member_key && msg.member_key === myMemberKey);
 
   // Avatar: use cache, fall back to initials
-  const cachedUrl = _streamAvatarCache[msg.email] || null;
-  const av = avatarHtml(msg.name || msg.email.split("@")[0], msg.email, 26, cachedUrl);
+  const _msgName  = msg.name || "Member";
+  const cachedUrl = msg.member_key ? (_streamAvatarCache[msg.member_key] || null) : null;
+  const av = avatarHtml(_msgName, null, 26, cachedUrl);
 
   // Fetch avatar if not cached yet (fills in on next message from same user)
-  if (!_streamAvatarCache.hasOwnProperty(msg.email)) {
-    _streamAvatarCache[msg.email] = null; // mark as fetching
-    _evCardFor(msg.email)
-      .then(({ data }) => {
-        _streamAvatarCache[msg.email] = data?.avatar_url || null;
+  if (msg.member_key && !_streamAvatarCache.hasOwnProperty(msg.member_key)) {
+    _streamAvatarCache[msg.member_key] = null; // mark as fetching
+    _evMemberDirectory()
+      .then(dir => {
+        const url = (dir[msg.member_key] || {}).url || null;
+        _streamAvatarCache[msg.member_key] = url;
         // Update existing avatar elements for this user
-        document.querySelectorAll(`.chat-msg[data-email="${CSS.escape(msg.email)}"] .chat-msg-av`).forEach(avEl => {
-          if (data?.avatar_url) avEl.outerHTML = avatarHtml(msg.name || msg.email.split("@")[0], msg.email, 26, data.avatar_url);
+        document.querySelectorAll(`.chat-msg[data-key="${CSS.escape(msg.member_key)}"] .chat-msg-av`).forEach(avEl => {
+          if (url) avEl.outerHTML = avatarHtml(_msgName, null, 26, url);
         });
       });
   }
@@ -5236,11 +5235,11 @@ function appendChatMsg(msg, skipUnread = false) {
   const div = document.createElement("div");
   div.className = "chat-msg" + (mine ? " mine" : "");
   div.dataset.id  = msg.id;
-  div.dataset.email = msg.email;
+  div.dataset.key = msg.member_key || "";
   div.innerHTML = `
     <span class="chat-msg-av">${av}</span>
     <div class="chat-msg-body">
-      <div class="chat-msg-author">${esc(msg.name || msg.email.split("@")[0])}</div>
+      <div class="chat-msg-author">${esc(msg.name || "Member")}</div>
       <div class="chat-msg-text">${esc(msg.message)}</div>
     </div>
   `;
@@ -5393,23 +5392,24 @@ function _setFeaturedQA(q) {
   const barEl   = document.getElementById("featured-qa-bar");
   if (!textEl || !askerEl || !barEl) return;
 
-  const name      = q.name || q.email?.split("@")[0] || "Anonymous";
-  const cachedUrl = q.email ? (_streamAvatarCache?.[q.email] ?? null) : null;
+  const name      = q.name || "Anonymous";
+  const cachedUrl = q.member_key ? (_streamAvatarCache?.[q.member_key] ?? null) : null;
 
   textEl.textContent = q.question;
-  askerEl.innerHTML  = `${avatarHtml(name, q.email || "", 20, cachedUrl)}<span>${esc(name)}</span>`;
+  askerEl.innerHTML  = `${avatarHtml(name, null, 20, cachedUrl)}<span>${esc(name)}</span>`;
   barEl.classList.add("visible");
 
   // Fetch avatar if not yet cached, then backfill
-  if (q.email && _streamAvatarCache && !_streamAvatarCache.hasOwnProperty(q.email)) {
-    _streamAvatarCache[q.email] = null;
-    _evCardFor(q.email)
-      .then(({ data }) => {
-        if (_streamAvatarCache) _streamAvatarCache[q.email] = data?.avatar_url || null;
+  if (q.member_key && _streamAvatarCache && !_streamAvatarCache.hasOwnProperty(q.member_key)) {
+    _streamAvatarCache[q.member_key] = null;
+    _evMemberDirectory()
+      .then(dir => {
+        const url = (dir[q.member_key] || {}).url || null;
+        if (_streamAvatarCache) _streamAvatarCache[q.member_key] = url;
         // Only update if this question is still the one showing
         const curAskerEl = document.getElementById("featured-qa-asker");
         if (curAskerEl && document.getElementById("featured-qa-text")?.textContent === q.question) {
-          curAskerEl.innerHTML = `${avatarHtml(name, q.email, 20, data?.avatar_url || null)}<span>${esc(name)}</span>`;
+          curAskerEl.innerHTML = `${avatarHtml(name, null, 20, url)}<span>${esc(name)}</span>`;
         }
       });
   }
@@ -5419,7 +5419,7 @@ function buildQAEl(q) {
   const div = document.createElement("div");
   div.className = "qa-item" + (q.is_featured ? " featured" : "");
   div.dataset.id = q.id;
-  div.dataset.email = q.email || "";
+  div.dataset.key = q.member_key || "";
   let actions = "";
   const svgStar     = `<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
   const svgStarOut  = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
@@ -5437,17 +5437,18 @@ function buildQAEl(q) {
   }
 
   // Avatar — use shared stream cache, fetch if not yet cached
-  const displayName = q.name || q.email?.split("@")[0] || "Anonymous";
-  const cachedUrl = q.email ? (_streamAvatarCache[q.email] ?? null) : null;
-  const av = avatarHtml(displayName, q.email || "", 26, cachedUrl);
-  if (q.email && !_streamAvatarCache.hasOwnProperty(q.email)) {
-    _streamAvatarCache[q.email] = null; // mark as fetching
-    _evCardFor(q.email)
-      .then(({ data }) => {
-        _streamAvatarCache[q.email] = data?.avatar_url || null;
-        if (data?.avatar_url) {
-          document.querySelectorAll(`.qa-item[data-email="${CSS.escape(q.email)}"] .qa-item-av`).forEach(avEl => {
-            avEl.outerHTML = `<span class="qa-item-av">${avatarHtml(displayName, q.email, 26, data.avatar_url)}</span>`;
+  const displayName = q.name || "Anonymous";
+  const cachedUrl = q.member_key ? (_streamAvatarCache[q.member_key] ?? null) : null;
+  const av = avatarHtml(displayName, null, 26, cachedUrl);
+  if (q.member_key && !_streamAvatarCache.hasOwnProperty(q.member_key)) {
+    _streamAvatarCache[q.member_key] = null; // mark as fetching
+    _evMemberDirectory()
+      .then(dir => {
+        const url = (dir[q.member_key] || {}).url || null;
+        _streamAvatarCache[q.member_key] = url;
+        if (url) {
+          document.querySelectorAll(`.qa-item[data-key="${CSS.escape(q.member_key)}"] .qa-item-av`).forEach(avEl => {
+            avEl.outerHTML = `<span class="qa-item-av">${avatarHtml(displayName, null, 26, url)}</span>`;
           });
         }
       });
@@ -5617,7 +5618,7 @@ async function setupVodQaList(ev) {
   if (useLegacyFallback) {
     const { data: legacyQs } = await db
       .from("event_qa")
-      .select("id, question, name, email, featured_at, unfeatured_at, answered")
+      .select("id, question, name, member_key, featured_at, unfeatured_at, answered")
       .eq("event_id", ev.id)
       .not("featured_at", "is", null)
       .order("featured_at", { ascending: true });
@@ -5666,26 +5667,25 @@ async function setupVodQaList(ev) {
   // Pre-warm avatar cache for all Q&A askers so rows show photos immediately.
   // Re-renders the whole list once all fetches settle (only fires if any were missing).
   {
-    const uncachedEmails = [...new Set(questions.map(q => q.email).filter(
-      e => e && !_streamAvatarCache?.hasOwnProperty(e)
+    const uncachedKeys = [...new Set(questions.map(q => q.member_key).filter(
+      k => k && !_streamAvatarCache?.hasOwnProperty(k)
     ))];
-    if (uncachedEmails.length && _streamAvatarCache) {
-      uncachedEmails.forEach(e => { _streamAvatarCache[e] = null; }); // mark as loading
-      /* Pictures from the directory by key. The cache stays keyed by address so
-         everything reading it below is untouched. */
+    if (uncachedKeys.length && _streamAvatarCache) {
+      uncachedKeys.forEach(k => { _streamAvatarCache[k] = null; }); // mark as loading
+      /* Pictures from the directory, keyed the way the questions are. */
       _evMemberDirectory()
         .then((dir) => {
           questions.forEach(q => {
-            const info = q.member_key && dir[q.member_key];
-            if (_streamAvatarCache && q.email) _streamAvatarCache[q.email] = (info && info.url) || null;
+            if (!q.member_key || !_streamAvatarCache) return;
+            _streamAvatarCache[q.member_key] = (dir[q.member_key] || {}).url || null;
           });
           // Re-render each asker line now that we have real URLs
           questions.forEach(q => {
-            if (!q.email) return;
-            const url = _streamAvatarCache?.[q.email] || null;
-            const name = q.name || q.email?.split("@")[0] || "Anonymous";
+            if (!q.member_key) return;
+            const url = _streamAvatarCache?.[q.member_key] || null;
+            const name = q.name || "Anonymous";
             const row = wrap.querySelector(`.vod-qa-row[data-qa-id="${q.id}"] .vod-qa-row-asker`);
-            if (row) row.innerHTML = `${avatarHtml(name, q.email, 18, url)}<span>${esc(name)}</span>`;
+            if (row) row.innerHTML = `${avatarHtml(name, null, 18, url)}<span>${esc(name)}</span>`;
           });
         });
     }
@@ -5724,15 +5724,15 @@ async function setupVodQaList(ev) {
               return `<button class="vod-qa-ts" onclick="event.stopPropagation();vodSeekTo(${secs})" title="Jump to this moment">${offset}</button>`;
             }).filter(Boolean).join("")
           : `<span class="vod-qa-ts no-ts">—</span>`;
-        const askerName = q.name || q.email?.split("@")[0] || "Anonymous";
-        const askerUrl  = q.email ? (_streamAvatarCache?.[q.email] ?? null) : null;
+        const askerName = q.name || "Anonymous";
+        const askerUrl  = q.member_key ? (_streamAvatarCache?.[q.member_key] ?? null) : null;
         const rowSeek = firstSecs != null ? ` onclick="vodSeekTo(${firstSecs})" style="cursor:pointer"` : "";
         return `
           <div class="vod-qa-row" data-qa-id="${q.id}"${rowSeek}>
             <div class="vod-qa-ts-group">${tsBtns}</div>
             <div class="vod-qa-row-body">
               <div class="vod-qa-row-q">${esc(q.question)}</div>
-              <div class="vod-qa-row-asker">${avatarHtml(askerName, q.email || "", 18, askerUrl)}<span>${esc(askerName)}</span></div>
+              <div class="vod-qa-row-asker">${avatarHtml(askerName, null, 18, askerUrl)}<span>${esc(askerName)}</span></div>
             </div>
           </div>`;
       }).join("")}
@@ -5774,10 +5774,10 @@ async function setupVodQaList(ev) {
         if (nowFeaturedEl) {
           if (newId && questionById[newId]) {
             const q    = questionById[newId];
-            const name = q.name || q.email?.split("@")[0] || "Anonymous";
-            const url  = q.email ? (_streamAvatarCache?.[q.email] ?? null) : null;
+            const name = q.name || "Anonymous";
+            const url  = q.member_key ? (_streamAvatarCache?.[q.member_key] ?? null) : null;
             nowFeaturedText.textContent = q.question;
-            nowFeaturedAsker.innerHTML  = `${avatarHtml(name, q.email || "", 20, url)}<span>${esc(name)}</span>`;
+            nowFeaturedAsker.innerHTML  = `${avatarHtml(name, null, 20, url)}<span>${esc(name)}</span>`;
             nowFeaturedEl.classList.add("visible");
           } else {
             nowFeaturedEl.classList.remove("visible");
@@ -6359,13 +6359,13 @@ function _bsAppendChatMsg(msg, skipBadge = false) {
   const el = document.getElementById("backstage-chat-messages");
   if (!el) return;
   if (el.querySelector(`[data-id="${msg.id}"]`)) return; // dedup
-  const mine = msg.email === myEmail;
-  const av = avatarHtml(msg.name || msg.email?.split("@")[0] || "?", msg.email, 26,
-    _streamAvatarCache?.[msg.email] || null);
+  const mine = !!(msg.member_key && msg.member_key === myMemberKey);
+  const av = avatarHtml(msg.name || "Member", null, 26,
+    (msg.member_key ? _streamAvatarCache?.[msg.member_key] : null) || null);
   const div = document.createElement("div");
   div.className = "chat-msg" + (mine ? " mine" : "");
   div.dataset.id    = msg.id;
-  div.dataset.email = msg.email;
+  div.dataset.key = msg.member_key || "";
   div.innerHTML = `
     <span class="chat-msg-av">${av}</span>
     <div class="chat-msg-body">
