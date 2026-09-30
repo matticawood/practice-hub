@@ -35,7 +35,7 @@ window.PR_COURSES = [
     // when you publish.
     featuredUntil: "2026-10-17",
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
-  { key: "sight-reading-beginners", levels: [1,2,3], label: "Sight Reading for Beginners", soon: "Coming in September",
+  { key: "sight-reading-beginners", levels: [1,2,3], label: "Sight Reading for Beginners", soon: "Coming early October",
     blurb: "Play music you have never seen before, with the exact formula for improvement.",
     color: "#0ea5e9", audience: "Beginners",
     icon: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>' },
