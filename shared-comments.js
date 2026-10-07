@@ -454,7 +454,17 @@
 
     if (createUpload) {
       await new Promise((resolve, reject) => {
-        const up = createUpload({ endpoint: uploadUrl, file, chunkSize: 5120 });
+        // A dropped connection mid-upload surfaces as HTTP status 0. UpChunk's
+        // default retry list is [408,502,503,504], so it treats a dropped chunk
+        // as fatal and aborts the whole upload on the first network blip (this
+        // is why a large upload could die partway, e.g. at 59%). Make status 0
+        // (and 5xx) retriable with a larger attempt budget, so a brief drop
+        // resumes that chunk instead of killing the upload.
+        const up = createUpload({
+          endpoint: uploadUrl, file, chunkSize: 5120,   // 5 MB chunks
+          retryCodes: [0, 408, 500, 502, 503, 504],
+          attempts: 10, delayBeforeAttempt: 2
+        });
         up.on("progress", e => onPct(Math.round(e.detail)));
         up.on("error",    e => reject(new Error(e.detail?.message || "Upload failed")));
         up.on("success",  () => resolve());
