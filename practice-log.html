@@ -22386,6 +22386,7 @@ function _renderJourneyCard(returnParts) {
       window._rgFadeBound = true;
     }
   }
+  try { if (typeof _ndRender === 'function') _ndRender(); } catch (e) {}
 }
 // Repaint whichever "Your Path" surface is showing after an async load (baseline /
 // self-checks): the dashboard journey card and, if the roadmap tab is open, the trail.
@@ -22399,6 +22400,179 @@ function _rmAfterLoad() {
     if (typeof renderRoadmap === "function" && _rmPanel && _rmPanel.style.display !== "none") renderRoadmap();
   } catch (_) {}
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW DASHBOARD (dev-only, ?newdash=1). Reskins the top of the dashboard into
+// the data-viz bento: hero statue-in-ring + streak + weekly goal + Ask access
+// point. Fresh DOM in an `nd-` namespace with a self-contained stylesheet, so
+// the old body.lb-dash !important layers never reach it. Reuses
+// _renderJourneyCard(true) for level/statue/progress; streak and weekly goal
+// come from the same globals renderDashboard already uses. Old .dash-stage is
+// hidden by CSS while this is on. Nothing here runs unless the flag is present.
+// ═══════════════════════════════════════════════════════════════════════════
+function _newDash(){ try { return /[?&]newdash=1/.test(location.search); } catch(e){ return false; } }
+
+function _ndInjectStyle(){
+  if (document.getElementById('nd-style')) return;
+  const css = `
+  body.nd-on #dashboard-content .dash-stage{ display:none !important; }
+  #nd-band{
+    --nd-card:#161619; --nd-card2:#1c1c20; --nd-line:rgba(255,255,255,.07);
+    --nd-line2:rgba(255,255,255,.13); --nd-text:#eeeef1; --nd-head:#f4f1ec;
+    --nd-muted:#9594a0; --nd-faint:#6a6972; --nd-gold:#f5c518; --nd-goldsoft:#eac64f;
+    --nd-sr:#34d399; --nd-piece:#a78bfa;
+    font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    color:var(--nd-text); margin-bottom:22px;
+  }
+  #nd-band *{ box-sizing:border-box; }
+  #nd-band .nd-h{ font-family:"Fraunces",Georgia,serif; font-size:1.3rem; color:var(--nd-head); margin:0 0 14px; font-weight:600; }
+  #nd-band .nd-bento{ display:grid; grid-template-columns:1.55fr 1fr; gap:16px; align-items:stretch; }
+  #nd-band .nd-tile{ background:var(--nd-card); border-radius:22px; padding:22px; }
+  #nd-band .nd-hero{ display:flex; gap:22px; align-items:center; padding:26px 28px; }
+  #nd-band .nd-col{ display:flex; flex-direction:column; gap:16px; }
+  #nd-band .nd-col .nd-tile{ flex:1; }
+  #nd-band .nd-ringwrap{ position:relative; width:240px; height:240px; flex:none; }
+  #nd-band .nd-ringwrap svg{ position:absolute; inset:0; width:100%; height:100%; }
+  #nd-band .nd-statue{ position:absolute; left:50%; top:50%; width:64%; height:64%; transform:translate(-50%,-50%); display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 14px 22px rgba(0,0,0,.55)); }
+  #nd-band .nd-statue img{ width:100%; height:100%; object-fit:contain; }
+  #nd-band .nd-badge{ position:absolute; left:50%; bottom:-2px; transform:translateX(-50%); background:var(--nd-card2); border:1px solid var(--nd-line2); border-radius:999px; padding:4px 13px 5px; font-size:.7rem; color:var(--nd-muted); white-space:nowrap; }
+  #nd-band .nd-badge b{ color:var(--nd-gold); font-family:"Fraunces",Georgia,serif; font-weight:600; }
+  #nd-band .nd-herotext{ min-width:0; display:flex; flex-direction:column; }
+  #nd-band .nd-eyebrow{ font-size:.7rem; letter-spacing:.16em; text-transform:uppercase; color:var(--nd-faint); }
+  #nd-band .nd-lv{ font-family:"Fraunces",Georgia,serif; font-size:2.6rem; line-height:1; color:var(--nd-head); margin:6px 0 2px; }
+  #nd-band .nd-stage{ font-size:1.02rem; color:var(--nd-text); font-weight:600; }
+  #nd-band .nd-next{ color:var(--nd-muted); font-size:.9rem; margin-top:10px; }
+  #nd-band .nd-next b{ color:var(--nd-goldsoft); font-weight:600; }
+  #nd-band .nd-cta{ margin-top:18px; align-self:flex-start; display:inline-flex; align-items:center; gap:8px; background:var(--nd-gold); color:#17130a; font-weight:700; font-size:.9rem; text-decoration:none; border-radius:12px; padding:11px 17px; }
+  #nd-band .nd-cta svg{ width:15px; height:15px; }
+  #nd-band .nd-th{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  #nd-band .nd-th span{ font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color:var(--nd-faint); }
+  #nd-band .nd-th .nd-th-x{ color:var(--nd-sr); }
+  #nd-band .nd-bignum{ font-family:"Fraunces",Georgia,serif; font-size:2.4rem; line-height:1; color:var(--nd-head); font-variant-numeric:tabular-nums; }
+  #nd-band .nd-bignum span{ font-size:1rem; color:var(--nd-muted); font-family:inherit; font-weight:500; margin-left:6px; font-family:"Inter",sans-serif; }
+  #nd-band .nd-week{ display:flex; gap:6px; margin-top:16px; }
+  #nd-band .nd-day{ flex:1; display:flex; flex-direction:column; align-items:center; gap:7px; }
+  #nd-band .nd-dot{ width:100%; max-width:26px; aspect-ratio:1; border-radius:8px; background:var(--nd-card2); border:1px solid var(--nd-line); }
+  #nd-band .nd-dot.on{ background:linear-gradient(180deg,var(--nd-goldsoft),var(--nd-gold)); border-color:transparent; }
+  #nd-band .nd-dot.today{ outline:2px solid rgba(245,197,24,.35); outline-offset:2px; }
+  #nd-band .nd-day small{ font-size:.62rem; color:var(--nd-faint); }
+  #nd-band .nd-goalrow{ display:flex; align-items:center; gap:18px; }
+  #nd-band .nd-gauge{ position:relative; width:84px; height:84px; flex:none; }
+  #nd-band .nd-gauge svg{ width:100%; height:100%; }
+  #nd-band .nd-gc{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  #nd-band .nd-gc b{ font-family:"Fraunces",Georgia,serif; font-size:1.05rem; color:var(--nd-head); }
+  #nd-band .nd-gbig{ font-family:"Fraunces",Georgia,serif; font-size:1.4rem; color:var(--nd-head); line-height:1.1; }
+  #nd-band .nd-gbig i{ color:var(--nd-muted); font-style:normal; font-size:1rem; }
+  #nd-band .nd-gsm{ color:var(--nd-faint); font-size:.78rem; letter-spacing:.06em; text-transform:uppercase; margin-top:4px; }
+  #nd-band .nd-ask{ display:flex; align-items:center; gap:16px; margin-top:16px; background:var(--nd-card); border-radius:22px; padding:20px 22px; text-decoration:none; color:var(--nd-text); transition:background .12s; }
+  #nd-band .nd-ask:hover{ background:var(--nd-card2); }
+  #nd-band .nd-ask-ic{ width:46px; height:46px; border-radius:14px; flex:none; display:grid; place-items:center; background:color-mix(in srgb, var(--nd-gold) 15%, transparent); color:var(--nd-gold); }
+  #nd-band .nd-ask-ic svg{ width:23px; height:23px; }
+  #nd-band .nd-ask-tx{ flex:1; min-width:0; }
+  #nd-band .nd-ask-h{ font-family:"Fraunces",Georgia,serif; font-size:1.15rem; color:var(--nd-head); font-weight:600; }
+  #nd-band .nd-ask-s{ font-size:.86rem; color:var(--nd-muted); margin-top:2px; }
+  #nd-band .nd-ask-chev{ color:var(--nd-faint); flex:none; display:flex; }
+  #nd-band .nd-ask-chev svg{ width:20px; height:20px; }
+  @media (max-width:1100px){
+    #nd-band .nd-bento{ grid-template-columns:1fr; }
+    #nd-band .nd-col{ display:grid; grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:640px){
+    #nd-band .nd-hero{ flex-direction:column; text-align:center; }
+    #nd-band .nd-herotext{ align-items:center; }
+    #nd-band .nd-cta{ align-self:center; }
+    #nd-band .nd-col{ grid-template-columns:1fr; }
+    #nd-band .nd-ringwrap{ width:210px; height:210px; }
+  }`;
+  const s = document.createElement('style'); s.id = 'nd-style'; s.textContent = css; document.head.appendChild(s);
+}
+
+function _ndRender(){
+  if (!_newDash()) { try { document.body.classList.remove('nd-on'); } catch(e){} return; }
+  const host = document.getElementById('dashboard-content');
+  if (!host) return;
+  let parts = null; try { parts = _renderJourneyCard(true); } catch(e){}
+  if (!parts || !parts.T) return;                 // ROADMAP not ready yet; repaints on load
+  _ndInjectStyle();
+  try { document.body.classList.add('nd-on'); } catch(e){}
+
+  const T = parts.T, stage = parts.stage || {};
+  const nStages = (window.ROADMAP && window.ROADMAP.stages ? window.ROADMAP.stages.length : 8) || 8;
+  const lvNo = T.idx + 1;
+  const pct = Math.max(0, Math.min(100, (parts.pct != null ? parts.pct : (T.next ? 0 : 100))));
+  const trophy = parts.trophy || ('/statue-l' + (stage.level || 1) + '.webp');
+  const nextLine = parts.nextLine || '';
+
+  // streak + last 7 days
+  let streak = 0;
+  try { streak = liveStreakState((allSessions || []).map(s => s.session_date)).current_streak; } catch(e){}
+  const dmap = {}; (allSessions || []).forEach(s => { dmap[s.session_date] = (dmap[s.session_date] || 0) + (s.duration_minutes || 0); });
+  const now = new Date(), days7 = [];
+  for (let i = 6; i >= 0; i--) { const d = new Date(now); d.setDate(now.getDate() - i);
+    const ds = toDateStr(d);
+    days7.push({ on: (dmap[ds] || 0) > 0, today: i === 0, lbl: ['S','M','T','W','T','F','S'][d.getDay()] }); }
+
+  // weekly goal
+  let goal = DEFAULT_WEEKLY_GOAL; try { if (weeklyGoalMins) goal = weeklyGoalMins; } catch(e){}
+  let wk = 0; try { wk = getThisWeekMins(); } catch(e){}
+  const gpct = goal ? Math.min(100, Math.round(wk / goal * 100)) : 0;
+
+  // ring + gauge geometry
+  const R = 128, C = 2 * Math.PI * R, off = (C * (1 - pct / 100)).toFixed(2);
+  const gr = 42, gc = 2 * Math.PI * gr, goff = (gc * (1 - gpct / 100)).toFixed(2);
+
+  const dots = days7.map(d => `<span class="nd-day"><i class="nd-dot${d.on ? ' on' : ''}${d.today ? ' today' : ''}"></i><small>${d.lbl}</small></span>`).join('');
+
+  const html =
+    `<h2 class="nd-h">Where you are</h2>
+    <div class="nd-bento">
+      <div class="nd-tile nd-hero">
+        <div class="nd-ringwrap">
+          <svg viewBox="0 0 300 300" aria-hidden="true">
+            <defs><linearGradient id="ndgg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eac64f"/><stop offset="1" stop-color="#f5c518"/></linearGradient></defs>
+            <circle cx="150" cy="150" r="128" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="13"/>
+            <circle cx="150" cy="150" r="128" fill="none" stroke="url(#ndgg)" stroke-width="13" stroke-linecap="round" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${off}" transform="rotate(-90 150 150)"/>
+          </svg>
+          <div class="nd-statue"><img src="${trophy}" alt="" draggable="false" onerror="this.onerror=null;this.src='/statue-bronze.webp'"></div>
+          <div class="nd-badge">Level <b>${lvNo}</b> of ${nStages}</div>
+        </div>
+        <div class="nd-herotext">
+          <div class="nd-eyebrow">Your level</div>
+          <div class="nd-lv">Level ${lvNo}</div>
+          <div class="nd-stage">${escHtml(stage.name || '')}</div>
+          ${nextLine ? `<div class="nd-next">${nextLine}</div>` : ''}
+          <a class="nd-cta" href="#" onclick="event.preventDefault();var f=document.getElementById('log-fab');if(f)f.click();return false;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#17130a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>Log practice</a>
+        </div>
+      </div>
+      <div class="nd-col">
+        <div class="nd-tile">
+          <div class="nd-th"><span>Streak</span><span class="nd-th-x">keep it alive</span></div>
+          <div class="nd-bignum">${streak}<span>day${streak === 1 ? '' : 's'}</span></div>
+          <div class="nd-week">${dots}</div>
+        </div>
+        <div class="nd-tile">
+          <div class="nd-th"><span>This week's goal</span></div>
+          <div class="nd-goalrow">
+            <div class="nd-gauge">
+              <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/><circle cx="50" cy="50" r="42" fill="none" stroke="url(#ndgg)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${gc.toFixed(2)}" stroke-dashoffset="${goff}" transform="rotate(-90 50 50)"/></svg>
+              <div class="nd-gc"><b>${gpct}%</b></div>
+            </div>
+            <div class="nd-goalmeta"><div class="nd-gbig">${formatMinutes(wk)} <i>/ ${formatMinutes(goal)}</i></div><div class="nd-gsm">this week</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <a class="nd-ask" href="/practice-log.html?goto=ask">
+      <div class="nd-ask-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+      <div class="nd-ask-tx"><div class="nd-ask-h">Ask</div><div class="nd-ask-s">Search the library, get free feedback from the room, or spend credits on private feedback from Matt.</div></div>
+      <div class="nd-ask-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+    </a>`;
+
+  let band = document.getElementById('nd-band');
+  if (!band) { band = document.createElement('div'); band.id = 'nd-band'; host.insertBefore(band, host.firstChild); }
+  band.innerHTML = html;
+}
+
 function renderStatsHero() {
   const el = document.getElementById('stats-hero');
   if (!el) return;
