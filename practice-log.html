@@ -22416,6 +22416,17 @@ function _ndInjectStyle(){
   const css = `
   body.nd-on #dashboard-content .dash-stage{ display:none !important; }
   body.nd-on #dashboard-content > #nd-band{ grid-column:1 / -1; }
+  /* CLEAN FLOATING HEADER (dev-only, dashboard-scoped). The solid header bar is
+     gone, no background, just the controls sitting on the ground. The chrome
+     sub-nav is removed; the Practice sub-nav moves INTO the page as a pill (below).
+     Scoped to body.nd-on: no other page is touched. */
+  body.nd-on #app-header{ background:transparent !important; border-bottom:none !important; box-shadow:none !important; }
+  body.nd-on .mobile-subnav{ display:none !important; }
+  /* Practice sub-nav, now content, a light pill on the ground */
+  #nd-band .nd-subnav{ display:flex; width:fit-content; margin:0 auto 24px; gap:3px; background:var(--nd-card); border-radius:999px; padding:4px; box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 10px 26px -10px rgba(0,0,0,.5); }
+  #nd-band .nd-sn{ padding:8px 16px; border-radius:999px; font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; transition:color .12s; }
+  #nd-band .nd-sn.on{ background:var(--nd-gold); color:#17130a; }
+  #nd-band .nd-sn:not(.on):hover{ color:var(--nd-text); }
   #nd-band{
     --nd-card:#1a1a20; --nd-card2:#24242b; --nd-line:rgba(255,255,255,.07);
     --nd-line2:rgba(255,255,255,.13); --nd-text:#eeeef1; --nd-head:#f4f1ec;
@@ -22463,6 +22474,12 @@ function _ndInjectStyle(){
   #nd-band .nd-th{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
   #nd-band .nd-th span{ font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color:var(--nd-faint); }
   #nd-band .nd-th .nd-th-x{ color:var(--nd-sr); }
+  #nd-band .nd-streakrow{ display:flex; align-items:center; gap:11px; }
+  #nd-band .nd-flame{ color:var(--nd-gold); display:flex; flex:none; }
+  #nd-band .nd-flame svg{ width:27px; height:27px; }
+  #nd-band .nd-substat{ font-size:.78rem; color:var(--nd-faint); margin-top:14px; }
+  #nd-band .nd-gbar{ height:8px; border-radius:999px; background:var(--nd-card2); overflow:hidden; margin-top:15px; }
+  #nd-band .nd-gbar i{ display:block; height:100%; border-radius:999px; background:linear-gradient(90deg,var(--nd-goldsoft),var(--nd-gold)); }
   #nd-band .nd-bignum{ font-family:"Fraunces",Georgia,serif; font-size:2.4rem; line-height:1; color:var(--nd-head); font-variant-numeric:tabular-nums; }
   #nd-band .nd-bignum span{ font-size:1rem; color:var(--nd-muted); font-family:inherit; font-weight:500; margin-left:6px; font-family:"Inter",sans-serif; }
   #nd-band .nd-week{ display:flex; gap:6px; margin-top:16px; }
@@ -22536,19 +22553,23 @@ function _ndRender(){
   const trophy = parts.trophy || ('/statue-l' + (stage.level || 1) + '.webp');
   const nextLine = parts.nextLine || '';
 
-  // streak + last 7 days
-  let streak = 0;
-  try { streak = liveStreakState((allSessions || []).map(s => s.session_date)).current_streak; } catch(e){}
+  // streak + saves + last 7 days + this month
+  let streak = 0, saves = 0;
+  try { const _ss = liveStreakState((allSessions || []).map(s => s.session_date)); streak = _ss.current_streak || 0; saves = _ss.balance || 0; } catch(e){}
   const dmap = {}; (allSessions || []).forEach(s => { dmap[s.session_date] = (dmap[s.session_date] || 0) + (s.duration_minutes || 0); });
   const now = new Date(), days7 = [];
   for (let i = 6; i >= 0; i--) { const d = new Date(now); d.setDate(now.getDate() - i);
     const ds = toDateStr(d);
     days7.push({ on: (dmap[ds] || 0) > 0, today: i === 0, lbl: ['S','M','T','W','T','F','S'][d.getDay()] }); }
+  let monthDays = 0, monthMins = 0;
+  const _mY = now.getFullYear(), _mM = now.getMonth() + 1;
+  Object.keys(dmap).forEach(ds => { const p = ds.split('-').map(Number); if (p[0] === _mY && p[1] === _mM && (dmap[ds] || 0) > 0) { monthDays++; monthMins += dmap[ds]; } });
 
   // weekly goal
   let goal = DEFAULT_WEEKLY_GOAL; try { if (weeklyGoalMins) goal = weeklyGoalMins; } catch(e){}
   let wk = 0; try { wk = getThisWeekMins(); } catch(e){}
   const gpct = goal ? Math.min(100, Math.round(wk / goal * 100)) : 0;
+  const daysLeft = 7 - ((now.getDay() + 6) % 7);
 
   // ring + gauge geometry
   const R = 128, C = 2 * Math.PI * R, off = (C * (1 - pct / 100)).toFixed(2);
@@ -22557,7 +22578,13 @@ function _ndRender(){
   const dots = days7.map(d => `<span class="nd-day"><i class="nd-dot${d.on ? ' on' : ''}${d.today ? ' today' : ''}"></i><small>${d.lbl}</small></span>`).join('');
 
   const html =
-    `<div class="nd-bento">
+    `<div class="nd-subnav">
+      <a class="nd-sn on" href="/practice-log.html">Dashboard</a>
+      <a class="nd-sn" href="/resources.html">Pieces</a>
+      <a class="nd-sn" href="/practice-log.html?goto=roadmap">Roadmap</a>
+      <a class="nd-sn" href="/practice-log.html?goto=stats">Progress</a>
+    </div>
+    <div class="nd-bento">
       <div class="nd-tile nd-hero">
         <div class="nd-ringwrap">
           <svg viewBox="0 0 300 300" aria-hidden="true">
@@ -22579,7 +22606,10 @@ function _ndRender(){
       </div>
       <div class="nd-tile nd-streak">
         <div class="nd-th"><span>Streak</span><span class="nd-th-x">keep it alive</span></div>
-        <div class="nd-bignum">${streak}<span>day${streak === 1 ? '' : 's'}</span></div>
+        <div class="nd-streakrow">
+          <span class="nd-flame"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 23a7 7 0 0 0 7-7c0-2.6-1.4-4.7-3.4-6.4.2 1.6-.6 2.7-1.7 2.7-1.9 0-.9-2.7-1.2-6C12.4 3.6 10.4 2 9 .5c.6 3.4-2.2 5-3.7 7.3C4.4 9.4 4 11.3 4 13a8 8 0 0 0 8 10Z"/></svg></span>
+          <span class="nd-bignum">${streak}<span>day${streak === 1 ? '' : 's'}</span></span>
+        </div>
         <div class="nd-week">${dots}</div>
       </div>
       <div class="nd-tile nd-goal">

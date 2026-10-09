@@ -120,7 +120,7 @@ const SH_SUBNAV = {
        marked the way it is everywhere else in the app: a gold indicator on the
        active item. This shows on desktop too, where the header sits over the
        page rather than over a sub-nav. */
-    #app-header { position: relative; z-index: 300; background: #141414; border-bottom: 0; padding: 0 !important; }
+    #app-header { position: relative; z-index: 300; background: transparent; border-bottom: 0; padding: 0 !important; }
     /* Header content shares the same centered container width as page content,
        so the logo lines up with the content's left edge and the account cluster
        with its right edge. */
@@ -339,7 +339,7 @@ const SH_SUBNAV = {
 
     @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #sh-mob-subnav {
-        display: block;
+        display: none;  /* floating-header redesign: sub-nav moves into page content per section */
         position: sticky;
         top: 0;
         left: 0; right: 0;
