@@ -225,16 +225,16 @@ const SH_SUBNAV = {
       .sh-sb-sub { display: none; flex-direction: column; margin: 3px 0 7px 22px; }
       .sh-sb-item.active + .sh-sb-sub { display: flex; }
       .sh-sb-subitem {
-        display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+        display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 9px;
         color: #8a847a; font-size: 0.85rem; font-weight: 500;
-        text-decoration: none; white-space: nowrap; transition: color .15s;
+        text-decoration: none; white-space: nowrap; transition: color .15s, background .15s;
       }
       .sh-sb-subitem::before {
         content: ""; width: 5px; height: 5px; border-radius: 50%; flex: none;
         background: transparent; transition: background .15s, box-shadow .15s;
       }
       .sh-sb-subitem:hover:not(.active) { color: #e9e4da; }
-      .sh-sb-subitem.active { color: var(--accent, #f5c518); font-weight: 600; }
+      .sh-sb-subitem.active { background: rgba(255,255,255,.07); color: var(--accent, #f5c518); font-weight: 600; }
       .sh-sb-subitem.active::before { background: var(--accent, #f5c518); box-shadow: 0 0 8px var(--accent, #f5c518); }
       /* Sub-pages now live in the sidebar accordion; hide the horizontal sub-nav on desktop. */
       #sh-mob-subnav { display: none !important; }
