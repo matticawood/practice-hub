@@ -22655,29 +22655,33 @@ function _ndInjectStyle(){
     #nd-band .nd-logbtn{ max-width:none; }
     #nd-band .nd-momentum{ max-width:none; width:100%; }
   }
-  /* ===== DESKTOP (>=1025): full-width and immersive, with each section COMPOSED to
-     fill the width so nothing floats left or stretches into dead space. The page is
-     NOT capped (he wants it full-bleed); instead the hero and Ask lay their content
-     across two internal columns, and Today runs as one row. Overrides the legacy
-     main+rail grid (equal specificity, later source order + !important wins). ===== */
+  /* ===== DESKTOP (>=1025): TWO COLUMNS, a main flow + a sticky right rail, so NO single
+     element is stretched the whole width (the one-long-thing-across problem). The main
+     column holds the primary flow; the rail holds the momentum tile and the Community
+     feed. _ndLayoutRail() moves those two into the rail on desktop and restores them on
+     mobile. Overrides the legacy grid (equal specificity, later source order + !important). */
   @media (min-width:1025px){
-    body.nd-on #dashboard-content{ display:block !important; max-width:none !important; margin:0 !important; }
-    /* HERO fills: level + Log on the left, momentum (streak + week) as a column on
-       the right, so the whole hero spans the band instead of hugging the left. */
-    #nd-band .nd-hero-main{ display:grid !important; grid-template-columns:minmax(0,1fr) minmax(300px,360px); grid-template-rows:auto auto; column-gap:52px; row-gap:0; align-items:center; }
-    #nd-band .nd-herotext{ grid-column:1; grid-row:1; }
-    #nd-band .nd-logbtn{ grid-column:1; grid-row:2; max-width:none; }
-    #nd-band .nd-momentum{ grid-column:2; grid-row:1 / span 2; flex-direction:column; align-items:stretch; gap:18px; max-width:none; margin-top:0; }
-    #nd-band .nd-mm-week{ width:100%; }
-    /* ASK fills: pitch on the left, credits gauge on the right of the same banner. */
-    #nd-band .nd-ask-tx{ display:grid; grid-template-columns:minmax(0,1fr) 320px; grid-template-rows:auto auto; column-gap:48px; align-items:center; }
+    body.nd-on #dashboard-content{ display:grid !important; grid-template-columns:minmax(0,1fr) 360px !important; column-gap:48px !important; max-width:none !important; margin:0 !important; align-items:start !important; }
+    body.nd-on #dashboard-content > #nd-band{ grid-column:1 !important; }
+    body.nd-on #dashboard-content > #nd-rail-col{ grid-column:2 !important; position:sticky; top:84px; display:flex; flex-direction:column; gap:14px; }
+    body.nd-on #dashboard-content > *:not(#nd-band):not(#nd-rail-col){ grid-column:1 !important; }
+    /* Hero: statue | level + Log (the momentum now lives in the rail). */
+    #nd-band .nd-hero{ grid-template-columns:auto minmax(0,1fr); }
+    #nd-band .nd-logbtn{ max-width:none; }
+    /* Ask banner fills its (now narrower) width: pitch left, credits gauge right. */
+    #nd-band .nd-ask-tx{ display:grid; grid-template-columns:minmax(0,1fr) 300px; grid-template-rows:auto auto; column-gap:40px; align-items:center; }
     #nd-band .nd-ask-h{ grid-column:1; grid-row:1; }
     #nd-band .nd-ask-s{ grid-column:1; grid-row:2; margin-top:4px; }
     #nd-band .nd-cr{ grid-column:2; grid-row:1 / span 2; margin-top:0; }
-    /* TODAY: one row, all visible. CONTINUE: columns, not one stretched rail. */
-    body.nd-on #dashboard-content .dday-cards{ display:flex !important; gap:14px !important; grid-template-columns:none !important; }
+    /* Today: one row, all visible. Continue: columns, not one stretched rail. */
+    body.nd-on #dashboard-content .dday-cards{ display:flex !important; gap:12px !important; grid-template-columns:none !important; }
     body.nd-on #dashboard-content .dday-card{ flex:1 1 0 !important; min-width:0 !important; }
-    body.nd-on #dashboard-content .dcourse-list{ display:grid !important; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)) !important; gap:14px !important; }
+    body.nd-on #dashboard-content .dcourse-list{ display:grid !important; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)) !important; gap:14px !important; }
+    /* Right-rail tiles. */
+    #nd-rail-col .nd-rl-h{ font-family:"Fraunces",Georgia,serif; font-size:1.06rem; color:var(--nd-head); font-weight:600; margin:4px 2px 0; }
+    #nd-rail-col .nd-momentum{ display:flex !important; flex-direction:column !important; align-items:stretch !important; gap:16px !important; max-width:none !important; margin:0 !important; background:var(--nd-card); border-radius:16px; padding:18px; }
+    #nd-rail-col .nd-mm-week{ width:100%; }
+    #nd-rail-col #dash-activity-card, #nd-rail-col .db-activity{ background:transparent !important; border:0 !important; padding:0 !important; margin:0 !important; min-height:0 !important; height:auto !important; }
   }`;
   const s = document.createElement('style'); s.id = 'nd-style'; s.textContent = css; document.head.appendChild(s);
 }
@@ -22789,6 +22793,56 @@ function _ndRender(){
   band.innerHTML = html;
   try { _ndContentRail(); } catch (e) {}
   try { _ndReorderSections(); } catch (e) {}
+  try { _ndLayoutRail(); } catch (e) {}
+}
+
+// Desktop two-column layout: move the momentum tile and the Community feed into a
+// sticky right rail, so the main column stays narrow and nothing is stretched across
+// the whole width. On mobile the rail is dismantled: the freshly-rendered momentum
+// stays in the hero, and Community returns to its place in the flow. Idempotent, and
+// re-run on resize so crossing the breakpoint rebuilds the right side correctly.
+let _ndCommHome = null, _ndCommHead = null;
+function _ndLayoutRail(){
+  const dc = document.getElementById('dashboard-content');
+  if (!dc) return;
+  const comm = document.getElementById('dash-activity-card');
+  if (comm && !_ndCommHome) {
+    _ndCommHome = { parent: comm.parentNode, next: comm.nextSibling };
+    const ph = comm.previousElementSibling;
+    _ndCommHead = (ph && ph.classList && ph.classList.contains('dash-band-head')) ? ph : null;
+  }
+  // Clean slate: tear down any existing rail, returning Community to its home and
+  // un-hiding its heading, before deciding what this width needs.
+  const oldRail = document.getElementById('nd-rail-col');
+  if (oldRail) {
+    if (comm && _ndCommHome && _ndCommHome.parent) {
+      try { _ndCommHome.parent.insertBefore(comm, _ndCommHome.next); }
+      catch (e) { _ndCommHome.parent.appendChild(comm); }
+    }
+    oldRail.remove();
+  }
+  if (_ndCommHead) _ndCommHead.style.display = '';
+  if (!window.matchMedia('(min-width:1025px)').matches) return;   // mobile: leave in flow
+  // Desktop: build the rail with the momentum tile and the Community feed.
+  const rail = document.createElement('div');
+  rail.id = 'nd-rail-col';
+  const mom = document.querySelector('#nd-band .nd-momentum');
+  if (mom) {
+    const h = document.createElement('div'); h.className = 'nd-rl-h'; h.textContent = 'Your momentum';
+    rail.appendChild(h); rail.appendChild(mom);
+  }
+  if (comm) {
+    const h = document.createElement('div'); h.className = 'nd-rl-h'; h.textContent = 'The room';
+    rail.appendChild(h); rail.appendChild(comm);
+    if (_ndCommHead) _ndCommHead.style.display = 'none';
+  }
+  dc.appendChild(rail);
+}
+if (!window._ndRailResizeBound) {
+  window._ndRailResizeBound = true;
+  let _rt; window.addEventListener('resize', function(){
+    clearTimeout(_rt); _rt = setTimeout(function(){ try { _ndLayoutRail(); } catch (e) {} }, 180);
+  });
 }
 
 // The concept leads with Today, then the rest; the live page renders Quiet pieces
