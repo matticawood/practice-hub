@@ -288,11 +288,12 @@ const SH_SUBNAV = {
       #app-header #presence-btn { padding: 0 11px; }
     }
 
-    /* Squeeze zone: hide the wordmark on smaller laptops so the nav always fits
-       (search label also collapses to an icon at <=1100px below). */
-    @media (min-width: 769px) and (max-width: 991px) {
-      #app-header h1 { display: none; }
-    }
+    /* (Removed) A 769-991px "squeeze zone" used to hide the wordmark, but it had no
+       orientation qualifier: in landscape 769-991 the sidebar is shown and the desktop
+       block already hides the wordmark, so it was redundant there; in PORTRAIT 769-991 the
+       sidebar is gone, so it blanked the wordmark and left an awkward "no sidebar, no
+       wordmark" gap. Dropping it aligns the two: sidebar present == wordmark hidden, sidebar
+       absent == wordmark shown, at the same breakpoint. */
 
     /* ── Mobile bottom tab bar ── */
     #sh-mob-bottom-bar {
