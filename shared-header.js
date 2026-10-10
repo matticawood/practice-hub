@@ -2655,6 +2655,10 @@ window.initSharedHeader = function({ db, myEmail, myName, isAdmin, activePage = 
   // Write back — always store the best available url + name
   sessionStorage.setItem(_cacheKey, JSON.stringify({ avatarUrl: _effectiveUrl, myName: _effectiveName }));
 
+  // Expose the name and fill the sidebar account foot (its avatar is mirrored
+  // from #sh-avatar-el by an observer; the name comes from here).
+  try { window._shMyName = _effectiveName || ""; } catch (e) {}
+  { const _sbN = document.getElementById("sh-sb-name"); if (_sbN && _effectiveName) _sbN.textContent = _effectiveName; }
   const avatarEl = document.getElementById("sh-avatar-el");
   if (avatarEl) {
     if (_effectiveUrl) {
