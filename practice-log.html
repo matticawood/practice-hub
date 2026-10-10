@@ -22457,39 +22457,21 @@ function _ndInjectStyle(){
   /* THE culprit: this wrapper had an opaque #0b0b0e that covered the glow over the
      whole content. Transparent so the one ground shows through everywhere. */
   body.nd-on .history-community-section{ background:transparent !important; }
-  /* Practice sub-nav, now content, a light pill on the ground */
-  /* The Practice sub-nav (phone/tablet only). The VISIBLE glass is drawn by #nd-liq-glass: a
-     single backdrop-blur panel masked to a GOO (metaball) shape, so the sub-nav's glass and the
-     top bar's glass are ONE surface that coagulates like liquid as you scroll. This .nd-subnav
-     is kept transparent - it only drives the shape (its rect feeds the mask) and takes the
-     clicks; a sharp copy of the tabs rides on top in #nd-tabs-top. _ndLiquidNav() runs it. As
-     --p goes 0->1 its rect grows to full-bleed and its corners flatten, so the mask blob does
-     too. It lives OUTSIDE the hero band (a direct child of #dashboard-content) to stay stuck. */
+  /* Practice sub-nav (phone/tablet only): ONE clean, reliable rounded glass pill that sticks under
+     the top bar. Plain backdrop-blur + a translucent gradient (works on every mobile browser),
+     inset from the edges, tabs visible. It lives OUTSIDE the hero band (a direct child of
+     #dashboard-content) so it stays stuck for the whole page. No goo/mask/overlay. */
   body.nd-on .nd-subnav{ display:none; position:sticky; top:var(--nd-hdr-h, 48px); z-index:45;
-    width:auto !important; margin:0 20px 22px !important; gap:3px; padding:4px; border-radius:999px; box-sizing:border-box;
-    background:transparent; -webkit-backdrop-filter:none; backdrop-filter:none; box-shadow:none;
-    opacity:0; }   /* a FIXED pill that never resizes: it only sets the sub-nav blob position + takes
-                       clicks; the 20px side margin keeps it an INSET pill (aligned with the hero/Ask),
-                       not full-bleed, since it's a direct child of the un-padded #dashboard-content.
-                       The liquid merge is the glass flowing over this pill. Visible tabs are #nd-tabs-top. */
+    gap:3px; padding:4px; border-radius:15px; box-sizing:border-box;
+    background:linear-gradient(180deg, rgba(20,20,28,.66), rgba(20,20,28,.5));
+    -webkit-backdrop-filter:blur(16px) saturate(1.3); backdrop-filter:blur(16px) saturate(1.3);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 12px 28px -16px rgba(0,0,0,.55); }
   @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px){
     body.nd-on .nd-subnav{ display:flex; }
   }
-  /* Belt-and-suspenders: never show the liquid layers on desktop (the sidebar is the nav there). */
-  @media (min-width:1025px){ #nd-liq-glass, #nd-tabs-top{ display:none !important; } }
-  /* When the liquid nav is active the top bar drops its own glass, so the masked panel is the
-     ONLY glass (no second fade line stacked under the header). */
-  body.nd-on.nd-liqnav #app-header{ background:transparent !important; -webkit-backdrop-filter:none !important; backdrop-filter:none !important; box-shadow:none !important; }
-  /* The single liquid-glass panel, clipped to the goo shape (header blob + sub-nav blob). */
-  #nd-liq-glass{ position:fixed; left:0; top:0; width:100vw; height:190px; z-index:6; pointer-events:none; display:none;
-    background:linear-gradient(180deg, rgba(16,16,24,.62), rgba(16,16,24,.42) 72%, rgba(16,16,24,.34));
-    -webkit-backdrop-filter:blur(20px) saturate(1.4); backdrop-filter:blur(20px) saturate(1.4);
-    -webkit-mask:url(#nd-liqmask); mask:url(#nd-liqmask); }
-  /* The sharp tab labels, floated above the glass (clicks pass through to the real sub-nav). */
-  #nd-tabs-top{ position:fixed; z-index:12; pointer-events:none; display:none; box-sizing:border-box; gap:3px; }
-  #nd-tabs-top .nd-sn{ flex:1; text-align:center; padding:9px 12px; font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; border-radius:999px; }
-  #nd-tabs-top .nd-sn.on{ background:var(--nd-gold); color:#17130a; }
-  body.nd-on .nd-sn{ flex:1; text-align:center; padding:9px 12px; border-radius:calc((1 - var(--p)) * 999px + 8px); font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; transition:color .12s; position:relative; z-index:1; }
+  /* Keep it INSET (a #dashboard-content id rule otherwise zeroes its margin / full-bleeds it). */
+  body.nd-on #dashboard-content > .nd-subnav{ margin:0 16px 20px !important; width:auto !important; border-top:none !important; }
+  body.nd-on .nd-sn{ flex:1; text-align:center; padding:9px 12px; border-radius:11px; font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; transition:color .12s; }
   body.nd-on .nd-sn.on{ background:var(--nd-gold); color:#17130a; }
   body.nd-on .nd-sn:not(.on):hover{ color:var(--nd-text); }
   #nd-band{
@@ -22866,99 +22848,23 @@ function _ndRender(){
   try { _ndLiquidNav(); } catch (e) {}
 }
 
-// The Practice sub-nav and the top bar become ONE liquid-glass surface as you scroll. A single
-// backdrop-blur panel (#nd-liq-glass) is clipped to a GOO (metaball) mask built from two white
-// blobs - the header bar and the sub-nav pill. A scroll handler drives --p on the (transparent)
-// sub-nav so its rect spreads to full-bleed and flattens; the sub-nav blob follows, so as the
-// pill rises it coagulates into the header blob with a liquid surface-tension bridge and the two
-// fuse into one bar. The real sub-nav stays behind the glass for clicks; a sharp copy of the
-// tabs (#nd-tabs-top) rides on top. Only active where the sub-nav shows (phone/tablet).
+// Publish the top-bar height as --nd-hdr-h so the sticky sub-nav tucks exactly under it. (The name
+// is kept so the _ndRender call site is unchanged.) Also remove any leftover liquid layers from the
+// earlier goo/mask build so nothing lingers in the DOM.
 function _ndLiquidNav(){
-  if (!document.getElementById('nd-liq-svg')) {
-    const NS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(NS, 'svg');
-    svg.id = 'nd-liq-svg';
-    svg.setAttribute('style', 'position:absolute;width:0;height:0;pointer-events:none');
-    svg.innerHTML =
-      '<defs>' +
-        '<filter id="nd-goo" x="-20%" y="-80%" width="140%" height="300%">' +
-          '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b"/>' +
-          '<feColorMatrix in="b" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="g"/>' +
-        '</filter>' +
-        '<mask id="nd-liqmask" maskUnits="userSpaceOnUse" x="0" y="0" width="3000" height="220">' +
-          '<g filter="url(#nd-goo)" fill="#fff">' +
-            '<rect id="nd-mb-h" x="0" y="0" width="100" height="48"/>' +
-            '<rect id="nd-mb-s" x="20" y="70" width="200" height="44" rx="22"/>' +
-          '</g>' +
-        '</mask>' +
-      '</defs>';
-    document.body.appendChild(svg);
-    const glass = document.createElement('div'); glass.id = 'nd-liq-glass'; glass.setAttribute('aria-hidden', 'true'); document.body.appendChild(glass);
-    const ov = document.createElement('div'); ov.id = 'nd-tabs-top'; ov.setAttribute('aria-hidden', 'true'); document.body.appendChild(ov);
-    document.body.classList.add('nd-liqnav');
-  }
-  // keep the sharp tab copy in sync with the real tabs (re-cloned when they change)
-  const snNow = document.querySelector('#dashboard-content > .nd-subnav') || document.querySelector('.nd-subnav');
-  const ovNow = document.getElementById('nd-tabs-top');
-  if (snNow && ovNow) {
-    const sig = snNow.innerHTML.length + '';
-    if (ovNow.dataset.sig !== sig) { ovNow.innerHTML = snNow.innerHTML; ovNow.dataset.sig = sig; }
-  }
-  if (window._ndLiqBound) { try { window._ndLiqUpdate(); } catch (e) {} return; }
-  window._ndLiqBound = true;
-  const MERGE = 90;           // px of scroll over which the pill fully merges into the bar
-  let stickStart = 0, ticking = false;
-  const update = function(){
-    ticking = false;
-    const sn = document.querySelector('#dashboard-content > .nd-subnav') || document.querySelector('.nd-subnav');
+  ['nd-liq-svg', 'nd-liq-glass', 'nd-tabs-top'].forEach(function(id){ const e = document.getElementById(id); if (e) e.remove(); });
+  try { document.body.classList.remove('nd-liqnav'); } catch (e) {}
+  const setH = function(){
     const hd = document.getElementById('app-header');
-    const glass = document.getElementById('nd-liq-glass');
-    const ov = document.getElementById('nd-tabs-top');
-    const mbH = document.getElementById('nd-mb-h'), mbS = document.getElementById('nd-mb-s');
-    if (!sn || !glass || !ov || !mbH || !mbS) return;
     const hh = hd ? Math.round(hd.getBoundingClientRect().height) : 48;
     document.documentElement.style.setProperty('--nd-hdr-h', hh + 'px');
-    const shown = getComputedStyle(sn).display !== 'none';
-    glass.style.display = shown ? 'block' : 'none';
-    ov.style.display = shown ? 'flex' : 'none';
-    if (!shown) return;
-    const sy = window.scrollY || document.documentElement.scrollTop || 0;
-    const rect = sn.getBoundingClientRect();               // the sub-nav is a FIXED pill (no resize)
-    const stuck = rect.top <= hh + 0.5;
-    let mp = 0;                                            // merge progress: 0 at rest, 1 fully absorbed
-    if (!stuck) stickStart = sy + rect.top - hh;
-    else mp = Math.max(0, Math.min(1, (sy - stickStart) / MERGE));
-    const headerBottom = hd ? Math.round(hd.getBoundingClientRect().bottom) : hh;
-    const subBottom = Math.round(rect.bottom);
-    // Header blob: full width, flowing DOWN to swallow the sub-nav pill as mp -> 1 (the glass
-    // moves, not the menu). The sub-nav blob stays a fixed pill that the header absorbs. Its TOP
-    // is pushed above the viewport (y:-40) so the goo's rounded top corners sit off-screen and the
-    // bar reads square + flush at the top/left/right; only the BOTTOM corners round on-screen.
-    const barBottom = Math.round(headerBottom + mp * Math.max(0, subBottom - headerBottom));
-    mbH.setAttribute('x', '0'); mbH.setAttribute('y', '-40'); mbH.setAttribute('width', window.innerWidth);
-    mbH.setAttribute('height', Math.max(1, barBottom + 40));
-    // Keep the goo gentle at REST so the pill is a crisp slim shape (not a bloated/squared blob);
-    // only ramp the blur up as the pill nears and merges with the header.
-    const restGap = 26;
-    const gapNow = Math.max(0, rect.top - headerBottom);
-    const prox = stuck ? 1 : Math.max(0, Math.min(1, (restGap - gapNow) / restGap));
-    const gb = document.querySelector('#nd-goo feGaussianBlur');
-    if (gb) gb.setAttribute('stdDeviation', (2 + prox * 10).toFixed(1));
-    const rad = parseFloat(getComputedStyle(sn).borderTopLeftRadius) || 0;
-    mbS.setAttribute('x', Math.round(rect.left)); mbS.setAttribute('y', Math.round(rect.top));
-    mbS.setAttribute('width', Math.round(rect.width)); mbS.setAttribute('height', Math.round(rect.height));
-    mbS.setAttribute('rx', Math.round(Math.min(rad, rect.height / 2)));
-    const cs = getComputedStyle(sn);
-    ov.style.left = Math.round(rect.left) + 'px'; ov.style.top = Math.round(rect.top) + 'px';
-    ov.style.width = Math.round(rect.width) + 'px'; ov.style.height = Math.round(rect.height) + 'px';
-    ov.style.paddingLeft = cs.paddingLeft; ov.style.paddingRight = cs.paddingRight;
-    ov.style.paddingTop = cs.paddingTop; ov.style.paddingBottom = cs.paddingBottom; ov.style.gap = cs.gap;
   };
-  window._ndLiqUpdate = update;
-  const onScroll = function(){ if (!ticking) { ticking = true; requestAnimationFrame(update); } };
-  window.addEventListener('scroll', onScroll, { passive: true });
-  window.addEventListener('resize', onScroll);
-  update();
+  if (!window._ndHdrBound) {
+    window._ndHdrBound = true;
+    window.addEventListener('resize', setH, { passive: true });
+    window.addEventListener('scroll', setH, { passive: true });
+  }
+  setH();
 }
 
 // The concept leads with Today, then the rest; the live page renders Quiet pieces
