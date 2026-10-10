@@ -22479,7 +22479,7 @@ function _ndInjectStyle(){
     -webkit-backdrop-filter:blur(20px) saturate(1.4); backdrop-filter:blur(20px) saturate(1.4);
     -webkit-mask:url(#nd-liqmask); mask:url(#nd-liqmask); }
   /* The sharp tab labels, floated above the glass (clicks pass through to the real sub-nav). */
-  #nd-tabs-top{ position:fixed; z-index:12; pointer-events:none; display:none; box-sizing:border-box; gap:3px; padding:4px; }
+  #nd-tabs-top{ position:fixed; z-index:12; pointer-events:none; display:none; box-sizing:border-box; gap:3px; }
   #nd-tabs-top .nd-sn{ flex:1; text-align:center; padding:9px 12px; font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; border-radius:999px; }
   #nd-tabs-top .nd-sn.on{ background:var(--nd-gold); color:#17130a; }
   body.nd-on .nd-sn{ flex:1; text-align:center; padding:9px 12px; border-radius:calc((1 - var(--p)) * 999px + 8px); font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; transition:color .12s; position:relative; z-index:1; }
@@ -22901,18 +22901,17 @@ function _ndLiquidNav(){
   window._ndLiqBound = true;
   const MERGE = 90;           // px of scroll over which the pill fully merges into the bar
   let stickStart = 0, ticking = false;
-  const SHOWMQ = '(max-width: 768px), (orientation: portrait) and (max-width: 1024px)';
   const update = function(){
+    ticking = false;
     const sn = document.querySelector('#dashboard-content > .nd-subnav') || document.querySelector('.nd-subnav');
     const hd = document.getElementById('app-header');
     const glass = document.getElementById('nd-liq-glass');
     const ov = document.getElementById('nd-tabs-top');
     const mbH = document.getElementById('nd-mb-h'), mbS = document.getElementById('nd-mb-s');
     if (!sn || !glass || !ov || !mbH || !mbS) return;
-    const hr = hd ? hd.getBoundingClientRect() : null;
-    const hh = hr ? Math.round(hr.height) : 48;
+    const hh = hd ? Math.round(hd.getBoundingClientRect().height) : 48;
     document.documentElement.style.setProperty('--nd-hdr-h', hh + 'px');
-    const shown = window.matchMedia(SHOWMQ).matches;
+    const shown = getComputedStyle(sn).display !== 'none';
     glass.style.display = shown ? 'block' : 'none';
     ov.style.display = shown ? 'flex' : 'none';
     if (!shown) return;
@@ -22922,7 +22921,7 @@ function _ndLiquidNav(){
     let mp = 0;                                            // merge progress: 0 at rest, 1 fully absorbed
     if (!stuck) stickStart = sy + rect.top - hh;
     else mp = Math.max(0, Math.min(1, (sy - stickStart) / MERGE));
-    const headerBottom = hr ? Math.round(hr.bottom) : hh;
+    const headerBottom = hd ? Math.round(hd.getBoundingClientRect().bottom) : hh;
     const subBottom = Math.round(rect.bottom);
     // Header blob: full width, flowing DOWN to swallow the sub-nav pill as mp -> 1 (the glass
     // moves, not the menu). The sub-nav blob stays a fixed pill that the header absorbs. Its TOP
@@ -22931,24 +22930,21 @@ function _ndLiquidNav(){
     const barBottom = Math.round(headerBottom + mp * Math.max(0, subBottom - headerBottom));
     mbH.setAttribute('x', '0'); mbH.setAttribute('y', '-40'); mbH.setAttribute('width', window.innerWidth);
     mbH.setAttribute('height', Math.max(1, barBottom + 40));
+    const rad = parseFloat(getComputedStyle(sn).borderTopLeftRadius) || 0;
     mbS.setAttribute('x', Math.round(rect.left)); mbS.setAttribute('y', Math.round(rect.top));
     mbS.setAttribute('width', Math.round(rect.width)); mbS.setAttribute('height', Math.round(rect.height));
-    mbS.setAttribute('rx', Math.round(rect.height / 2));
+    mbS.setAttribute('rx', Math.round(Math.min(rad, rect.height / 2)));
+    const cs = getComputedStyle(sn);
     ov.style.left = Math.round(rect.left) + 'px'; ov.style.top = Math.round(rect.top) + 'px';
     ov.style.width = Math.round(rect.width) + 'px'; ov.style.height = Math.round(rect.height) + 'px';
-    // OVERSCROLL (rubber-band at the top): the header rubber-bands down (its top goes > 0) while a
-    // fixed glass would stay put, so the tabs would slide over a frozen edge. Move the glass down
-    // by the same offset so the whole chrome travels together. (The overlay already follows the
-    // sub-nav's rect, so it tracks too; running this every frame keeps it synced during the bounce.)
-    const off = hr ? Math.max(0, Math.round(hr.top)) : 0;
-    glass.style.transform = off ? ('translateY(' + off + 'px)') : '';
+    ov.style.paddingLeft = cs.paddingLeft; ov.style.paddingRight = cs.paddingRight;
+    ov.style.paddingTop = cs.paddingTop; ov.style.paddingBottom = cs.paddingBottom; ov.style.gap = cs.gap;
   };
   window._ndLiqUpdate = update;
-  // Run every frame (not just on scroll): overscroll/rubber-band does not fire scroll events, so a
-  // per-frame loop is what keeps the glass + tabs glued to the header while the page springs.
-  function loop(){ try { update(); } catch (e) {} requestAnimationFrame(loop); }
-  requestAnimationFrame(loop);
-  window.addEventListener('resize', function(){ try { update(); } catch (e) {} });
+  const onScroll = function(){ if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  update();
 }
 
 // The concept leads with Today, then the rest; the live page renders Quiet pieces
