@@ -49,6 +49,9 @@ const SH_SUBNAV = {
        and a tab bar on the page moves between them. Nothing was removed: every
        one of them is still a click away, and every other route in still works. */
     { label: "Progress", href: "/practice-log.html?goto=stats" },
+    /* Ask: search the library, ask the room, or spend credits on private feedback
+       from Matt. The access-to-Matt surface. Page is built in a later phase. */
+    { label: "Ask", href: "/practice-log.html?goto=ask" },
   ],
   learn: [
     { label: "Library", href: "/learn.html" },
