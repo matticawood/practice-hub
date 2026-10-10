@@ -22424,13 +22424,13 @@ function _ndInjectStyle(){
   body.nd-on .mobile-subnav{ display:none !important; }
   /* GLASS bars on phone/tablet: the top bar gets the same frosted treatment as the
      bottom bar, so content scrolls behind both. Dashboard-scoped, other pages untouched. */
-  @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px){
-    body.nd-on #app-header{ position:sticky; top:0;
+  @media (max-width: 1024px){
+    body.nd-on #app-header{ position:sticky !important; top:0 !important; z-index:50 !important;
       background:linear-gradient(180deg, rgba(11,11,14,.92), rgba(11,11,14,.5) 72%, transparent) !important;
-      -webkit-backdrop-filter:blur(13px); backdrop-filter:blur(13px); }
+      -webkit-backdrop-filter:blur(13px) !important; backdrop-filter:blur(13px) !important; }
     body.nd-on #sh-mob-bottom-bar{ border-top:none !important;
       background:linear-gradient(0deg, rgba(11,11,14,.96), rgba(11,11,14,.68) 72%, transparent) !important;
-      -webkit-backdrop-filter:blur(13px); backdrop-filter:blur(13px); }
+      -webkit-backdrop-filter:blur(13px) !important; backdrop-filter:blur(13px) !important; }
   }
   /* One continuous ground: the dark + the top-right glow live on the BODY (fixed,
      behind everything), and the header, main and content are transparent so the
@@ -22655,20 +22655,29 @@ function _ndInjectStyle(){
     #nd-band .nd-logbtn{ max-width:none; }
     #nd-band .nd-momentum{ max-width:none; width:100%; }
   }
-  /* ===== DESKTOP / wide: ONE immersive capped column, not the old main+rail grid.
-     The legacy layout turns #dashboard-content into a two-column grid (a ~1000px
-     main column + a Community rail) at >=1200px, which makes the band span the whole
-     width so the hero floats left and the Ask stretches across everything. The
-     immersive concept is a single centred column (matches the approved mock's
-     .scroll max-width). Equal specificity (1 class + 1 id) + later source order wins. */
+  /* ===== DESKTOP (>=1025): full-width and immersive, with each section COMPOSED to
+     fill the width so nothing floats left or stretches into dead space. The page is
+     NOT capped (he wants it full-bleed); instead the hero and Ask lay their content
+     across two internal columns, and Today runs as one row. Overrides the legacy
+     main+rail grid (equal specificity, later source order + !important wins). ===== */
   @media (min-width:1025px){
-    body.nd-on #dashboard-content{ display:block !important; max-width:1120px !important; margin-left:auto !important; margin-right:auto !important; }
-    body.nd-on #dashboard-content > *{ grid-column:auto !important; grid-row:auto !important; }
-    /* Today: all cards in ONE row, all visible, never a ragged two-row wrap. */
+    body.nd-on #dashboard-content{ display:block !important; max-width:none !important; margin:0 !important; }
+    /* HERO fills: level + Log on the left, momentum (streak + week) as a column on
+       the right, so the whole hero spans the band instead of hugging the left. */
+    #nd-band .nd-hero-main{ display:grid !important; grid-template-columns:minmax(0,1fr) minmax(300px,360px); grid-template-rows:auto auto; column-gap:52px; row-gap:0; align-items:center; }
+    #nd-band .nd-herotext{ grid-column:1; grid-row:1; }
+    #nd-band .nd-logbtn{ grid-column:1; grid-row:2; max-width:none; }
+    #nd-band .nd-momentum{ grid-column:2; grid-row:1 / span 2; flex-direction:column; align-items:stretch; gap:18px; max-width:none; margin-top:0; }
+    #nd-band .nd-mm-week{ width:100%; }
+    /* ASK fills: pitch on the left, credits gauge on the right of the same banner. */
+    #nd-band .nd-ask-tx{ display:grid; grid-template-columns:minmax(0,1fr) 320px; grid-template-rows:auto auto; column-gap:48px; align-items:center; }
+    #nd-band .nd-ask-h{ grid-column:1; grid-row:1; }
+    #nd-band .nd-ask-s{ grid-column:1; grid-row:2; margin-top:4px; }
+    #nd-band .nd-cr{ grid-column:2; grid-row:1 / span 2; margin-top:0; }
+    /* TODAY: one row, all visible. CONTINUE: columns, not one stretched rail. */
     body.nd-on #dashboard-content .dday-cards{ display:flex !important; gap:14px !important; grid-template-columns:none !important; }
     body.nd-on #dashboard-content .dday-card{ flex:1 1 0 !important; min-width:0 !important; }
-    /* Continue learning: two tidy columns instead of a stretched single rail. */
-    body.nd-on #dashboard-content .dcourse-list{ display:grid !important; grid-template-columns:repeat(2,1fr) !important; gap:14px !important; }
+    body.nd-on #dashboard-content .dcourse-list{ display:grid !important; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)) !important; gap:14px !important; }
   }`;
   const s = document.createElement('style'); s.id = 'nd-style'; s.textContent = css; document.head.appendChild(s);
 }
@@ -22836,16 +22845,14 @@ async function _ndContentRail(){
     (fp.data || []).forEach(p => {
       if (p.type === "blog" || p.type === "clinic") return;   // dup of articles / live_events
       if (FEED_SKIP.test(p.title || "")) return;
-      let thumb = "";
-      if (p.youtube_id) {
-        thumb = `https://i.ytimg.com/vi/${p.youtube_id}/${p.orientation === "portrait" ? "oardefault" : "mqdefault"}.jpg`;
-      } else {
-        const mux = (p.media || []).find(x => x && x.type === "mux");
-        const pid = mux && (mux.playbackId || mux.playback_id);
-        if (pid) thumb = `https://image.mux.com/${pid}/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=8`;
-      }
-      if (!thumb) return;
-      items.push({ kind:"video", title:p.title, date:p.published_at, thumb,
+      // Members-only = Matthew's own Mux uploads. A youtube_id is public teaching
+      // (it lives on YouTube), so it does NOT belong in the members-only rail.
+      if (p.youtube_id) return;
+      const mux = (p.media || []).find(x => x && x.type === "mux");
+      const pid = mux && (mux.playbackId || mux.playback_id);
+      if (!pid) return;
+      items.push({ kind:"video", title:p.title, date:p.published_at,
+        thumb:`https://image.mux.com/${pid}/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=8`,
         href:`/learn.html?post=${encodeURIComponent(p.id)}`,
         mins: p.duration_seconds ? Math.max(1, Math.round(p.duration_seconds / 60)) : 0 });
     });
