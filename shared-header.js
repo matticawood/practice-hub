@@ -194,11 +194,16 @@ const SH_SUBNAV = {
       .sh-sb-brand h1 { margin: 0; color: #f5f0e8; font-size: 1.12rem; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
       .sh-sb-nav { display: flex; flex-direction: column; gap: 3px; padding: 14px 12px; overflow-y: auto; flex: 1 1 auto; }
       /* Account foot: the member at the bottom-left, opening the account menu. */
-      .sh-sb-foot { margin-top: auto; flex-shrink: 0; padding: 12px; }
+      .sh-sb-foot { margin-top: auto; flex-shrink: 0; padding: 12px; position: relative; }
       .sh-sb-foot-acct { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; color: inherit; cursor: pointer; text-align: left; font-family: inherit; }
       .sh-sb-foot-acct:hover { background: rgba(255,255,255,.06); }
       .sh-sb-foot-acct .sh-avatar { width: 34px; height: 34px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: .78rem; font-weight: 600; overflow: hidden; }
-      .sh-sb-foot-name { font-size: .85rem; font-weight: 600; color: #f2ede2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .sh-sb-foot-info { display: flex; flex-direction: column; min-width: 0; }
+      .sh-sb-foot-name { font-size: .85rem; font-weight: 600; color: #f2ede2; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .sh-sb-foot-role { font-size: .72rem; color: #8a847a; line-height: 1.2; }
+      /* The account menu pops up from the foot (moved here on desktop). */
+      .sh-sb-foot .sh-user-menu { top: auto; bottom: calc(100% + 8px); left: 10px; right: auto; transform-origin: bottom left; transform: translateY(6px) scale(.98); }
+      .sh-sb-foot .sh-user-menu.open { transform: translateY(0) scale(1); }
       /* The account lives in the sidebar now, so the desktop top bar sheds its
          avatar and email and becomes a slim transparent utility (search, bell). */
       #app-header { background: transparent !important; border-bottom: none !important; }
@@ -212,24 +217,25 @@ const SH_SUBNAV = {
       }
       .sh-sb-item svg { width: 18px; height: 18px; flex-shrink: 0; }
       .sh-sb-item:hover:not(.active) { background: rgba(255,255,255,.06); color: #f2ede2; }
-      .sh-sb-item.active { background: rgba(245,197,24,.16); color: var(--accent, #f5c518); font-weight: 700; }
+      .sh-sb-item.active { background: rgba(255,255,255,.07); color: #f6f3ee; font-weight: 700; }
       .sh-sb-item:focus-visible, .sh-sb-subitem:focus-visible { outline: 2px solid var(--accent, #f5c518); outline-offset: 2px; }
-      /* Accordion: the active section's sub-pages expand beneath it.
-         Sub-items use a vertical rail (lighter than the parent's filled pill);
-         the active item's rail segment + text turn gold, with no fill — so the
-         hierarchy reads clearly (section = pill, page = rail item). */
+      /* Accordion, matching the mock: indented text, no rail; the active page is
+         gold with a gold dot, the section pill is a neutral surface. */
       .sh-sb-group { display: flex; flex-direction: column; }
       .sh-sb-sub { display: none; flex-direction: column; margin: 3px 0 7px 22px; }
       .sh-sb-item.active + .sh-sb-sub { display: flex; }
       .sh-sb-subitem {
-        display: block; padding: 6px 12px 6px 18px;
-        border-left: 2px solid rgba(255,255,255,.10);
+        display: flex; align-items: center; gap: 8px; padding: 6px 12px;
         color: #8a847a; font-size: 0.85rem; font-weight: 500;
-        text-decoration: none; white-space: nowrap;
-        transition: color .15s, border-color .15s;
+        text-decoration: none; white-space: nowrap; transition: color .15s;
       }
-      .sh-sb-subitem:hover:not(.active) { color: #e9e4da; border-left-color: rgba(255,255,255,.28); }
-      .sh-sb-subitem.active { color: var(--accent, #f5c518); font-weight: 600; border-left-color: var(--accent, #f5c518); }
+      .sh-sb-subitem::before {
+        content: ""; width: 5px; height: 5px; border-radius: 50%; flex: none;
+        background: transparent; transition: background .15s, box-shadow .15s;
+      }
+      .sh-sb-subitem:hover:not(.active) { color: #e9e4da; }
+      .sh-sb-subitem.active { color: var(--accent, #f5c518); font-weight: 600; }
+      .sh-sb-subitem.active::before { background: var(--accent, #f5c518); box-shadow: 0 0 8px var(--accent, #f5c518); }
       /* Sub-pages now live in the sidebar accordion; hide the horizontal sub-nav on desktop. */
       #sh-mob-subnav { display: none !important; }
       /* Top bar becomes a slim utility bar over the content area (sidebar holds nav). */
@@ -1381,7 +1387,10 @@ function _shBuildChrome() {
     '<div class="sh-sb-foot">' +
       '<button class="sh-sb-foot-acct" onclick="window._shToggleUserMenu && window._shToggleUserMenu()" aria-label="Account menu">' +
         '<div class="sh-avatar" id="sh-sb-avatar-el"></div>' +
-        '<span class="sh-sb-foot-name" id="sh-sb-name">Member</span>' +
+        '<span class="sh-sb-foot-info">' +
+          '<span class="sh-sb-foot-name" id="sh-sb-name">Member</span>' +
+          '<span class="sh-sb-foot-role">Member</span>' +
+        "</span>" +
       "</button>" +
     "</div>";
   document.body.insertBefore(sidebar, document.body.firstChild);
@@ -1532,6 +1541,26 @@ if (document.readyState === "loading") {
 } else {
   _shBuildChrome();
 }
+
+// The account menu belongs to the header avatar on mobile and to the sidebar
+// account foot on desktop (where the avatar lives). Relocate it by viewport so
+// it always opens from the avatar you can actually see. _shToggleUserMenu finds
+// it by id, so moving the node does not affect the toggle.
+window._shPlaceAccountMenu = function () {
+  const menu = document.getElementById("sh-user-menu");
+  const foot = document.querySelector(".sh-sb-foot");
+  const wrap = document.querySelector(".sh-avatar-wrap");
+  if (!menu) return;
+  const desktop = window.matchMedia("(min-width: 1025px), (orientation: landscape) and (min-width: 769px)").matches;
+  if (desktop) { if (foot && menu.parentElement !== foot) foot.appendChild(menu); }
+  else if (wrap && menu.parentElement !== wrap) wrap.appendChild(menu);
+};
+(function () {
+  function place() { try { window._shPlaceAccountMenu(); } catch (e) {} }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", place);
+  else place();
+  window.addEventListener("resize", place);
+})();
 
 // ── Sheet helpers (kept as no-ops for backward compat) ────────────────────────
 window._shOpenSheet  = function() {};
