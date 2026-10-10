@@ -22542,6 +22542,7 @@ function _ndInjectStyle(){
   #nd-band .nd-ccard{ flex:0 0 246px; text-decoration:none; color:var(--nd-text); }
   #nd-band .nd-cthumb{ width:100%; aspect-ratio:16/9; border-radius:16px; background:#222228 center/cover no-repeat; box-shadow:0 14px 34px -10px rgba(0,0,0,.6); position:relative; }
   #nd-band .nd-cthumb::after{ content:""; position:absolute; inset:0; border-radius:16px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
+  #nd-band .nd-ctag{ position:absolute; top:10px; left:10px; z-index:1; font-size:.64rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:4px 9px; border-radius:999px; color:#0c0c0e; background:var(--ctagc,#eac64f); box-shadow:0 3px 10px -2px rgba(0,0,0,.5); }
   #nd-band .nd-ctitle{ font-weight:600; color:var(--nd-text); margin-top:11px; font-size:.92rem; line-height:1.3; }
   #nd-band .nd-cmeta{ font-size:.78rem; color:var(--nd-faint); margin-top:3px; }
   #nd-band .nd-rail-ph{ color:var(--nd-faint); font-size:.85rem; padding:18px 2px; }
@@ -22653,6 +22654,21 @@ function _ndInjectStyle(){
     #nd-band .nd-herotext{ align-items:center; }
     #nd-band .nd-logbtn{ max-width:none; }
     #nd-band .nd-momentum{ max-width:none; width:100%; }
+  }
+  /* ===== DESKTOP / wide: ONE immersive capped column, not the old main+rail grid.
+     The legacy layout turns #dashboard-content into a two-column grid (a ~1000px
+     main column + a Community rail) at >=1200px, which makes the band span the whole
+     width so the hero floats left and the Ask stretches across everything. The
+     immersive concept is a single centred column (matches the approved mock's
+     .scroll max-width). Equal specificity (1 class + 1 id) + later source order wins. */
+  @media (min-width:1025px){
+    body.nd-on #dashboard-content{ display:block !important; max-width:1120px !important; margin-left:auto !important; margin-right:auto !important; }
+    body.nd-on #dashboard-content > *{ grid-column:auto !important; grid-row:auto !important; }
+    /* Today: all cards in ONE row, all visible, never a ragged two-row wrap. */
+    body.nd-on #dashboard-content .dday-cards{ display:flex !important; gap:14px !important; grid-template-columns:none !important; }
+    body.nd-on #dashboard-content .dday-card{ flex:1 1 0 !important; min-width:0 !important; }
+    /* Continue learning: two tidy columns instead of a stretched single rail. */
+    body.nd-on #dashboard-content .dcourse-list{ display:grid !important; grid-template-columns:repeat(2,1fr) !important; gap:14px !important; }
   }`;
   const s = document.createElement('style'); s.id = 'nd-style'; s.textContent = css; document.head.appendChild(s);
 }
@@ -22792,24 +22808,56 @@ async function _ndContentRail(){
   if (window._ndRailHTML) { const r = slot(); if (r) r.innerHTML = window._ndRailHTML; return; }
   if (window._ndRailLoading) return;
   window._ndRailLoading = true;
+  const fmtDate = ts => { const d = ts ? new Date(ts) : null; return d ? d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) : ''; };
+  const TAG = { video:{ label:'Video',       c:'#a78bfa' },
+                clinic:{ label:'Live clinic', c:'#f472b6' } };
+  const card = it => {
+    const t = TAG[it.kind] || TAG.video;
+    const meta = [fmtDate(it.date), it.mins ? it.mins + ' min' : ''].filter(Boolean).join('  ·  ');
+    return `<a class="nd-ccard" href="${it.href || '/learn.html'}">
+      <div class="nd-cthumb" style="background-image:url('${it.thumb}')"><span class="nd-ctag" style="--ctagc:${t.c}">${t.label}</span></div>
+      <div class="nd-ctitle">${escHtml(it.title || '')}</div>
+      <div class="nd-cmeta">${escHtml(meta)}</div></a>`;
+  };
   try {
-    const { data } = await db.from("live_events")
-      .select("id,title,scheduled_at,duration_mins,mux_playback_id,status")
-      .not("mux_playback_id", "is", null)
-      .order("scheduled_at", { ascending: false })
-      .limit(12);
-    const items = (data || []).filter(e => e.mux_playback_id);
-    if (items.length) {
-      const html = items.map(e => {
-        const thumb = `https://image.mux.com/${e.mux_playback_id}/thumbnail.webp?width=480&height=270&fit_mode=smartcrop`;
-        const d = e.scheduled_at ? new Date(e.scheduled_at) : null;
-        const meta = [d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '', e.duration_mins ? e.duration_mins + ' min' : '']
-          .filter(Boolean).join('  ·  ');
-        return `<a class="nd-ccard" href="/learn.html">
-          <div class="nd-cthumb" style="background-image:url('${thumb}')"></div>
-          <div class="nd-ctitle">${escHtml(e.title || '')}</div>
-          <div class="nd-cmeta">${escHtml(meta)}</div></a>`;
-      }).join("");
+    // Members-only content = the latest exclusive videos (content_feed_posts) AND
+    // clinic replays (live_events), merged newest-first — not clinics alone.
+    const [fp, le] = await Promise.all([
+      db.from("content_feed_posts")
+        .select("id,type,title,youtube_id,media,published_at,duration_seconds,orientation")
+        .order("published_at", { ascending: false }).limit(14),
+      db.from("live_events")
+        .select("id,title,scheduled_at,duration_mins,mux_playback_id,status,feed_post_id")
+        .not("mux_playback_id", "is", null)
+        .order("scheduled_at", { ascending: false }).limit(6),
+    ]);
+    const FEED_SKIP = /topic poll|^live practice clinic|^live q&a/i;
+    const items = [];
+    (fp.data || []).forEach(p => {
+      if (p.type === "blog" || p.type === "clinic") return;   // dup of articles / live_events
+      if (FEED_SKIP.test(p.title || "")) return;
+      let thumb = "";
+      if (p.youtube_id) {
+        thumb = `https://i.ytimg.com/vi/${p.youtube_id}/${p.orientation === "portrait" ? "oardefault" : "mqdefault"}.jpg`;
+      } else {
+        const mux = (p.media || []).find(x => x && x.type === "mux");
+        const pid = mux && (mux.playbackId || mux.playback_id);
+        if (pid) thumb = `https://image.mux.com/${pid}/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=8`;
+      }
+      if (!thumb) return;
+      items.push({ kind:"video", title:p.title, date:p.published_at, thumb,
+        href:`/learn.html?post=${encodeURIComponent(p.id)}`,
+        mins: p.duration_seconds ? Math.max(1, Math.round(p.duration_seconds / 60)) : 0 });
+    });
+    (le.data || []).forEach(e => {
+      items.push({ kind:"clinic", title:e.title, date:e.scheduled_at, mins:e.duration_mins || 0,
+        href: e.feed_post_id ? `/learn.html?post=${encodeURIComponent(e.feed_post_id)}` : '/learn.html',
+        thumb:`https://image.mux.com/${e.mux_playback_id}/thumbnail.webp?width=480&height=270&fit_mode=smartcrop` });
+    });
+    items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    const top = items.slice(0, 10);
+    if (top.length) {
+      const html = top.map(card).join("");
       window._ndRailHTML = html;
       const r = slot(); if (r) r.innerHTML = html;
     } else {
