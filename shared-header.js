@@ -177,17 +177,29 @@ const SH_SUBNAV = {
     body { --sh-sb-w: 0px; }
     @media (min-width: 1025px), (orientation: landscape) and (min-width: 769px) {
       body { padding-left: 244px; --sh-sb-w: 244px; }
+      /* Blended sidebar: no panel fill and no border, so it reads as part of the
+         page (the mock's clean look), with the nav up top and the account at the foot. */
       #sh-sidebar {
         display: flex; flex-direction: column;
         position: fixed; top: 0; left: 0; bottom: 0; width: 244px; z-index: 320;
-        background: #141414; border-right: 1px solid rgba(255,255,255,.08);
+        background: transparent; border-right: none;
       }
       .sh-sb-brand {
         display: flex; align-items: center; height: 59px; flex-shrink: 0;
-        padding: 0 22px; border-bottom: 1px solid rgba(255,255,255,.06);
+        padding: 0 22px;
       }
       .sh-sb-brand h1 { margin: 0; color: #f5f0e8; font-size: 1.12rem; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
-      .sh-sb-nav { display: flex; flex-direction: column; gap: 3px; padding: 14px 12px; overflow-y: auto; }
+      .sh-sb-nav { display: flex; flex-direction: column; gap: 3px; padding: 14px 12px; overflow-y: auto; flex: 1 1 auto; }
+      /* Account foot: the member at the bottom-left, opening the account menu. */
+      .sh-sb-foot { margin-top: auto; flex-shrink: 0; padding: 12px; }
+      .sh-sb-foot-acct { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; color: inherit; cursor: pointer; text-align: left; font-family: inherit; }
+      .sh-sb-foot-acct:hover { background: rgba(255,255,255,.06); }
+      .sh-sb-foot-acct .sh-avatar { width: 34px; height: 34px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: .78rem; font-weight: 600; overflow: hidden; }
+      .sh-sb-foot-name { font-size: .85rem; font-weight: 600; color: #f2ede2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* The account lives in the sidebar now, so the desktop top bar sheds its
+         avatar and email and becomes a slim transparent utility (search, bell). */
+      #app-header { background: transparent !important; border-bottom: none !important; }
+      #app-header .sh-avatar-wrap, #app-header #header-email { display: none !important; }
       .sh-sb-item {
         display: flex; align-items: center; gap: 12px;
         padding: 9px 13px; border-radius: 9px;
@@ -1193,6 +1205,20 @@ window.SavedPosts = (function() {
         avatarEl.style.background = colour.bg;
         avatarEl.style.color = colour.fg;
       }
+      // Mirror into the sidebar account foot (desktop).
+      const sbAv = document.getElementById("sh-sb-avatar-el");
+      if (sbAv) {
+        if (cached.avatarUrl) {
+          sbAv.innerHTML = `<img src="${cached.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+          sbAv.style.background = "none"; sbAv.style.color = "inherit";
+        } else {
+          const c2 = _colour(email);
+          sbAv.textContent = _ini(cached.myName || email.split("@")[0]);
+          sbAv.style.background = c2.bg; sbAv.style.color = c2.fg;
+        }
+      }
+      const sbName = document.getElementById("sh-sb-name");
+      if (sbName) sbName.textContent = cached.myName || email.split("@")[0];
     }
 
     if (document.readyState === "loading") {
@@ -1347,7 +1373,13 @@ function _shBuildChrome() {
         (subs ? '<div class="sh-sb-sub">' + subs + "</div>" : "") +
       "</div>";
     }).join("") +
-    "</nav>";
+    "</nav>" +
+    '<div class="sh-sb-foot">' +
+      '<button class="sh-sb-foot-acct" onclick="window._shToggleUserMenu && window._shToggleUserMenu()" aria-label="Account menu">' +
+        '<div class="sh-avatar" id="sh-sb-avatar-el"></div>' +
+        '<span class="sh-sb-foot-name" id="sh-sb-name">Member</span>' +
+      "</button>" +
+    "</div>";
   document.body.insertBefore(sidebar, document.body.firstChild);
 
   // Mobile bottom tab bar
