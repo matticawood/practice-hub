@@ -22452,22 +22452,33 @@ function _ndInjectStyle(){
      whole content. Transparent so the one ground shows through everywhere. */
   body.nd-on .history-community-section{ background:transparent !important; }
   /* Practice sub-nav, now content, a light pill on the ground */
-  /* The Practice sub-nav (phone/tablet only). A glass pill on the ground that, as you scroll,
-     MORPHS continuously into the top bar: a scroll handler drives --p (0 at rest -> 1 merged)
-     and --gut (the side gutter in px). As --p rises the pill's width grows to full-bleed, its
-     corners flatten from a 999px pill to a square bar, and its glass thickens to the header's,
-     so it spreads like liquid and fuses with the top bar. It lives OUTSIDE the hero band (a
-     direct child of #dashboard-content) so it stays stuck for the whole page. */
+  /* The Practice sub-nav (phone/tablet only). The VISIBLE glass is drawn by #nd-liq-glass: a
+     single backdrop-blur panel masked to a GOO (metaball) shape, so the sub-nav's glass and the
+     top bar's glass are ONE surface that coagulates like liquid as you scroll. This .nd-subnav
+     is kept transparent - it only drives the shape (its rect feeds the mask) and takes the
+     clicks; a sharp copy of the tabs rides on top in #nd-tabs-top. _ndLiquidNav() runs it. As
+     --p goes 0->1 its rect grows to full-bleed and its corners flatten, so the mask blob does
+     too. It lives OUTSIDE the hero band (a direct child of #dashboard-content) to stay stuck. */
   body.nd-on .nd-subnav{ --p:0; --gut:0px; display:none; position:sticky; top:var(--nd-hdr-h, 48px); z-index:45;
     width:calc(100% + 2 * var(--gut) * var(--p)); margin:0 0 22px; margin-left:calc(-1 * var(--gut) * var(--p)); gap:3px;
     padding:4px; padding-left:calc(4px + var(--gut) * var(--p)); padding-right:calc(4px + var(--gut) * var(--p));
     border-radius:calc((1 - var(--p)) * 999px); box-sizing:border-box;
-    background:linear-gradient(180deg, rgba(12,12,16, calc(.62 + .3 * var(--p))), rgba(12,12,16, calc(.42 + .3 * var(--p))) calc(70% + 12% * var(--p)));
-    -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 calc(10px + 6px * var(--p)) calc(26px + 8px * var(--p)) -14px rgba(0,0,0, calc(.5 + .25 * var(--p))); }
+    background:transparent; -webkit-backdrop-filter:none; backdrop-filter:none; box-shadow:none; }
   @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px){
     body.nd-on .nd-subnav{ display:flex; }
   }
+  /* When the liquid nav is active the top bar drops its own glass, so the masked panel is the
+     ONLY glass (no second fade line stacked under the header). */
+  body.nd-on.nd-liqnav #app-header{ background:transparent !important; -webkit-backdrop-filter:none !important; backdrop-filter:none !important; box-shadow:none !important; }
+  /* The single liquid-glass panel, clipped to the goo shape (header blob + sub-nav blob). */
+  #nd-liq-glass{ position:fixed; left:0; top:0; width:100vw; height:180px; z-index:6; pointer-events:none; display:none;
+    background:linear-gradient(180deg, rgba(10,10,13,.88), rgba(10,10,13,.66) 68%, rgba(10,10,13,.54));
+    -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px);
+    -webkit-mask:url(#nd-liqmask); mask:url(#nd-liqmask); }
+  /* The sharp tab labels, floated above the glass (clicks pass through to the real sub-nav). */
+  #nd-tabs-top{ position:fixed; z-index:12; pointer-events:none; display:none; box-sizing:border-box; gap:3px; }
+  #nd-tabs-top .nd-sn{ flex:1; text-align:center; padding:9px 12px; font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; border-radius:calc((1 - var(--p,0)) * 999px + 8px); }
+  #nd-tabs-top .nd-sn.on{ background:var(--nd-gold); color:#17130a; }
   body.nd-on .nd-sn{ flex:1; text-align:center; padding:9px 12px; border-radius:calc((1 - var(--p)) * 999px + 8px); font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; transition:color .12s; position:relative; z-index:1; }
   body.nd-on .nd-sn.on{ background:var(--nd-gold); color:#17130a; }
   body.nd-on .nd-sn:not(.on):hover{ color:var(--nd-text); }
@@ -22842,43 +22853,90 @@ function _ndRender(){
   } catch (e) {}
   try { _ndContentRail(); } catch (e) {}
   try { _ndReorderSections(); } catch (e) {}
-  try { _ndStickSubnav(); } catch (e) {}
+  try { _ndLiquidNav(); } catch (e) {}
 }
 
-// The Practice sub-nav morphs into the top bar as you scroll. A scroll handler drives
-// --p (0 at rest, 1 fully merged) over ~90px once the pill reaches the header, plus --gut
-// (the side gutter) so CSS can grow it to full-bleed. The CSS interpolates width, corner
-// radius and glass from --p, giving the liquid pill-to-bar morph.
-function _ndStickSubnav(){
-  if (window._ndSubnavBound) { try { window._ndSubnavUpdate(); } catch (e) {} return; }
-  window._ndSubnavBound = true;
-  const MERGE = 90;           // px of scroll over which the pill fully merges
+// The Practice sub-nav and the top bar become ONE liquid-glass surface as you scroll. A single
+// backdrop-blur panel (#nd-liq-glass) is clipped to a GOO (metaball) mask built from two white
+// blobs - the header bar and the sub-nav pill. A scroll handler drives --p on the (transparent)
+// sub-nav so its rect spreads to full-bleed and flattens; the sub-nav blob follows, so as the
+// pill rises it coagulates into the header blob with a liquid surface-tension bridge and the two
+// fuse into one bar. The real sub-nav stays behind the glass for clicks; a sharp copy of the
+// tabs (#nd-tabs-top) rides on top. Only active where the sub-nav shows (phone/tablet).
+function _ndLiquidNav(){
+  if (!document.getElementById('nd-liq-svg')) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.id = 'nd-liq-svg';
+    svg.setAttribute('style', 'position:absolute;width:0;height:0;pointer-events:none');
+    svg.innerHTML =
+      '<defs>' +
+        '<filter id="nd-goo" x="-20%" y="-60%" width="140%" height="240%">' +
+          '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b"/>' +
+          '<feColorMatrix in="b" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 26 -12" result="g"/>' +
+        '</filter>' +
+        '<mask id="nd-liqmask" maskUnits="userSpaceOnUse" x="0" y="0" width="3000" height="220">' +
+          '<g filter="url(#nd-goo)" fill="#fff">' +
+            '<rect id="nd-mb-h" x="0" y="0" width="100" height="48"/>' +
+            '<rect id="nd-mb-s" x="20" y="70" width="200" height="44" rx="22"/>' +
+          '</g>' +
+        '</mask>' +
+      '</defs>';
+    document.body.appendChild(svg);
+    const glass = document.createElement('div'); glass.id = 'nd-liq-glass'; glass.setAttribute('aria-hidden', 'true'); document.body.appendChild(glass);
+    const ov = document.createElement('div'); ov.id = 'nd-tabs-top'; ov.setAttribute('aria-hidden', 'true'); document.body.appendChild(ov);
+    document.body.classList.add('nd-liqnav');
+  }
+  // keep the sharp tab copy in sync with the real tabs (re-cloned when they change)
+  const snNow = document.querySelector('#dashboard-content > .nd-subnav') || document.querySelector('.nd-subnav');
+  const ovNow = document.getElementById('nd-tabs-top');
+  if (snNow && ovNow) {
+    const sig = snNow.innerHTML.length + '';
+    if (ovNow.dataset.sig !== sig) { ovNow.innerHTML = snNow.innerHTML; ovNow.dataset.sig = sig; }
+  }
+  if (window._ndLiqBound) { try { window._ndLiqUpdate(); } catch (e) {} return; }
+  window._ndLiqBound = true;
+  const MERGE = 90;           // px of scroll over which the pill fully merges into the bar
   let stickStart = 0, ticking = false;
-  const hdrH = function(){
-    const hd = document.getElementById('app-header');
-    return hd ? Math.round(hd.getBoundingClientRect().height) : 48;
-  };
   const update = function(){
     ticking = false;
     const sn = document.querySelector('#dashboard-content > .nd-subnav') || document.querySelector('.nd-subnav');
-    const hh = hdrH();
+    const hd = document.getElementById('app-header');
+    const glass = document.getElementById('nd-liq-glass');
+    const ov = document.getElementById('nd-tabs-top');
+    const mbH = document.getElementById('nd-mb-h'), mbS = document.getElementById('nd-mb-s');
+    if (!sn || !glass || !ov || !mbH || !mbS) return;
+    const hh = hd ? Math.round(hd.getBoundingClientRect().height) : 48;
     document.documentElement.style.setProperty('--nd-hdr-h', hh + 'px');
-    if (!sn || getComputedStyle(sn).display === 'none') return;
+    const shown = getComputedStyle(sn).display !== 'none';
+    glass.style.display = shown ? 'block' : 'none';
+    ov.style.display = shown ? 'flex' : 'none';
+    if (!shown) return;
     const sy = window.scrollY || document.documentElement.scrollTop || 0;
-    const rect = sn.getBoundingClientRect();
+    let rect = sn.getBoundingClientRect();
     const stuck = rect.top <= hh + 0.5;
     if (!stuck) {
       stickStart = sy + rect.top - hh;
       if (rect.left > 0) sn.style.setProperty('--gut', Math.round(rect.left) + 'px');
       sn.style.setProperty('--p', '0');
-      sn.classList.remove('nd-stuck');
     } else {
       const p = Math.max(0, Math.min(1, (sy - stickStart) / MERGE));
       sn.style.setProperty('--p', p.toFixed(3));
-      sn.classList.toggle('nd-stuck', p > 0.02);
     }
+    rect = sn.getBoundingClientRect();                     // after the --p morph
+    const rad = parseFloat(getComputedStyle(sn).borderTopLeftRadius) || 0;
+    if (hd) { const hr = hd.getBoundingClientRect(); mbH.setAttribute('width', window.innerWidth); mbH.setAttribute('height', Math.max(1, Math.round(hr.bottom))); }
+    mbS.setAttribute('x', Math.round(rect.left)); mbS.setAttribute('y', Math.round(rect.top));
+    mbS.setAttribute('width', Math.round(rect.width)); mbS.setAttribute('height', Math.round(rect.height));
+    mbS.setAttribute('rx', Math.round(Math.min(rad, rect.height / 2)));
+    const cs = getComputedStyle(sn);
+    ov.style.left = Math.round(rect.left) + 'px'; ov.style.top = Math.round(rect.top) + 'px';
+    ov.style.width = Math.round(rect.width) + 'px'; ov.style.height = Math.round(rect.height) + 'px';
+    ov.style.paddingLeft = cs.paddingLeft; ov.style.paddingRight = cs.paddingRight;
+    ov.style.paddingTop = cs.paddingTop; ov.style.paddingBottom = cs.paddingBottom; ov.style.gap = cs.gap;
+    ov.style.setProperty('--p', (cs.getPropertyValue('--p') || '0').trim());
   };
-  window._ndSubnavUpdate = update;
+  window._ndLiqUpdate = update;
   const onScroll = function(){ if (!ticking) { ticking = true; requestAnimationFrame(update); } };
   window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', onScroll);
