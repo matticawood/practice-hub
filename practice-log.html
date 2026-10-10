@@ -22459,22 +22459,36 @@ function _ndInjectStyle(){
   /* THE culprit: this wrapper had an opaque #0b0b0e that covered the glow over the
      whole content. Transparent so the one ground shows through everywhere. */
   body.nd-on .history-community-section{ background:transparent !important; }
-  /* Practice sub-nav (phone/tablet only). It lives OUTSIDE the hero band (a direct child of
-     #dashboard-content) so position:sticky holds it under the header on scroll.
-     ONE sticky element: the glass background, the rounded corners and the tab buttons are the
-     SAME element, so they move together and can never detach on pull-down / overscroll (the old
-     fixed-glass-panel + JS-positioned-tabs split is what let the background stick while the buttons
-     moved). Crisp CSS corners (no goo), so it is never squared. It is a rounded inset bar at rest;
-     on scroll it sticks and .nd-stuck squares its top + goes full width to merge into the header. */
+  /* Practice sub-nav (phone/tablet only), a direct child of #dashboard-content so position:sticky
+     holds it under the header. Two-part glass so the LIQUID merge works without the background ever
+     detaching from the buttons:
+       - REST glass = .nd-subnav::before. It lives ON the sticky element, so on pull-down/overscroll
+         at the top it moves WITH the buttons (the old bug was a position:fixed glass staying pinned
+         while the buttons moved). The buttons are children of this same element.
+       - MERGE glass = #nd-liq-glass, a fixed backdrop-blur panel clipped to a GOO (metaball) mask
+         of two blobs (header + sub-nav) that FUSE like liquid. It only fades in as you scroll DOWN
+         into the merge, where overscroll/pull-down cannot happen, so the fixed layer never detaches.
+     --nd-mp (0 at rest -> 1 merged) cross-fades REST out and MERGE in. The goo layer is appended
+     inside #dashboard-content so it sits in #app-main's stacking context: ABOVE scrolling content
+     (it frosts it) but BELOW the sub-nav (z 45), so it shows through the sub-nav's transparent
+     background, behind the buttons - no separate button overlay to desync. */
   body.nd-on .nd-subnav{ display:none; position:sticky; top:var(--nd-hdr-h, 48px); z-index:45;
-    gap:3px; box-sizing:border-box;
+    gap:3px; box-sizing:border-box; background:transparent; isolation:isolate;
+    transition:margin .18s ease; }
+  body.nd-on .nd-subnav::before{ content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+    border-radius:inherit; opacity:calc(1 - var(--nd-mp, 0));
     background:linear-gradient(180deg, rgba(20,20,28,.74), rgba(20,20,28,.54));
     -webkit-backdrop-filter:blur(16px) saturate(1.3); backdrop-filter:blur(16px) saturate(1.3);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 14px 30px -18px rgba(0,0,0,.6);
-    transition:border-radius .22s ease, margin .22s ease; }
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 14px 30px -18px rgba(0,0,0,.6); }
   @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px){
     body.nd-on .nd-subnav{ display:flex; }
   }
+  #nd-liq-glass{ position:fixed; left:0; top:0; width:100vw; height:240px; z-index:44; pointer-events:none;
+    opacity:var(--nd-mp, 0); display:none;
+    background:linear-gradient(180deg, rgba(17,17,23,.84), rgba(17,17,23,.6) 68%, rgba(17,17,23,.44));
+    -webkit-backdrop-filter:blur(15px) saturate(1.3); backdrop-filter:blur(15px) saturate(1.3);
+    -webkit-mask:url(#nd-liqmask); mask:url(#nd-liqmask); }
+  @media (min-width:1025px){ #nd-liq-glass{ display:none !important; } }
   body.nd-on .nd-sn{ flex:1; text-align:center; padding:9px 12px; border-radius:12px; font-size:.85rem; font-weight:600; color:var(--nd-muted); text-decoration:none; transition:color .12s; position:relative; z-index:1; }
   body.nd-on .nd-sn.on{ background:var(--nd-gold); color:#17130a; }
   body.nd-on .nd-sn:not(.on):hover{ color:var(--nd-text); }
@@ -22852,31 +22866,79 @@ function _ndRender(){
   try { _ndLiquidNav(); } catch (e) {}
 }
 
-// The Practice sub-nav is ONE sticky element: its glass background, rounded corners and the tab
-// buttons are the same element, so they always move together - there is no separate fixed glass
-// layer to stay pinned while the buttons scroll (that split is what made the background detach on
-// pull-down). This handler only (a) tracks the header height into --nd-hdr-h so the sticky top is
-// right, and (b) toggles .nd-stuck when the bar reaches the header, which (via CSS transition)
-// squares its top and spreads it full-width to merge flush into the header glass. A class toggle
-// can never desync the background from the buttons the way per-frame repositioning did.
+// The Practice sub-nav fuses into the header with a LIQUID (metaball) merge, built so the glass can
+// never detach from the buttons on pull-down:
+//   - REST glass is the sub-nav's own ::before (on the sticky element) - it moves with the buttons.
+//   - MERGE glass is #nd-liq-glass: one fixed backdrop-blur panel clipped to an SVG GOO mask of two
+//     white blobs (header bar + sub-nav). As the sub-nav rises the blobs coagulate with a surface-
+//     tension bridge and fuse into one bar. It is appended INSIDE #dashboard-content so it lives in
+//     #app-main's stacking context: above scrolling content (frosts it) but below the sub-nav, so it
+//     shows behind the buttons without a separate overlay.
+//   - --nd-mp (0 rest -> 1 merged) cross-fades REST out / MERGE in and is 0 at the very top, where
+//     pull-down happens, so the fixed layer is invisible there and nothing can decouple.
 function _ndLiquidNav(){
-  // tear down any layers from the old liquid build so nothing stale can stick to the viewport
-  ['nd-liq-svg','nd-liq-glass','nd-tabs-top'].forEach(function(id){ const e=document.getElementById(id); if(e) e.remove(); });
+  ['nd-tabs-top'].forEach(function(id){ var e=document.getElementById(id); if(e) e.remove(); });
   try { document.body.classList.remove('nd-liqnav'); } catch(e){}
-  const update = function(){
-    const hd = document.getElementById('app-header');
-    const hh = hd ? Math.round(hd.getBoundingClientRect().height) : 48;
+  var host = document.getElementById('dashboard-content') || document.body;
+  // build the goo filter + mask once, and the fixed glass panel inside the content context
+  if (!document.getElementById('nd-liq-svg')) {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.id = 'nd-liq-svg';
+    svg.setAttribute('style', 'position:absolute;width:0;height:0;pointer-events:none');
+    svg.innerHTML =
+      '<defs>' +
+        '<filter id="nd-goo" x="-20%" y="-60%" width="140%" height="260%">' +
+          '<feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b"/>' +
+          '<feColorMatrix in="b" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" result="g"/>' +
+        '</filter>' +
+        '<mask id="nd-liqmask" maskUnits="userSpaceOnUse" x="0" y="0" width="3000" height="260">' +
+          '<g filter="url(#nd-goo)" fill="#fff">' +
+            '<rect id="nd-mb-h" x="0" y="0" width="100" height="48"/>' +
+            '<rect id="nd-mb-s" x="20" y="70" width="200" height="46" rx="18"/>' +
+          '</g>' +
+        '</mask>' +
+      '</defs>';
+    host.appendChild(svg);
+    var glass = document.createElement('div'); glass.id = 'nd-liq-glass'; glass.setAttribute('aria-hidden', 'true');
+    host.appendChild(glass);
+  }
+  var MERGE = 70;   // px of gap (sub-nav top above header bottom) over which it fuses: 0 -> merged
+  var update = function(){
+    var hd = document.getElementById('app-header');
+    var hh = hd ? Math.round(hd.getBoundingClientRect().height) : 48;
     document.documentElement.style.setProperty('--nd-hdr-h', hh + 'px');
-    const sn = document.querySelector('#dashboard-content > .nd-subnav') || document.querySelector('.nd-subnav');
-    if (!sn) return;
-    if (getComputedStyle(sn).display === 'none') { sn.classList.remove('nd-stuck'); return; }
-    sn.classList.toggle('nd-stuck', sn.getBoundingClientRect().top <= hh + 1);
+    var sn = document.querySelector('#dashboard-content > .nd-subnav') || document.querySelector('.nd-subnav');
+    var glass = document.getElementById('nd-liq-glass');
+    var mbH = document.getElementById('nd-mb-h'), mbS = document.getElementById('nd-mb-s');
+    if (!sn || !glass || !mbH || !mbS) return;
+    var shown = getComputedStyle(sn).display !== 'none';
+    glass.style.display = shown ? 'block' : 'none';
+    if (!shown) { sn.classList.remove('nd-stuck'); document.documentElement.style.setProperty('--nd-mp', '0'); return; }
+    var rect = sn.getBoundingClientRect();
+    var headerBottom = hd ? Math.round(hd.getBoundingClientRect().bottom) : hh;
+    var stuck = rect.top <= hh + 1;
+    sn.classList.toggle('nd-stuck', stuck);
+    // merge progress 0..1 from how close the sub-nav top is to the header bottom
+    var gap = Math.max(0, rect.top - headerBottom);
+    var mp = stuck ? 1 : Math.max(0, Math.min(1, (MERGE - gap) / MERGE));
+    document.documentElement.style.setProperty('--nd-mp', mp.toFixed(3));
+    // header blob: full width from above the viewport down to the header bottom (square top off-screen)
+    mbH.setAttribute('x', '0'); mbH.setAttribute('y', '-40'); mbH.setAttribute('width', window.innerWidth);
+    mbH.setAttribute('height', Math.max(1, headerBottom + 40));
+    // sub-nav blob: tracks the real sub-nav rect, so the buttons always sit over it
+    var rad = parseFloat(getComputedStyle(sn).borderTopLeftRadius) || 16;
+    mbS.setAttribute('x', Math.round(rect.left)); mbS.setAttribute('y', Math.round(rect.top));
+    mbS.setAttribute('width', Math.round(rect.width)); mbS.setAttribute('height', Math.round(rect.height));
+    mbS.setAttribute('rx', Math.round(Math.min(rad, rect.height / 2)));
   };
   window._ndLiqUpdate = update;
+  var ticking = false;
+  var onScroll = function(){ if (!ticking) { ticking = true; requestAnimationFrame(function(){ ticking = false; update(); }); } };
   if (!window._ndStuckBound) {
     window._ndStuckBound = true;
-    window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
   }
   update();
 }
