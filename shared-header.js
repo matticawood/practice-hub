@@ -1220,8 +1220,9 @@ window.SavedPosts = (function() {
           sbAv.style.background = c2.bg; sbAv.style.color = c2.fg;
         }
       }
+      try { window._shMyName = cached.myName || (email ? email.split("@")[0] : ""); } catch (e) {}
       const sbName = document.getElementById("sh-sb-name");
-      if (sbName) sbName.textContent = cached.myName || email.split("@")[0];
+      if (sbName) sbName.textContent = window._shMyName || "Member";
     }
 
     if (document.readyState === "loading") {
@@ -1384,6 +1385,26 @@ function _shBuildChrome() {
       "</button>" +
     "</div>";
   document.body.insertBefore(sidebar, document.body.firstChild);
+
+  // The sidebar account foot mirrors the header avatar (populated from cache and
+  // the profile fetch). The foot is built after the first paint, so instead of
+  // relying on paint order, mirror the header avatar whenever it changes.
+  (function(){
+    const src = document.getElementById("sh-avatar-el");
+    const dst = document.getElementById("sh-sb-avatar-el");
+    const nm = document.getElementById("sh-sb-name");
+    if (!src || !dst) return;
+    function sync(){
+      try {
+        dst.innerHTML = src.innerHTML;
+        dst.style.background = src.style.background;
+        dst.style.color = src.style.color;
+        if (nm && window._shMyName) nm.textContent = window._shMyName;
+      } catch (e) {}
+    }
+    sync();
+    try { new MutationObserver(sync).observe(src, { childList: true, attributes: true, subtree: true }); } catch (e) {}
+  })();
 
   // Mobile bottom tab bar
   const bottomBar = document.createElement("nav");
