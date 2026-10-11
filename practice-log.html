@@ -22615,8 +22615,12 @@ function _ndInjectStyle(){
   #nd-band .nd-rail-head{ display:flex; align-items:baseline; justify-content:space-between; margin:34px 0 15px; }
   #nd-band .nd-rail-t{ font-family:"Fraunces",Georgia,serif; font-size:1.3rem; color:var(--nd-head); font-weight:600; }
   #nd-band .nd-rail-all{ font-size:.82rem; color:var(--nd-gold); text-decoration:none; }
-  #nd-band .nd-rail{ display:flex; gap:15px; overflow-x:auto; padding-bottom:6px; scrollbar-width:none; }
+  #nd-band .nd-rail{ display:flex; gap:15px; overflow-x:auto; padding-bottom:6px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
   #nd-band .nd-rail::-webkit-scrollbar{ display:none; }
+  /* Fade the right edge, but ONLY when the shelf overflows (JS toggles .is-scroll), so a
+     lone last card is never clipped. Next to the community feed this dissolves the cut-off
+     card instead of a hard edge, and signals there is more to swipe. Matches .rg-recs-row. */
+  #nd-band .nd-rail.is-scroll{ -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent); mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent); }
   #nd-band .nd-ccard{ flex:0 0 246px; text-decoration:none; color:var(--nd-text); }
   #nd-band .nd-cthumb{ width:100%; aspect-ratio:16/9; border-radius:16px; background:#222228 center/cover no-repeat; box-shadow:0 14px 34px -10px rgba(0,0,0,.6); position:relative; }
   #nd-band .nd-cthumb::after{ content:""; position:absolute; inset:0; border-radius:16px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
@@ -22677,6 +22681,10 @@ function _ndInjectStyle(){
     #nd-band .nd-al-ic{ width:28px; height:28px; }
     #nd-band .nd-al-n{ font-size:.88rem; }
     #nd-band .nd-al-p{ font-size:.88rem; }
+    /* Full-bleed the rail to the screen edge (the dashboard's mobile gutter is 16px, from
+       #dashboard-content > *), so cards run off the right edge rather than stopping inside a
+       gutter. The header and first card stay aligned to the gutter; the fade sits at the edge. */
+    #nd-band .nd-rail{ margin-right:-16px; }
   }
   /* TWO-ZONE HERO (research-grounded: fill width with zones, don't stretch one element). The hero is
      two zones: the identity (statue + ring + level text + Log button) and the momentum (streak +
@@ -23221,7 +23229,10 @@ function _ndReorderSections(tries){
 // Mux thumbnails off the playback id. Fetched once, cached, reused across repaints.
 async function _ndContentRail(){
   const slot = () => document.getElementById('nd-rail');
-  if (window._ndRailHTML) { const r = slot(); if (r) r.innerHTML = window._ndRailHTML; return; }
+  // Fade the right edge only while the rail overflows; re-checked after paint and on resize.
+  const applyFade = () => { const r = slot(); if (r && r.clientWidth) r.classList.toggle('is-scroll', r.scrollWidth - r.clientWidth > 4); };
+  if (!window._ndRailFadeBound) { window.addEventListener('resize', () => requestAnimationFrame(applyFade)); window._ndRailFadeBound = true; }
+  if (window._ndRailHTML) { const r = slot(); if (r) { r.innerHTML = window._ndRailHTML; requestAnimationFrame(applyFade); } return; }
   if (window._ndRailLoading) return;
   window._ndRailLoading = true;
   const fmtDate = ts => { const d = ts ? new Date(ts) : null; return d ? d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) : ''; };
@@ -23291,7 +23302,7 @@ async function _ndContentRail(){
     if (top.length) {
       const html = top.map(card).join("");
       window._ndRailHTML = html;
-      const r = slot(); if (r) r.innerHTML = html;
+      const r = slot(); if (r) { r.innerHTML = html; requestAnimationFrame(applyFade); }
     } else {
       const r = slot(); if (r) r.innerHTML = '<div class="nd-rail-ph">No recordings yet.</div>';
     }
