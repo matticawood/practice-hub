@@ -22617,12 +22617,21 @@ function _ndInjectStyle(){
   #nd-band .nd-rail-all{ font-size:.82rem; color:var(--nd-gold); text-decoration:none; }
   #nd-band .nd-rail{ display:flex; gap:15px; overflow-x:auto; padding-bottom:6px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
   #nd-band .nd-rail::-webkit-scrollbar{ display:none; }
-  /* The right-edge bleed (single-column) is measured and set inline by JS in _ndContentRail, because
-     the gutter comes from different rules at different widths and no one CSS var tracks it reliably. */
-  /* The edge fade is a DYNAMIC mask set inline by JS on scroll (_ndContentRail): it fades only
-     the side that still has hidden content, so it is gone at whichever end you reach and never
-     fades toward nothing. Next to the community feed this dissolves the cut-off card instead of a
-     hard edge; with no overflow there is no mask at all. */
+  /* Arrow paging. On pointer/desktop (a side menu is present) the rail is held inside its column and
+     these page it a set of cards at a time; each arrow shows only when there is more that way. On
+     mobile (no side menu) they are hidden and the rail swipes and bleeds off the screen edges instead.
+     Enabling/hiding and the per-click scroll are driven by JS in _ndContentRail. */
+  #nd-band .nd-railwrap{ position:relative; }
+  #nd-band .nd-rnav{ position:absolute; top:var(--nd-rnav-top, 69px); transform:translateY(-50%); z-index:3;
+    width:40px; height:40px; border-radius:50%; display:grid; place-items:center; cursor:pointer;
+    color:#fff; background:rgba(18,18,22,.78); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+    border:1px solid var(--nd-line2); box-shadow:0 8px 20px -6px rgba(0,0,0,.65);
+    opacity:0; pointer-events:none; transition:opacity .15s, background .15s; }
+  #nd-band .nd-rnav.show{ opacity:1; pointer-events:auto; }
+  #nd-band .nd-rnav:hover{ background:rgba(30,30,36,.96); }
+  #nd-band .nd-rnav svg{ width:20px; height:20px; }
+  #nd-band .nd-rprev{ left:-6px; }
+  #nd-band .nd-rnext{ right:-6px; }
   #nd-band .nd-ccard{ flex:0 0 246px; text-decoration:none; color:var(--nd-text); }
   #nd-band .nd-cthumb{ width:100%; aspect-ratio:16/9; border-radius:16px; background:#222228 center/cover no-repeat; box-shadow:0 14px 34px -10px rgba(0,0,0,.6); position:relative; }
   #nd-band .nd-cthumb::after{ content:""; position:absolute; inset:0; border-radius:16px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
@@ -23065,7 +23074,11 @@ function _ndRender(){
       </div>
     </div>
     <div class="nd-rail-head"><span class="nd-rail-t">New for members</span><a class="nd-rail-all" href="/learn.html">See all &rsaquo;</a></div>
-    <div class="nd-rail" id="nd-rail">${window._ndRailHTML || '<div class="nd-rail-ph">Loading the latest…</div>'}</div>`;
+    <div class="nd-railwrap">
+      <button class="nd-rnav nd-rprev" type="button" aria-label="Previous"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="nd-rail" id="nd-rail">${window._ndRailHTML || '<div class="nd-rail-ph">Loading the latest…</div>'}</div>
+      <button class="nd-rnav nd-rnext" type="button" aria-label="Next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+    </div>`;
 
   let band = document.getElementById('nd-band');
   if (!band) { band = document.createElement('div'); band.id = 'nd-band'; host.insertBefore(band, host.firstChild); }
@@ -23227,33 +23240,49 @@ function _ndReorderSections(tries){
 // Mux thumbnails off the playback id. Fetched once, cached, reused across repaints.
 async function _ndContentRail(){
   const slot = () => document.getElementById('nd-rail');
-  // Dynamic edge fade: fade ONLY the side that still has hidden content, so the rail never fades
-  // toward nothing at either end. Set inline as a mask-image gradient and recomputed on scroll.
-  // Re-run after paint and on resize. Retries until the rail has a layout width, since a repaint can
-  // run this while the dashboard tab is briefly not laid out (clientWidth 0).
-  const applyFade = (tries) => {
+  const hasMenu = () => { const m = document.getElementById('app-main'); return !!(m && m.getBoundingClientRect().left > 4); };
+  const CARD = 261; // card (246) + gap (15); a page step is a whole number of these
+  // Show each arrow only when there is more that way (pointer/desktop, i.e. the side menu is present
+  // and the rail overflows). Runs on scroll - cheap, just toggles classes.
+  const updateArrows = (r) => {
+    const w = r.closest('.nd-railwrap'); if (!w) return;
+    const prev = w.querySelector('.nd-rprev'), next = w.querySelector('.nd-rnext');
+    const max = r.scrollWidth - r.clientWidth;
+    const paged = hasMenu() && max > 4;
+    if (prev) prev.classList.toggle('show', paged && r.scrollLeft > 2);
+    if (next) next.classList.toggle('show', paged && r.scrollLeft < max - 2);
+  };
+  // Lay the rail out: on pointer/desktop (side menu present) hold it inside its column and let the
+  // arrows page it; on mobile (no side menu) hide the arrows and bleed it off both screen edges so
+  // cards run off the edge. Retries until the rail has a layout width (a repaint can run while the
+  // dashboard tab is briefly not laid out). Re-run on resize; arrow clicks/scroll wired once per rail.
+  const tuneRail = (tries) => {
     const r = slot(); if (!r) return;
-    if (!r.clientWidth) { if ((tries || 0) < 12) setTimeout(() => applyFade((tries || 0) + 1), 120); return; }
-    // No fade (it read as wrong against the panels): the overflow clip gives a clean cut and the next
-    // card peeking is the "there's more" signal. PER EDGE: bleed an edge off the SCREEN only when there
-    // is open space beyond it; when a panel sits beside it, keep the rail aligned to the main column
-    // there instead of sliding behind/into the panel. Left panel = the side menu (it pushes #app-main
-    // off the screen's left edge). Right panel = the community feed (the dashboard grid gains a second
-    // column). Matching padding on a bled edge keeps the first/last card at the gutter; #app-main's
-    // overflow-x:clip stops any page overflow.
+    if (!r.clientWidth) { if ((tries || 0) < 12) setTimeout(() => tuneRail((tries || 0) + 1), 120); return; }
+    const w = r.closest('.nd-railwrap');
+    const thumb = r.querySelector('.nd-cthumb');
+    if (w && thumb) w.style.setProperty('--nd-rnav-top', Math.round(thumb.getBoundingClientRect().height / 2) + 'px');
     r.style.webkitMaskImage = r.style.maskImage = '';
-    const appMain = document.getElementById('app-main');
-    const host = document.getElementById('dashboard-content');
-    const panelL = !!(appMain && appMain.getBoundingClientRect().left > 4);
-    const panelR = !!(host && getComputedStyle(host).display === 'grid');   // feed column is active (grid-template-columns stays declared even when display:block)
     r.style.marginLeft = r.style.marginRight = '0px';
     r.style.paddingLeft = r.style.paddingRight = '';
-    const rect = r.getBoundingClientRect();
-    if (!panelL) { const b = Math.round(rect.left); if (b > 0) { r.style.marginLeft = '-' + b + 'px'; r.style.paddingLeft = b + 'px'; } }
-    if (!panelR) { const b = Math.round(document.documentElement.clientWidth - rect.right); if (b > 0) { r.style.marginRight = '-' + b + 'px'; r.style.paddingRight = b + 'px'; } }
+    if (!hasMenu()) {   // mobile: bleed off both screen edges; matching padding keeps first/last at the gutter
+      const rect = r.getBoundingClientRect();
+      const bl = Math.round(rect.left), br = Math.round(document.documentElement.clientWidth - rect.right);
+      if (bl > 0) { r.style.marginLeft = '-' + bl + 'px'; r.style.paddingLeft = bl + 'px'; }
+      if (br > 0) { r.style.marginRight = '-' + br + 'px'; r.style.paddingRight = br + 'px'; }
+    }
+    if (!r._ndNavBound) {
+      r.addEventListener('scroll', () => updateArrows(r), { passive: true });
+      const prev = w && w.querySelector('.nd-rprev'), next = w && w.querySelector('.nd-rnext');
+      const step = () => Math.max(CARD, Math.floor(r.clientWidth / CARD) * CARD);
+      if (prev) prev.addEventListener('click', () => r.scrollBy({ left: -step(), behavior: 'smooth' }));
+      if (next) next.addEventListener('click', () => r.scrollBy({ left: step(), behavior: 'smooth' }));
+      r._ndNavBound = true;
+    }
+    updateArrows(r);
   };
-  if (!window._ndRailFadeBound) { window.addEventListener('resize', () => applyFade()); window._ndRailFadeBound = true; }
-  if (window._ndRailHTML) { const r = slot(); if (r) { r.innerHTML = window._ndRailHTML; applyFade(); } return; }
+  if (!window._ndRailFadeBound) { window.addEventListener('resize', () => tuneRail()); window._ndRailFadeBound = true; }
+  if (window._ndRailHTML) { const r = slot(); if (r) { r.innerHTML = window._ndRailHTML; tuneRail(); } return; }
   if (window._ndRailLoading) return;
   window._ndRailLoading = true;
   const fmtDate = ts => { const d = ts ? new Date(ts) : null; return d ? d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) : ''; };
@@ -23323,7 +23352,7 @@ async function _ndContentRail(){
     if (top.length) {
       const html = top.map(card).join("");
       window._ndRailHTML = html;
-      const r = slot(); if (r) { r.innerHTML = html; applyFade(); }
+      const r = slot(); if (r) { r.innerHTML = html; tuneRail(); }
     } else {
       const r = slot(); if (r) r.innerHTML = '<div class="nd-rail-ph">No recordings yet.</div>';
     }
