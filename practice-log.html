@@ -22617,10 +22617,10 @@ function _ndInjectStyle(){
   #nd-band .nd-rail-all{ font-size:.82rem; color:var(--nd-gold); text-decoration:none; }
   #nd-band .nd-rail{ display:flex; gap:15px; overflow-x:auto; padding-bottom:6px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
   #nd-band .nd-rail::-webkit-scrollbar{ display:none; }
-  /* Fade the right edge, but ONLY when the shelf overflows (JS toggles .is-scroll), so a
-     lone last card is never clipped. Next to the community feed this dissolves the cut-off
-     card instead of a hard edge, and signals there is more to swipe. Matches .rg-recs-row. */
-  #nd-band .nd-rail.is-scroll{ -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent); mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent); }
+  /* The edge fade is a DYNAMIC mask set inline by JS on scroll (_ndContentRail): it fades only
+     the side that still has hidden content, so it is gone at whichever end you reach and never
+     fades toward nothing. Next to the community feed this dissolves the cut-off card instead of a
+     hard edge; with no overflow there is no mask at all. */
   #nd-band .nd-ccard{ flex:0 0 246px; text-decoration:none; color:var(--nd-text); }
   #nd-band .nd-cthumb{ width:100%; aspect-ratio:16/9; border-radius:16px; background:#222228 center/cover no-repeat; box-shadow:0 14px 34px -10px rgba(0,0,0,.6); position:relative; }
   #nd-band .nd-cthumb::after{ content:""; position:absolute; inset:0; border-radius:16px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
@@ -23229,13 +23229,25 @@ function _ndReorderSections(tries){
 // Mux thumbnails off the playback id. Fetched once, cached, reused across repaints.
 async function _ndContentRail(){
   const slot = () => document.getElementById('nd-rail');
-  // Fade the right edge only while the rail overflows; re-checked after paint and on resize.
-  // Retries until the rail has a layout width, since a repaint can run it while the dashboard
-  // tab is briefly not laid out (clientWidth 0), which would otherwise leave the fade off.
+  // Dynamic edge fade: fade ONLY the side that still has hidden content, so the rail never fades
+  // toward nothing at either end. Set inline as a mask-image gradient and recomputed on scroll.
+  const paintFade = (r) => {
+    const max = r.scrollWidth - r.clientWidth;
+    if (max <= 4) { r.style.webkitMaskImage = r.style.maskImage = ''; return; }   // fits: no fade
+    const x = r.scrollLeft;
+    const left  = x <= 1       ? '#000 0%'   : 'transparent 0%, #000 40px';
+    const right = x >= max - 1 ? '#000 100%' : '#000 calc(100% - 40px), transparent 100%';
+    const g = 'linear-gradient(to right, ' + left + ', ' + right + ')';
+    r.style.webkitMaskImage = r.style.maskImage = g;
+  };
+  // Re-checked after paint and on resize. Retries until the rail has a layout width, since a
+  // repaint can run this while the dashboard tab is briefly not laid out (clientWidth 0). The
+  // scroll listener is bound once per fresh #nd-rail (the band is rebuilt on each repaint).
   const applyFade = (tries) => {
     const r = slot(); if (!r) return;
     if (!r.clientWidth) { if ((tries || 0) < 12) setTimeout(() => applyFade((tries || 0) + 1), 120); return; }
-    r.classList.toggle('is-scroll', r.scrollWidth - r.clientWidth > 4);
+    if (!r._ndFadeBound) { r.addEventListener('scroll', () => paintFade(r), { passive: true }); r._ndFadeBound = true; }
+    paintFade(r);
   };
   if (!window._ndRailFadeBound) { window.addEventListener('resize', () => applyFade()); window._ndRailFadeBound = true; }
   if (window._ndRailHTML) { const r = slot(); if (r) { r.innerHTML = window._ndRailHTML; applyFade(); } return; }
