@@ -23232,41 +23232,58 @@ async function _ndContentRail(){
       <div class="nd-ctitle">${escHtml(it.title || '')}</div>
       <div class="nd-cmeta">${escHtml(fmtDate(it.date))}</div></a>`;
   };
+  // Real running time: posts never store a duration and a clinic's duration_mins is
+  // the booked slot, not the replay. Mux publishes it in the public storyboard.json
+  // for these playbacks, so read it from there. A failed/slow fetch leaves no badge
+  // rather than a wrong one.
+  const muxMins = async pid => {
+    if (!pid) return 0;
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 4000);
+      const r = await fetch(`https://image.mux.com/${pid}/storyboard.json`, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!r.ok) return 0;
+      const j = await r.json();
+      return j && j.duration ? Math.max(1, Math.round(j.duration / 60)) : 0;
+    } catch (e) { return 0; }
+  };
   try {
-    // Members-only content = the latest exclusive videos (content_feed_posts) AND
-    // clinic replays (live_events), merged newest-first — not clinics alone.
+    // Members-only content = the member videos (content_feed_posts, Matthew's own Mux
+    // uploads) AND clinic replays (live_events), merged newest-first. The member videos
+    // are queried directly (type=post, no youtube_id) so the public YouTube stream never
+    // crowds them out of the fetch window and starves the rail of them.
     const [fp, le] = await Promise.all([
       db.from("content_feed_posts")
-        .select("id,type,title,youtube_id,media,published_at,duration_seconds,orientation")
-        .order("published_at", { ascending: false }).limit(14),
+        .select("id,title,media,published_at")
+        .eq("type", "post").is("youtube_id", null)
+        .order("published_at", { ascending: false }).limit(24),
       db.from("live_events")
-        .select("id,title,scheduled_at,duration_mins,mux_playback_id,status,feed_post_id")
+        .select("id,title,scheduled_at,mux_playback_id,status")
         .not("mux_playback_id", "is", null)
-        .order("scheduled_at", { ascending: false }).limit(6),
+        .order("scheduled_at", { ascending: false }).limit(8),
     ]);
     const FEED_SKIP = /topic poll|^live practice clinic|^live q&a/i;
     const items = [];
     (fp.data || []).forEach(p => {
-      if (p.type === "blog" || p.type === "clinic") return;   // dup of articles / live_events
-      if (FEED_SKIP.test(p.title || "")) return;
-      // Members-only = Matthew's own Mux uploads. A youtube_id is public teaching
-      // (it lives on YouTube), so it does NOT belong in the members-only rail.
-      if (p.youtube_id) return;
+      if (FEED_SKIP.test(p.title || "")) return;   // clinic announcements / polls, not videos
       const mux = (p.media || []).find(x => x && x.type === "mux");
       const pid = mux && (mux.playbackId || mux.playback_id);
-      if (!pid) return;
-      items.push({ kind:"video", title:p.title, date:p.published_at,
+      if (!pid) return;                            // members-only = a Mux upload
+      items.push({ kind:"video", title:p.title, date:p.published_at, pid,
         thumb:`https://image.mux.com/${pid}/thumbnail.webp?width=480&height=270&fit_mode=smartcrop&time=8`,
-        href:`/learn.html?post=${encodeURIComponent(p.id)}`,
-        mins: p.duration_seconds ? Math.max(1, Math.round(p.duration_seconds / 60)) : 0 });
+        href:`/learn.html?post=${encodeURIComponent(p.id)}`, mins:0 });
     });
     (le.data || []).forEach(e => {
-      items.push({ kind:"clinic", title:e.title, date:e.scheduled_at, mins:e.duration_mins || 0,
-        href: e.feed_post_id ? `/learn.html?post=${encodeURIComponent(e.feed_post_id)}` : '/learn.html',
+      // A clinic opens by its EVENT id (learn.html?clinic=), which plays the replay;
+      // ?post= with the announcement id just lands on the library.
+      items.push({ kind:"clinic", title:e.title, date:e.scheduled_at, pid:e.mux_playback_id,
+        href:`/learn.html?clinic=${encodeURIComponent(e.id)}`,
         thumb:`https://image.mux.com/${e.mux_playback_id}/thumbnail.webp?width=480&height=270&fit_mode=smartcrop` });
     });
     items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
     const top = items.slice(0, 10);
+    await Promise.all(top.map(async it => { it.mins = await muxMins(it.pid); }));
     if (top.length) {
       const html = top.map(card).join("");
       window._ndRailHTML = html;
