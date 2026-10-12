@@ -22632,7 +22632,7 @@ function _ndInjectStyle(){
   #nd-band .nd-rnav svg{ width:20px; height:20px; }
   #nd-band .nd-rprev{ left:-6px; }
   #nd-band .nd-rnext{ right:-6px; }
-  #nd-band .nd-ccard{ flex:0 0 246px; text-decoration:none; color:var(--nd-text); }
+  #nd-band .nd-ccard{ flex:0 0 var(--nd-cardw, 246px); text-decoration:none; color:var(--nd-text); }
   #nd-band .nd-cthumb{ width:100%; aspect-ratio:16/9; border-radius:16px; background:#222228 center/cover no-repeat; box-shadow:0 14px 34px -10px rgba(0,0,0,.6); position:relative; }
   #nd-band .nd-cthumb::after{ content:""; position:absolute; inset:0; border-radius:16px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
   #nd-band .nd-ctag{ position:absolute; top:11px; left:11px; z-index:1; font-size:.63rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:4px 8px; border-radius:7px; color:#0c0c0e; background:var(--ctagc,#eac64f); box-shadow:0 3px 10px -2px rgba(0,0,0,.5); }
@@ -23241,7 +23241,7 @@ function _ndReorderSections(tries){
 async function _ndContentRail(){
   const slot = () => document.getElementById('nd-rail');
   const hasMenu = () => { const m = document.getElementById('app-main'); return !!(m && m.getBoundingClientRect().left > 4); };
-  const CARD = 261; // card (246) + gap (15); a page step is a whole number of these
+  const GAP = 15, CARD = 246 + GAP; // target card width + gap; desktop fits a whole number of these
   // Show each arrow only when there is more that way (pointer/desktop, i.e. the side menu is present
   // and the rail overflows). Runs on scroll - cheap, just toggles classes.
   const updateArrows = (r) => {
@@ -23252,10 +23252,11 @@ async function _ndContentRail(){
     if (prev) prev.classList.toggle('show', paged && r.scrollLeft > 2);
     if (next) next.classList.toggle('show', paged && r.scrollLeft < max - 2);
   };
-  // Lay the rail out: on pointer/desktop (side menu present) hold it inside its column and let the
-  // arrows page it; on mobile (no side menu) hide the arrows and bleed it off both screen edges so
-  // cards run off the edge. Retries until the rail has a layout width (a repaint can run while the
-  // dashboard tab is briefly not laid out). Re-run on resize; arrow clicks/scroll wired once per rail.
+  // Lay the rail out. Desktop/pointer (side menu present): ARROW-PAGED with no free scroll - the cards
+  // are sized so a whole number fills the column exactly (never a half-card at rest), free horizontal
+  // scroll is turned off, and each arrow click pages one full screen. Mobile (no side menu): free swipe
+  // at the cards' natural size, bled off both screen edges. Retries until the rail has a layout width
+  // (a repaint can run while the dashboard tab is briefly not laid out). Re-run on resize.
   const tuneRail = (tries) => {
     const r = slot(); if (!r) return;
     if (!r.clientWidth) { if ((tries || 0) < 12) setTimeout(() => tuneRail((tries || 0) + 1), 120); return; }
@@ -23265,7 +23266,19 @@ async function _ndContentRail(){
     r.style.webkitMaskImage = r.style.maskImage = '';
     r.style.marginLeft = r.style.marginRight = '0px';
     r.style.paddingLeft = r.style.paddingRight = '';
-    if (!hasMenu()) {   // mobile: bleed off both screen edges; matching padding keeps first/last at the gutter
+    if (hasMenu()) {
+      // Size cards so N of them + gaps fill the column exactly; page one full screen at a time; no free scroll.
+      const cw = r.clientWidth;
+      const n = Math.max(1, Math.round(cw / CARD));
+      r.style.setProperty('--nd-cardw', ((cw - (n - 1) * GAP) / n).toFixed(2) + 'px');
+      r.style.overflowX = 'hidden';
+      r._ndStep = Math.round(cw + GAP);   // one full page of n cards lands on a card boundary
+    } else {
+      // Mobile: natural card size, free swipe, bleed off both screen edges (matching padding keeps the
+      // first/last card at the gutter).
+      r.style.removeProperty('--nd-cardw');
+      r.style.overflowX = 'auto';
+      r._ndStep = 0;
       const rect = r.getBoundingClientRect();
       const bl = Math.round(rect.left), br = Math.round(document.documentElement.clientWidth - rect.right);
       if (bl > 0) { r.style.marginLeft = '-' + bl + 'px'; r.style.paddingLeft = bl + 'px'; }
@@ -23274,11 +23287,11 @@ async function _ndContentRail(){
     if (!r._ndNavBound) {
       r.addEventListener('scroll', () => updateArrows(r), { passive: true });
       const prev = w && w.querySelector('.nd-rprev'), next = w && w.querySelector('.nd-rnext');
-      const step = () => Math.max(CARD, Math.floor(r.clientWidth / CARD) * CARD);
       // Animate scrollLeft directly (CSS/behavior:'smooth' does not take here), easeInOutQuad.
       const glide = (dir) => {
+        const stepPx = r._ndStep || Math.round(r.clientWidth + GAP);
         const max = r.scrollWidth - r.clientWidth;
-        const from = r.scrollLeft, to = Math.max(0, Math.min(max, from + dir * step())), d = to - from;
+        const from = r.scrollLeft, to = Math.max(0, Math.min(max, from + dir * stepPx)), d = to - from;
         if (!d) return;
         const t0 = performance.now(), D = 340, ease = p => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
         const tick = (now) => { const p = Math.min(1, (now - t0) / D); r.scrollLeft = Math.round(from + d * ease(p)); if (p < 1) requestAnimationFrame(tick); else updateArrows(r); };
