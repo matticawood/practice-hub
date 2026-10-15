@@ -78,7 +78,15 @@
   .store-h{ display:flex; align-items:baseline; gap:11px; margin:36px 0 4px; }
   .store-h h2{ font-family:var(--voice); font-size:1.45rem; font-weight:600; color:var(--head); }
   .store-sub{ font-size:.86rem; color:var(--muted); margin:0 0 15px; }
-  .store{ display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; }
+  .store{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media(min-width:1400px){ .store{ grid-template-columns:repeat(4,1fr); } }
+  @media(max-width:560px){ .store{ grid-template-columns:1fr; } }
+  /* owner view-as-member bar */
+  .owner-bar{ display:flex; align-items:center; gap:12px; background:rgba(245,197,24,.08); border:1px solid rgba(245,197,24,.22); border-radius:11px; padding:9px 14px; margin:0 0 18px; font-size:.84rem; color:var(--golds); }
+  .owner-bar svg{ width:16px; height:16px; flex:0 0 auto; }
+  .owner-bar b{ color:var(--head); font-weight:600; }
+  .owner-bar button{ margin-left:auto; flex:0 0 auto; background:transparent; border:1px solid var(--line2); color:#e9e8ee; border-radius:8px; padding:6px 12px; font:inherit; font-size:.8rem; font-weight:600; cursor:pointer; }
+  .owner-bar.preview{ background:rgba(96,165,250,.1); border-color:rgba(96,165,250,.28); color:#9ecbff; }
   .sitem{ position:relative; overflow:hidden; background:var(--card); border-radius:18px; padding:17px; box-shadow:inset 0 0 0 1px var(--hair), 0 14px 36px -26px rgba(0,0,0,.9); display:flex; flex-direction:column; min-height:150px; cursor:pointer; text-align:left; border:0; font:inherit; color:inherit; }
   .sitem::before{ content:""; position:absolute; top:-40px; right:-30px; width:170px; height:170px; border-radius:50%; background:radial-gradient(circle, color-mix(in srgb,var(--oc) 17%, transparent), transparent 70%); pointer-events:none; }
   .sitem.flag{ box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--oc) 42%, transparent), 0 14px 40px -24px rgba(245,197,24,.32); }
@@ -233,7 +241,7 @@
 <script src="/shared-header.js?v=2026071802"></script>
 
 <main id="app-main" style="display:none">
-  <div id="ask"><div class="ask-wrap"><div id="ask-view"></div></div></div>
+  <div id="ask"><div class="ask-wrap"><div id="owner-bar"></div><div id="ask-view"></div></div></div>
 </main>
 
 <div class="ask-modal" id="earn-modal" onclick="if(event.target===this)this.classList.remove('on')">
@@ -296,7 +304,7 @@ const CAT = {
   feedback: { cost:1000,  oc:'#34d399', live:true,  cta:'Send', name:'Feedback on a recording',
     val:'Send a video; Matt marks up what to fix.',
     ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>' },
-  plan: { cost:3000,      oc:'#f5c518', live:true,  cta:'Get a plan', name:'A direction plan', flag:true,
+  plan: { cost:3000,      oc:'#f5c518', live:true,  cta:'Get a plan', name:'A direction plan',
     val:'Your next few weeks, mapped to your goal.',
     ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>' },
   lesson: { cost:18000,   oc:'#f472b6', live:false, cta:'Book', name:'A 1:1 lesson',
@@ -325,11 +333,32 @@ async function spend(item, body){
   return { data, error };
 }
 
+// ── Owner "view as member" preview ─────────────────────────────────────────────
+function previewingMember(){ return new URLSearchParams(window.location.search).get('as') === 'member'; }
+function ownerActive(){ return isOwner() && !previewingMember(); }  // owner UI only when NOT previewing
+function toggleAs(){
+  const sp = new URLSearchParams(window.location.search);
+  if(sp.get('as')==='member') sp.delete('as'); else sp.set('as','member');
+  const u = new URL(window.location.href); u.search = sp.toString();
+  history.pushState({}, "", u); render();
+}
+function renderOwnerBar(){
+  const el = document.getElementById('owner-bar'); if(!el) return;
+  if(!isOwner()){ el.innerHTML = ''; return; }
+  if(previewingMember()){
+    el.innerHTML = '<div class="owner-bar preview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>You\'re previewing the page as a member sees it.<button onclick="toggleAs()">Back to owner view</button></div>';
+  } else {
+    el.innerHTML = '<div class="owner-bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg>Viewing as <b>Matt</b> (owner).<button onclick="toggleAs()">Preview as a member</button></div>';
+  }
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 function go(params){
+  const cur = new URLSearchParams(window.location.search);
   const u = new URL(window.location.href);
   u.search = "";
   Object.keys(params||{}).forEach(function(k){ if(params[k]!=null) u.searchParams.set(k, params[k]); });
+  const as = cur.get('as'); if(as && !u.searchParams.get('as')) u.searchParams.set('as', as);  // keep the preview mode across navigation
   history.pushState({}, "", u);
   render();
 }
@@ -340,6 +369,7 @@ async function render(){
   const flow = sp.get('flow') || '';
   const req  = sp.get('req') || '';
   await loadBalance();
+  renderOwnerBar();
   const view = document.getElementById('ask-view');
   if(flow === 'question') return renderQuestion(view, req);
   if(flow === 'feedback') return renderFeedback(view, req);
@@ -349,12 +379,11 @@ async function render(){
 
 // ── Hub ───────────────────────────────────────────────────────────────────────
 async function renderHub(view){
-  const owner = isOwner();
+  const owner = ownerActive();
   const items = Object.keys(CAT).map(function(key){
     const it = CAT[key]; const can = (_balance==null) || _balance>=it.cost;
     const need = (it.live && _balance!=null && !can) ? ('· '+fmt(it.cost-_balance)+' more') : '';
-    return '<button class="sitem'+(it.flag?' flag':'')+((it.live&&!can)?' cant':'')+'" style="--oc:'+it.oc+'" onclick="onStore(\''+key+'\')">'
-      + (it.flag?'<span class="sitem-tag" style="position:absolute;top:14px;right:14px">Most chosen</span>':'')
+    return '<button class="sitem'+((it.live&&!can)?' cant':'')+'" style="--oc:'+it.oc+'" onclick="onStore(\''+key+'\')">'
       + '<div class="sitem-top"><span class="sitem-ic">'+it.ic+'</span></div>'
       + '<div class="sitem-n">'+it.name+'</div><div class="sitem-v">'+it.val+'</div>'
       + '<div class="sitem-foot"><span class="price"><span class="coin">'+IC.coin+'</span>'+fmt(it.cost)+'<span class="sitem-need">'+need+'</span></span>'
@@ -485,7 +514,7 @@ function contextRail(){
 async function renderThread(view, reqId, kind){
   const r = await getRequest(reqId);
   if(!r){ view.innerHTML = convTop('Not found','',null)+'<div class="empty-note">That request could not be loaded.</div>'; return; }
-  const owner = isOwner();
+  const owner = ownerActive();
   const q = escHtml((r.body && (r.body.text||r.body.aim||r.body.note)) || '');
   const title = KIND_LABEL[r.kind]||'Request';
   let reply = '';
@@ -582,7 +611,7 @@ async function submitPlan(){
 async function renderPlanDeliverable(view, reqId){
   const r = await getRequest(reqId);
   if(!r){ view.innerHTML = convTop('Not found','',null)+'<div class="empty-note">That plan could not be loaded.</div>'; return; }
-  const owner = isOwner();
+  const owner = ownerActive();
   if(r.status==='delivered' && r.response && r.response.text){
     view.innerHTML = convTop('Your direction plan','From Matt · delivered',null)
       + '<div style="max-width:720px"><div class="rendered">'+escHtml(r.response.text)+'</div></div>';
