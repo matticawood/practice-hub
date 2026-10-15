@@ -51,7 +51,7 @@ const SH_SUBNAV = {
     { label: "Progress", href: "/practice-log.html?goto=stats" },
     /* Ask: search the library, ask the room, or spend credits on private feedback
        from Matt. The access-to-Matt surface. Page is built in a later phase. */
-    { label: "Ask", href: "/practice-log.html?goto=ask" },
+    { label: "Ask", href: "/ask.html" },
   ],
   learn: [
     { label: "Library", href: "/learn.html" },

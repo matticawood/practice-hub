@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Ask — The Practice Room</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#f5c518" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Practice Room" />
+  <link rel="icon" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icon-512.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+  /* ===== Ask page: its own dark immersive ground over the shared header ===== */
+  body.hub-mode{ background:#0b0b0e; }
+  #app-main{ background:transparent !important; }
+  #ask{
+    position:relative; min-height:70vh; color:#e9e8ee;
+    font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased;
+    --card:#1a1a20; --raised:#24242b; --hair:rgba(255,255,255,.07); --line:rgba(255,255,255,.12); --line2:rgba(255,255,255,.18);
+    --head:#f4f1ec; --muted:#9594a0; --faint:#6a6972; --gold:#f5c518; --golds:#eac64f;
+    --green:#34d399; --blue:#60a5fa; --purple:#a78bfa; --pink:#f472b6; --voice:'Fraunces',Georgia,serif;
+  }
+  #ask::before{ content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:radial-gradient(1100px 760px at 100% -6%, rgba(99,102,241,.14), transparent 56%); }
+  #ask *{ box-sizing:border-box; }
+  #ask a{ color:inherit; text-decoration:none; }
+  .ask-wrap{ position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:22px clamp(16px,5vw,30px) 90px; }
+
+  .eyb{ font-size:.7rem; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); font-weight:700; }
+  .ask-h1{ font-family:var(--voice); font-size:2rem; font-weight:500; color:var(--head); line-height:1.05; margin:8px 0 0; }
+
+  /* layout: main + rail */
+  .lay{ display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:30px; align-items:start; }
+  .lay-narrow{ grid-template-columns:minmax(0,1fr) 320px; }
+  .rail{ position:sticky; top:84px; }
+  @media(max-width:980px){ .lay,.lay-narrow{ grid-template-columns:1fr; } .rail{ position:static; } }
+
+  /* help unit (search + topics + community) */
+  .help{ margin:20px 0 0; background:var(--card); border:1px solid var(--line2); border-radius:16px; overflow:hidden; }
+  .help-s{ display:flex; align-items:center; gap:12px; padding:15px 17px; }
+  .help-s > svg{ width:20px; height:20px; color:var(--muted); flex:0 0 auto; }
+  .help-s input{ flex:1; min-width:0; background:none; border:0; outline:0; color:var(--head); font-family:'Inter',sans-serif; font-size:1rem; }
+  .help-s input::placeholder{ color:var(--faint); }
+  .help-go{ flex:0 0 auto; width:38px; height:38px; border-radius:10px; border:0; background:var(--gold); color:#17130a; display:grid; place-items:center; cursor:pointer; }
+  .help-go svg{ width:18px; height:18px; }
+  .help-c{ display:flex; flex-wrap:wrap; gap:7px; padding:0 15px 15px; }
+  .help-c span{ font-size:.78rem; color:var(--muted); background:rgba(255,255,255,.04); border:1px solid var(--line); border-radius:999px; padding:6px 12px; cursor:pointer; }
+  .help-comm{ display:flex; align-items:center; gap:11px; padding:13px 16px; border-top:1px solid var(--line); color:#e9e8ee; font-size:.88rem; }
+  .help-comm .cic{ width:30px; height:30px; flex:0 0 auto; border-radius:9px; background:var(--raised); color:var(--blue); display:grid; place-items:center; }
+  .help-comm .cic svg{ width:16px; height:16px; }
+  .help-comm b{ color:var(--head); font-weight:600; }
+  .help-comm .free{ margin-left:8px; font-size:.64rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--green); }
+  .help-comm-b{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .help-comm-sub{ font-size:.78rem; color:var(--muted); line-height:1.4; }
+  .help-comm .go{ margin-left:auto; color:var(--muted); flex:0 0 auto; }
+  .help-comm .go svg{ width:18px; height:18px; }
+
+  /* store */
+  .store-h{ display:flex; align-items:baseline; gap:11px; margin:36px 0 4px; }
+  .store-h h2{ font-family:var(--voice); font-size:1.45rem; font-weight:600; color:var(--head); }
+  .store-sub{ font-size:.86rem; color:var(--muted); margin:0 0 15px; }
+  .store{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media(max-width:620px){ .store{ grid-template-columns:1fr; } }
+  .sitem{ position:relative; overflow:hidden; background:var(--card); border-radius:18px; padding:17px; box-shadow:inset 0 0 0 1px var(--hair), 0 14px 36px -26px rgba(0,0,0,.9); display:flex; flex-direction:column; min-height:150px; cursor:pointer; text-align:left; border:0; font:inherit; color:inherit; }
+  .sitem::before{ content:""; position:absolute; top:-40px; right:-30px; width:170px; height:170px; border-radius:50%; background:radial-gradient(circle, color-mix(in srgb,var(--oc) 17%, transparent), transparent 70%); pointer-events:none; }
+  .sitem.flag{ box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--oc) 42%, transparent), 0 14px 40px -24px rgba(245,197,24,.32); }
+  .sitem-top{ display:flex; align-items:center; gap:12px; position:relative; }
+  .sitem-ic{ width:44px; height:44px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center; background:color-mix(in srgb,var(--oc) 16%, var(--card)); color:var(--oc); box-shadow:0 0 0 1px color-mix(in srgb,var(--oc) 32%, transparent); }
+  .sitem-ic svg{ width:22px; height:22px; }
+  .sitem-tag{ margin-left:auto; font-size:.58rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:#1a1408; background:var(--golds); border-radius:5px; padding:4px 8px; }
+  .sitem-n{ font-family:var(--voice); font-size:1.1rem; font-weight:500; color:var(--head); line-height:1.2; margin:12px 0 0; }
+  .sitem-v{ font-size:.84rem; color:var(--muted); line-height:1.45; margin:5px 0 0; }
+  .sitem-foot{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:auto; padding-top:14px; }
+  .price{ display:inline-flex; align-items:center; gap:7px; font-family:var(--voice); font-size:1.1rem; color:var(--golds); font-variant-numeric:tabular-nums; }
+  .coin{ display:inline-grid; place-items:center; width:19px; height:19px; border-radius:50%; flex:0 0 auto; background:radial-gradient(circle at 34% 30%,#ffe7a0,#f5c518 55%,#c7960f); box-shadow:inset 0 -1px 2px rgba(120,80,0,.45),inset 0 1px 2px rgba(255,255,255,.4); }
+  .coin svg{ width:11px; height:11px; color:#6a4e06; }
+  .sitem-need{ font-size:.72rem; color:var(--faint); margin-left:8px; }
+  .buy{ border:0; border-radius:11px; padding:10px 16px; font:inherit; font-size:.85rem; font-weight:600; cursor:pointer; background:var(--gold); color:#17130a; white-space:nowrap; }
+  .buy.ghost{ background:transparent; color:#e9e8ee; box-shadow:inset 0 0 0 1px var(--line2); }
+  .sitem.cant{ opacity:.74; }
+
+  /* wallet rail */
+  .wallet{ background:linear-gradient(180deg,#1d1d24,#161619); border-radius:18px; padding:18px; box-shadow:inset 0 0 0 1px var(--line); }
+  .w-k{ font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); font-weight:700; }
+  .w-bal{ display:flex; align-items:center; gap:11px; margin:11px 0 0; }
+  .w-coin{ width:34px; height:34px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center; background:radial-gradient(circle at 34% 30%,#ffe7a0,#f5c518 55%,#c7960f); box-shadow:inset 0 -2px 4px rgba(120,80,0,.4),inset 0 2px 4px rgba(255,255,255,.4); }
+  .w-coin svg{ width:18px; height:18px; color:#6a4e06; }
+  .w-n{ font-family:var(--voice); font-size:2rem; font-weight:500; color:var(--head); line-height:1; font-variant-numeric:tabular-nums; }
+  .w-u{ font-size:.9rem; color:var(--muted); }
+  .w-earn{ font-size:.82rem; color:var(--muted); line-height:1.5; margin:14px 0 0; }
+  .w-info{ font-size:.78rem; font-weight:600; color:var(--gold); margin:14px 0 0; display:inline-block; cursor:pointer; }
+  .how{ margin:24px 0 0; }
+  .how-h{ font-family:var(--voice); font-size:1.05rem; font-weight:600; color:var(--head); margin:0 0 13px; }
+  .how-step{ display:flex; gap:12px; align-items:flex-start; margin-bottom:13px; }
+  .how-num{ width:23px; height:23px; flex:0 0 auto; border-radius:50%; background:var(--raised); color:var(--golds); font-size:.74rem; font-weight:700; display:grid; place-items:center; }
+  .how-tx{ font-size:.85rem; color:var(--muted); line-height:1.45; }
+  .how-tx b{ color:var(--head); font-weight:600; }
+  .reqs{ margin:26px 0 0; }
+  .reqs-h{ font-family:var(--voice); font-size:1.05rem; font-weight:600; color:var(--head); margin:0 0 4px; }
+  .req{ padding:13px 2px; border-top:1px solid var(--hair); display:block; cursor:pointer; }
+  .req:first-of-type{ border-top:0; }
+  .req-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .req-n{ font-size:.86rem; font-weight:600; color:var(--head); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .req-st{ font-size:.64rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; white-space:nowrap; }
+  .req-st.wait{ color:var(--faint); }
+  .req-st.done{ color:var(--golds); }
+  .req-s{ font-size:.78rem; color:var(--faint); margin-top:3px; }
+  .reqs-empty{ font-size:.84rem; color:var(--faint); line-height:1.5; padding:12px 2px 0; }
+
+  /* owner queue */
+  .queue{ margin:26px 0 34px; }
+  .queue-h{ font-family:var(--voice); font-size:1.3rem; font-weight:600; color:var(--head); margin:0 0 4px; }
+  .queue-sub{ font-size:.85rem; color:var(--muted); margin:0 0 15px; }
+  .qreq{ background:var(--card); border-radius:14px; padding:15px; box-shadow:inset 0 0 0 1px var(--hair); margin-bottom:12px; }
+  .qreq-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+  .qreq-who{ font-size:.86rem; font-weight:600; color:var(--head); }
+  .qreq-k{ font-size:.68rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--faint); }
+  .qreq-q{ font-size:.92rem; color:#d7d6de; line-height:1.55; white-space:pre-wrap; margin-bottom:10px; }
+  .qreq textarea{ width:100%; background:var(--raised); border:1px solid var(--line2); border-radius:10px; color:var(--head); font:inherit; font-size:.9rem; padding:10px; resize:vertical; min-height:70px; }
+  .qreq .buy{ margin-top:9px; }
+
+  /* conversation / flow pages */
+  .conv-top{ display:flex; align-items:center; gap:13px; margin:6px 0 22px; }
+  .back{ width:34px; height:34px; flex:0 0 auto; border-radius:10px; display:grid; place-items:center; color:var(--muted); background:var(--card); border:1px solid var(--line); cursor:pointer; }
+  .back svg{ width:18px; height:18px; }
+  .conv-t{ font-family:var(--voice); font-size:1.3rem; font-weight:600; color:var(--head); line-height:1.15; }
+  .conv-s{ font-size:.78rem; color:var(--faint); display:flex; align-items:center; gap:6px; margin-top:2px; }
+  .conv-s svg{ width:12px; height:12px; }
+  .conv-cost{ margin-left:auto; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; font-size:.86rem; font-weight:600; color:var(--golds); background:rgba(245,197,24,.1); border:1px solid rgba(245,197,24,.28); border-radius:999px; padding:7px 13px; font-variant-numeric:tabular-nums; }
+
+  .msg{ display:flex; gap:13px; align-items:flex-start; margin-bottom:18px; }
+  .msg-av{ width:38px; height:38px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center; font-weight:600; font-size:.86rem; background:linear-gradient(135deg,#f5c518,#b8791a); color:#2a1800; font-family:var(--voice); }
+  .msg-av.me{ background:linear-gradient(135deg,#3a3a46,#24242b); color:#e9e8ee; }
+  .msg-who{ font-size:.8rem; font-weight:600; color:var(--head); margin-bottom:5px; }
+  .msg-who span{ color:var(--faint); font-weight:400; margin-left:7px; }
+  .bubble{ background:var(--card); border:1px solid var(--hair); border-radius:4px 16px 16px 16px; padding:14px 16px; font-size:.95rem; line-height:1.55; color:#e9e8ee; max-width:560px; white-space:pre-wrap; }
+  .msg-hint{ font-size:.8rem; color:var(--faint); margin:2px 0 12px; }
+
+  .composer-wrap{ background:var(--raised); border:1px solid var(--line2); border-radius:18px; padding:14px 15px; box-shadow:0 20px 50px -24px rgba(0,0,0,.9); }
+  .composer-wrap textarea{ width:100%; min-height:96px; background:none; border:0; outline:0; resize:vertical; color:var(--head); font-family:'Inter',sans-serif; font-size:1rem; line-height:1.55; }
+  .composer-wrap textarea::placeholder{ color:var(--faint); }
+  .composer-row{ display:flex; align-items:center; gap:9px; margin-top:10px; flex-wrap:wrap; }
+  .attach{ display:inline-flex; align-items:center; gap:7px; font-size:.8rem; font-weight:500; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px; padding:7px 12px; cursor:pointer; }
+  .attach.soon{ opacity:.6; cursor:default; }
+  .attach svg{ width:15px; height:15px; }
+  .send{ margin-left:auto; display:inline-flex; align-items:center; gap:9px; border:0; border-radius:12px; padding:11px 18px; font:inherit; font-size:.92rem; font-weight:700; cursor:pointer; background:var(--gold); color:#17130a; }
+  .send:disabled{ opacity:.6; cursor:default; }
+  .composer-note{ font-size:.78rem; color:var(--faint); text-align:center; margin:10px 0 0; }
+
+  .fl{ font-size:.74rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--faint); margin:0 0 10px; }
+  .fsec{ margin-bottom:22px; }
+  .lead{ font-size:.98rem; color:#cfcdd6; line-height:1.6; margin:0 0 22px; }
+  .ti{ width:100%; background:var(--card); border:1px solid var(--line2); border-radius:12px; padding:13px 15px; color:var(--head); font-family:'Inter',sans-serif; font-size:.95rem; }
+  .ta{ width:100%; min-height:96px; background:var(--card); border:1px solid var(--line2); border-radius:12px; padding:13px 15px; color:var(--head); font-family:'Inter',sans-serif; font-size:.95rem; line-height:1.6; resize:vertical; }
+  .ta.big{ min-height:104px; }
+  .ta::placeholder,.ti::placeholder{ color:var(--faint); }
+
+  .known{ background:var(--card); border-radius:15px; padding:16px; box-shadow:inset 0 0 0 1px var(--hair); }
+  .known-h{ display:flex; align-items:center; gap:8px; font-size:.84rem; font-weight:600; color:var(--head); margin-bottom:3px; }
+  .known-h svg{ width:15px; height:15px; color:var(--green); }
+  .known-s{ font-size:.8rem; color:var(--faint); margin:0 0 14px; }
+  .kgrid{ display:grid; grid-template-columns:1fr 1fr; gap:14px 18px; }
+  @media(max-width:620px){ .kgrid{ grid-template-columns:1fr; } }
+  .kitem{ display:flex; gap:11px; align-items:flex-start; }
+  .kic{ width:30px; height:30px; flex:0 0 auto; border-radius:9px; background:var(--raised); display:grid; place-items:center; }
+  .kic svg{ width:16px; height:16px; }
+  .kk{ font-size:.72rem; color:var(--faint); }
+  .kv{ font-size:.88rem; color:var(--head); font-weight:600; line-height:1.3; }
+
+  .rc{ background:var(--card); border-radius:16px; padding:16px; box-shadow:inset 0 0 0 1px var(--hair); margin-bottom:16px; }
+  .rc-h{ display:flex; align-items:center; gap:8px; font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:12px; }
+  .rc-h svg{ width:14px; height:14px; }
+  .rc-row{ display:flex; align-items:center; gap:11px; padding:11px 0; border-top:1px solid var(--hair); }
+  .rc-row:first-of-type{ border-top:0; }
+  .rc-ic{ width:30px; height:30px; flex:0 0 auto; border-radius:9px; background:var(--raised); display:grid; place-items:center; color:var(--blue); }
+  .rc-ic svg{ width:16px; height:16px; }
+  .rc-k{ font-size:.72rem; color:var(--faint); }
+  .rc-v{ font-size:.88rem; color:var(--head); font-weight:600; line-height:1.3; }
+  .rc-step{ display:flex; gap:11px; align-items:flex-start; margin-bottom:12px; }
+  .rc-num{ width:22px; height:22px; flex:0 0 auto; border-radius:50%; background:var(--raised); color:var(--golds); font-size:.72rem; font-weight:700; display:grid; place-items:center; }
+  .rc-tx{ font-size:.84rem; color:var(--muted); line-height:1.45; }
+  .rc-tx b{ color:var(--head); font-weight:600; }
+  .rc-foot{ display:flex; align-items:center; gap:8px; font-size:.78rem; color:var(--faint); margin-top:4px; }
+  .rc-foot svg{ width:14px; height:14px; color:var(--green); }
+
+  .ups{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:22px; }
+  @media(max-width:620px){ .ups{ grid-template-columns:1fr; } }
+  .updrop{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; min-height:150px; border:1.5px dashed var(--line2); border-radius:15px; background:rgba(255,255,255,.02); color:var(--muted); text-align:center; padding:22px; }
+  .updrop .d-ic{ width:40px; height:40px; border-radius:50%; background:var(--raised); display:grid; place-items:center; color:var(--golds); }
+  .updrop .d-ic svg{ width:19px; height:19px; }
+  .updrop .d-t{ font-size:.9rem; font-weight:600; color:var(--head); }
+  .updrop .d-s{ font-size:.76rem; color:var(--faint); }
+  .updrop .soon-b{ font-size:.6rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); background:rgba(255,255,255,.05); border-radius:5px; padding:3px 7px; margin-top:4px; }
+
+  .rendered{ font-size:.98rem; line-height:1.7; color:#e9e8ee; white-space:pre-wrap; }
+  .empty-note{ font-size:.92rem; color:var(--muted); line-height:1.6; background:var(--card); border-radius:14px; padding:16px; box-shadow:inset 0 0 0 1px var(--hair); }
+  .soon-page{ background:var(--card); border-radius:16px; padding:20px; box-shadow:inset 0 0 0 1px var(--hair); font-size:.95rem; color:var(--muted); line-height:1.6; }
+  .soon-page b{ color:var(--head); font-weight:600; }
+
+  /* earn modal */
+  .ask-modal{ position:fixed; inset:0; z-index:9000; background:rgba(5,5,8,.68); backdrop-filter:blur(3px); display:none; align-items:center; justify-content:center; padding:18px; }
+  .ask-modal.on{ display:flex; }
+  .ask-modal-card{ width:100%; max-width:420px; background:#15151a; border:1px solid rgba(255,255,255,.1); border-radius:18px; padding:20px; color:#e9e8ee; }
+  .ask-modal-h{ font-family:var(--voice); font-size:1.2rem; font-weight:600; color:#f4f1ec; margin-bottom:8px; }
+  .ask-modal-b{ font-size:.92rem; color:#cfcdd6; line-height:1.6; }
+  .ask-modal-x{ float:right; background:none; border:0; color:#9594a0; font-size:1.5rem; line-height:1; cursor:pointer; }
+  </style>
+</head>
+<body class="hub-mode">
+
+<div id="loading-screen"><div class="loading-spinner"></div></div>
+<div id="toast"></div>
+
+<header id="app-header" style="display:none"></header>
+<script src="/shared-header.js?v=2026071802"></script>
+
+<main id="app-main" style="display:none">
+  <div id="ask"><div class="ask-wrap"><div id="ask-view"></div></div></div>
+</main>
+
+<div class="ask-modal" id="earn-modal" onclick="if(event.target===this)this.classList.remove('on')">
+  <div class="ask-modal-card">
+    <button class="ask-modal-x" onclick="document.getElementById('earn-modal').classList.remove('on')">&times;</button>
+    <div class="ask-modal-h">How you earn credits</div>
+    <div class="ask-modal-b">Your practice earns credits automatically: one credit for every minute you log, up to 90 a day, plus 300 every month. Courses and practice tools count too. The more you play, the more access you build.</div>
+  </div>
+</div>
+
+<script>
+// ── Configuration ─────────────────────────────────────────────────────────────
+const SUPABASE_URL  = "https://gyskfutmncprqxazgatv.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5c2tmdXRtbmNwcnF4YXpnYXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NjIwMTYsImV4cCI6MjA5MTMzODAxNn0.ttC3plmhbA7ls_T3w25XgYT0WBt6O3MMu0G6NrEKI9g";
+const OWNER_EMAIL   = "matthew@matthewcawood.com";
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+  auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false }
+});
+
+let myEmail = "";
+let myName  = "";
+let myMemberKey = null;
+let _balance = null;
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function escHtml(str){ return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function showToast(msg, duration){ if(duration===undefined) duration=3500; const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("visible"); setTimeout(function(){ el.classList.remove("visible"); }, duration); }
+function redirectToRoot(){ window.location.href = "/"; }
+function isOwner(){ return myEmail.toLowerCase() === OWNER_EMAIL.toLowerCase(); }
+function fmt(n){ return (typeof n==="number") ? n.toLocaleString() : "—"; }
+
+async function ensureFreshToken(){
+  try{
+    const { data: { session } } = await db.auth.getSession();
+    if(!session) return false;
+    const expiresAt = session.expires_at * 1000;
+    if(Date.now() > expiresAt - 5*60*1000){ const { error } = await db.auth.refreshSession(); if(error) return false; }
+    return true;
+  } catch(e){ return false; }
+}
+async function requireAuth(){ const ok = await ensureFreshToken(); if(!ok){ await db.auth.signOut().catch(function(){}); redirectToRoot(); } return ok; }
+document.addEventListener("visibilitychange", async function(){ if(document.visibilityState!=="visible") return; const ok=await ensureFreshToken(); if(!ok){ await db.auth.signOut().catch(function(){}); redirectToRoot(); } });
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+const IC = {
+  coin: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  piece: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  photo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>',
+  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>'
+};
+
+// ── Catalogue ─────────────────────────────────────────────────────────────────
+const CAT = {
+  question: { cost:500,   oc:'#60a5fa', live:true,  cta:'Ask', name:'A private question',
+    val:'A written reply from Matt, just for you.',
+    ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' },
+  feedback: { cost:1000,  oc:'#34d399', live:true,  cta:'Send', name:'Feedback on a recording',
+    val:'Send a video; Matt marks up what to fix.',
+    ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>' },
+  plan: { cost:3000,      oc:'#f5c518', live:true,  cta:'Get a plan', name:'A direction plan', flag:true,
+    val:'Your next few weeks, mapped to your goal.',
+    ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>' },
+  lesson: { cost:18000,   oc:'#f472b6', live:false, cta:'Book', name:'A 1:1 lesson',
+    val:'30 minutes, live and one to one.',
+    ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>' }
+};
+const KIND_LABEL = { question:'Private question', feedback:'Feedback', plan:'Direction plan', lesson:'1:1 lesson' };
+
+// ── Credits data ──────────────────────────────────────────────────────────────
+async function loadBalance(){
+  try{ const { data } = await db.rpc('get_my_credits'); const b = Array.isArray(data) ? (data[0] && data[0].balance) : (data && data.balance); if(typeof b==='number') _balance = b; }catch(e){}
+}
+async function myRequests(){
+  try{ const { data } = await db.from('credit_requests').select('*').order('created_at',{ascending:false}); return data || []; }catch(e){ return []; }
+}
+async function openRequests(){
+  try{ const { data } = await db.from('credit_requests').select('*').eq('status','open').order('created_at',{ascending:true}); return data || []; }catch(e){ return []; }
+}
+async function getRequest(id){
+  try{ const { data } = await db.from('credit_requests').select('*').eq('id', id).maybeSingle(); return data || null; }catch(e){ return null; }
+}
+async function spend(item, body){
+  if(!await requireAuth()) return { error:{ message:'auth' } };
+  const { data, error } = await db.rpc('spend_credits', { p_item:item, p_body:body });
+  if(!error){ const b = data && (Array.isArray(data) ? (data[0] && data[0].balance) : data.balance); if(typeof b==='number') _balance = b; }
+  return { data, error };
+}
+
+// ── Router ────────────────────────────────────────────────────────────────────
+function go(params){
+  const u = new URL(window.location.href);
+  u.search = "";
+  Object.keys(params||{}).forEach(function(k){ if(params[k]!=null) u.searchParams.set(k, params[k]); });
+  history.pushState({}, "", u);
+  render();
+}
+window.addEventListener('popstate', render);
+
+async function render(){
+  const sp = new URLSearchParams(window.location.search);
+  const flow = sp.get('flow') || '';
+  const req  = sp.get('req') || '';
+  await loadBalance();
+  const view = document.getElementById('ask-view');
+  if(flow === 'question') return renderQuestion(view, req);
+  if(flow === 'feedback') return renderFeedback(view, req);
+  if(flow === 'plan')     return renderPlan(view, req);
+  return renderHub(view);
+}
+
+// ── Hub ───────────────────────────────────────────────────────────────────────
+async function renderHub(view){
+  const owner = isOwner();
+  const items = Object.keys(CAT).map(function(key){
+    const it = CAT[key]; const can = (_balance==null) || _balance>=it.cost;
+    const need = (it.live && _balance!=null && !can) ? ('· '+fmt(it.cost-_balance)+' more') : '';
+    return '<button class="sitem'+(it.flag?' flag':'')+((it.live&&!can)?' cant':'')+'" style="--oc:'+it.oc+'" onclick="onStore(\''+key+'\')">'
+      + (it.flag?'<span class="sitem-tag" style="position:absolute;top:14px;right:14px">Most chosen</span>':'')
+      + '<div class="sitem-top"><span class="sitem-ic">'+it.ic+'</span></div>'
+      + '<div class="sitem-n">'+it.name+'</div><div class="sitem-v">'+it.val+'</div>'
+      + '<div class="sitem-foot"><span class="price"><span class="coin">'+IC.coin+'</span>'+fmt(it.cost)+'<span class="sitem-need">'+need+'</span></span>'
+      + '<span class="buy'+(it.live?'':' ghost')+'">'+(it.live?it.cta:'Soon')+'</span></div></button>';
+  }).join('');
+
+  view.innerHTML =
+    '<div class="eyb">Ask</div><h1 class="ask-h1">What do you need help with?</h1>'
+    + '<div class="lay"><div>'
+    + '<div class="help">'
+      + '<div class="help-s"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>'
+      + '<input placeholder="Search the Practice Room in your own words…" onkeydown="if(event.key===\'Enter\')onSearch(this.value)">'
+      + '<button class="help-go" aria-label="Search" onclick="onSearch(this.previousElementSibling.value)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>'
+      + '<div class="help-c"><span onclick="onSearch(\'Pedalling\')">Pedalling</span><span onclick="onSearch(\'Staccato\')">Staccato</span><span onclick="onSearch(\'Sight-reading\')">Sight-reading</span><span onclick="onSearch(\'Memorising\')">Memorising</span></div>'
+      + '<a class="help-comm" href="/community.html"><span class="cic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg></span>'
+        + '<span class="help-comm-b"><span style="display:flex;align-items:center"><b>Ask the community</b><span class="free">Free</span></span><span class="help-comm-sub">Fellow members and Matt both answer, in the open.</span></span>'
+        + '<span class="go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></a>'
+    + '</div>'
+    + '<div class="store-h"><h2>Personalised help from Matt</h2></div>'
+    + '<div class="store-sub">Four ways to get his direct attention, paid with the credits you earn.</div>'
+    + '<div class="store">'+items+'</div>'
+    + (owner ? '<div id="owner-queue"></div>' : '')
+    + '</div>'
+    + '<aside class="rail"><div class="wallet"><div class="w-k">Your wallet</div>'
+      + '<div class="w-bal"><span class="w-coin">'+IC.coin+'</span><span class="w-n" data-credit-balance>'+fmt(_balance)+'</span><span class="w-u">credits</span></div>'
+      + '<div class="w-earn">You earn 1 credit for every minute you practise, up to 90 a day. Plus 300 a month.</div>'
+      + '<a class="w-info" onclick="document.getElementById(\'earn-modal\').classList.add(\'on\')">How credits work ›</a></div>'
+      + '<div class="how"><div class="how-h">How it works</div>'
+        + '<div class="how-step"><span class="how-num">1</span><span class="how-tx"><b>Practise</b> and earn credits automatically.</span></div>'
+        + '<div class="how-step"><span class="how-num">2</span><span class="how-tx"><b>Ask</b> a question, send a recording, or request a plan.</span></div>'
+        + '<div class="how-step"><span class="how-num">3</span><span class="how-tx"><b>Matt replies</b> personally, and it lands here.</span></div></div>'
+      + '<div class="reqs"><div class="reqs-h">Your requests</div><div id="your-reqs"><div class="reqs-empty">Loading…</div></div></div>'
+    + '</aside></div>';
+
+  // your requests (member view)
+  const reqs = await myRequests();
+  const mine = reqs.filter(function(r){ return r.email && r.email.toLowerCase()===myEmail.toLowerCase(); });
+  const yr = document.getElementById('your-reqs');
+  if(yr){
+    if(!mine.length){ yr.innerHTML = '<div class="reqs-empty">Nothing yet. Ask Matt your first question above.</div>'; }
+    else { yr.innerHTML = mine.slice(0,6).map(function(r){
+      const st = r.status==='delivered' ? '<span class="req-st done">Replied</span>' : (r.status==='cancelled' ? '<span class="req-st">Refunded</span>' : '<span class="req-st wait">Waiting</span>');
+      return '<a class="req" onclick="openReq(\''+r.kind+'\',\''+r.id+'\')"><div class="req-top"><span class="req-n">'+escHtml(KIND_LABEL[r.kind]||r.kind)+'</span>'+st+'</div><div class="req-s">'+escHtml(_reqPreview(r))+'</div></a>';
+    }).join(''); }
+  }
+  // owner queue
+  if(owner){ renderOwnerQueue(); }
+  _applyAffordability();
+}
+
+function _reqPreview(r){
+  const t = (r.body && (r.body.text || r.body.aim || r.body.note)) || '';
+  return (t.length>42 ? t.slice(0,42)+'…' : t) || (KIND_LABEL[r.kind]||'');
+}
+function openReq(kind, id){ go({ flow: kind, req: id }); }
+function onStore(key){ const it=CAT[key]; if(!it.live){ showToast('That one is coming soon.'); return; } go({ flow:key }); }
+function onSearch(q){ if(!q) return; window.location.href = '/learn.html?q=' + encodeURIComponent(q); }
+
+function _applyAffordability(){
+  document.querySelectorAll('[data-credit-balance]').forEach(function(el){ if(_balance!=null) el.textContent = fmt(_balance); });
+}
+
+async function renderOwnerQueue(){
+  const el = document.getElementById('owner-queue'); if(!el) return;
+  const rows = await openRequests();
+  el.innerHTML = '<div class="queue"><div class="queue-h">Open requests</div><div class="queue-sub">Members waiting on you.</div>'
+    + (rows.length ? rows.map(function(r){
+      const q = escHtml((r.body && (r.body.text||r.body.aim||r.body.note)) || '');
+      return '<div class="qreq"><div class="qreq-top"><span class="qreq-who">'+escHtml(r.email||'')+'</span><span class="qreq-k">'+escHtml(KIND_LABEL[r.kind]||r.kind)+' · '+r.cost+' cr</span></div>'
+        + '<div class="qreq-q">'+q+'</div>'
+        + '<textarea id="reply-'+r.id+'" placeholder="Write your reply…"></textarea>'
+        + '<button class="buy" onclick="deliver(\''+r.id+'\')">Send reply & charge '+r.cost+'</button></div>';
+    }).join('') : '<div class="reqs-empty">Nothing waiting. You are all caught up.</div>')
+    + '</div>';
+}
+async function deliver(id){
+  const ta = document.getElementById('reply-'+id); const text = ((ta&&ta.value)||'').trim();
+  if(text.length<2){ showToast('Write your reply first.', 3000); return; }
+  if(!await requireAuth()) return;
+  const { error } = await db.rpc('deliver_credit_request', { p_id:id, p_response:{ text:text } });
+  if(error){ showToast('Could not deliver. '+(error.message||''), 4000); return; }
+  showToast('Delivered. The member has been notified.');
+  renderOwnerQueue();
+}
+
+// ── shared flow header ─────────────────────────────────────────────────────────
+function convTop(title, sub, cost){
+  return '<div class="conv-top"><button class="back" onclick="go({})">'+IC.back+'</button>'
+    + '<div><div class="conv-t">'+title+'</div><div class="conv-s">'+IC.lock+' '+sub+'</div></div>'
+    + (cost!=null ? '<span class="conv-cost"><span class="coin">'+IC.coin+'</span>'+fmt(cost)+' credits</span>' : '')
+    + '</div>';
+}
+function balanceAfter(cost){ return (_balance!=null) ? ('You have '+fmt(_balance)+', so you\'ll have '+fmt(Math.max(0,_balance-cost))+' left.') : ''; }
+
+// ── Question flow ──────────────────────────────────────────────────────────────
+async function renderQuestion(view, reqId){
+  if(reqId){ return renderThread(view, reqId, 'question'); }
+  const cost = CAT.question.cost;
+  view.innerHTML = convTop('Ask Matt a question','Private to you and Matt',cost)
+    + '<div class="lay-narrow lay"><div>'
+    + '<div class="msg"><span class="msg-av">M</span><div><div class="msg-who">Matt <span>usually replies within a couple of days</span></div>'
+      + '<div class="bubble">Hi '+escHtml(myName)+'. Ask me anything about your playing: a passage that won\'t sit, how to practise something, what to work on next. Be as specific as you can and I\'ll give you a proper, considered answer, just for you.</div></div></div>'
+    + '<div class="msg-hint">Your question is held at '+fmt(cost)+' credits until Matt replies. Refunded if he can\'t take it.</div>'
+    + '<div class="composer-wrap"><textarea id="q-text" placeholder="What would you like to ask Matt?"></textarea>'
+      + '<div class="composer-row"><span class="attach soon">'+IC.piece+'Add a piece · soon</span><span class="attach soon">'+IC.photo+'Attach a photo · soon</span>'
+      + '<button class="send" id="q-send" onclick="submitQuestion()"><span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(cost)+'</button></div></div>'
+    + '<div class="composer-note">'+balanceAfter(cost)+'</div>'
+    + '</div><aside class="rail">'+contextRail()+'</aside></div>';
+}
+async function submitQuestion(){
+  const ta = document.getElementById('q-text'); const text = ((ta&&ta.value)||'').trim();
+  if(text.length<5){ showToast('Write your question first.', 3000); return; }
+  const btn = document.getElementById('q-send'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
+  const { data, error } = await spend('question', { text:text });
+  if(error){ showToast(/insufficient/i.test(error.message||'')?'You do not have enough credits.':'Could not send. Please try again.', 3800); if(btn){ btn.disabled=false; btn.innerHTML='<span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(CAT.question.cost); } return; }
+  const id = data && (Array.isArray(data)?(data[0]&&data[0].request_id):data.request_id);
+  showToast('Sent to Matt. You\'ll get a notification when he replies.');
+  if(id) go({ flow:'question', req:id }); else go({});
+}
+
+function contextRail(){
+  return '<div class="rc"><div class="rc-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>What Matt sees</div>'
+    + '<div class="rc-row"><span class="rc-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg></span><div><div class="rc-k">Member</div><div class="rc-v">'+escHtml(myName)+'</div></div></div>'
+    + '<div class="rc-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Private. Only you and Matt can see this.</div></div>';
+}
+
+// ── Thread (question / any delivered reply) ────────────────────────────────────
+async function renderThread(view, reqId, kind){
+  const r = await getRequest(reqId);
+  if(!r){ view.innerHTML = convTop('Not found','',null)+'<div class="empty-note">That request could not be loaded.</div>'; return; }
+  const owner = isOwner();
+  const q = escHtml((r.body && (r.body.text||r.body.aim||r.body.note)) || '');
+  const title = KIND_LABEL[r.kind]||'Request';
+  let reply = '';
+  if(r.status==='delivered' && r.response && r.response.text){
+    reply = '<div class="msg"><span class="msg-av">M</span><div><div class="msg-who">Matt</div><div class="bubble">'+escHtml(r.response.text)+'</div></div></div>';
+  } else if(owner){
+    reply = '<div class="composer-wrap"><textarea id="reply-'+r.id+'" placeholder="Write your reply to '+escHtml((r.email||'').split('@')[0])+'…"></textarea>'
+      + '<div class="composer-row"><button class="send" onclick="deliverThread(\''+r.id+'\')">Send reply & charge '+r.cost+'</button></div></div>';
+  } else {
+    reply = '<div class="msg-hint">Waiting for Matt. You\'ll get a notification when he replies.</div>';
+  }
+  view.innerHTML = convTop(title, (owner?('From '+escHtml(r.email)):'Private to you and Matt'), null)
+    + '<div style="max-width:680px">'
+    + '<div class="msg"><span class="msg-av me">'+escHtml((myName||'Y')[0].toUpperCase())+'</span><div><div class="msg-who">'+(owner?escHtml(r.email):'You')+'</div><div class="bubble">'+q+'</div></div></div>'
+    + reply + '</div>';
+}
+async function deliverThread(id){
+  const ta = document.getElementById('reply-'+id); const text=((ta&&ta.value)||'').trim();
+  if(text.length<2){ showToast('Write your reply first.',3000); return; }
+  if(!await requireAuth()) return;
+  const { error } = await db.rpc('deliver_credit_request', { p_id:id, p_response:{ text:text } });
+  if(error){ showToast('Could not deliver. '+(error.message||''),4000); return; }
+  showToast('Delivered. The member has been notified.');
+  render();
+}
+
+// ── Feedback flow ──────────────────────────────────────────────────────────────
+async function renderFeedback(view, reqId){
+  if(reqId){ return renderThread(view, reqId, 'feedback'); }
+  const cost = CAT.feedback.cost;
+  view.innerHTML = convTop('Send Matt a recording','Private to you and Matt',cost)
+    + '<div class="lay-narrow lay"><div>'
+    + '<p class="lead">Play it through and upload your score. Matt watches it back and marks up exactly what to change. Send as much or as little as you like, a whole piece is completely fine.</p>'
+    + '<div class="fl">Your recording & score</div>'
+    + '<div class="ups"><div class="updrop"><span class="d-ic">'+IC.video+'</span><div class="d-t">Upload your video</div><div class="d-s">Record or choose a file</div><span class="soon-b">Upload · soon</span></div>'
+      + '<div class="updrop"><span class="d-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg></span><div class="d-t">Upload your score</div><div class="d-s">PDF or a photo of the page</div><span class="soon-b">Upload · soon</span></div></div>'
+    + '<div class="fl">Which piece?</div><input class="ti" id="f-piece" placeholder="e.g. Clair de Lune" style="margin-bottom:22px">'
+    + '<div class="fl">Would you like Matt to look at anything specific?</div><textarea class="ta" id="f-note" placeholder="e.g. The pedalling in the opening feels muddy, and I\'m not sure my tempo is even. Or leave this blank and I\'ll give you my overall thoughts."></textarea>'
+    + '<div style="display:flex;align-items:center;gap:14px;margin-top:20px"><div class="composer-note" style="text-align:left;margin:0">Holds '+fmt(cost)+' credits until Matt replies.<br>'+balanceAfter(cost)+'</div>'
+      + '<button class="send" id="f-send" onclick="submitFeedback()"><span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(cost)+'</button></div>'
+    + '</div><aside class="rail">'+feedbackRail()+'</aside></div>';
+}
+function feedbackRail(){
+  return '<div class="rc"><div class="rc-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg>How feedback works</div>'
+    + '<div class="rc-step"><span class="rc-num">1</span><span class="rc-tx"><b>You send</b> a video and your score.</span></div>'
+    + '<div class="rc-step"><span class="rc-num">2</span><span class="rc-tx"><b>Matt marks it up</b> and replies here.</span></div>'
+    + '<div class="rc-step"><span class="rc-num">3</span><span class="rc-tx"><b>You get it back</b> and can ask a follow-up.</span></div></div>'
+    + '<div class="rc"><div class="rc-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Private unless you choose to share it.</div></div>';
+}
+async function submitFeedback(){
+  const note = ((document.getElementById('f-note')||{}).value||'').trim();
+  const piece = ((document.getElementById('f-piece')||{}).value||'').trim();
+  const btn = document.getElementById('f-send'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
+  const { data, error } = await spend('feedback', { note:note, piece:piece });
+  if(error){ showToast(/insufficient/i.test(error.message||'')?'You do not have enough credits.':'Could not send. Please try again.', 3800); if(btn){ btn.disabled=false; btn.innerHTML='<span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(CAT.feedback.cost); } return; }
+  const id = data && (Array.isArray(data)?(data[0]&&data[0].request_id):data.request_id);
+  showToast('Sent to Matt. You\'ll get a notification when your feedback is ready.');
+  if(id) go({ flow:'feedback', req:id }); else go({});
+}
+
+// ── Plan flow ──────────────────────────────────────────────────────────────────
+async function renderPlan(view, reqId){
+  if(reqId){ return renderPlanDeliverable(view, reqId); }
+  const cost = CAT.plan.cost;
+  view.innerHTML = convTop('Request a direction plan','Matt maps your next few weeks',cost)
+    + '<div class="lay-narrow lay"><div>'
+    + '<p class="lead">Tell me where you\'re trying to get to, in your own words. The more you tell me the better, and your practice is pulled in below, so there\'s nothing to look up.</p>'
+    + '<div class="fsec"><div class="fl">What have you been working on lately?</div><textarea class="ta big" id="p-working" placeholder="e.g. Mostly Clair de Lune, plus scales a couple of times a week. The left hand in the middle keeps tripping me up."></textarea></div>'
+    + '<div class="fsec"><div class="fl">What are you hoping to get to?</div><textarea class="ta big" id="p-aim" placeholder="e.g. I\'d love to play Clair de Lune confidently from memory, and generally feel more fluent."></textarea></div>'
+    + '<div class="fsec"><div class="fl">Anything else that would help? <span style="color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0">Optional</span></div><textarea class="ta" id="p-extra" placeholder="Your time each week, a deadline, or anything you\'ve been finding frustrating."></textarea></div>'
+    + '<div class="fsec"><div class="fl">Pulled in from your practice</div><div class="known"><div class="known-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Included for Matt automatically</div><p class="known-s">So you don\'t have to look any of it up. He builds the plan on top of it.</p>'
+      + '<div class="kgrid"><div class="kitem"><span class="kic" style="color:var(--gold)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg></span><div><div class="kk">Member</div><div class="kv">'+escHtml(myName)+'</div></div></div>'
+      + '<div class="kitem"><span class="kic" style="color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20v-10M18 20V4"/></svg></span><div><div class="kk">Practice</div><div class="kv">From your log</div></div></div></div></div></div>'
+    + '<div style="display:flex;align-items:center;gap:14px;margin-top:4px"><div class="composer-note" style="text-align:left;margin:0">Holds '+fmt(cost)+' credits until your plan arrives.<br>'+balanceAfter(cost)+'</div>'
+      + '<button class="send" id="p-send" onclick="submitPlan()"><span class="coin">'+IC.coin+'</span>Request plan · '+fmt(cost)+'</button></div>'
+    + '</div><aside class="rail"><div class="rc"><div class="rc-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15 9 22 9 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9 9 9"/></svg>What you\'ll get</div>'
+      + '<div class="rc-step"><span class="rc-num">·</span><span class="rc-tx"><b>A week-by-week plan</b> toward your goal.</span></div>'
+      + '<div class="rc-step"><span class="rc-num">·</span><span class="rc-tx"><b>What to practise</b> each session.</span></div>'
+      + '<div class="rc-step"><span class="rc-num">·</span><span class="rc-tx"><b>The pieces and exercises</b> that get you there.</span></div></div></aside></div>';
+}
+async function submitPlan(){
+  const working = ((document.getElementById('p-working')||{}).value||'').trim();
+  const aim = ((document.getElementById('p-aim')||{}).value||'').trim();
+  const extra = ((document.getElementById('p-extra')||{}).value||'').trim();
+  if(aim.length<5 && working.length<5){ showToast('Tell Matt a little about what you want.', 3000); return; }
+  const btn = document.getElementById('p-send'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
+  const body = { working_on:working, aim:aim, extra:extra, text:(aim || working) };
+  const { data, error } = await spend('plan', body);
+  if(error){ showToast(/insufficient/i.test(error.message||'')?'You do not have enough credits.':'Could not send. Please try again.', 3800); if(btn){ btn.disabled=false; btn.innerHTML='<span class="coin">'+IC.coin+'</span>Request plan · '+fmt(CAT.plan.cost); } return; }
+  const id = data && (Array.isArray(data)?(data[0]&&data[0].request_id):data.request_id);
+  showToast('Requested. Matt will build your plan and it\'ll land here.');
+  if(id) go({ flow:'plan', req:id }); else go({});
+}
+async function renderPlanDeliverable(view, reqId){
+  const r = await getRequest(reqId);
+  if(!r){ view.innerHTML = convTop('Not found','',null)+'<div class="empty-note">That plan could not be loaded.</div>'; return; }
+  const owner = isOwner();
+  if(r.status==='delivered' && r.response && r.response.text){
+    view.innerHTML = convTop('Your direction plan','From Matt · delivered',null)
+      + '<div style="max-width:720px"><div class="rendered">'+escHtml(r.response.text)+'</div></div>';
+    return;
+  }
+  // not delivered yet
+  const input = escHtml([r.body&&r.body.working_on, r.body&&r.body.aim, r.body&&r.body.extra].filter(Boolean).join('\n\n'));
+  if(owner){
+    view.innerHTML = convTop('Build a plan for '+escHtml((r.email||'').split('@')[0]),'From '+escHtml(r.email),null)
+      + '<div style="max-width:720px"><div class="empty-note" style="margin-bottom:16px"><b>What they told you</b><br><span style="white-space:pre-wrap">'+input+'</span></div>'
+      + '<div class="composer-wrap"><textarea id="reply-'+r.id+'" style="min-height:220px" placeholder="Write the plan…"></textarea><div class="composer-row"><button class="send" onclick="deliverThread(\''+r.id+'\')">Send plan & charge '+r.cost+'</button></div></div></div>';
+  } else {
+    view.innerHTML = convTop('Your direction plan','Matt is building it',null)
+      + '<div style="max-width:680px"><div class="empty-note" style="margin-bottom:14px"><b>What you told Matt</b><br><span style="white-space:pre-wrap">'+input+'</span></div>'
+      + '<div class="msg-hint">Matt is building your plan. You\'ll get a notification when it\'s ready.</div></div>';
+  }
+}
+
+// ── Auth & boot ────────────────────────────────────────────────────────────────
+(async function(){
+  const { data: { session } } = await db.auth.getSession();
+  if(!session){ window.location.href = "/"; return; }
+  myEmail = session.user.email;
+  const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
+  myName = (ae && ae.name) || myEmail.split("@")[0];
+  try{ const _pr = await db.rpc("get_profile_row"); myMemberKey = (_pr && _pr.data && _pr.data[0] && _pr.data[0].member_key) || null; }catch(e){}
+  try{ initSharedHeader({ db, myEmail, myName, isAdmin: isOwner(), activePage:"hub", avatarUrl:(ae && ae.avatar_url)||null }); }catch(e){ console.error("initSharedHeader error:", e); }
+  document.getElementById("app-main").style.display = "block";
+  document.getElementById("app-header").style.display = "";
+  try{ await render(); }catch(e){ console.error(e); }
+  const el = document.getElementById("loading-screen"); if(el) el.style.display = "none";
+})();
+</script>
+</body>
+</html>
