@@ -14482,6 +14482,11 @@
       <div id="roadmap-content"><div class="page-loading"><div class="loading-spinner"></div></div></div>
     </div>
 
+    <!-- Ask panel: the credits store / private access to Matt (?goto=ask) -->
+    <div id="lb-panel-ask" style="display:none">
+      <div id="ask-content"><div class="page-loading"><div class="loading-spinner"></div></div></div>
+    </div>
+
     <!-- Community feed panel -->
     <div id="lb-panel-community" style="display:none">
       <div style="min-height:28px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
@@ -16245,7 +16250,7 @@ async function loadData() {
      tab 50ms later by the deep-link router, which meant the dashboard was built
      in full - all of it - for someone who never asked to see it. Read the link
      here and land on it first time. */
-  const _GOTO_TAB = { stats:1, roadmap:1, history:1, leaderboard:1, achievements:1 };
+  const _GOTO_TAB = { stats:1, roadmap:1, history:1, leaderboard:1, achievements:1, ask:1 };
   const _gotoTab = (new URLSearchParams(location.search).get('goto') || '').trim();
   /* THE DEEP DIVE SURVIVES A REFRESH. It was a class on #prog-page and nothing
      else, so reloading landed the member back on Progress having lost the page
@@ -19092,6 +19097,7 @@ function switchMainLbTab(main, fromHistory) {
   const achPanel        = document.getElementById("lb-panel-achievements");
   const communityPanel  = document.getElementById("lb-panel-community");
   const roadmapPanel    = document.getElementById("lb-panel-roadmap");
+  const askPanel        = document.getElementById("lb-panel-ask");
   // Only the scenic map (?map=scene) is the fixed, immersive, non-scrolling view.
   // The trail roadmap is a normal scrolling page, so it must NOT get the lock.
   const _rmScene = new URLSearchParams(location.search).get("map") === "scene";
@@ -19121,6 +19127,7 @@ function switchMainLbTab(main, fromHistory) {
   _fabSettle();
   [90, 320].forEach(function (ms) { setTimeout(_fabSettle, ms); });
   if (roadmapPanel)   roadmapPanel.style.display   = main === "roadmap"      ? "" : "none";
+  if (askPanel)       askPanel.style.display       = main === "ask"          ? "" : "none";
   if (dashPanel)      dashPanel.style.display      = main === "dashboard"    ? "" : "none";
   if (statsPanel)     statsPanel.style.display     = main === "stats"        ? "" : "none";
   if (goalsPanel)     goalsPanel.style.display     = main === "goals"        ? "" : "none";
@@ -19152,6 +19159,7 @@ function switchMainLbTab(main, fromHistory) {
     if (main === "leaderboard")  { renderLeaderboard(); loadLbOptOut(); }
     if (main === "achievements") { renderAchievements(); }
     if (main === "roadmap")      { if (typeof renderRoadmap === "function") renderRoadmap(); }
+    if (main === "ask")          { if (typeof renderAsk === "function") renderAsk(); }
     if (main === "community")    { renderCommunityFeed(); }
     /* History used to be built at boot for everyone; it builds when it is asked
        for now, once. */
@@ -19167,7 +19175,7 @@ function switchMainLbTab(main, fromHistory) {
     window._bootHeld = 1;
     const _panelId = { dashboard:"lb-panel-dashboard", stats:"lb-panel-stats", goals:"lb-panel-goals",
       history:"lb-panel-history", leaderboard:"lb-panel-leaderboard", achievements:"lb-panel-achievements",
-      community:"lb-panel-community", roadmap:"lb-panel-roadmap" }[main];
+      community:"lb-panel-community", roadmap:"lb-panel-roadmap", ask:"lb-panel-ask" }[main];
     const _cover = document.getElementById("app-boot");
     if (_cover && _panelId && main !== "dashboard") {
       /* Waits for the panel to CHANGE, not to pass a size. Some panels carry
@@ -23242,7 +23250,7 @@ function _ndRender(){
   const mmbars = days7.map(d => `<i class="${d.on ? 'on' : ''}${d.today ? ' today' : ''}"></i>`).join('');
   // Credits placeholder until the Phase-2 ledger exists: 1 per practiced minute.
   // TEMP DEMO OVERRIDE (dev only): pinned so the half-affordable state is visible. REVERT before community.
-  const credits = 1512; // was: Math.round((parts.mins && parts.mins.total) || 0);
+  const credits = (window._creditBalance != null ? window._creditBalance : 0); // real balance loaded via _loadCredits()
   // Credit store (settled 2026-10): credits buy a private, guaranteed line to Matt, at four depths.
   // The community stays free/public; credits are the private, guaranteed tier. See the
   // ask-credit-store-catalogue memory for the rules behind this.
@@ -23328,7 +23336,7 @@ function _ndRender(){
     <div class="nd-ask">
       <div class="nd-ask-strip">
         <span class="nd-coin"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg></span>
-        <span class="nd-ask-bn">${credits.toLocaleString()}<i>credits</i></span>
+        <span class="nd-ask-bn"><span data-credit-balance>${credits.toLocaleString()}</span><i>credits</i></span>
         <span class="nd-info" role="button" tabindex="0" aria-label="How you earn credits" onclick="var m=document.getElementById('nd-earn-modal');if(m)m.classList.add('on');">i</span>
         <a class="nd-ask-store" href="${_ASK}">Open the store &rarr;</a>
       </div>
@@ -23370,6 +23378,8 @@ function _ndRender(){
   try { _ndContentRail(); } catch (e) {}
   try { _ndReorderSections(); } catch (e) {}
   try { _ndLiquidNav(); } catch (e) {}
+  // Real credit balance for the doorway card (replaces the 0 placeholder once loaded).
+  try { if (window._loadCredits) window._loadCredits(); } catch (e) {}
 }
 
 // The Practice sub-nav fuses into the header with a LIQUID (metaball) merge, built so the glass can
@@ -44407,6 +44417,326 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     }
 
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ASK PAGE — the credits store (private access to Matt). Self-contained: own
+  // dark ground + tokens under #ask-band, so it never depends on body.nd-on /
+  // lb-dash. Balance is real (get_my_credits); spends go through spend_credits.
+  // ══════════════════════════════════════════════════════════════════════════
+  const _ASK_COIN = '<span class="ask-coin"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg></span>';
+  const _askCatalogue = [
+    { item:'question', cost:500,   oc:'#60a5fa', live:true,  cta:'Ask Matt',
+      name:'Ask a private question',
+      val:'Ask Matt anything about your playing, privately. A considered written reply, just for you.',
+      ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' },
+    { item:'feedback', cost:1000,  oc:'#34d399', live:false, cta:'Get feedback',
+      name:'Private feedback on a recording',
+      val:'Send a recording and your score. Matt gives you specific, private feedback on exactly what to change.',
+      ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>' },
+    { item:'plan', cost:3000,      oc:'#eac64f', live:false, cta:'Get a plan',
+      name:'A private direction plan',
+      val:'Matt maps your next few weeks toward your goal, from what you have actually been practising.',
+      ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>' },
+    { item:'lesson', cost:18000,   oc:'#f472b6', live:false, cta:'Book a lesson',
+      name:'A 1:1 lesson with Matt',
+      val:'A private 30-minute lesson with Matt, live and one to one. The save-up goal.',
+      ic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>' }
+  ];
+
+  function _askInjectStyle() {
+    if (document.getElementById('ask-style')) return;
+    const s = document.createElement('style'); s.id = 'ask-style';
+    s.textContent = `
+    #ask-band{ position:relative; margin:0 calc(50% - 50vw) -40px; min-height:100vh; overflow:hidden;
+      background:#0b0b0e; color:#e9e8ee; font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased;
+      --ask-card:#1a1a20; --ask-card2:#24242b; --ask-line:rgba(255,255,255,.07); --ask-line2:rgba(255,255,255,.13);
+      --ask-head:#f4f1ec; --ask-muted:#9594a0; --ask-faint:#6a6972; --ask-gold:#f5c518; --ask-golds:#eac64f; }
+    #ask-band::before{ content:""; position:absolute; inset:0; pointer-events:none; z-index:0;
+      background:radial-gradient(1100px 760px at 100% -8%, rgba(99,102,241,.13), transparent 56%); }
+    #ask-band *{ box-sizing:border-box; }
+    .ask-wrap{ position:relative; z-index:1; max-width:1080px; margin:0 auto; padding:20px clamp(16px,5vw,26px) 90px; }
+    /* sub-nav (mobile; desktop uses the sidebar, like the dashboard) */
+    .ask-subnav{ display:none; gap:4px; background:var(--ask-card); border-radius:16px; padding:5px; margin:0 0 22px; }
+    @media (max-width:1024px){ .ask-subnav{ display:flex; } }
+    .ask-sn{ flex:1; text-align:center; padding:9px 12px; border-radius:12px; font-size:.85rem; font-weight:600; color:var(--ask-muted); text-decoration:none; }
+    .ask-sn.on{ background:var(--ask-gold); color:#17130a; }
+    /* header */
+    .ask-eyb{ font-size:.7rem; letter-spacing:.16em; text-transform:uppercase; color:var(--ask-faint); font-weight:700; }
+    .ask-title{ font-family:'Fraunces',Georgia,serif; font-size:2.1rem; font-weight:500; color:var(--ask-head); line-height:1.05; margin:7px 0 0; }
+    .ask-lead{ font-size:.96rem; color:#cfcdd6; line-height:1.55; max-width:600px; margin:10px 0 0; }
+    /* balance on the ground */
+    .ask-bal{ display:flex; align-items:center; gap:12px; margin:26px 0 4px; }
+    .ask-bal-coin{ width:34px; height:34px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center;
+      background:radial-gradient(circle at 34% 30%,#ffe7a0,#f5c518 55%,#c7960f); box-shadow:inset 0 -2px 4px rgba(120,80,0,.4),inset 0 2px 4px rgba(255,255,255,.4); }
+    .ask-bal-coin svg{ width:18px; height:18px; color:#6a4e06; }
+    .ask-bal-n{ font-family:'Fraunces',Georgia,serif; font-size:2rem; font-weight:500; color:var(--ask-head); line-height:1; font-variant-numeric:tabular-nums; }
+    .ask-bal-u{ font-size:.9rem; color:var(--ask-muted); }
+    .ask-bal-i{ width:20px; height:20px; flex:0 0 auto; border-radius:50%; border:1px solid var(--ask-line2); background:none; color:var(--ask-faint); font-family:'Fraunces',Georgia,serif; font-style:italic; font-size:.74rem; display:grid; place-items:center; cursor:pointer; }
+    .ask-bal-i:hover{ color:var(--ask-golds); border-color:var(--ask-golds); }
+    .ask-bal-sub{ font-size:.85rem; color:var(--ask-muted); margin:0 0 2px; }
+    /* section heading */
+    .ask-h{ font-family:'Fraunces',Georgia,serif; font-size:1.3rem; font-weight:600; color:var(--ask-head); margin:38px 0 4px; }
+    .ask-hsub{ font-size:.85rem; color:var(--ask-muted); margin:0 0 15px; }
+    /* store grid */
+    .ask-store{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media (max-width:640px){ .ask-store{ grid-template-columns:1fr; } }
+    .ask-item{ position:relative; overflow:hidden; background:var(--ask-card); border-radius:16px; padding:17px;
+      box-shadow:inset 0 0 0 1px var(--ask-line), 0 10px 30px -22px rgba(0,0,0,.8); display:flex; flex-direction:column; gap:12px; }
+    .ask-item::before{ content:""; position:absolute; top:-34px; right:-26px; width:140px; height:140px; border-radius:50%;
+      background:radial-gradient(circle, color-mix(in srgb, var(--oc) 15%, transparent), transparent 70%); pointer-events:none; }
+    .ask-item-top{ display:flex; align-items:flex-start; gap:12px; position:relative; }
+    .ask-item-ic{ width:44px; height:44px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center;
+      background:color-mix(in srgb, var(--oc) 16%, var(--ask-card)); color:var(--oc); box-shadow:0 0 0 1px color-mix(in srgb, var(--oc) 30%, transparent); }
+    .ask-item-ic svg{ width:22px; height:22px; }
+    .ask-item-n{ font-family:'Fraunces',Georgia,serif; font-size:1.04rem; font-weight:500; color:var(--ask-head); line-height:1.2; }
+    .ask-item-v{ font-size:.85rem; color:var(--ask-muted); line-height:1.5; margin-top:5px; }
+    .ask-item-foot{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:auto; padding-top:4px; }
+    .ask-item-price{ display:inline-flex; align-items:center; gap:6px; font-family:'Fraunces',Georgia,serif; font-size:1rem; color:var(--ask-golds); font-variant-numeric:tabular-nums; }
+    .ask-coin{ display:inline-grid; place-items:center; width:16px; height:16px; }
+    .ask-coin svg{ width:16px; height:16px; color:var(--ask-gold); }
+    .ask-item-need{ font-size:.72rem; color:var(--ask-faint); margin-left:8px; }
+    .ask-item-cta{ border:0; border-radius:10px; padding:9px 15px; font:inherit; font-size:.85rem; font-weight:600; cursor:pointer;
+      background:var(--ask-gold); color:#17130a; white-space:nowrap; }
+    .ask-item-cta:hover{ filter:brightness(1.05); }
+    .ask-item.soon .ask-item-cta{ background:transparent; color:var(--ask-muted); box-shadow:inset 0 0 0 1px var(--ask-line2); }
+    .ask-item.cant{ opacity:.74; }
+    .ask-item.cant .ask-item-cta{ background:transparent; color:var(--ask-muted); box-shadow:inset 0 0 0 1px var(--ask-line2); }
+    .ask-soon-tag{ position:absolute; top:12px; right:12px; font-size:.58rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ask-faint); background:rgba(255,255,255,.05); border-radius:5px; padding:3px 7px; }
+    /* request lists */
+    .ask-reqs{ display:flex; flex-direction:column; }
+    .ask-req{ padding:14px 2px; border-top:1px solid var(--ask-line); }
+    .ask-req:first-child{ border-top:0; }
+    .ask-req-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .ask-req-who{ font-size:.82rem; font-weight:600; color:var(--ask-head); }
+    .ask-req-st{ font-size:.68rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--ask-faint); }
+    .ask-req-st.delivered{ color:var(--ask-golds); }
+    .ask-req-q{ font-size:.9rem; color:#d7d6de; line-height:1.5; margin:7px 0 0; white-space:pre-wrap; }
+    .ask-req-reply{ font-size:.9rem; color:#cfcdd6; line-height:1.5; margin:9px 0 0; padding:11px 13px; background:var(--ask-card); border-radius:11px; border-left:2px solid var(--ask-golds); }
+    .ask-req-reply b{ color:var(--ask-head); font-weight:600; }
+    .ask-rbox{ margin-top:9px; display:flex; flex-direction:column; gap:8px; }
+    .ask-rbox textarea{ width:100%; background:var(--ask-card); border:1px solid var(--ask-line2); border-radius:10px; color:var(--ask-head); font:inherit; font-size:.88rem; padding:10px; resize:vertical; }
+    .ask-rbox .ask-item-cta{ align-self:flex-start; }
+    .ask-empty{ font-size:.86rem; color:var(--ask-faint); padding:14px 2px; }
+    /* overlay */
+    .ask-overlay{ position:fixed; inset:0; z-index:9000; background:rgba(5,5,8,.68); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:18px; }
+    .ask-ov-card{ width:100%; max-width:460px; background:#15151a; border:1px solid rgba(255,255,255,.1); border-radius:18px; padding:20px; color:#e9e8ee; box-shadow:0 30px 70px -20px rgba(0,0,0,.8); }
+    .ask-ov-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .ask-ov-t{ font-family:'Fraunces',Georgia,serif; font-size:1.2rem; font-weight:600; color:#f4f1ec; }
+    .ask-ov-s{ font-size:.8rem; color:#9594a0; margin-top:4px; line-height:1.45; }
+    .ask-ov-x{ background:none; border:0; color:#9594a0; font-size:1.5rem; line-height:1; cursor:pointer; padding:0 2px; }
+    .ask-ov-ta{ width:100%; margin-top:14px; min-height:120px; background:#0f0f13; border:1px solid rgba(255,255,255,.13); border-radius:12px; color:#f4f1ec; font:inherit; font-size:.92rem; padding:12px; resize:vertical; }
+    .ask-ov-foot{ display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:14px; }
+    .ask-ov-cancel{ background:none; border:0; color:#9594a0; font:inherit; font-weight:600; cursor:pointer; padding:9px 12px; }
+    .ask-ov-send{ background:var(--ask-gold,#f5c518); border:0; border-radius:10px; color:#17130a; font:inherit; font-weight:700; cursor:pointer; padding:10px 18px; }
+    .ask-ov-send:disabled{ opacity:.6; cursor:default; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function renderAsk() {
+    const host = document.getElementById('ask-content');
+    if (!host) return;
+    _askInjectStyle();
+    const owner = (typeof isOwner === 'function' && isOwner());
+    const items = _askCatalogue.map(function (it) {
+      return `<div class="ask-item${it.live ? '' : ' soon'}" style="--oc:${it.oc}" data-item="${it.item}" data-cost="${it.cost}" data-live="${it.live ? 1 : 0}">
+        ${it.live ? '' : '<span class="ask-soon-tag">Soon</span>'}
+        <div class="ask-item-top">
+          <span class="ask-item-ic">${it.ic}</span>
+          <div><div class="ask-item-n">${it.name}</div><div class="ask-item-v">${it.val}</div></div>
+        </div>
+        <div class="ask-item-foot">
+          <span class="ask-item-price">${_ASK_COIN}${it.cost.toLocaleString()}<span class="ask-item-need" data-need></span></span>
+          <button class="ask-item-cta" onclick="_askRedeem('${it.item}',${it.cost})">${it.live ? it.cta : 'Soon'}</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    host.innerHTML = `<div id="ask-band"><div class="ask-wrap">
+      <div class="ask-subnav">
+        <a class="ask-sn" href="/practice-log.html">Dashboard</a>
+        <a class="ask-sn" href="/resources.html">Pieces</a>
+        <a class="ask-sn" href="/practice-log.html?goto=roadmap">Roadmap</a>
+        <a class="ask-sn" href="/practice-log.html?goto=stats">Progress</a>
+        <a class="ask-sn on" href="/practice-log.html?goto=ask">Ask</a>
+      </div>
+      <div class="ask-eyb">Private access</div>
+      <h1 class="ask-title">Ask Matt</h1>
+      <p class="ask-lead">A private, guaranteed line to Matt. The community stays free and open; your credits buy his direct, personal attention, just for you.</p>
+
+      <div class="ask-bal-sub" style="margin-top:22px">Your balance</div>
+      <div class="ask-bal">
+        <span class="ask-bal-coin"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg></span>
+        <span class="ask-bal-n" data-credit-balance>—</span>
+        <span class="ask-bal-u">credits</span>
+        <button class="ask-bal-i" onclick="_askEarnInfo()" aria-label="How you earn credits">i</button>
+      </div>
+      <div class="ask-bal-sub">Earned from your practice: one credit a minute, up to 90 a day.</div>
+
+      ${owner ? '<div id="ask-queue-wrap"><h2 class="ask-h">Open requests</h2><div class="ask-hsub">Members waiting on you.</div><div id="ask-queue" class="ask-reqs"><div class="ask-empty">Loading…</div></div></div>' : ''}
+
+      <h2 class="ask-h">The store</h2>
+      <div class="ask-hsub">Spend your credits on private access to Matt. A menu of choices, not a ladder.</div>
+      <div class="ask-store">${items}</div>
+
+      ${owner ? '' : '<div id="ask-yours-wrap" style="display:none"><h2 class="ask-h">Your requests</h2><div id="ask-yours" class="ask-reqs"></div></div>'}
+    </div></div>`;
+
+    _askLoad(owner);
+  }
+
+  async function _askLoad(owner) {
+    try {
+      const { data } = await db.rpc('get_my_credits');
+      const b = Array.isArray(data) ? (data[0] && data[0].balance) : (data && data.balance);
+      if (typeof b === 'number') window._creditBalance = b;
+    } catch (e) {}
+    _applyCreditBalance();
+    _askLoadRequests(owner);
+  }
+
+  async function _askLoadRequests(owner) {
+    owner = (owner != null) ? owner : (typeof isOwner === 'function' && isOwner());
+    try {
+      if (owner) {
+        const { data } = await db.from('credit_requests').select('*').eq('status', 'open').order('created_at', { ascending: true });
+        _askRenderQueue(data || []);
+      } else {
+        const { data } = await db.from('credit_requests').select('*').order('created_at', { ascending: false });
+        _askRenderYours(data || []);
+      }
+    } catch (e) {}
+  }
+
+  function _askRenderQueue(rows) {
+    const el = document.getElementById('ask-queue'); if (!el) return;
+    if (!rows.length) { el.innerHTML = '<div class="ask-empty">Nothing waiting. You are all caught up.</div>'; return; }
+    el.innerHTML = rows.map(function (r) {
+      const q = escHtml((r.body && r.body.text) || '');
+      return `<div class="ask-req">
+        <div class="ask-req-top"><span class="ask-req-who">${escHtml(r.email || '')}</span><span class="ask-req-st">${escHtml(r.kind)} &middot; ${r.cost} cr</span></div>
+        <div class="ask-req-q">${q}</div>
+        <div class="ask-rbox">
+          <textarea id="ask-reply-${r.id}" rows="3" placeholder="Write your reply to ${escHtml((r.email || '').split('@')[0])}…"></textarea>
+          <button class="ask-item-cta" onclick="_askDeliver('${r.id}')">Send reply &amp; charge ${r.cost}</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function _askRenderYours(rows) {
+    const wrap = document.getElementById('ask-yours-wrap');
+    const el = document.getElementById('ask-yours');
+    if (!el || !wrap) return;
+    if (!rows.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    el.innerHTML = rows.map(function (r) {
+      const q = escHtml((r.body && r.body.text) || '');
+      const st = r.status === 'delivered' ? 'Replied' : (r.status === 'cancelled' ? 'Refunded' : 'Waiting for Matt');
+      const reply = (r.status === 'delivered' && r.response && r.response.text)
+        ? `<div class="ask-req-reply"><b>Matt:</b> ${escHtml(r.response.text)}</div>` : '';
+      return `<div class="ask-req">
+        <div class="ask-req-top"><span class="ask-req-who">${escHtml(r.kind === 'question' ? 'Your question' : r.kind)}</span><span class="ask-req-st ${r.status === 'delivered' ? 'delivered' : ''}">${st}</span></div>
+        <div class="ask-req-q">${q}</div>${reply}
+      </div>`;
+    }).join('');
+  }
+
+  function _askRedeem(item, cost) {
+    const it = _askCatalogue.find(function (x) { return x.item === item; });
+    if (!it) return;
+    if (!it.live) { showToast('That one is coming soon. The private question is live now.', 3500); return; }
+    const bal = window._creditBalance;
+    if (bal != null && bal < cost) { showToast('You need ' + (cost - bal).toLocaleString() + ' more credits for that.', 3500, true); return; }
+    _askOpenQuestion(it);
+  }
+
+  function _askOpenQuestion(it) {
+    _askCloseOverlay();
+    const ov = document.createElement('div'); ov.id = 'ask-overlay'; ov.className = 'ask-overlay';
+    ov.innerHTML = `<div class="ask-ov-card" role="dialog" aria-label="Ask a private question">
+      <div class="ask-ov-head"><div>
+        <div class="ask-ov-t">Ask a private question</div>
+        <div class="ask-ov-s">Private to you and Matt. Costs ${it.cost.toLocaleString()} credits, held until he replies.</div>
+      </div><button class="ask-ov-x" onclick="_askCloseOverlay()" aria-label="Close">&times;</button></div>
+      <textarea id="ask-q-text" class="ask-ov-ta" placeholder="What would you like to ask Matt? The more specific you are, the better the answer."></textarea>
+      <div class="ask-ov-foot">
+        <button class="ask-ov-cancel" onclick="_askCloseOverlay()">Cancel</button>
+        <button id="ask-q-send" class="ask-ov-send" onclick="_askSubmitQuestion()">Send to Matt</button>
+      </div></div>`;
+    ov.addEventListener('click', function (e) { if (e.target === ov) _askCloseOverlay(); });
+    document.body.appendChild(ov);
+    setTimeout(function () { const t = document.getElementById('ask-q-text'); if (t) t.focus(); }, 30);
+  }
+  function _askCloseOverlay() { const o = document.getElementById('ask-overlay'); if (o) o.remove(); }
+
+  async function _askSubmitQuestion() {
+    const ta = document.getElementById('ask-q-text');
+    const text = ((ta && ta.value) || '').trim();
+    if (text.length < 5) { showToast('Write your question first.', 3000, true); return; }
+    const btn = document.getElementById('ask-q-send');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    if (!await requireAuth()) { if (btn) { btn.disabled = false; btn.textContent = 'Send to Matt'; } return; }
+    const { data, error } = await db.rpc('spend_credits', { p_item: 'question', p_body: { text: text } });
+    if (error) {
+      const msg = /insufficient/i.test(error.message || '') ? 'You do not have enough credits for that.' : 'Could not send that. Please try again.';
+      showToast(msg, 3800, true);
+      if (btn) { btn.disabled = false; btn.textContent = 'Send to Matt'; }
+      return;
+    }
+    const bal = data && (Array.isArray(data) ? (data[0] && data[0].balance) : data.balance);
+    if (typeof bal === 'number') window._creditBalance = bal;
+    _askCloseOverlay();
+    showToast('Sent to Matt. You will get a notification when he replies.');
+    _applyCreditBalance();
+    _askLoadRequests(false);
+  }
+
+  async function _askDeliver(id) {
+    const ta = document.getElementById('ask-reply-' + id);
+    const text = ((ta && ta.value) || '').trim();
+    if (text.length < 2) { showToast('Write your reply first.', 3000, true); return; }
+    if (!await requireAuth()) return;
+    const { error } = await db.rpc('deliver_credit_request', { p_id: id, p_response: { text: text } });
+    if (error) { showToast('Could not deliver. ' + (error.message || ''), 4000, true); return; }
+    showToast('Delivered. The member has been notified.');
+    _askLoadRequests(true);
+  }
+
+  function _askEarnInfo() {
+    const m = document.getElementById('nd-earn-modal');
+    if (m) { m.classList.add('on'); return; }
+    showToast('You earn 1 credit for every minute you practise, up to 90 a day, plus 300 a month.', 5000);
+  }
+
+  // Shared with the dashboard doorway card: one place updates every balance
+  // readout ([data-credit-balance]) and the store affordability.
+  async function _loadCredits() {
+    try {
+      const { data } = await db.rpc('get_my_credits');
+      const b = Array.isArray(data) ? (data[0] && data[0].balance) : (data && data.balance);
+      if (typeof b === 'number') { window._creditBalance = b; _applyCreditBalance(); }
+    } catch (e) {}
+  }
+  function _applyCreditBalance() {
+    const bal = (window._creditBalance != null) ? window._creditBalance : null;
+    if (bal == null) return;   // leave the rendered value until a real balance loads
+    document.querySelectorAll('[data-credit-balance]').forEach(function (el) {
+      el.textContent = bal.toLocaleString();
+    });
+    document.querySelectorAll('.ask-item').forEach(function (it) {
+      const cost = +it.getAttribute('data-cost') || 0;
+      const live = it.getAttribute('data-live') === '1';
+      const need = it.querySelector('[data-need]');
+      const can = (bal != null) && bal >= cost;
+      it.classList.toggle('cant', live && bal != null && !can);
+      if (need) need.textContent = (live && bal != null && !can) ? ('· ' + (cost - bal).toLocaleString() + ' more') : '';
+    });
+  }
+  window._askRedeem = _askRedeem; window._askSubmitQuestion = _askSubmitQuestion;
+  window._askCloseOverlay = _askCloseOverlay; window._askDeliver = _askDeliver;
+  window._askEarnInfo = _askEarnInfo; window._loadCredits = _loadCredits;
+  window._applyCreditBalance = _applyCreditBalance;
 
   function renderRoadmap() {
     const el = document.getElementById("roadmap-content");
