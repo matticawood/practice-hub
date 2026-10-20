@@ -77,7 +77,12 @@ as $$
   from titled t
   where t.title is not null
     and (t.app_post_id is not null or t.clinic_id is not null)
-  order by t.viewers desc, t.completions desc, t.last_seen desc nulls last
+  -- Engagement score, not raw views: a member who finished counts full, one
+  -- who only opened/partly watched counts half. Rewards content people
+  -- actually watch through over content that merely gets clicked. (YouTube
+  -- uploads can't report completion, so they rank on opens — half weight.)
+  order by (t.completions + 0.5 * (t.viewers - t.completions)) desc,
+           t.completions desc, t.last_seen desc nulls last
   limit greatest(1, least(coalesce(p_limit, 8), 20));
 $$;
 
