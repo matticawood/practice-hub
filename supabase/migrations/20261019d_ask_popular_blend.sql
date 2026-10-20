@@ -95,10 +95,13 @@ as $$
     from elig
   ),
   scored as (
+    -- Likes are excluded: they were imported with the videos (44 of 61 liked
+    -- posts have more likes than tracked viewers; 24 have no in-app views at
+    -- all; likes carry no timestamp), so they are not in-app approval.
+    -- Signal = how many watched (reach) + how much of it they watched (depth).
     select e.*,
       ( 0.40 * (e.viewers / coalesce(s.mv, 1))
-      + 0.35 * (e.likes   / coalesce(s.ml, 1))
-      + 0.25 * coalesce(e.wt, s.med_wt, 0) )::numeric as score
+      + 0.60 * coalesce(e.wt, s.med_wt, 0) )::numeric as score
     from elig e, stat s
   )
   select content_type, title, app_post_id, clinic_id, youtube_id, mux_pid,
