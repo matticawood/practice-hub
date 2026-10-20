@@ -512,15 +512,20 @@ async function loadPopular(){
   if(!items){
     items = [];
     try{
-      const [rp, rc, ra] = await Promise.all([
-        db.from('content_feed_posts').select('id,type,title,media,youtube_id,published_at').eq('type','post').is('youtube_id',null).order('published_at',{ascending:false}).limit(12),
-        db.from('live_events').select('id,title,scheduled_at,mux_playback_id').not('mux_playback_id','is',null).order('scheduled_at',{ascending:false}).limit(6),
-        db.from('mmt_articles').select('id,slug,title,cover_image,published_at').order('published_at',{ascending:false}).limit(4)
-      ]);
-      (rp.data||[]).forEach(function(p){ const pid=_postPid(p); if(!pid) return; if(/topic poll|^live practice clinic|^live q&a/i.test(p.title||'')) return; items.push({kind:'video',tag:'Video',title:p.title,meta:'Members-only video',thumb:_muxThumb(pid,8),href:'/learn.html?post='+encodeURIComponent(p.id),date:p.published_at}); });
-      (rc.data||[]).forEach(function(e){ items.push({kind:'clinic',tag:'Clinic',title:e.title,meta:'Live clinic replay',thumb:_muxThumb(e.mux_playback_id,25),href:'/learn.html?clinic='+encodeURIComponent(e.id),date:e.scheduled_at}); });
-      (ra.data||[]).forEach(function(a){ items.push({kind:'article',tag:'Article',title:a.title,meta:'Article',thumb:a.cover_image||'',href:'/theory/sheets/view.html?mmt='+encodeURIComponent(a.slug),date:a.published_at}); });
-      items.sort(function(a,b){ return (''+(b.date||'')).localeCompare(''+(a.date||'')); });
+      // Real popularity: most-watched videos/clinics across all members
+      // (distinct viewers), from content_views via the ask_popular RPC.
+      const res = await db.rpc('ask_popular', { p_limit:8 });
+      if(res.error) throw res.error;
+      (res.data||[]).forEach(function(r){
+        var isClinic = !!r.clinic_id;
+        var thumb = r.mux_pid ? _muxThumb(r.mux_pid, isClinic?25:8)
+                  : (r.youtube_id ? ('https://i.ytimg.com/vi/'+r.youtube_id+'/hqdefault.jpg') : '');
+        var href = isClinic ? ('/learn.html?clinic='+encodeURIComponent(r.clinic_id))
+                            : ('/learn.html?post='+encodeURIComponent(r.app_post_id));
+        var v = Number(r.viewers)||0;
+        var meta = v>0 ? (v+' member'+(v>1?'s':'')+' watched') : (isClinic?'Clinic replay':'Video');
+        items.push({ kind:isClinic?'clinic':'video', tag:isClinic?'Clinic':'Video', title:r.title, meta:meta, thumb:thumb, href:href });
+      });
       window._askPopular = items;
     }catch(e){ items = []; }
   }
