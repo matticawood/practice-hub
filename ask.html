@@ -123,6 +123,10 @@
   .rcard-t{ font-size:.92rem; font-weight:600; color:var(--head); line-height:1.3; margin:5px 0 4px; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; overflow:hidden; }
   .rcard-snip{ font-size:.82rem; color:var(--muted); line-height:1.5; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
   .rcard-snip mark{ background:none; color:var(--golds); font-weight:600; }
+  .rtl{ position:relative; height:6px; border-radius:999px; background:rgba(255,255,255,.1); margin:10px 0 5px; }
+  .rtl-seg{ position:absolute; top:0; bottom:0; min-width:5px; background:linear-gradient(90deg,var(--gold),var(--golds)); border-radius:999px; box-shadow:0 0 10px -1px var(--gold); }
+  .rtl-lab{ display:flex; justify-content:space-between; font-size:.64rem; color:var(--faint); font-variant-numeric:tabular-nums; }
+  .rtl-lab .at{ color:var(--golds); font-weight:600; }
   .rcard-sk{ height:84px; border-radius:14px; border:1px solid var(--line); background:linear-gradient(100deg,#17171c 30%,#1e1e25 50%,#17171c 70%); background-size:200% 100%; animation:rsk 1.1s ease-in-out infinite; }
   @keyframes rsk{ 0%{background-position:160% 0} 100%{background-position:-60% 0} }
   .results-empty{ padding:24px 18px; text-align:center; color:var(--muted); font-size:.88rem; line-height:1.55; border:1px dashed var(--line); border-radius:14px; }
@@ -525,7 +529,7 @@ async function loadPopular(){
 function findModule(){
   return '<div class="find">'
     + '<div class="find-s"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>'
-    + '<input placeholder="Search the Practice Room in your own words…" onkeydown="if(event.key===\'Enter\')onSearch(this.value)">'
+    + '<input placeholder="Search the Practice Room in your own words…" autocomplete="off" oninput="onSearchLive(this.value)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();onSearch(this.value);}">'
     + '<button class="find-go" aria-label="Search" onclick="onSearch(this.previousElementSibling.value)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>'
     + '<div class="find-meta"><span class="lbl">Try</span><span class="chip" onclick="onSearch(\'Pedalling\')">Pedalling</span><span class="chip" onclick="onSearch(\'Memorising a piece\')">Memorising a piece</span><span class="chip" onclick="onSearch(\'Evening out my scales\')">Evening out my scales</span><span class="chip" onclick="onSearch(\'Sight-reading\')">Sight-reading</span></div>'
     + '<div class="browse" id="browse"></div>'
@@ -624,7 +628,19 @@ function _resultCardHtml(r){
     + '<div class="rcard-th">'+img+ov+ts+'</div>'
     + '<div class="rcard-b"><div class="rcard-src">'+escHtml(_askTag(r))+'</div>'
     + '<div class="rcard-t">'+escHtml(r.title||'Untitled')+'</div>'
-    + '<div class="rcard-snip">'+_snipHtml(r.snippet)+'</div></div></a>';
+    + '<div class="rcard-snip">'+_snipHtml(r.snippet)+'</div>'
+    + _timelineHtml(r)
+    + '</div></a>';
+}
+function _timelineHtml(r){
+  var dur=Number(r.duration_s)||0;
+  if(r.start_seconds==null || !dur) return '';          // dormant until timing exists
+  var s=Math.max(0, Number(r.start_seconds)||0);
+  var e=(r.end_seconds!=null)?Number(r.end_seconds):Math.min(dur, s+20);
+  var left=Math.max(0, Math.min(100, s/dur*100));
+  var w=Math.max(1.5, Math.min(100-left, (e-s)/dur*100));
+  return '<div class="rtl"><span class="rtl-seg" style="left:'+left.toFixed(2)+'%;width:'+w.toFixed(2)+'%"></span></div>'
+    + '<div class="rtl-lab"><span class="at">'+_fmtTs(s)+'</span><span>'+_fmtTs(dur)+'</span></div>';
 }
 function _resultsHead(txt){
   return '<div class="results-h"><div class="results-t">'+txt+'</div><button class="results-clear" onclick="clearSearch()">Clear</button></div>';
@@ -639,24 +655,42 @@ function renderResults(el, q, rows){
   el.innerHTML = _resultsHead('<b>'+n+'</b> moment'+(n>1?'s':'')+' for <b>'+escHtml(q)+'</b>')
     + '<div class="rlist">'+rows.map(_resultCardHtml).join('')+'</div>';
 }
-async function onSearch(q){
+var _askDebounce=null;
+function onSearchLive(q){
+  q=(q||'').trim();
+  if(_askDebounce){ clearTimeout(_askDebounce); _askDebounce=null; }
+  if(q.length < 2){ window._askLastQuery=null; _askDebounce=setTimeout(loadPopular, 120); return; }
+  _askDebounce=setTimeout(function(){ onSearch(q, { silent:true }); }, 240);
+}
+async function onSearch(q, opts){
   q=(q||'').trim(); if(!q) return;
+  opts=opts||{};
+  if(_askDebounce){ clearTimeout(_askDebounce); _askDebounce=null; }
   var el=document.getElementById('browse'); if(!el) return;
   var input=document.querySelector('.find .find-s input'); if(input && input.value!==q) input.value=q;
   window._askLastQuery=q;
-  el.innerHTML = _resultsHead('Searching for <b>'+escHtml(q)+'</b>…')
-    + '<div class="rlist"><div class="rcard-sk"></div><div class="rcard-sk"></div><div class="rcard-sk"></div></div>';
+  // On live typing keep the current results in place (just dim) rather than
+  // flashing skeletons on every keystroke; show skeletons only on a cold search.
+  var hasResults = !!el.querySelector('.rlist');
+  if(opts.silent && hasResults){ el.style.opacity='0.55'; }
+  else {
+    el.innerHTML = _resultsHead('Searching for <b>'+escHtml(q)+'</b>…')
+      + '<div class="rlist"><div class="rcard-sk"></div><div class="rcard-sk"></div><div class="rcard-sk"></div></div>';
+  }
   try{
     var res = await db.rpc('ask_search', { p_q:q, p_limit:12 });
     if(window._askLastQuery!==q) return; // a newer search superseded this one
+    el.style.opacity='';
     if(res.error) throw res.error;
     renderResults(el, q, res.data||[]);
   }catch(e){
+    if(window._askLastQuery!==q) return;
+    el.style.opacity='';
     el.innerHTML = _resultsHead('Search for <b>'+escHtml(q)+'</b>')
       + '<div class="results-empty">Search is not available right now. <button class="results-clear" style="display:inline" onclick="onSearch(window._askLastQuery)">Try again</button></div>';
   }
 }
-function clearSearch(){ window._askLastQuery=null; var input=document.querySelector('.find .find-s input'); if(input) input.value=''; loadPopular(); }
+function clearSearch(){ window._askLastQuery=null; if(_askDebounce){ clearTimeout(_askDebounce); _askDebounce=null; } var el=document.getElementById('browse'); if(el) el.style.opacity=''; var input=document.querySelector('.find .find-s input'); if(input) input.value=''; loadPopular(); }
 
 function _applyAffordability(){
   document.querySelectorAll('[data-credit-balance]').forEach(function(el){ if(_balance!=null) el.textContent = fmt(_balance); });
