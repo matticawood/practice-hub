@@ -1191,7 +1191,13 @@
     if (spreadMusic && firstFull >= 0){
       var pre  = blocks.slice(0, firstFull).map(blockHTML).join("\n");
       var imgs = blocks.slice(firstFull).filter(function(b){ return b && b.type === "image" && b.full; }).map(blockHTML).join("\n");
-      body = pre + '<div class="br-musicspread">' + imgs + '</div>';
+      // The header leaves a gap below its rule; the footer has none above its own,
+      // so without this the last exercise runs straight into it. Opt-in per book
+      // (theme.musicFootGap, in px) rather than a blanket rule, so a book that
+      // was laid out without it keeps the spacing it was approved with.
+      var footGap = parseInt((book.theme && book.theme.musicFootGap), 10) || 0;
+      var fgStyle = footGap ? ' style="padding-bottom:' + footGap + 'px"' : '';
+      body = pre + '<div class="br-musicspread"' + fgStyle + '>' + imgs + '</div>';
     } else {
       body = blocks.map(blockHTML).join("\n");
     }
