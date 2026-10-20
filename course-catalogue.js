@@ -20,7 +20,7 @@ window.PR_COURSES = [
   { key: "learn-your-first-piece", levels: [1,2,3], label: "Learn Your First Piece", blurb: "Ready for a real piece? Learn your first one, bar by bar.", color: "#2563eb", audience: "Beginners",
     format: "video", thumbId: "Uav7E8LAdqGDVIgS00iOsm91FYJ9vb4pNawk6KMwfchc", thumbTime: 21,
     icon: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>' },
-  { key: "sight-reading-beginners", levels: [1,2,3], label: "Sight Reading for Beginners",
+  { key: "sight-reading-beginners", levels: [1,2,3,4,5,6], levelLabel: "Module", label: "Sight Reading for Beginners",
     blurb: "Play music you have never seen before, with the exact formula for improvement.",
     color: "#0ea5e9", audience: "Beginners",
     format: "video", thumbId: "VUFYDUO02DzcZ6uYRkIL6elAmrmPgXWyupgc4s5nNT9Q", thumbTime: 3,
