@@ -105,6 +105,30 @@
   .comm .go{ margin-left:auto; color:var(--muted); }
   .comm .go svg{ width:18px; height:18px; }
 
+  /* SEARCH RESULTS */
+  .results-h{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:2px 2px 12px; }
+  .results-t{ font-size:.82rem; color:var(--muted); min-width:0; }
+  .results-t b{ color:var(--head); font-weight:600; }
+  .results-clear{ font-size:.8rem; font-weight:600; color:var(--gold); cursor:pointer; background:none; border:0; padding:0; flex:0 0 auto; }
+  .rlist{ display:flex; flex-direction:column; gap:10px; }
+  .rcard{ display:flex; gap:14px; align-items:stretch; padding:11px; border:1px solid var(--line); border-radius:14px; background:var(--card); text-decoration:none; transition:border-color .16s, transform .16s, background .16s; }
+  .rcard:hover{ border-color:var(--line2); background:#1f1f26; transform:translateY(-1px); }
+  .rcard-th{ position:relative; flex:0 0 132px; aspect-ratio:16/10; border-radius:9px; overflow:hidden; background:radial-gradient(120% 120% at 25% 15%,#2b2b38,#16161d); display:grid; place-items:center; }
+  .rcard-th img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
+  .rcard-th .pl{ position:relative; z-index:1; width:32px; height:32px; border-radius:50%; background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.28); display:grid; place-items:center; }
+  .rcard-th .pl svg{ width:13px; height:13px; color:#fff; margin-left:2px; }
+  .rcard-ts{ position:absolute; z-index:2; bottom:6px; right:6px; font-size:.6rem; font-weight:700; background:rgba(0,0,0,.78); color:#fff; padding:2px 6px; border-radius:5px; font-variant-numeric:tabular-nums; }
+  .rcard-b{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; }
+  .rcard-src{ font-size:.62rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
+  .rcard-t{ font-size:.92rem; font-weight:600; color:var(--head); line-height:1.3; margin:5px 0 4px; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; overflow:hidden; }
+  .rcard-snip{ font-size:.82rem; color:var(--muted); line-height:1.5; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+  .rcard-snip mark{ background:none; color:var(--golds); font-weight:600; }
+  .rcard-sk{ height:84px; border-radius:14px; border:1px solid var(--line); background:linear-gradient(100deg,#17171c 30%,#1e1e25 50%,#17171c 70%); background-size:200% 100%; animation:rsk 1.1s ease-in-out infinite; }
+  @keyframes rsk{ 0%{background-position:160% 0} 100%{background-position:-60% 0} }
+  .results-empty{ padding:24px 18px; text-align:center; color:var(--muted); font-size:.88rem; line-height:1.55; border:1px dashed var(--line); border-radius:14px; }
+  .results-empty b{ color:var(--head); }
+  @media(max-width:980px){ .rcard-th{ flex-basis:104px; } }
+
   /* STORE */
   .store-head{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin:44px 0 18px; }
   .store-eyb{ font-size:.7rem; letter-spacing:.17em; text-transform:uppercase; color:var(--golds); font-weight:700; }
@@ -563,7 +587,76 @@ function _reqPreview(r){
 }
 function openReq(kind, id){ go({ flow: kind, req: id }); }
 function onStore(key){ const it=CAT[key]; if(!it.live){ showToast('That one is coming soon.'); return; } go({ flow:key }); }
-function onSearch(q){ if(!q) return; window.location.href = '/learn.html?q=' + encodeURIComponent(q); }
+/* ---- Search over Matt's teaching corpus (ask_search RPC) ---- */
+function _askTag(r){
+  switch(r.source_type){
+    case 'video': return 'Video';
+    case 'muxvideo': return "Members' video";
+    case 'clinic': return 'Clinic replay';
+    case 'mmt': return 'Article';
+    case 'theory_sheet': return 'Theory';
+    default: return 'Answer';
+  }
+}
+function _askHref(r){
+  if(r.clinic_id) return '/learn.html?clinic=' + encodeURIComponent(r.clinic_id) + (r.start_seconds!=null?('&t='+Math.floor(r.start_seconds)):'');
+  if(r.app_post_id) return '/learn.html?post=' + encodeURIComponent(r.app_post_id) + (r.start_seconds!=null?('&t='+Math.floor(r.start_seconds)):'');
+  if(r.youtube_id) return 'https://www.youtube.com/watch?v=' + encodeURIComponent(r.youtube_id) + (r.start_seconds!=null?('&t='+Math.floor(r.start_seconds)+'s'):'');
+  return r.url || '/learn.html';
+}
+function _askThumb(r){
+  if(r.mux_pid) return _muxThumb(r.mux_pid, r.start_seconds!=null?Math.max(1,Math.floor(r.start_seconds)):(r.clinic_id?25:8));
+  if(r.youtube_id) return 'https://i.ytimg.com/vi/' + r.youtube_id + '/hqdefault.jpg';
+  return '';
+}
+function _fmtTs(s){ s=Math.max(0,Math.floor(s||0)); var m=Math.floor(s/60), ss=s%60; return m+':'+(ss<10?'0':'')+ss; }
+function _snipHtml(s){ return escHtml(s||'').replace(/«/g,'<mark>').replace(/»/g,'</mark>'); }
+function _resultCardHtml(r){
+  var thumb=_askThumb(r);
+  var isArticle=(r.source_type==='mmt'||r.source_type==='theory_sheet');
+  var img=thumb?('<img src="'+escHtml(thumb)+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">'):'';
+  var ov=isArticle
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="#9fe1cb" stroke-width="2" style="position:relative;z-index:1;width:20px;height:20px"><path d="M5 4h11l3 3v13H5z"/><path d="M8 10h8M8 14h6"/></svg>'
+    : '<span class="pl"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span>';
+  var ts=(r.start_seconds!=null)?('<span class="rcard-ts">'+_fmtTs(r.start_seconds)+'</span>'):'';
+  var ext=(!r.clinic_id && !r.app_post_id && r.youtube_id)?' target="_blank" rel="noopener"':'';
+  return '<a class="rcard" href="'+escHtml(_askHref(r))+'"'+ext+'>'
+    + '<div class="rcard-th">'+img+ov+ts+'</div>'
+    + '<div class="rcard-b"><div class="rcard-src">'+escHtml(_askTag(r))+'</div>'
+    + '<div class="rcard-t">'+escHtml(r.title||'Untitled')+'</div>'
+    + '<div class="rcard-snip">'+_snipHtml(r.snippet)+'</div></div></a>';
+}
+function _resultsHead(txt){
+  return '<div class="results-h"><div class="results-t">'+txt+'</div><button class="results-clear" onclick="clearSearch()">Clear</button></div>';
+}
+function renderResults(el, q, rows){
+  if(!rows.length){
+    el.innerHTML = _resultsHead('No results for <b>'+escHtml(q)+'</b>')
+      + '<div class="results-empty">Nothing matched those words yet. Try different wording, <a href="/community.html" style="color:var(--gold);font-weight:600">ask the community</a>, or send Matt a private question below.</div>';
+    return;
+  }
+  var n=rows.length;
+  el.innerHTML = _resultsHead('<b>'+n+'</b> moment'+(n>1?'s':'')+' for <b>'+escHtml(q)+'</b>')
+    + '<div class="rlist">'+rows.map(_resultCardHtml).join('')+'</div>';
+}
+async function onSearch(q){
+  q=(q||'').trim(); if(!q) return;
+  var el=document.getElementById('browse'); if(!el) return;
+  var input=document.querySelector('.find .find-s input'); if(input && input.value!==q) input.value=q;
+  window._askLastQuery=q;
+  el.innerHTML = _resultsHead('Searching for <b>'+escHtml(q)+'</b>…')
+    + '<div class="rlist"><div class="rcard-sk"></div><div class="rcard-sk"></div><div class="rcard-sk"></div></div>';
+  try{
+    var res = await db.rpc('ask_search', { p_q:q, p_limit:12 });
+    if(window._askLastQuery!==q) return; // a newer search superseded this one
+    if(res.error) throw res.error;
+    renderResults(el, q, res.data||[]);
+  }catch(e){
+    el.innerHTML = _resultsHead('Search for <b>'+escHtml(q)+'</b>')
+      + '<div class="results-empty">Search is not available right now. <button class="results-clear" style="display:inline" onclick="onSearch(window._askLastQuery)">Try again</button></div>';
+  }
+}
+function clearSearch(){ window._askLastQuery=null; var input=document.querySelector('.find .find-s input'); if(input) input.value=''; loadPopular(); }
 
 function _applyAffordability(){
   document.querySelectorAll('[data-credit-balance]').forEach(function(el){ if(_balance!=null) el.textContent = fmt(_balance); });
