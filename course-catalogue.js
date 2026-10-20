@@ -30,6 +30,9 @@ window.PR_COURSES = [
     blurb: "Play music you have never seen before, with the exact formula for improvement.",
     color: "#0ea5e9", audience: "Beginners",
     format: "video", thumbId: "VUFYDUO02DzcZ6uYRkIL6elAmrmPgXWyupgc4s5nNT9Q", thumbTime: 3,
+    // Finishing a lesson auto-logs its minutes. This course is sight reading,
+    // so the time belongs on the sight-reading track, not musicianship.
+    practiceType: "sightreading",
     // Launch feature: leads the Courses hero and the Learn hero until this
     // date, then both fall back to normal rotation. One week from publishing.
     featuredUntil: "2026-10-27",
