@@ -15,7 +15,26 @@
 window.PR_COURSES = [
   { key: "first-steps", levels: [1], label: "The Absolute Beginner Course", blurb: "Never played before? Start here and play your first pieces.", color: "#8b5cf6", audience: "Absolute beginners",
     icon: '<path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"/>' },
-  { key: "theory", levels: [1,2,3,4], label: "Music Theory", blurb: "How music works, from note names to harmony.", color: "#10b981", audience: "Absolute beginner to intermediate",
+  // Music Theory is one course in the database (key "theory", lessons tagged by
+  // level 1-5). It is PRESENTED as five separate level-courses: each entry below
+  // reads the same `theory` lessons filtered to its `onlyLevel`. No database
+  // change, so achievements/progress/deep-links that key off course="theory"
+  // keep working. Levels 4-5 have only draft lessons, so they show as
+  // "coming soon" until those lessons are published (self-activating).
+  // Hidden parent: not shown as a card (card surfaces skip `hidden`), but kept
+  // so anything that queries by the real lesson course key ("theory"), e.g. the
+  // dashboard's one-shot lesson query, keeps resolving exactly as before.
+  { key: "theory", levels: [1,2,3,4], label: "Music Theory", blurb: "How music works, from note names to harmony.", color: "#10b981", audience: "Absolute beginner to intermediate", hidden: true,
+    icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>' },
+  { key: "theory-1", levels: [1,2], label: "Music Theory: Level 1", blurb: "Reading the stave in both clefs, note values and simple time, the major scale, your first keys, tonic triads and intervals.", color: "#16a34a", audience: "Absolute Beginner", srcCourse: "theory", onlyLevel: 1,
+    icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>' },
+  { key: "theory-2", levels: [2,3], label: "Music Theory: Level 2", blurb: "New time signatures and triplets, more major keys, and your first minor keys, relative, harmonic and melodic.", color: "#0891b2", audience: "Beginner", srcCourse: "theory", onlyLevel: 2,
+    icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>' },
+  { key: "theory-3", levels: [3,4], label: "Music Theory: Level 3", blurb: "Compound time, keys up to four sharps or flats, the primary triads, interval quality, and writing a melody.", color: "#7c3aed", audience: "Lower Intermediate", srcCourse: "theory", onlyLevel: 3,
+    icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>' },
+  { key: "theory-4", levels: [4,5], label: "Music Theory: Level 4", blurb: "Irregular time, keys up to five sharps or flats, technical scale-degree names, the chromatic scale, all intervals, chords and ornaments.", color: "#c026d3", audience: "Intermediate", srcCourse: "theory", onlyLevel: 4,
+    icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>' },
+  { key: "theory-5", levels: [5,6], label: "Music Theory: Level 5", blurb: "Four clefs and transposition, the modes, chords and inversions, writing for voices, the instruments, and full score analysis.", color: "#e11d48", audience: "Upper Intermediate", srcCourse: "theory", onlyLevel: 5,
     icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>' },
   { key: "learn-your-first-piece", levels: [1,2,3], label: "Learn Your First Piece", blurb: "Ready for a real piece? Learn your first one, bar by bar.", color: "#2563eb", audience: "Beginners",
     format: "video", thumbId: "Uav7E8LAdqGDVIgS00iOsm91FYJ9vb4pNawk6KMwfchc", thumbTime: 21,
@@ -52,7 +71,7 @@ window.PR_COURSES = [
     // when you publish.
     featuredUntil: "2026-10-17",
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
-  { key: "lower-intermediate-walkthrough", levels: [3,4,5], label: "Lower Intermediate Walkthrough", soon: "Coming in late October",
+  { key: "lower-intermediate-walkthrough", levels: [3,4,5], label: "Lower Intermediate Walkthrough", soon: "Coming in late October", format: "video",
     blurb: "A full lower intermediate piece, bar by bar, including how to make decisions and learn effectively.",
     color: "#6366f1", audience: "Lower intermediate",
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
