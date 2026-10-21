@@ -71,7 +71,7 @@ window.PR_COURSES = [
     // when you publish.
     featuredUntil: "2026-10-17",
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
-  { key: "lower-intermediate-walkthrough", levels: [3,4,5], label: "Lower Intermediate Walkthrough", soon: "Coming in late October",
+  { key: "lower-intermediate-walkthrough", levels: [3,4,5], label: "Lower Intermediate Walkthrough", soon: "Coming in late October", format: "video",
     blurb: "A full lower intermediate piece, bar by bar, including how to make decisions and learn effectively.",
     color: "#6366f1", audience: "Lower intermediate",
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
