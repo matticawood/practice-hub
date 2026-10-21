@@ -681,7 +681,20 @@ const lvlTitle = (c, n) => (c && c.levelNames && c.levelNames[n]) || "";
 const lvlName  = (c, n) => { const t = lvlTitle(c, n); return t ? lvlNum(c, n) + " \u00b7 " + t : lvlNum(c, n); };
 // How many levels each course will eventually have, so we can show the
 // remaining ones as "coming soon" placeholders under the published lessons.
-const PLANNED_LEVELS = { theory: 5 };
+const PLANNED_LEVELS = {};
+// A catalogue entry can present a slice of another course's lessons: the five
+// Music Theory level-courses all read the one "theory" course's lessons, one
+// level each (srcCourse:"theory", onlyLevel:N). Route every course->lessons
+// lookup through this so those virtual courses resolve to the right lessons.
+function _lsFor(c, all) {
+  all = all || LESSONS;
+  const src = (c && c.srcCourse) || (c && c.key);
+  return all.filter(l => l.course === src && (c && c.onlyLevel != null ? l.level === c.onlyLevel : true));
+}
+// A virtual level-course with no published lessons yet shows as "coming soon",
+// and self-activates the moment its lessons are published.
+const _isSoon  = c => !!(c && c.soon) || (c && c.onlyLevel != null && _lsFor(c).length === 0);
+const _soonLbl = c => (c && c.soon) || "Coming soon";
 const LOCK_ICON = SVG('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>');
 const ARROW_ICON = SVG('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>');
 const DOWN_ICON  = SVG('<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>');
@@ -990,13 +1003,13 @@ function renderOverview(push) {
   // ── Premium course cards: full vertical units with progress bar + CTA ──
   // Live courses are the ones with published lessons. Courses flagged `soon` are
   // shown after them as inert cards, so the list never looks like a finished set.
-  const liveCourses = COURSES.filter(c => !c.soon && LESSONS.some(l => l.course === c.key));
-  const soonCourses = COURSES.filter(c => c.soon);
+  const liveCourses = COURSES.filter(c => !c.hidden && !_isSoon(c) && _lsFor(c).length > 0);
+  const soonCourses = COURSES.filter(c => !c.hidden && _isSoon(c));
 
   // Premium course card: a coloured hero (Mux thumbnail for video courses, icon-on-
   // gradient for written ones) over a body with title, promise, progress and a CTA.
   function courseCard(c) {
-    const ls = LESSONS.filter(l => l.course === c.key);
+    const ls = _lsFor(c);
     const done = ls.filter(l => PROGRESS[l.id] && PROGRESS[l.id].completed).length;
     const pct = ls.length ? Math.round(done / ls.length * 100) : 0;
     const started = done > 0;
@@ -1033,14 +1046,14 @@ function renderOverview(push) {
         <div class="cc-title">${c.label}</div>
         <div class="cc-blurb">${c.blurb}</div>
         <div class="cc-spacer"></div>
-        <div class="cc-foot"><span class="soon-badge">${c.soon}</span></div>
+        <div class="cc-foot"><span class="soon-badge">${_soonLbl(c)}</span></div>
       </div></div>`;
   }
 
   // Big space-filling feature card (used when only one course is live, so the
   // page reads as a rich, full offering rather than one lonely card).
   function featureCard(c) {
-    const ls = LESSONS.filter(l => l.course === c.key);
+    const ls = _lsFor(c);
     const done = ls.filter(l => PROGRESS[l.id] && PROGRESS[l.id].completed).length;
     const byLv = {}; ls.forEach(l => (byLv[l.level] = byLv[l.level] || []).push(l));
     const levels = Object.keys(byLv).map(Number).sort((a, b) => a - b);
@@ -1072,9 +1085,9 @@ function renderOverview(push) {
   // half-empty. The backdrop follows the rule the cards already use: the
   // course's own artwork if it has any, otherwise its colour and its icon. ──
   const prog = {};
-  LESSONS.forEach(l => { const p = prog[l.course] || (prog[l.course] = { total: 0, done: 0 });
-    p.total++; if (PROGRESS[l.id] && PROGRESS[l.id].completed) p.done++; });
-  const heroLive = COURSES.filter(c => !c.soon && prog[c.key]);
+  COURSES.forEach(c => { const ls = _lsFor(c);
+    prog[c.key] = { total: ls.length, done: ls.filter(l => PROGRESS[l.id] && PROGRESS[l.id].completed).length }; });
+  const heroLive = COURSES.filter(c => !c.hidden && !_isSoon(c) && prog[c.key] && prog[c.key].total > 0);
   const _featured = c => c.featuredUntil && new Date(c.featuredUntil) > new Date();
   const _feat = heroLive.find(_featured);
   // The normal two picks, with the featured course held out so it is not shown
@@ -1098,12 +1111,12 @@ function renderOverview(push) {
       ? `<img class="cv-bd" data-mux="${c.thumbId}" src="https://image.mux.com/${c.thumbId}/thumbnail.webp?width=1600&height=900&fit_mode=smartcrop&time=${c.thumbTime || 0}" alt=""${i ? ' loading="lazy"' : ""}>`
       : `<div class="cv-plate"></div><div class="cv-plate-ic">${c.icon}</div>`;
     let kick, title, meta, extra = "", acts = "";
-    if (c.soon) {
+    if (_isSoon(c)) {
       kick = "Coming soon"; title = c.label; meta = escHtml(c.blurb);
-      extra = `<div class="cv-soon">${escHtml(c.soon)}</div>`;
+      extra = `<div class="cv-soon">${escHtml(_soonLbl(c))}</div>`;
     } else if (prog[c.key].done > 0) {
       const p = prog[c.key];
-      const nx = ordered.find(l => l.course === c.key && !(PROGRESS[l.id] && PROGRESS[l.id].completed));
+      const nx = _lsFor(c, ordered).find(l => !(PROGRESS[l.id] && PROGRESS[l.id].completed));
       kick = "Continue &middot; " + escHtml(c.label);
       title = escHtml(nx ? nx.title : c.label);
       meta = nx
@@ -1152,7 +1165,7 @@ function renderCourse(courseKey, push) {
   document.title = c.label + " · The Practice Room";
   _courseHist({ view: "course", course: courseKey }, "/courses.html?course=" + encodeURIComponent(courseKey), push);
   const v = document.getElementById("view");
-  const ls = LESSONS.filter(l => l.course === courseKey);
+  const ls = _lsFor(c);
   // A course with practice breaks reads as a single-column sequence (lesson, break, lesson),
   // not the multi-column grid used for courses of independent lessons.
   const _linear = ls.some(l => l.break_after);
@@ -1264,7 +1277,12 @@ async function openLesson(id, courseKey, push) {
     if (courseKey && COURSE[courseKey]) renderCourse(courseKey, false); else renderOverview(false);
     return;
   }
-  const c = COURSE[lesson.course] || { label: "Course" };
+  // Prefer the virtual level-course this lesson was opened from (or the one that
+  // matches its level) so the header and back link read "Music Theory N" rather
+  // than the hidden parent. Falls back to the lesson's own course.
+  const c = (courseKey && COURSE[courseKey])
+    || COURSES.find(x => x.srcCourse === lesson.course && x.onlyLevel === lesson.level)
+    || COURSE[lesson.course] || { label: "Course" };
   window._shPageDetail = "Courses · " + c.label + " · " + lesson.title; if (window._shPing) window._shPing();
   document.title = lesson.title + " · The Practice Room";
   _courseHist({ view: "lesson", lesson: id, course: lesson.course }, "/courses.html?lesson=" + encodeURIComponent(id), push);
@@ -1280,7 +1298,7 @@ async function openLesson(id, courseKey, push) {
     <div class="complete-bar" id="complete-bar"></div></div>`;
 
   v.querySelector("[data-home]").onclick = renderOverview;
-  v.querySelector("[data-course]").onclick = () => renderCourse(lesson.course);
+  v.querySelector("[data-course]").onclick = () => renderCourse(c.key || lesson.course);
 
   const body = document.getElementById("lesson-body");
   body.innerHTML = LessonRender.html(lesson.blocks || []);
