@@ -348,6 +348,7 @@
   .kv{ font-size:.88rem; color:var(--head); font-weight:600; line-height:1.3; }
 
   .rc{ background:var(--card); border-radius:16px; padding:16px; box-shadow:inset 0 0 0 1px var(--hair); margin-bottom:16px; }
+  .rc-sub{ font-size:.82rem; color:var(--muted); line-height:1.5; margin:0 0 13px; }
   .rc-h{ display:flex; align-items:center; gap:8px; font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:12px; }
   .rc-h svg{ width:14px; height:14px; }
   .rc-row{ display:flex; align-items:center; gap:11px; padding:11px 0; border-top:1px solid var(--hair); }
@@ -1151,6 +1152,7 @@ async function renderQuestion(view, reqId){
       + '<button class="send" id="q-send" disabled onclick="submitQuestion()"><span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(cost)+'</button></div>'
     + '</div><div class="composer-note">'+balanceAfter(cost)+'</div></div>'
     + '</div>';
+  fillContextRail();
 }
 async function submitQuestion(){
   const ta = document.getElementById('q-text'); const text = ((ta&&ta.value)||'').trim();
@@ -1164,10 +1166,71 @@ async function submitQuestion(){
   if(id) go({ flow:'question', req:id }); else go({});
 }
 
+/* The rail is the reason this costs what it costs: Matt answers with their
+   context already in front of him. Rows beyond the name are real, so they are
+   fetched and filled in after the view paints rather than guessed at render
+   time. Nothing is invented: a member who has logged nothing is told so. */
 function contextRail(who){
   return '<div class="rc"><div class="rc-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>What Matt sees</div>'
+    + '<div class="rc-sub">He answers with your playing already in front of him, so you do not have to explain it.</div>'
     + '<div class="rc-row"><span class="rc-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg></span><div><div class="rc-k">Member</div><div class="rc-v">'+escHtml(who || myName)+'</div></div></div>'
+    + '<div id="ctx-rows"></div>'
     + '<div class="rc-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Private. Only you and Matt can see this.</div></div>';
+}
+
+function _hm(mins){
+  const h = Math.floor(mins/60), m = Math.round(mins%60);
+  return h ? (h + 'h' + (m ? ' ' + m + 'm' : '')) : (m + 'm');
+}
+
+/* Their last week and what they have actually been playing. `email` is passed
+   only in the owner's view of a thread, where the admin policy lets Matt read
+   the member's rows; a member's own call is scoped to them by RLS. */
+async function memberContext(email){
+  try{
+    const since = new Date(Date.now() - 6*864e5).toISOString().slice(0,10);
+    let weekQ = db.from('practice_sessions').select('id,duration_minutes').gte('session_date', since);
+    let recentQ = db.from('practice_sessions').select('id,session_date').order('session_date',{ascending:false}).limit(25);
+    if(email){ weekQ = weekQ.eq('email', email); recentQ = recentQ.eq('email', email); }
+    const [wk, rc] = await Promise.all([weekQ, recentQ]);
+    const week = wk.data || [];
+    const ids = (rc.data || []).map(function(r){ return r.id; });
+    const pieces = [];
+    if(ids.length){
+      const it = await db.from('practice_items').select('session_id,item_type,piece_label,label')
+                   .in('session_id', ids).eq('item_type','piece');
+      const ord = {}; ids.forEach(function(id,i){ ord[id] = i; });
+      const seen = {};
+      (it.data || []).slice().sort(function(a,b){ return (ord[a.session_id]||0) - (ord[b.session_id]||0); })
+        .forEach(function(r){
+          const n = String(r.piece_label || r.label || '').trim();
+          const k = n.toLowerCase();
+          if(n && !seen[k]){ seen[k] = 1; pieces.push(n); }
+        });
+    }
+    return { sessions: week.length,
+             minutes: week.reduce(function(a,s){ return a + (s.duration_minutes || 0); }, 0),
+             pieces: pieces.slice(0,3) };
+  }catch(e){ return null; }
+}
+
+const IC_NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+const IC_BARS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20v-10M18 20V4"/></svg>';
+
+async function fillContextRail(email){
+  const el = document.getElementById('ctx-rows'); if(!el) return;
+  const c = await memberContext(email);
+  if(!c){ return; }
+  let html = '';
+  if(c.pieces.length){
+    html += '<div class="rc-row"><span class="rc-ic">'+IC_NOTE+'</span><div><div class="rc-k">Working on</div>'
+          + '<div class="rc-v">'+c.pieces.map(escHtml).join(' · ')+'</div></div></div>';
+  }
+  html += '<div class="rc-row"><span class="rc-ic">'+IC_BARS+'</span><div><div class="rc-k">Last 7 days</div>'
+        + '<div class="rc-v">' + (c.sessions
+            ? (c.sessions + ' session' + (c.sessions===1?'':'s') + ' · ' + _hm(c.minutes))
+            : 'Nothing logged yet') + '</div></div></div>';
+  el.innerHTML = html;
 }
 
 // ── Thread (question / any delivered reply) ────────────────────────────────────
@@ -1194,6 +1257,7 @@ async function renderThread(view, reqId, kind){
     + '<aside class="rail">'+contextRail(owner ? (r.email||'').split('@')[0] : null)+'</aside>'
     + (composer ? '<div class="conv-composer">'+composer+'</div>' : '')
     + '</div>';
+  fillContextRail(owner ? r.email : null);
 }
 async function deliverThread(id){
   const ta = document.getElementById('reply-'+id); const text=((ta&&ta.value)||'').trim();
