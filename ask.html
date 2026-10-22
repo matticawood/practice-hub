@@ -18,6 +18,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- shared composer plumbing (image/file upload) reused by the question flow -->
+  <script src="/shared-comments.js?v=20260910a"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3.5.0/dist/mux-player.mjs"></script>
   <style>
   /* ===== Ask page: its own dark immersive ground over the shared header ===== */
   html{ background:#0b0b0e; }
@@ -380,6 +383,132 @@
   .am-yes{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:0; background:#f5c518; color:#17130a; }
   .am-yes:hover{ filter:brightness(.96); }
   .am-yes .coin{ width:16px; height:16px; }
+  /* ══ Question flow: full-bleed immersive conversation (aq- namespace) ══════════
+     Mirrors chat.html's "chrome away" idiom. Toggled by body.ask-flow (only while
+     the question flow is active); the hub keeps its chrome. */
+  body.ask-flow #app-header,
+  body.ask-flow #sh-mob-bottom-bar,
+  body.ask-flow #sh-mob-subnav,
+  body.ask-flow #sh-sidebar{ display:none !important; }
+  body.ask-flow{ padding:0 !important; overflow:hidden; }
+  body.ask-flow #owner-bar{ display:none !important; }
+  body.ask-flow .ask-wrap{ padding:0 !important; }
+
+  .aq-flow{ position:fixed; inset:0; z-index:40; background:#0b0b0e;
+    --purple:#a78bfa; color:var(--body); }
+  .aq-flow::before{ content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+    background:radial-gradient(130% 90% at 100% 0%, rgba(99,102,241,.16), transparent 70%),
+               radial-gradient(90% 80% at 0% 100%, rgba(167,139,250,.10), transparent 68%); }
+  .aq-x{ position:fixed; z-index:60; top:max(16px,env(safe-area-inset-top)); right:16px; width:38px; height:38px; border-radius:11px;
+    display:grid; place-items:center; cursor:pointer; border:1px solid var(--line); background:rgba(20,20,26,.6); color:var(--muted); backdrop-filter:blur(8px); }
+  .aq-x:hover{ color:#fff; border-color:var(--line2); }
+  .aq-x svg{ width:17px; height:17px; }
+  .aq-lay{ position:relative; z-index:1; height:100%; display:grid; grid-template-columns:minmax(0,1fr) 400px; gap:clamp(20px,2.4vw,40px);
+    padding:clamp(22px,3vw,44px) clamp(20px,3vw,44px); }
+  .aq-conv{ min-height:0; display:flex; flex-direction:column; }
+  .aq-scroll{ flex:1; min-height:0; overflow-y:auto; padding-right:6px; }
+  .aq-scroll::-webkit-scrollbar{ width:8px; } .aq-scroll::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.08); border-radius:8px; }
+  .aq-eyb{ font-size:.7rem; letter-spacing:.2em; text-transform:uppercase; color:var(--purple); font-weight:700; }
+  .aq-meta{ display:flex; align-items:center; flex-wrap:wrap; gap:7px 11px; margin-top:13px; font-size:.86rem; color:var(--muted); line-height:1.4; }
+  .aq-meta-i{ display:inline-flex; align-items:center; gap:7px; }
+  .aq-meta-i svg{ width:14px; height:14px; color:var(--faint); }
+  .aq-meta .aq-gold{ color:var(--golds); font-weight:600; }
+  .aq-meta-sep{ width:3px; height:3px; border-radius:50%; background:var(--faint); opacity:.5; flex:0 0 auto; }
+  .aq-intro{ display:flex; gap:14px; align-items:flex-start; margin:30px 0 10px; max-width:600px; }
+  .aq-av{ width:42px; height:42px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center; font-family:var(--voice);
+    font-weight:600; font-size:.9rem; background:linear-gradient(135deg,#f5c518,#b8791a); color:#2a1800; }
+  .aq-av.me{ background:linear-gradient(135deg,#3a3a46,#24242b); color:#e9e8ee; }
+  .aq-who{ font-size:.82rem; font-weight:600; color:var(--head); margin-bottom:7px; }
+  .aq-who span{ color:var(--faint); font-weight:400; margin-left:8px; }
+  .aq-bubble{ background:var(--card); border:1px solid var(--hair); border-radius:5px 18px 18px 18px; padding:15px 17px;
+    font-size:.96rem; line-height:1.6; color:#e9e8ee; box-shadow:0 20px 50px -34px rgba(0,0,0,.9); white-space:pre-wrap; }
+  .aq-bubble.me{ border-radius:18px 5px 18px 18px; background:var(--raised); }
+  .aq-dock{ flex:0 0 auto; padding-top:14px; }
+  .aq-trigger{ display:none; }
+  .aq-composer{ background:linear-gradient(180deg,#1d1d25,#191920); border:1px solid var(--line2); border-radius:20px;
+    padding:12px 13px; box-shadow:0 30px 70px -34px rgba(0,0,0,.95); }
+  .aq-ctoolbar{ display:flex; gap:5px; margin-bottom:9px; }
+  .aq-tbtn{ width:36px; height:36px; border-radius:9px; border:1.5px solid transparent; background:none; color:var(--muted);
+    display:grid; place-items:center; cursor:pointer; transition:background .15s, border-color .15s, color .15s; }
+  .aq-tbtn:hover{ background:rgba(255,255,255,.06); border-color:var(--line); color:var(--head); }
+  .aq-tbtn svg{ width:18px; height:18px; }
+  .aq-input-row{ display:flex; gap:9px; align-items:flex-end; }
+  .aq-ctext{ flex:1; min-width:0; field-sizing:content; min-height:42px; max-height:30vh; overflow-y:auto; resize:none; outline:none;
+    background:rgba(255,255,255,.04); border:1px solid var(--line); border-radius:15px; padding:10px 14px; color:var(--head);
+    font-family:'Inter',sans-serif; font-size:1rem; line-height:1.5; transition:border-color .15s, box-shadow .15s; }
+  .aq-ctext::placeholder{ color:var(--faint); }
+  .aq-ctext:focus{ border-color:rgba(167,139,250,.55); box-shadow:0 0 0 3px rgba(167,139,250,.14); }
+  .aq-csend{ flex:0 0 auto; width:42px; height:42px; border-radius:50%; border:0; cursor:pointer; color:#1a1430;
+    background:linear-gradient(135deg,#c4b5fd,#a78bfa); display:grid; place-items:center;
+    box-shadow:0 5px 14px -5px rgba(167,139,250,.8); transition:transform .12s, box-shadow .15s, opacity .15s; }
+  .aq-csend:hover{ box-shadow:0 7px 18px -6px rgba(167,139,250,.9); }
+  .aq-csend:active{ transform:scale(.92); }
+  .aq-csend:disabled{ opacity:.45; cursor:default; box-shadow:none; }
+  .aq-csend svg{ width:17px; height:17px; }
+  /* staged-attachment previews (from shared-comments) sit above the input */
+  #inline-media-preview-askq:not(:empty){ margin-bottom:10px; }
+  .aq-ctx-col{ min-height:0; }
+  .aq-ctx{ height:100%; overflow-y:auto; background:linear-gradient(180deg,rgba(27,27,34,.72),rgba(19,19,24,.72));
+    border:1px solid var(--hair); border-radius:22px; padding:22px; backdrop-filter:blur(14px);
+    box-shadow:0 40px 90px -50px rgba(0,0,0,.9); }
+  .aq-ctx::-webkit-scrollbar{ width:8px; } .aq-ctx::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.08); border-radius:8px; }
+  .aq-ctx-h{ display:flex; align-items:center; gap:9px; font-family:var(--voice); font-size:1.06rem; font-weight:600; color:var(--head); }
+  .aq-ctx-h svg{ width:17px; height:17px; color:var(--purple); }
+  .aq-ctx-sub{ font-size:.82rem; color:var(--muted); line-height:1.55; margin:9px 0 18px; }
+  .aq-ctx-sub b{ color:var(--body); font-weight:600; }
+  .aq-stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
+  .aq-stat{ background:rgba(255,255,255,.03); border:1px solid var(--hair); border-radius:14px; padding:13px 10px; text-align:center; }
+  .aq-stat-n{ font-family:var(--voice); font-size:1.45rem; font-weight:600; color:var(--head); line-height:1; font-variant-numeric:tabular-nums; }
+  .aq-stat-n small{ font-size:.78rem; color:var(--muted); font-weight:500; margin-left:1px; }
+  .aq-stat-k{ font-size:.63rem; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); font-weight:700; margin-top:7px; }
+  .aq-sec{ margin-top:20px; }
+  .aq-sec-h{ font-size:.67rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:10px; display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  .aq-sec-h span{ color:var(--muted); letter-spacing:0; text-transform:none; font-weight:600; text-align:right; }
+  .aq-piece{ display:flex; align-items:center; gap:12px; padding:9px 0; border-top:1px solid var(--hair); }
+  .aq-piece:first-of-type{ border-top:0; }
+  .aq-pic{ width:33px; height:33px; flex:0 0 auto; border-radius:10px; display:grid; place-items:center; color:var(--purple); background:rgba(167,139,250,.12); }
+  .aq-pic svg{ width:16px; height:16px; }
+  .aq-pt{ font-size:.9rem; font-weight:600; color:var(--head); }
+  .aq-pc{ font-size:.77rem; color:var(--faint); margin-top:1px; }
+  .aq-pm{ margin-left:auto; font-size:.76rem; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .aq-ses{ padding:10px 0; border-top:1px solid var(--hair); }
+  .aq-ses:first-of-type{ border-top:0; }
+  .aq-ses-top{ display:flex; align-items:baseline; gap:10px; font-size:.84rem; }
+  .aq-ses-d{ color:var(--muted); font-weight:600; width:72px; flex:0 0 auto; }
+  .aq-ses-t{ color:var(--body); flex:1; }
+  .aq-ses-m{ color:var(--faint); font-variant-numeric:tabular-nums; }
+  .aq-ses-note{ margin:7px 0 0 82px; font-size:.81rem; color:var(--muted); line-height:1.5; font-style:italic; border-left:2px solid rgba(167,139,250,.4); padding-left:10px; }
+  .aq-lib{ font-size:.83rem; color:var(--muted); line-height:1.55; }
+  .aq-empty{ font-size:.84rem; color:var(--faint); }
+  .aq-foot{ display:flex; align-items:flex-start; gap:9px; font-size:.79rem; color:var(--body); margin-top:20px; padding-top:16px; border-top:1px solid var(--hair); line-height:1.5; }
+  .aq-foot svg{ width:15px; height:15px; color:var(--green); flex:0 0 auto; margin-top:1px; }
+  .aq-foot b{ color:var(--head); font-weight:600; }
+  @media(max-width:900px){
+    .aq-lay{ grid-template-columns:1fr; gap:0; padding:0; }
+    .aq-ctx-col{ display:none; }
+    .aq-conv{ height:100%; }
+    .aq-scroll{ padding:max(54px,calc(env(safe-area-inset-top) + 46px)) 16px 0; }
+    .aq-dock{ padding:9px 10px calc(9px + env(safe-area-inset-bottom)); border-top:1px solid var(--hair); background:rgba(17,17,22,.94); backdrop-filter:blur(12px); }
+    .aq-composer{ background:none; border:0; border-radius:0; padding:0; box-shadow:none; }
+    .aq-ctoolbar{ margin-bottom:7px; gap:4px; }
+    .aq-tbtn{ width:34px; height:34px; }
+    .aq-ctext{ max-height:38vh; }
+    .aq-trigger{ display:flex; align-items:center; gap:10px; width:100%; margin-bottom:10px; cursor:pointer;
+      background:rgba(167,139,250,.08); border:1px solid rgba(167,139,250,.24); border-radius:13px; padding:11px 14px; color:var(--head); font:inherit; }
+    .aq-trigger .eye{ width:17px; height:17px; color:var(--purple); flex:0 0 auto; }
+    .aq-trigger-t{ font-size:.86rem; font-weight:600; }
+    .aq-trigger-s{ font-size:.76rem; color:var(--muted); }
+    .aq-trigger .chev{ margin-left:auto; width:16px; height:16px; color:var(--muted); }
+  }
+  .aq-sheet-ov{ position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,.6); backdrop-filter:blur(5px);
+    display:flex; align-items:flex-end; justify-content:center; opacity:0; pointer-events:none; transition:opacity .22s; }
+  .aq-sheet-ov.open{ opacity:1; pointer-events:all; }
+  .aq-sheet{ width:100%; max-width:520px; max-height:92vh; background:#141319; border:1px solid var(--line); border-bottom:0;
+    border-radius:20px 20px 0 0; display:flex; flex-direction:column; transform:translateY(100%);
+    transition:transform .32s cubic-bezier(.34,1.3,.64,1); overscroll-behavior:none; }
+  .aq-sheet-ov.open .aq-sheet{ transform:translateY(0); }
+  .aq-grab{ width:40px; height:4px; border-radius:99px; background:rgba(255,255,255,.18); margin:10px auto 2px; flex:0 0 auto; }
+  .aq-sheet-body{ overflow-y:auto; padding:14px 20px calc(24px + env(safe-area-inset-bottom)); }
   </style>
 </head>
 <body class="hub-mode">
@@ -424,6 +553,7 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
 
 let myEmail = "";
 let myName  = "";
+let myMemberKey = null;   // resolved at boot; member_key-scoped RPCs (member_card_*) need it
 let _balance = null;
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -581,6 +711,10 @@ async function render(){
   const req  = sp.get('req') || '';
   await loadBalance();
   renderOwnerBar();
+  // The question flow is a full-bleed immersive conversation (chrome hidden); the
+  // hub and the other flows keep the app chrome. Toggle before rendering so the
+  // layout measures against the right shell.
+  document.body.classList.toggle('ask-flow', flow === 'question' && !req);
   const view = document.getElementById('ask-view');
   if(flow === 'question')      await renderQuestion(view, req);
   else if(flow === 'feedback') await renderFeedback(view, req);
@@ -1128,36 +1262,165 @@ function renderShortfall(view, key){
 }
 
 // ── Question flow ──────────────────────────────────────────────────────────────
+// A full-bleed immersive conversation (body.ask-flow hides the app chrome). The
+// composer reuses the shared image/file uploader; "What Matt sees" is a real
+// snapshot of the member's own practice, shown in the right rail on desktop and
+// a slide-up sheet on mobile.
+const AQ_NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+const AQ_EYE  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7z"/></svg>';
 async function renderQuestion(view, reqId){
   if(!reqId && !canAfford(CAT.question.cost)) return renderShortfall(view, 'question');
   if(reqId){ return renderThread(view, reqId, 'question'); }
   const cost = CAT.question.cost;
-  view.innerHTML = convTop('Ask Matt a question','Private to you and Matt',cost)
-    + '<div class="conv">'
-    + '<div class="conv-thread">'
-      + '<div class="msg"><span class="msg-av">M</span><div><div class="msg-who">Matt <span>usually replies within a couple of days</span></div>'
-      + '<div class="bubble">Hi '+escHtml(myName)+'. Ask me anything about your playing: a passage that won\'t sit, how to practise something, what to work on next. Be as specific as you can and I\'ll give you a proper, considered answer, just for you.</div></div></div>'
-      + '<div class="msg-hint">Your question is held at '+fmt(cost)+' credits until Matt replies. Refunded if he can\'t take it.</div>'
+  try{ if(window.Comments) Comments.clearState('askq'); }catch(_){}
+  view.innerHTML =
+    '<div class="aq-flow">'
+    + '<button class="aq-x" aria-label="Close" onclick="go({})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>'
+    + '<div class="aq-lay">'
+    +   '<section class="aq-conv"><div class="aq-scroll">'
+    +     '<div class="aq-eyb">Ask Matt</div>'
+    +     '<div class="aq-meta"><span class="aq-meta-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Private to you and Matt</span>'
+    +       '<span class="aq-meta-sep"></span>'
+    +       '<span><span class="aq-gold">'+fmt(cost)+' credits held</span>, refunded if he can\'t take it</span></div>'
+    +     '<div class="aq-intro"><span class="aq-av">M</span><div>'
+    +       '<div class="aq-who">Matt <span>usually replies within a couple of days</span></div>'
+    +       '<div class="aq-bubble">Hi '+escHtml(myName)+'. Ask me anything about your playing: a passage that won\'t sit, how to practise something, what to work on next. Be as specific as you can and I\'ll give you a proper, considered answer.</div>'
+    +     '</div></div>'
+    +   '</div>'
+    +   '<div class="aq-dock">'
+    +     '<button class="aq-trigger" onclick="aqOpenSheet()"><span class="eye">'+AQ_EYE+'</span><span><span class="aq-trigger-t">What Matt sees</span> <span class="aq-trigger-s">your full record</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg></button>'
+    +     '<div class="aq-composer">'
+    +       '<div id="inline-media-preview-askq"></div>'
+    +       '<div class="aq-ctoolbar">'
+    +         '<button class="aq-tbtn" title="Add an image" aria-label="Add an image" onclick="document.getElementById(\'aq-fi-img\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>'
+    +         '<button class="aq-tbtn" title="Attach sheet music" aria-label="Attach sheet music" onclick="document.getElementById(\'aq-fi-file\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></button>'
+    +         '<input type="file" id="aq-fi-img" accept="image/*" multiple style="display:none" onchange="tcHandleImage(this,\'askq\')">'
+    +         '<input type="file" id="aq-fi-file" accept=".pdf,.doc,.docx,.txt,.xml,.musicxml,.mxl,.mid,.midi" style="display:none" onchange="tcHandleFile(this,\'askq\')">'
+    +       '</div>'
+    +       '<div class="aq-input-row"><textarea class="aq-ctext" id="aq-text" placeholder="What would you like to ask Matt?"></textarea>'
+    +         '<button class="aq-csend" id="aq-send" aria-label="Send" onclick="submitQuestion()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></button></div>'
+    +     '</div>'
+    +   '</div></section>'
+    +   '<aside class="aq-ctx-col"><div class="aq-ctx" id="aq-ctx-host">'+aqContextLoading()+'</div></aside>'
     + '</div>'
-    + '<aside class="rail">'+contextRail()+'</aside>'
-    + '<div class="conv-composer"><div class="composer-wrap">'
-      + '<textarea id="q-text" oninput="composerInput(this,\'q-send\')" placeholder="What would you like to ask Matt?"></textarea>'
-      + '<div class="composer-row"><span class="attach soon">'+IC.piece+'Add a piece · soon</span><span class="attach soon">'+IC.photo+'Attach a photo · soon</span>'
-      + '<button class="send" id="q-send" disabled onclick="submitQuestion()"><span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(cost)+'</button></div>'
-    + '</div><div class="composer-note">'+balanceAfter(cost)+'</div></div>'
+    + '<div class="aq-sheet-ov" id="aq-sheet" onclick="if(event.target===this)aqCloseSheet()"><div class="aq-sheet"><div class="aq-grab"></div><div class="aq-sheet-body" id="aq-sheet-host">'+aqContextLoading()+'</div></div></div>'
     + '</div>';
-  fillContextRail();
+  fillAqContext();
 }
 async function submitQuestion(){
-  const ta = document.getElementById('q-text'); const text = ((ta&&ta.value)||'').trim();
-  if(text.length<5){ showToast('Write your question first.', 3000); return; }
+  const ta = document.getElementById('aq-text'); const text = ((ta&&ta.value)||'').trim();
+  if(text.length<5){ showToast('Write your question first.', 3000); if(ta) ta.focus(); return; }
   if(!await confirmSpend('question')) return;
-  const btn = document.getElementById('q-send'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
-  const { data, error } = await spend('question', { text:text });
-  if(error){ showToast(/insufficient/i.test(error.message||'')?'You do not have enough credits.':'Could not send. Please try again.', 3800); if(btn){ btn.disabled=false; btn.innerHTML='<span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(CAT.question.cost); } return; }
+  const btn = document.getElementById('aq-send'); if(btn){ btn.disabled=true; }
+  let media = [];
+  try{ if(window.Comments) media = await Comments.uploadMedia('askq'); }
+  catch(e){ showToast(e && e.message ? e.message : 'An attachment is still uploading.', 3800); if(btn) btn.disabled=false; return; }
+  const body = { text:text }; if(media && media.length) body.media = media;
+  const { data, error } = await spend('question', body);
+  if(error){ showToast(/insufficient/i.test(error.message||'')?'You do not have enough credits.':'Could not send. Please try again.', 3800); if(btn) btn.disabled=false; return; }
+  try{ if(window.Comments) Comments.clearState('askq'); }catch(_){}
   const id = data && (Array.isArray(data)?(data[0]&&data[0].request_id):data.request_id);
   showToast('Sent to Matt. You\'ll get a notification when he replies.');
   if(id) go({ flow:'question', req:id }); else go({});
+}
+function aqOpenSheet(){ const s=document.getElementById('aq-sheet'); if(s) s.classList.add('open'); }
+function aqCloseSheet(){ const s=document.getElementById('aq-sheet'); if(s) s.classList.remove('open'); }
+function aqContextLoading(){
+  return '<div class="aq-ctx-h">'+AQ_EYE+'What Matt sees</div><div class="aq-ctx-sub">Loading your practice…</div>';
+}
+function _hmShort(mins){
+  const h=Math.floor(mins/60), m=Math.round(mins%60);
+  if(h && m) return h+'<small>h</small> '+m+'<small>m</small>';
+  if(h) return h+'<small>h</small>';
+  return m+'<small>m</small>';
+}
+function _dayLabel(dateStr){
+  if(!dateStr) return '';
+  const d=new Date(dateStr+'T00:00:00'); const t=new Date(); t.setHours(0,0,0,0);
+  const diff=Math.round((t-d)/864e5);
+  if(diff<=0) return 'Today'; if(diff===1) return 'Yesterday'; if(diff<7) return diff+' days ago';
+  return d.toLocaleDateString(undefined,{day:'numeric',month:'short'});
+}
+// The member's own practice, read with their own RLS scope. Degrades gracefully:
+// a missing RPC or an empty log simply shows less, never an error.
+async function _aqContext(){
+  const out = { weekMins:0, streak:null, total:0, learning:[], recent:[], libCount:0, libTitles:[] };
+  try{
+    const sevenAgo=new Date(Date.now()-6*864e5); sevenAgo.setHours(0,0,0,0);
+    const sevenStr=sevenAgo.toISOString().slice(0,10);
+    const [sessRes, collRes, streakRes] = await Promise.all([
+      db.rpc('get_my_sessions', { p_email: myEmail }).then(r=>r, ()=>({data:null})),
+      db.from('user_collections').select('status, pieces(title,composer), user_pieces(title)').eq('email', myEmail).then(r=>r, ()=>({data:null})),
+      myMemberKey ? db.rpc('member_card_streak', { p_member_key: myMemberKey }).then(r=>r, ()=>({data:null})) : Promise.resolve({data:null})
+    ]);
+    const sessions = Array.isArray(sessRes && sessRes.data) ? sessRes.data : [];
+    out.total = sessions.length;
+    const pieceMins = {};
+    sessions.forEach(function(s){
+      if(String(s.session_date||'') >= sevenStr) out.weekMins += (s.duration_minutes||0);
+      (s.practice_items||[]).forEach(function(it){
+        if(it.item_type==='piece' || it.item_type==='book'){
+          const n=String(it.piece_label||it.label||'').trim(); if(!n) return;
+          pieceMins[n.toLowerCase()] = (pieceMins[n.toLowerCase()]||0) + (it.duration_minutes||0);
+        }
+      });
+    });
+    const recent = sessions.slice().sort(function(a,b){ return String(b.session_date||'').localeCompare(String(a.session_date||'')); }).slice(0,3);
+    out.recent = recent.map(function(s){
+      const seen={}, names=[];
+      (s.practice_items||[]).forEach(function(it){ const n=String(it.piece_label||it.label||'').trim(); const k=n.toLowerCase(); if(n && !seen[k]){ seen[k]=1; names.push(n); } });
+      return { date:s.session_date, mins:s.duration_minutes||0, what:names.slice(0,3).join(', '), note:String(s.notes||'').trim() };
+    });
+    const sk = streakRes && streakRes.data; const skRow = Array.isArray(sk)?sk[0]:sk;
+    out.streak = skRow ? (skRow.current_streak!=null?skRow.current_streak:(skRow.streak!=null?skRow.streak:null)) : null;
+    const coll = (Array.isArray(collRes && collRes.data) ? collRes.data : []).map(function(r){
+      const t=String((r.pieces&&r.pieces.title)||(r.user_pieces&&r.user_pieces.title)||'').trim();
+      return { title:t, composer:String((r.pieces&&r.pieces.composer)||'').trim(), status:r.status };
+    }).filter(function(r){ return r.title; });
+    out.libCount = coll.length;
+    out.libTitles = coll.map(function(r){ return r.title; });
+    out.learning = coll.filter(function(r){ return r.status==='learning'; }).map(function(r){
+      return { title:r.title, composer:r.composer, mins:pieceMins[r.title.toLowerCase()]||0 };
+    }).slice(0,4);
+  }catch(e){ }
+  return out;
+}
+function aqContextHtml(c){
+  let h = '<div class="aq-ctx-h">'+AQ_EYE+'What Matt sees</div>'
+    + '<div class="aq-ctx-sub">Not a summary, <b>your whole record</b>. Before he answers he opens every session you\'ve logged, the notes you wrote with them, and your full library. Here\'s a glimpse.</div>'
+    + '<div class="aq-stats">'
+    +   '<div class="aq-stat"><div class="aq-stat-n">'+(c.weekMins?_hmShort(c.weekMins):'0<small>m</small>')+'</div><div class="aq-stat-k">This week</div></div>'
+    +   '<div class="aq-stat"><div class="aq-stat-n">'+(c.streak!=null?c.streak:'—')+'</div><div class="aq-stat-k">Day streak</div></div>'
+    +   '<div class="aq-stat"><div class="aq-stat-n">'+c.total+'</div><div class="aq-stat-k">Sessions</div></div>'
+    + '</div>';
+  if(c.learning.length){
+    h += '<div class="aq-sec"><div class="aq-sec-h">Learning now <span>'+c.learning.length+' piece'+(c.learning.length===1?'':'s')+'</span></div>';
+    c.learning.forEach(function(p){ h += '<div class="aq-piece"><span class="aq-pic">'+AQ_NOTE+'</span><div><div class="aq-pt">'+escHtml(p.title)+'</div>'+(p.composer?'<div class="aq-pc">'+escHtml(p.composer)+'</div>':'')+'</div>'+(p.mins?'<span class="aq-pm">'+_hm(p.mins)+'</span>':'')+'</div>'; });
+    h += '</div>';
+  }
+  if(c.recent.length){
+    h += '<div class="aq-sec"><div class="aq-sec-h">Recent practice <span>every session, '+c.total+' logged</span></div>';
+    c.recent.forEach(function(s){
+      h += '<div class="aq-ses"><div class="aq-ses-top"><span class="aq-ses-d">'+escHtml(_dayLabel(s.date))+'</span><span class="aq-ses-t">'+(escHtml(s.what)||'Practice')+'</span><span class="aq-ses-m">'+_hm(s.mins)+'</span></div>'
+         + (s.note ? '<div class="aq-ses-note">"'+escHtml(s.note)+'"</div>' : '') + '</div>';
+    });
+    h += '</div>';
+  }
+  if(c.libCount){
+    h += '<div class="aq-sec"><div class="aq-sec-h">Your library <span>'+c.libCount+' piece'+(c.libCount===1?'':'s')+'</span></div>'
+       + '<div class="aq-lib">'+c.libTitles.slice(0,6).map(escHtml).join(' · ')+(c.libCount>6?' · +'+(c.libCount-6)+' more':'')+'</div></div>';
+  }
+  if(!c.total && !c.libCount){
+    h += '<div class="aq-sec"><div class="aq-empty">Nothing logged yet. As you practise, it builds up here, and Matt sees all of it.</div></div>';
+  }
+  h += '<div class="aq-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg><span><b>He sees all of it, you see all of it.</b> Private, only you and Matt.</span></div>';
+  return h;
+}
+async function fillAqContext(){
+  const data = await _aqContext();
+  const html = aqContextHtml(data);
+  const a=document.getElementById('aq-ctx-host'); if(a) a.innerHTML=html;
+  const b=document.getElementById('aq-sheet-host'); if(b) b.innerHTML=html;
 }
 
 /* The rail is the reason this costs what it costs: Matt answers with their
@@ -1365,6 +1628,9 @@ async function renderPlanDeliverable(view, reqId){
   myEmail = session.user.email;
   const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName = (ae && ae.name) || myEmail.split("@")[0];
+  try{ const { data: pr } = await db.rpc("get_profile_row"); myMemberKey = (Array.isArray(pr)?pr[0]:pr)?.member_key || null; }catch(_){ }
+  // Initialise the shared composer plumbing (image/file upload) used by the question flow.
+  try{ if(window.initCommentsSystem) initCommentsSystem({ db, auth:{ email:myEmail, name:myName, avatarUrl:(ae && ae.avatar_url)||null, isAdmin:isOwner() } }); }catch(e){ console.error("initCommentsSystem error:", e); }
   try{ initSharedHeader({ db, myEmail, myName, isAdmin: isOwner(), activePage:"hub", avatarUrl:(ae && ae.avatar_url)||null }); }catch(e){ console.error("initSharedHeader error:", e); }
   document.getElementById("app-main").style.display = "block";
   document.getElementById("app-header").style.display = "";

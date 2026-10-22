@@ -1477,6 +1477,10 @@
     // Read raw inline media array (for custom submit handlers — e.g. content-feed.html Post form)
     readMedia: (key) => (_inlineMedia[key] || []).slice(),
 
+    // Finalize staged media: uploads any blob items (images/files) to storage and
+    // returns the persisted media array. For custom submit handlers (e.g. ask.html).
+    uploadMedia: (key) => _uploadMedia(key),
+
     // Expose reaction state for external reads (e.g. to build avatars / counts)
     getReactionState: (parentId) => ({..._reactState(parentId)}),
     setReactionState: (parentId, data) => { _rxState[parentId]=data; },
