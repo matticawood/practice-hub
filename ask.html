@@ -392,6 +392,16 @@
   .am-row{ display:flex; gap:10px; margin-top:18px; }
   .am-row button{ flex:1; border-radius:12px; padding:11px 14px; font:inherit; font-size:.9rem; font-weight:700; cursor:pointer; white-space:nowrap; transition:filter .15s, border-color .15s, color .15s; }
   .am-row .am-yes{ flex:1.6; }
+  /* Secondary actions: withdrawing and declining are deliberately quiet, they
+     are not what the page is for. */
+  .ghostbtn{ display:inline-flex; align-items:center; gap:7px; background:transparent; border:1px solid var(--line2);
+             color:var(--muted); border-radius:11px; padding:10px 15px; font:inherit; font-size:.86rem; font-weight:600;
+             cursor:pointer; transition:border-color .15s, color .15s; }
+  .ghostbtn:hover{ border-color:var(--border-2,rgba(255,255,255,.34)); color:var(--head); }
+  .linkbtn{ background:none; border:0; padding:0; margin:2px 0 0; font:inherit; font-size:.8rem; color:var(--faint);
+            text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+  .linkbtn:hover{ color:var(--muted); }
+  .qreq-acts{ display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:10px; }
   .am-no{ background:transparent; border:1px solid rgba(255,255,255,.18); color:#cfcdd6; }
   .am-no:hover{ border-color:rgba(255,255,255,.34); color:#f4f1ec; }
   .am-yes{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:0; background:#f5c518; color:#17130a; }
@@ -1061,10 +1071,33 @@ async function renderOwnerQueue(){
       return '<div class="qreq"><div class="qreq-top"><span class="qreq-who">'+escHtml(r.email||'')+'</span><span class="qreq-k">'+escHtml(KIND_LABEL[r.kind]||r.kind)+' · '+r.cost+' cr</span></div>'
         + '<div class="qreq-q">'+q+'</div>'
         + '<textarea id="reply-'+r.id+'" placeholder="Write your reply…"></textarea>'
-        + '<button class="buy" onclick="deliver(\''+r.id+'\')">Send reply & charge '+r.cost+'</button></div>';
+        + '<div class="qreq-acts"><button class="buy" onclick="deliver(\''+r.id+'\')">Send reply & charge '+r.cost+'</button>'
+        + '<button class="ghostbtn" onclick="cancelRequest(\''+r.id+'\',false)">Decline & refund</button></div></div>';
     }).join('') : '<div class="reqs-empty">Nothing waiting. You are all caught up.</div>')
     + '</div>';
 }
+/* cancel_credit_request has existed since the credits migration and had no
+   caller, so the page promised a refund it could not perform. Either side may
+   call it while the request is still open: the hold becomes a refund and the
+   balance comes back. */
+async function cancelRequest(id, mine){
+  const ok = await askDialog({
+    title: mine ? 'Withdraw this question?' : 'Decline this request?',
+    body: mine
+      ? 'It will be withdrawn before Matt answers, and the credits it is holding come straight back to you.'
+      : 'The member gets the credits back and the request leaves your queue.',
+    yes: mine ? 'Withdraw and refund' : 'Decline and refund',
+    no: 'Keep it', coin: false
+  });
+  if(!ok) return;
+  if(!await requireAuth()) return;
+  const { error } = await db.rpc('cancel_credit_request', { p_id:id });
+  if(error){ showToast('Could not do that. ' + (error.message||''), 4000); return; }
+  showToast(mine ? 'Withdrawn. Your credits are back.' : 'Declined, and the member has been refunded.');
+  await loadBalance();
+  render();
+}
+
 async function deliver(id){
   const ta = document.getElementById('reply-'+id); const text = ((ta&&ta.value)||'').trim();
   if(text.length<2){ showToast('Write your reply first.', 3000); return; }
@@ -1246,7 +1279,8 @@ async function renderThread(view, reqId, kind){
     composer = '<div class="composer-wrap"><textarea id="reply-'+r.id+'" oninput="_taGrow(this)" placeholder="Write your reply to '+escHtml((r.email||'').split('@')[0])+'…"></textarea>'
       + '<div class="composer-row"><button class="send" onclick="deliverThread(\''+r.id+'\')">Send reply & charge '+r.cost+'</button></div></div>';
   } else {
-    reply = '<div class="msg-hint">Waiting for Matt. You\'ll get a notification when he replies.</div>';
+    reply = '<div class="msg-hint">Waiting for Matt. You\'ll get a notification when he replies.</div>'
+          + (r.status==='open' ? '<button class="linkbtn" onclick="cancelRequest(\''+r.id+'\',true)">Withdraw this and get your '+fmt(r.cost)+' credits back</button>' : '');
   }
   view.innerHTML = convTop(title, (owner?('From '+escHtml(r.email)):'Private to you and Matt'), null)
     + '<div class="conv">'
