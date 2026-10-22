@@ -204,7 +204,8 @@
   .sitem-need{ font-size:.72rem; color:var(--faint); margin-left:8px; }
   .buy{ border:0; border-radius:11px; padding:10px 17px; font:inherit; font-size:.86rem; font-weight:600; cursor:pointer; background:var(--gold); color:#17130a; white-space:nowrap; }
   .buy.ghost{ background:transparent; color:#e9e8ee; box-shadow:inset 0 0 0 1px var(--line2); }
-  .sitem.cant{ opacity:.74; }
+  .sitem.cant{ opacity:.74; cursor:default; }
+  .sitem.cant:hover{ transform:none; border-color:var(--line); }
   /* store card demo: one inline SVG per feature, drawn on a 4:3 viewBox so
      the whole graphic scales with the card instead of its parts squashing. */
   .sitem-demo{ margin-top:14px; box-sizing:border-box; width:100%; aspect-ratio:4 / 3; border-radius:14px; background:linear-gradient(180deg,#131318,#0d0d11); box-shadow:inset 0 0 0 1px var(--hair); overflow:hidden; }
@@ -340,6 +341,18 @@
   .ask-modal-h{ font-family:var(--voice); font-size:1.2rem; font-weight:600; color:#f4f1ec; margin-bottom:8px; }
   .ask-modal-b{ font-size:.92rem; color:#cfcdd6; line-height:1.6; }
   .ask-modal-x{ float:right; background:none; border:0; color:#9594a0; font-size:1.5rem; line-height:1; cursor:pointer; }
+  /* Dialog buttons. The modal is a body child, outside #ask, so it cannot use
+     the #ask custom properties: colours here are literal, as the rules above are. */
+  .am-fig{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:15px; padding:12px 14px; background:#101014; border:1px solid rgba(255,255,255,.07); border-radius:12px; font-size:.86rem; color:#9594a0; }
+  .am-fig b{ color:#f4f1ec; font-weight:600; font-variant-numeric:tabular-nums; }
+  .am-row{ display:flex; gap:10px; margin-top:18px; }
+  .am-row button{ flex:1; border-radius:12px; padding:11px 14px; font:inherit; font-size:.9rem; font-weight:700; cursor:pointer; white-space:nowrap; transition:filter .15s, border-color .15s, color .15s; }
+  .am-row .am-yes{ flex:1.6; }
+  .am-no{ background:transparent; border:1px solid rgba(255,255,255,.18); color:#cfcdd6; }
+  .am-no:hover{ border-color:rgba(255,255,255,.34); color:#f4f1ec; }
+  .am-yes{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:0; background:#f5c518; color:#17130a; }
+  .am-yes:hover{ filter:brightness(.96); }
+  .am-yes .coin{ width:16px; height:16px; }
   </style>
 </head>
 <body class="hub-mode">
@@ -354,6 +367,16 @@
   <div id="ask"><div class="ask-wrap"><div id="owner-bar"></div><div id="ask-view"></div></div></div>
 </main>
 
+<div class="ask-modal" id="ask-dialog" onclick="if(event.target===this)_dlgDone(false)">
+  <div class="ask-modal-card">
+    <button class="ask-modal-x" onclick="_dlgDone(false)">&times;</button>
+    <div class="ask-modal-h" id="dlg-h"></div>
+    <div class="ask-modal-b" id="dlg-b"></div>
+    <div id="dlg-fig"></div>
+    <div class="am-row"><button class="am-no" id="dlg-no" onclick="_dlgDone(false)">Not yet</button>
+    <button class="am-yes" id="dlg-yes" onclick="_dlgDone(true)"></button></div>
+  </div>
+</div>
 <div class="ask-modal" id="earn-modal" onclick="if(event.target===this)this.classList.remove('on')">
   <div class="ask-modal-card">
     <button class="ask-modal-x" onclick="document.getElementById('earn-modal').classList.remove('on')">&times;</button>
@@ -437,6 +460,58 @@ async function openRequests(){
 async function getRequest(id){
   try{ const { data } = await db.from('credit_requests').select('*').eq('id', id).maybeSingle(); return data || null; }catch(e){ return null; }
 }
+// ── Spending guards ───────────────────────────────────────────────────────────
+// Credits are HELD on send and only charged when Matt replies, so the two
+// moments that matter are the door (can they afford it at all?) and the send
+// (do they mean it?). _balance is null until the first load: treat unknown as
+// allowed, or a slow connection shows a dead store.
+function canAfford(cost){ return _balance == null || _balance >= cost; }
+
+let _dlgCb = null;
+function _dlgDone(v){
+  const m = document.getElementById('ask-dialog'); if(m) m.classList.remove('on');
+  const cb = _dlgCb; _dlgCb = null; if(cb) cb(v);
+}
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && _dlgCb) _dlgDone(false); });
+
+/* One dialog for both guards. Returns a promise so a caller can simply await it. */
+function askDialog(o){
+  return new Promise(function(resolve){
+    document.getElementById('dlg-h').textContent = o.title;
+    document.getElementById('dlg-b').innerHTML = o.body;
+    document.getElementById('dlg-fig').innerHTML = o.figures || '';
+    document.getElementById('dlg-no').textContent = o.no || 'Not yet';
+    document.getElementById('dlg-yes').innerHTML = (o.coin === false ? '' : '<span class="coin">'+IC.coin+'</span>') + (o.yes || 'Confirm');
+    _dlgCb = resolve;
+    document.getElementById('ask-dialog').classList.add('on');
+  });
+}
+
+/* Shown instead of opening a flow the member cannot pay for. */
+async function needCredits(key){
+  const it = CAT[key]; const short = Math.max(0, it.cost - (_balance||0));
+  const ok = await askDialog({
+    title: 'You need a few more credits',
+    body: it.name + ' costs ' + fmt(it.cost) + ' credits. Your practice earns them automatically, so this one is not far off.',
+    figures: '<div class="am-fig"><span>You have</span><b>' + fmt(_balance||0) + '</b></div>'
+           + '<div class="am-fig"><span>Still needed</span><b>' + fmt(short) + '</b></div>',
+    yes: 'How credits work', no: 'Close', coin: false
+  });
+  if(ok) document.getElementById('earn-modal').classList.add('on');
+}
+
+/* Shown on send, once they know what they are asking for. */
+function confirmSpend(key){
+  const it = CAT[key];
+  return askDialog({
+    title: 'Send this to Matt?',
+    body: 'This holds ' + fmt(it.cost) + ' credits until Matt replies. If he cannot take it, they come straight back to you.',
+    figures: '<div class="am-fig"><span>Held now</span><b>' + fmt(it.cost) + '</b></div>'
+           + (_balance != null ? '<div class="am-fig"><span>Left after</span><b>' + fmt(Math.max(0, _balance - it.cost)) + '</b></div>' : ''),
+    yes: 'Hold ' + fmt(it.cost) + ' and send', no: 'Not yet'
+  });
+}
+
 async function spend(item, body){
   if(!await requireAuth()) return { error:{ message:'auth' } };
   const { data, error } = await db.rpc('spend_credits', { p_item:item, p_body:body });
@@ -761,7 +836,8 @@ async function renderHub(view){
   const items = Object.keys(CAT).map(function(key){
     const it = CAT[key]; const can = (_balance==null) || _balance>=it.cost;
     const need = (it.live && _balance!=null && !can) ? ('· '+fmt(it.cost-_balance)+' more') : '';
-    return '<button class="sitem'+((it.live&&!can)?' cant':'')+'" style="--oc:'+it.oc+'" onclick="onStore(\''+key+'\')">'
+    return '<button class="sitem'+((it.live&&!can)?' cant':'')+'"'+((it.live&&!can)?' aria-disabled="true"':'')
+      + ' style="--oc:'+it.oc+'" onclick="onStore(\''+key+'\')">'
       + '<div class="sitem-top"><span class="sitem-ic">'+it.ic+'</span><span class="sitem-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div>'
       + '<div class="sitem-n">'+it.name+'</div><div class="sitem-v">'+it.val+'</div>'
       + itemDemo(key)
@@ -807,7 +883,12 @@ function _reqPreview(r){
   return (t.length>42 ? t.slice(0,42)+'…' : t) || (KIND_LABEL[r.kind]||'');
 }
 function openReq(kind, id){ go({ flow: kind, req: id }); }
-function onStore(key){ const it=CAT[key]; if(!it.live){ showToast('That one is coming soon.'); return; } go({ flow:key }); }
+function onStore(key){
+  const it = CAT[key];
+  if(!it.live){ showToast('That one is coming soon.'); return; }
+  if(!canAfford(it.cost)){ needCredits(key); return; }
+  go({ flow:key });
+}
 /* ---- Search over Matt's teaching corpus (ask_search RPC) ---- */
 function _askTag(r){
   switch(r.source_type){
@@ -958,8 +1039,24 @@ function convTop(title, sub, cost){
 }
 function balanceAfter(cost){ return (_balance!=null) ? ('You have '+fmt(_balance)+', so you\'ll have '+fmt(Math.max(0,_balance-cost))+' left.') : ''; }
 
+/* Reached by typing ?flow=question with too few credits. Better than a composer
+   that cannot send: it says where they are and how the gap closes. */
+function renderShortfall(view, key){
+  const it = CAT[key]; const short = Math.max(0, it.cost - (_balance||0));
+  view.innerHTML = convTop(it.name, 'Private to you and Matt', it.cost)
+    + '<div class="lay-narrow lay"><div><div class="empty-note">'
+    + '<b>You are ' + fmt(short) + ' credits short.</b><br><br>'
+    + escHtml(it.name) + ' costs ' + fmt(it.cost) + ' credits and you have ' + fmt(_balance||0) + '. '
+    + 'Your practice earns them automatically, so this one comes round on its own.'
+    + '<div class="am-row" style="max-width:380px;margin-top:20px">'
+    + '<button class="am-no" onclick="go({})">Back to Ask</button>'
+    + '<button class="am-yes" onclick="document.getElementById(\'earn-modal\').classList.add(\'on\')">How credits work</button>'
+    + '</div></div></div><aside class="rail"></aside></div>';
+}
+
 // ── Question flow ──────────────────────────────────────────────────────────────
 async function renderQuestion(view, reqId){
+  if(!reqId && !canAfford(CAT.question.cost)) return renderShortfall(view, 'question');
   if(reqId){ return renderThread(view, reqId, 'question'); }
   const cost = CAT.question.cost;
   view.innerHTML = convTop('Ask Matt a question','Private to you and Matt',cost)
@@ -976,6 +1073,7 @@ async function renderQuestion(view, reqId){
 async function submitQuestion(){
   const ta = document.getElementById('q-text'); const text = ((ta&&ta.value)||'').trim();
   if(text.length<5){ showToast('Write your question first.', 3000); return; }
+  if(!await confirmSpend('question')) return;
   const btn = document.getElementById('q-send'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
   const { data, error } = await spend('question', { text:text });
   if(error){ showToast(/insufficient/i.test(error.message||'')?'You do not have enough credits.':'Could not send. Please try again.', 3800); if(btn){ btn.disabled=false; btn.innerHTML='<span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(CAT.question.cost); } return; }
@@ -1023,6 +1121,7 @@ async function deliverThread(id){
 
 // ── Feedback flow ──────────────────────────────────────────────────────────────
 async function renderFeedback(view, reqId){
+  if(!reqId && !canAfford(CAT.feedback.cost)) return renderShortfall(view, 'feedback');
   if(reqId){ return renderThread(view, reqId, 'feedback'); }
   const cost = CAT.feedback.cost;
   view.innerHTML = convTop('Send Matt a recording','Private to you and Matt',cost)
@@ -1047,6 +1146,8 @@ function feedbackRail(){
 async function submitFeedback(){
   const note = ((document.getElementById('f-note')||{}).value||'').trim();
   const piece = ((document.getElementById('f-piece')||{}).value||'').trim();
+  if(note.length<5 && piece.length<2){ showToast('Tell Matt what to look at first.', 3000); return; }
+  if(!await confirmSpend('feedback')) return;
   const btn = document.getElementById('f-send'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
   const { data, error } = await spend('feedback', { note:note, piece:piece });
   if(error){ showToast(/insufficient/i.test(error.message||'')?'You do not have enough credits.':'Could not send. Please try again.', 3800); if(btn){ btn.disabled=false; btn.innerHTML='<span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(CAT.feedback.cost); } return; }
@@ -1057,6 +1158,7 @@ async function submitFeedback(){
 
 // ── Plan flow ──────────────────────────────────────────────────────────────────
 async function renderPlan(view, reqId){
+  if(!reqId && !canAfford(CAT.plan.cost)) return renderShortfall(view, 'plan');
   if(reqId){ return renderPlanDeliverable(view, reqId); }
   const cost = CAT.plan.cost;
   view.innerHTML = convTop('Request a direction plan','Matt maps your next few weeks',cost)
@@ -1080,6 +1182,7 @@ async function submitPlan(){
   const aim = ((document.getElementById('p-aim')||{}).value||'').trim();
   const extra = ((document.getElementById('p-extra')||{}).value||'').trim();
   if(aim.length<5 && working.length<5){ showToast('Tell Matt a little about what you want.', 3000); return; }
+  if(!await confirmSpend('plan')) return;
   const btn = document.getElementById('p-send'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
   const body = { working_on:working, aim:aim, extra:extra, text:(aim || working) };
   const { data, error } = await spend('plan', body);
