@@ -257,7 +257,13 @@
   .qreq .buy{ margin-top:9px; }
 
   /* conversation / flow pages */
-  .conv-top{ display:flex; align-items:center; gap:13px; margin:6px 0 22px; }
+  /* Sticky bar: the app header scrolls away, so this becomes the thing that
+     stays. Negative side margins match .ask-wrap's padding so the hairline
+     reaches both edges instead of stopping short of them. */
+  .conv-top{ position:sticky; top:0; z-index:6; display:flex; align-items:center; gap:13px;
+             margin:0 calc(-1 * clamp(18px,3.6vw,44px)) 18px; padding:14px clamp(18px,3.6vw,44px) 13px;
+             background:rgba(11,11,14,.86); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+             border-bottom:1px solid var(--hair); }
   .back{ width:34px; height:34px; flex:0 0 auto; border-radius:10px; display:grid; place-items:center; color:var(--muted); background:var(--card); border:1px solid var(--line); cursor:pointer; }
   .back svg{ width:18px; height:18px; }
   .conv-t{ font-family:var(--voice); font-size:1.3rem; font-weight:600; color:var(--head); line-height:1.15; }
@@ -274,7 +280,8 @@
   .msg-hint{ font-size:.8rem; color:var(--faint); margin:2px 0 12px; }
 
   .composer-wrap{ background:var(--raised); border:1px solid var(--line2); border-radius:18px; padding:14px 15px; box-shadow:0 20px 50px -24px rgba(0,0,0,.9); }
-  .composer-wrap textarea{ width:100%; min-height:96px; background:none; border:0; outline:0; resize:vertical; color:var(--head); font-family:'Inter',sans-serif; font-size:1rem; line-height:1.55; }
+  /* field-sizing is the native autogrow; _taGrow() covers browsers without it. */
+  .composer-wrap textarea{ width:100%; min-height:92px; max-height:40vh; background:none; border:0; outline:0; resize:none; field-sizing:content; overflow-y:auto; color:var(--head); font-family:'Inter',sans-serif; font-size:1rem; line-height:1.55; }
   .composer-wrap textarea::placeholder{ color:var(--faint); }
   .composer-row{ display:flex; align-items:center; gap:9px; margin-top:10px; flex-wrap:wrap; }
   .attach{ display:inline-flex; align-items:center; gap:7px; font-size:.8rem; font-weight:500; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px; padding:7px 12px; cursor:pointer; }
@@ -283,6 +290,42 @@
   .send{ margin-left:auto; display:inline-flex; align-items:center; gap:9px; border:0; border-radius:12px; padding:11px 18px; font:inherit; font-size:.92rem; font-weight:700; cursor:pointer; background:var(--gold); color:#17130a; }
   .send:disabled{ opacity:.6; cursor:default; }
   .composer-note{ font-size:.78rem; color:var(--faint); text-align:center; margin:10px 0 0; }
+
+  /* Conversation shell. Chat gets its full-bleed by going position:fixed and
+     hiding the header, sidebar and tab bar; that is right for a room you sit in,
+     wrong for sending one question, so the member keeps their navigation here.
+     The header is static in hub-mode and scrolls away, so the page scrolls
+     normally and the composer is sticky inside it. --ask-hdr and --conv-top are
+     measured at boot because both are real elements, not guesses. */
+  .conv{ display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:0 34px;
+         grid-template-areas:"thread rail" "composer rail"; grid-template-rows:1fr auto;
+         max-width:1120px;
+         min-height:calc(100dvh - var(--ask-hdr,64px) - var(--conv-top,78px) - 54px); }
+  .conv-thread{ grid-area:thread; padding-top:4px; min-width:0; }
+  .conv > .rail{ grid-area:rail; }
+  /* --ask-nav is the mobile tab bar, measured: at bottom:0 the composer sat on
+     top of it. --ask-safe is zeroed when that bar exists, because the bar
+     already clears the home indicator and adding the inset twice leaves a gap. */
+  .conv-composer{ grid-area:composer; position:sticky; bottom:var(--ask-nav,0px); z-index:4;
+                  padding:14px 0 calc(16px + var(--ask-safe, env(safe-area-inset-bottom,0px)));
+                  background:linear-gradient(180deg, rgba(11,11,14,0), #0b0b0e 30%); }
+  .conv-composer .composer-note{ text-align:left; }
+  /* On a phone the rail must sit ABOVE the composer: dropped below the send
+     button, the privacy line and the context are never read. */
+  @media(max-width:1100px){
+    /* Stacked, the rail goes FIRST. Between the thread and the composer it was
+       permanently under the sticky composer and never read; above the thread it
+       is the first thing seen, which is where reassurance belongs on something
+       private you are paying for. Forcing the thread to fill the viewport also
+       pushed it down, so the stacked shell sizes to its content. */
+    .conv{ grid-template-columns:1fr; grid-template-areas:"rail" "thread" "composer";
+           grid-template-rows:auto 1fr auto; gap:0; min-height:0; }
+    .conv > .rail{ margin:0 0 16px; }
+    .conv-composer{ padding-top:10px; }
+    /* A 92px box plus its row and note took over a third of a phone screen and
+       pushed the conversation under it. It still grows as they write. */
+    .conv-composer .composer-wrap textarea{ min-height:64px; }
+  }
 
   .fl{ font-size:.74rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--faint); margin:0 0 10px; }
   .fsec{ margin-bottom:22px; }
@@ -557,10 +600,11 @@ async function render(){
   await loadBalance();
   renderOwnerBar();
   const view = document.getElementById('ask-view');
-  if(flow === 'question') return renderQuestion(view, req);
-  if(flow === 'feedback') return renderFeedback(view, req);
-  if(flow === 'plan')     return renderPlan(view, req);
-  return renderHub(view);
+  if(flow === 'question')      await renderQuestion(view, req);
+  else if(flow === 'feedback') await renderFeedback(view, req);
+  else if(flow === 'plan')     await renderPlan(view, req);
+  else                         await renderHub(view);
+  _measureShell();
 }
 
 // ── Hub ───────────────────────────────────────────────────────────────────────
@@ -1031,6 +1075,40 @@ async function deliver(id){
 }
 
 // ── shared flow header ─────────────────────────────────────────────────────────
+/* The shell fills the viewport below two real elements, so both are measured
+   rather than assumed: the shared header (static here, it scrolls away) and the
+   conversation bar. */
+function _measureShell(){
+  const r = document.documentElement;
+  const h = document.getElementById('app-header');
+  const t = document.querySelector('.conv-top');
+  r.style.setProperty('--ask-hdr', ((h && h.offsetHeight) || 0) + 'px');
+  r.style.setProperty('--conv-top', ((t && t.offsetHeight) || 0) + 'px');
+  const nav = document.getElementById('sh-mob-bottom-bar');
+  const navH = (nav && getComputedStyle(nav).display !== 'none') ? nav.offsetHeight : 0;
+  r.style.setProperty('--ask-nav', navH + 'px');
+  r.style.setProperty('--ask-safe', navH > 0 ? '0px' : 'env(safe-area-inset-bottom, 0px)');
+}
+window.addEventListener('resize', _measureShell);
+
+/* Autogrow for browsers without field-sizing (Chrome<123, Firefox<128, Safari<17.4).
+   Lifted from chat.html, which is the one place in the app that gets this right. */
+function _taGrow(ta){
+  if(CSS.supports('field-sizing','content')) return;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, Math.round(window.innerHeight * 0.4)) + 'px';
+}
+/* Keeps send honest: nothing to send, nothing to spend. */
+function composerInput(ta, btnId, min){
+  _taGrow(ta);
+  const b = document.getElementById(btnId);
+  if(b) b.disabled = ta.value.trim().length < (min || 5);
+}
+/* A member's own words: escaped, with links and mentions made live. */
+function msgBody(t){
+  return window.renderUserContent ? window.renderUserContent(t || '') : escHtml(t || '');
+}
+
 function convTop(title, sub, cost){
   return '<div class="conv-top"><button class="back" onclick="go({})">'+IC.back+'</button>'
     + '<div><div class="conv-t">'+title+'</div><div class="conv-s">'+IC.lock+' '+sub+'</div></div>'
@@ -1060,15 +1138,19 @@ async function renderQuestion(view, reqId){
   if(reqId){ return renderThread(view, reqId, 'question'); }
   const cost = CAT.question.cost;
   view.innerHTML = convTop('Ask Matt a question','Private to you and Matt',cost)
-    + '<div class="lay-narrow lay"><div>'
-    + '<div class="msg"><span class="msg-av">M</span><div><div class="msg-who">Matt <span>usually replies within a couple of days</span></div>'
-      + '<div class="bubble">Hi '+escHtml(myName)+'. Ask me anything about your playing: a passage that won\'t sit, how to practice something, what to work on next. Be as specific as you can and I\'ll give you a proper, considered answer, just for you.</div></div></div>'
-    + '<div class="msg-hint">Your question is held at '+fmt(cost)+' credits until Matt replies. Refunded if he can\'t take it.</div>'
-    + '<div class="composer-wrap"><textarea id="q-text" placeholder="What would you like to ask Matt?"></textarea>'
+    + '<div class="conv">'
+    + '<div class="conv-thread">'
+      + '<div class="msg"><span class="msg-av">M</span><div><div class="msg-who">Matt <span>usually replies within a couple of days</span></div>'
+      + '<div class="bubble">Hi '+escHtml(myName)+'. Ask me anything about your playing: a passage that won\'t sit, how to practise something, what to work on next. Be as specific as you can and I\'ll give you a proper, considered answer, just for you.</div></div></div>'
+      + '<div class="msg-hint">Your question is held at '+fmt(cost)+' credits until Matt replies. Refunded if he can\'t take it.</div>'
+    + '</div>'
+    + '<aside class="rail">'+contextRail()+'</aside>'
+    + '<div class="conv-composer"><div class="composer-wrap">'
+      + '<textarea id="q-text" oninput="composerInput(this,\'q-send\')" placeholder="What would you like to ask Matt?"></textarea>'
       + '<div class="composer-row"><span class="attach soon">'+IC.piece+'Add a piece · soon</span><span class="attach soon">'+IC.photo+'Attach a photo · soon</span>'
-      + '<button class="send" id="q-send" onclick="submitQuestion()"><span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(cost)+'</button></div></div>'
-    + '<div class="composer-note">'+balanceAfter(cost)+'</div>'
-    + '</div><aside class="rail">'+contextRail()+'</aside></div>';
+      + '<button class="send" id="q-send" disabled onclick="submitQuestion()"><span class="coin">'+IC.coin+'</span>Send to Matt · '+fmt(cost)+'</button></div>'
+    + '</div><div class="composer-note">'+balanceAfter(cost)+'</div></div>'
+    + '</div>';
 }
 async function submitQuestion(){
   const ta = document.getElementById('q-text'); const text = ((ta&&ta.value)||'').trim();
@@ -1082,9 +1164,9 @@ async function submitQuestion(){
   if(id) go({ flow:'question', req:id }); else go({});
 }
 
-function contextRail(){
+function contextRail(who){
   return '<div class="rc"><div class="rc-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>What Matt sees</div>'
-    + '<div class="rc-row"><span class="rc-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg></span><div><div class="rc-k">Member</div><div class="rc-v">'+escHtml(myName)+'</div></div></div>'
+    + '<div class="rc-row"><span class="rc-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg></span><div><div class="rc-k">Member</div><div class="rc-v">'+escHtml(who || myName)+'</div></div></div>'
     + '<div class="rc-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Private. Only you and Matt can see this.</div></div>';
 }
 
@@ -1093,21 +1175,25 @@ async function renderThread(view, reqId, kind){
   const r = await getRequest(reqId);
   if(!r){ view.innerHTML = convTop('Not found','',null)+'<div class="empty-note">That request could not be loaded.</div>'; return; }
   const owner = ownerActive();
-  const q = escHtml((r.body && (r.body.text||r.body.aim||r.body.note)) || '');
   const title = KIND_LABEL[r.kind]||'Request';
-  let reply = '';
+  let reply = '', composer = '';
   if(r.status==='delivered' && r.response && r.response.text){
-    reply = '<div class="msg"><span class="msg-av">M</span><div><div class="msg-who">Matt</div><div class="bubble">'+escHtml(r.response.text)+'</div></div></div>';
+    reply = '<div class="msg"><span class="msg-av">M</span><div><div class="msg-who">Matt</div><div class="bubble">'+msgBody(r.response.text)+'</div></div></div>';
   } else if(owner){
-    reply = '<div class="composer-wrap"><textarea id="reply-'+r.id+'" placeholder="Write your reply to '+escHtml((r.email||'').split('@')[0])+'…"></textarea>'
+    composer = '<div class="composer-wrap"><textarea id="reply-'+r.id+'" oninput="_taGrow(this)" placeholder="Write your reply to '+escHtml((r.email||'').split('@')[0])+'…"></textarea>'
       + '<div class="composer-row"><button class="send" onclick="deliverThread(\''+r.id+'\')">Send reply & charge '+r.cost+'</button></div></div>';
   } else {
     reply = '<div class="msg-hint">Waiting for Matt. You\'ll get a notification when he replies.</div>';
   }
   view.innerHTML = convTop(title, (owner?('From '+escHtml(r.email)):'Private to you and Matt'), null)
-    + '<div style="max-width:680px">'
-    + '<div class="msg"><span class="msg-av me">'+escHtml((myName||'Y')[0].toUpperCase())+'</span><div><div class="msg-who">'+(owner?escHtml(r.email):'You')+'</div><div class="bubble">'+q+'</div></div></div>'
-    + reply + '</div>';
+    + '<div class="conv">'
+    + '<div class="conv-thread">'
+      + '<div class="msg"><span class="msg-av me">'+escHtml((owner ? (r.email||'M') : (myName||'Y'))[0].toUpperCase())+'</span><div><div class="msg-who">'+(owner?escHtml(r.email):'You')+'</div><div class="bubble">'+msgBody((r.body && (r.body.text||r.body.aim||r.body.note)) || '')+'</div></div></div>'
+      + reply
+    + '</div>'
+    + '<aside class="rail">'+contextRail(owner ? (r.email||'').split('@')[0] : null)+'</aside>'
+    + (composer ? '<div class="conv-composer">'+composer+'</div>' : '')
+    + '</div>';
 }
 async function deliverThread(id){
   const ta = document.getElementById('reply-'+id); const text=((ta&&ta.value)||'').trim();
