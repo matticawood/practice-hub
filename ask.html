@@ -1628,11 +1628,13 @@ async function renderAqThread(view, reqId){
     thread += '<div class="aq-msg'+(mine?' me':'')+'">'+aqAvatar(mine?'me':'', isO?mattAvatar:mAv, isO?'M':mInitial)
       + '<div class="aq-msg-b"><div class="aq-who">'+who+'</div><div class="aq-bubble'+(mine?' me':'')+'">'+escHtml(m.text)+aqMedia(m.media)+'</div>'+withdraw+'</div></div>';
   });
-  const hasReply = msgs.some(function(m){ return m.from==='owner'; });
-  if(!owner && !hasReply && r.status!=='cancelled') thread += '<div class="aq-wait">Matt will reply here, and you\'ll get a notification when he does.</div>';
+  // The member may send only when it is their turn: after Matt's last message,
+  // never twice in a row. The owner can always send.
+  const memberTurn = list.length>0 && list[list.length-1].from==='owner';
+  if(!owner && !memberTurn && r.status!=='cancelled') thread += '<div class="aq-wait">Matt will reply here, and you\'ll get a notification when he does.</div>';
   if(r.status==='cancelled') thread += '<div class="aq-wait">This question was withdrawn and the '+fmt(r.cost)+' credits refunded.</div>';
   let dock='';
-  if(r.status!=='cancelled'){
+  if(r.status!=='cancelled' && (owner || memberTurn)){
     const ph = owner ? ('Write your reply to '+mFirst+'…') : 'Send a follow-up…';
     dock = '<div class="aq-dock"><div class="aq-composer"><div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" placeholder="'+ph+'"></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')">'+AQ_SEND+'</button></div></div></div>';
   }
@@ -1658,8 +1660,8 @@ async function aqThreadSend(id){
   if(!text){ if(ta) ta.focus(); return; }
   if(!await requireAuth()) return;
   const btn = document.getElementById('aq-reply-send'); if(btn) btn.disabled=true;
-  const { error } = await db.rpc('credit_thread_send', { p_id:id, p_text:text });
-  if(error){ showToast('Could not send. '+(error.message||''), 3800); if(btn) btn.disabled=false; return; }
+  const { error } = await db.rpc('credit_thread_send', { p_id:id, p_text:text, p_as_owner: ownerActive() });
+  if(error){ showToast(/wait for a reply/i.test(error.message||'')?'Wait for Matt to reply before sending again.':('Could not send. '+(error.message||'')), 3800); if(btn) btn.disabled=false; return; }
   await loadBalance();
   render();
 }
