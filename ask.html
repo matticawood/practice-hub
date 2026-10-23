@@ -552,6 +552,8 @@
     border-radius:12px; padding:13px 15px; margin-top:10px; cursor:pointer; transition:background .15s, border-color .15s; }
   .qreq-link:hover{ background:rgba(255,255,255,.06); border-color:var(--line); }
   .qreq-open{ display:inline-block; margin-top:9px; font-size:.8rem; font-weight:600; color:var(--purple); }
+  .qreq-badge{ margin-left:8px; font-size:.68rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--golds); }
+  .qreq-badge.done{ color:var(--green); }
   </style>
 </head>
 <body class="hub-mode">
@@ -1215,15 +1217,22 @@ function _applyAffordability(){
 
 async function renderOwnerQueue(){
   const el = document.getElementById('owner-queue'); if(!el) return;
-  const rows = await openRequests();
-  el.innerHTML = '<div class="queue"><div class="queue-h">Open requests</div><div class="queue-sub">Members waiting on you.</div>'
-    + (rows.length ? rows.map(function(r){
-      const q = escHtml((r.body && (r.body.text||r.body.aim||r.body.note)) || '');
-      return '<a class="qreq-link" onclick="go({flow:\''+r.kind+'\',req:\''+r.id+'\'})">'
-        + '<div class="qreq-top"><span class="qreq-who">'+escHtml(r.email||'')+'</span><span class="qreq-k">'+escHtml(KIND_LABEL[r.kind]||r.kind)+' · '+r.cost+' cr</span></div>'
-        + '<div class="qreq-q">'+q+'</div>'
-        + '<span class="qreq-open">Open and reply ›</span></a>';
-    }).join('') : '<div class="reqs-empty">Nothing waiting. You are all caught up.</div>')
+  let rows = []; try{ const { data } = await db.from('credit_requests').select('*').neq('status','cancelled').order('created_at',{ascending:false}); rows = data||[]; }catch(_){ }
+  const waiting = rows.filter(function(r){ return r.status==='open'||r.status==='in_progress'; });
+  const done    = rows.filter(function(r){ return r.status==='delivered'; });
+  const link = function(r){
+    const q = escHtml((r.body && (r.body.text||r.body.aim||r.body.note)) || '');
+    const badge = (r.status==='delivered') ? '<span class="qreq-badge done">Answered</span>' : '<span class="qreq-badge">Waiting</span>';
+    return '<a class="qreq-link" onclick="go({flow:\''+r.kind+'\',req:\''+r.id+'\'})">'
+      + '<div class="qreq-top"><span class="qreq-who">'+escHtml(r.email||'')+'</span><span class="qreq-k">'+escHtml(KIND_LABEL[r.kind]||r.kind)+' · '+r.cost+' cr'+badge+'</span></div>'
+      + '<div class="qreq-q">'+q+'</div>'
+      + '<span class="qreq-open">Open conversation ›</span></a>';
+  };
+  el.innerHTML = '<div class="queue"><div class="queue-h">Requests</div>'
+    + '<div class="queue-sub">'+(waiting.length ? (waiting.length+' waiting on you') : 'Nothing waiting')+'.</div>'
+    + waiting.map(link).join('')
+    + (done.length ? '<div class="queue-h" style="margin-top:20px">Answered</div>'+done.map(link).join('') : '')
+    + (!waiting.length && !done.length ? '<div class="reqs-empty">No conversations yet.</div>' : '')
     + '</div>';
 }
 /* cancel_credit_request has existed since the credits migration and had no
@@ -1608,10 +1617,8 @@ async function renderAqThread(view, reqId){
   // include that only if it is not already represented in messages.
   const msgs = [{ from:'member', text:String((r.body&&r.body.text)||''), media:(r.body&&r.body.media)||[] }];
   const list = Array.isArray(r.messages) ? r.messages : [];
-  if(r.response && r.response.text && !list.some(function(m){ return m.from==='owner'; })){
-    msgs.push({ from:'owner', text:String(r.response.text||''), media:(r.response.media)||[] });
-  }
-  list.forEach(function(m){ msgs.push({ from:m.from, text:String(m.text||''), media:m.media||[] }); });
+  if(list.length){ list.forEach(function(m){ msgs.push({ from:m.from, text:String(m.text||''), media:m.media||[] }); }); }
+  else if(r.response && r.response.text){ msgs.push({ from:'owner', text:String(r.response.text||''), media:(r.response.media)||[] }); }
   let thread='';
   msgs.forEach(function(m, i){
     const isO = m.from==='owner';
