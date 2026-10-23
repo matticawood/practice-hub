@@ -39,7 +39,7 @@
     font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased;
     --card:#1a1a20; --raised:#24242b; --hair:rgba(255,255,255,.07); --line:rgba(255,255,255,.12); --line2:rgba(255,255,255,.18);
     --head:#f4f1ec; --muted:#9594a0; --faint:#6a6972; --gold:#f5c518; --golds:#eac64f;
-    --body:#e9e8ee; --green:#34d399; --blue:#60a5fa; --pink:#f472b6; --voice:'Fraunces',Georgia,serif;
+    --body:#e9e8ee; --green:#34d399; --blue:#60a5fa; --pink:#f472b6; --purple:#a78bfa; --voice:'Fraunces',Georgia,serif;
   }
   #ask *{ box-sizing:border-box; }
   #ask a{ color:inherit; text-decoration:none; }
@@ -541,6 +541,17 @@
   @media(min-width:901px){ .aq-sheet-ov{ display:none !important; } }
   .aq-grab{ width:40px; height:4px; border-radius:99px; background:rgba(255,255,255,.18); margin:10px auto 2px; flex:0 0 auto; }
   .aq-sheet-body{ overflow-y:auto; padding:14px 20px calc(24px + env(safe-area-inset-bottom)); }
+  /* Floating toast — pinned bottom-centre above everything, never inline text. */
+  #toast{ position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(12px); z-index:5000;
+    background:#1f1f27; color:#f4f1ec; border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:12px 18px;
+    font-size:.9rem; font-weight:500; box-shadow:0 20px 50px -20px rgba(0,0,0,.85); opacity:0; pointer-events:none;
+    transition:opacity .2s, transform .2s; max-width:min(90vw,440px); text-align:center; }
+  #toast.visible{ opacity:1; transform:translateX(-50%) translateY(0); }
+  /* Owner queue: each open request is a link that opens its thread to reply. */
+  .qreq-link{ display:block; text-decoration:none; color:inherit; background:rgba(255,255,255,.03); border:1px solid var(--hair);
+    border-radius:12px; padding:13px 15px; margin-top:10px; cursor:pointer; transition:background .15s, border-color .15s; }
+  .qreq-link:hover{ background:rgba(255,255,255,.06); border-color:var(--line); }
+  .qreq-open{ display:inline-block; margin-top:9px; font-size:.8rem; font-weight:600; color:var(--purple); }
   </style>
 </head>
 <body class="hub-mode">
@@ -1208,11 +1219,10 @@ async function renderOwnerQueue(){
   el.innerHTML = '<div class="queue"><div class="queue-h">Open requests</div><div class="queue-sub">Members waiting on you.</div>'
     + (rows.length ? rows.map(function(r){
       const q = escHtml((r.body && (r.body.text||r.body.aim||r.body.note)) || '');
-      return '<div class="qreq"><div class="qreq-top"><span class="qreq-who">'+escHtml(r.email||'')+'</span><span class="qreq-k">'+escHtml(KIND_LABEL[r.kind]||r.kind)+' · '+r.cost+' cr</span></div>'
+      return '<a class="qreq-link" onclick="go({flow:\''+r.kind+'\',req:\''+r.id+'\'})">'
+        + '<div class="qreq-top"><span class="qreq-who">'+escHtml(r.email||'')+'</span><span class="qreq-k">'+escHtml(KIND_LABEL[r.kind]||r.kind)+' · '+r.cost+' cr</span></div>'
         + '<div class="qreq-q">'+q+'</div>'
-        + '<textarea id="reply-'+r.id+'" placeholder="Write your reply…"></textarea>'
-        + '<div class="qreq-acts"><button class="buy" onclick="deliver(\''+r.id+'\')">Send reply & charge '+r.cost+'</button>'
-        + '<button class="ghostbtn" onclick="cancelRequest(\''+r.id+'\',false)">Decline & refund</button></div></div>';
+        + '<span class="qreq-open">Open and reply ›</span></a>';
     }).join('') : '<div class="reqs-empty">Nothing waiting. You are all caught up.</div>')
     + '</div>';
 }
@@ -1593,22 +1603,31 @@ async function renderAqThread(view, reqId){
   if(r.status==='delivered') metaR='<span style="color:var(--green);font-weight:600">Answered</span>';
   else if(r.status==='cancelled') metaR='<span>Withdrawn and refunded</span>';
   else metaR='<span class="aq-gold">'+fmt(r.cost)+' credits held, awaiting a reply</span>';
-  const qBubble = '<div class="aq-msg me">'+aqAvatar('me', mAv, mInitial)+'<div class="aq-msg-b">'
-    + '<div class="aq-who">'+(owner?escHtml(mName):'You')+'</div>'
-    + '<div class="aq-bubble me">'+escHtml(String((r.body&&r.body.text)||''))+aqMedia(r.body&&r.body.media)+'</div>'
-    + ((!owner && r.status==='open') ? '<button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true)">Withdraw this question</button>' : '')
-    + '</div></div>';
-  let after='';
-  if(r.status==='delivered' && r.response && (r.response.text||r.response.media)){
-    after = '<div class="aq-msg">'+aqAvatar('', mattAvatar, 'M')+'<div class="aq-msg-b"><div class="aq-who">Matt</div><div class="aq-bubble">'+escHtml(String((r.response&&r.response.text)||''))+aqMedia(r.response&&r.response.media)+'</div></div></div>';
-  } else if(!owner && (r.status==='open'||r.status==='in_progress')){
-    after = '<div class="aq-wait">Matt will reply here, and you\'ll get a notification when he does.</div>';
-  } else if(r.status==='cancelled'){
-    after = '<div class="aq-wait">You withdrew this question. The '+fmt(r.cost)+' credits were refunded.</div>';
+  // The full conversation: the question, then the ongoing messages. A legacy
+  // request delivered before threads existed kept its reply in `response`, so
+  // include that only if it is not already represented in messages.
+  const msgs = [{ from:'member', text:String((r.body&&r.body.text)||''), media:(r.body&&r.body.media)||[] }];
+  const list = Array.isArray(r.messages) ? r.messages : [];
+  if(r.response && r.response.text && !list.some(function(m){ return m.from==='owner'; })){
+    msgs.push({ from:'owner', text:String(r.response.text||''), media:(r.response.media)||[] });
   }
+  list.forEach(function(m){ msgs.push({ from:m.from, text:String(m.text||''), media:m.media||[] }); });
+  let thread='';
+  msgs.forEach(function(m, i){
+    const isO = m.from==='owner';
+    const mine = isO === owner;
+    const who = isO ? (owner?'You':'Matt') : (owner?escHtml(mName):'You');
+    const withdraw = (!owner && !isO && i===0 && r.status==='open') ? '<button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true)">Withdraw this question</button>' : '';
+    thread += '<div class="aq-msg'+(mine?' me':'')+'">'+aqAvatar(mine?'me':'', isO?mattAvatar:mAv, isO?'M':mInitial)
+      + '<div class="aq-msg-b"><div class="aq-who">'+who+'</div><div class="aq-bubble'+(mine?' me':'')+'">'+escHtml(m.text)+aqMedia(m.media)+'</div>'+withdraw+'</div></div>';
+  });
+  const hasReply = msgs.some(function(m){ return m.from==='owner'; });
+  if(!owner && !hasReply && r.status!=='cancelled') thread += '<div class="aq-wait">Matt will reply here, and you\'ll get a notification when he does.</div>';
+  if(r.status==='cancelled') thread += '<div class="aq-wait">This question was withdrawn and the '+fmt(r.cost)+' credits refunded.</div>';
   let dock='';
-  if(owner && (r.status==='open'||r.status==='in_progress')){
-    dock = '<div class="aq-dock"><div class="aq-composer"><div class="aq-input-row"><textarea class="aq-ctext" id="reply-'+r.id+'" placeholder="Write your reply to '+mFirst+'…"></textarea><button class="aq-csend" aria-label="Send reply" onclick="deliverThread(\''+r.id+'\')">'+AQ_SEND+'</button></div></div></div>';
+  if(r.status!=='cancelled'){
+    const ph = owner ? ('Write your reply to '+mFirst+'…') : 'Send a follow-up…';
+    dock = '<div class="aq-dock"><div class="aq-composer"><div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" placeholder="'+ph+'"></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')">'+AQ_SEND+'</button></div></div></div>';
   }
   const railExtra  = !owner ? '<div class="aq-hist" id="aq-hist-host"></div>' : '';
   const sheetExtra = !owner ? '<div class="aq-hist" id="aq-sheet-hist" style="max-height:none;overflow:visible;margin-bottom:14px"></div>' : '';
@@ -1617,7 +1636,7 @@ async function renderAqThread(view, reqId){
     + '<div class="aq-lay"><section class="aq-conv"><div class="aq-scroll">'
     +   '<div class="aq-eyb">Ask Matt</div>'
     +   '<div class="aq-meta"><span class="aq-meta-i">'+AQ_LOCK+(owner?('Question from '+escHtml(mName)):'Private to you and Matt')+'</span><span class="aq-meta-sep"></span>'+metaR+'</div>'
-    +   '<div class="aq-thread">'+qBubble+after+'</div>'
+    +   '<div class="aq-thread">'+thread+'</div>'
     + '</div>'+dock+'</section>'
     + '<aside class="aq-ctx-col">'+railExtra+'<div class="aq-ctx" id="aq-ctx-host">'+aqContextLoading()+'</div></aside>'
     + '</div>'
@@ -1625,6 +1644,17 @@ async function renderAqThread(view, reqId){
     + '</div>';
   fillAqContext(owner && !own ? r.email : null, owner && !own ? mFirst : null);
   if(!owner) fillAqHistory();
+  const sc = view.querySelector('.aq-scroll'); if(sc) sc.scrollTop = sc.scrollHeight;
+}
+async function aqThreadSend(id){
+  const ta = document.getElementById('aq-reply'); const text = ((ta&&ta.value)||'').trim();
+  if(!text){ if(ta) ta.focus(); return; }
+  if(!await requireAuth()) return;
+  const btn = document.getElementById('aq-reply-send'); if(btn) btn.disabled=true;
+  const { error } = await db.rpc('credit_thread_send', { p_id:id, p_text:text });
+  if(error){ showToast('Could not send. '+(error.message||''), 3800); if(btn) btn.disabled=false; return; }
+  await loadBalance();
+  render();
 }
 
 // ── Thread (feedback / plan) ───────────────────────────────────────────────────
