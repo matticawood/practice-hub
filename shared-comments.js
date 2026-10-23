@@ -1481,6 +1481,10 @@
     // returns the persisted media array. For custom submit handlers (e.g. ask.html).
     uploadMedia: (key) => _uploadMedia(key),
 
+    // Render a persisted media array (images with lightbox, files, video) exactly
+    // as a comment/chat message renders it. For custom message views (e.g. ask.html).
+    renderMedia: (media) => _renderCommentMedia({ media: media }),
+
     // Expose reaction state for external reads (e.g. to build avatars / counts)
     getReactionState: (parentId) => ({..._reactState(parentId)}),
     setReactionState: (parentId, data) => { _rxState[parentId]=data; },

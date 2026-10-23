@@ -395,7 +395,8 @@
   body.ask-flow .ask-wrap{ padding:0 !important; }
 
   .aq-flow{ position:fixed; inset:0; z-index:40; background:#0b0b0e;
-    --purple:#a78bfa; color:var(--body); }
+    --purple:#a78bfa; color:var(--body);
+    --text:var(--head); --text-muted:var(--muted); --border:var(--line); --surface:var(--raised); }
   .aq-flow::before{ content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
     background:radial-gradient(130% 90% at 100% 0%, rgba(99,102,241,.16), transparent 70%),
                radial-gradient(90% 80% at 0% 100%, rgba(167,139,250,.10), transparent 68%); }
@@ -425,6 +426,16 @@
   .aq-bubble{ background:var(--card); border:1px solid var(--hair); border-radius:5px 18px 18px 18px; padding:15px 17px;
     font-size:.96rem; line-height:1.6; color:#e9e8ee; box-shadow:0 20px 50px -34px rgba(0,0,0,.9); white-space:pre-wrap; }
   .aq-bubble.me{ border-radius:18px 5px 18px 18px; background:var(--raised); }
+  .aq-thread{ margin-top:26px; }
+  .aq-msg{ display:flex; gap:14px; align-items:flex-start; margin:0 0 22px; max-width:640px; }
+  .aq-msg.me{ flex-direction:row-reverse; margin-left:auto; }
+  .aq-msg-b{ min-width:0; }
+  .aq-msg.me .aq-msg-b{ display:flex; flex-direction:column; align-items:flex-end; }
+  .aq-msg.me .aq-who{ text-align:right; }
+  .aq-bubble img{ max-width:100%; border-radius:8px; }
+  .aq-withdraw{ margin-top:10px; background:none; border:0; color:var(--faint); font:inherit; font-size:.82rem; cursor:pointer; text-decoration:underline; padding:0; }
+  .aq-withdraw:hover{ color:var(--muted); }
+  .aq-wait{ font-size:.86rem; color:var(--faint); margin:4px 0 0 56px; line-height:1.5; }
   .aq-dock{ flex:0 0 auto; padding-top:14px; }
   .aq-trigger{ display:none; }
   .aq-composer{ background:linear-gradient(180deg,#1d1d25,#191920); border:1px solid var(--line2); border-radius:20px;
@@ -573,6 +584,7 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
 let myEmail = "";
 let myName  = "";
 let myMemberKey = null;   // resolved at boot; member_key-scoped RPCs (member_card_*) need it
+let myAvatar = null;   // the signed-in member's own avatar (from allowed_emails)
 let mattAvatar = null, _mattLoaded = false;   // Matt's real avatar, read from the member directory
 async function ensureMattIdentity(){
   if(_mattLoaded) return;
@@ -745,7 +757,7 @@ async function render(){
   // The question flow is a full-bleed immersive conversation (chrome hidden); the
   // hub and the other flows keep the app chrome. Toggle before rendering so the
   // layout measures against the right shell.
-  document.body.classList.toggle('ask-flow', flow === 'question' && !req);
+  document.body.classList.toggle('ask-flow', flow === 'question');
   const view = document.getElementById('ask-view');
   if(flow === 'question')      await renderQuestion(view, req);
   else if(flow === 'feedback') await renderFeedback(view, req);
@@ -1301,7 +1313,7 @@ const AQ_NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const AQ_EYE  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7z"/></svg>';
 async function renderQuestion(view, reqId){
   if(!reqId && !canAfford(CAT.question.cost)) return renderShortfall(view, 'question');
-  if(reqId){ return renderThread(view, reqId, 'question'); }
+  if(reqId){ return renderAqThread(view, reqId); }
   const cost = CAT.question.cost;
   try{ if(window.Comments) Comments.clearState('askq'); }catch(_){}
   view.innerHTML =
@@ -1397,15 +1409,17 @@ function _dayLabel(dateStr){
 }
 // The member's own practice, read with their own RLS scope. Degrades gracefully:
 // a missing RPC or an empty log simply shows less, never an error.
-async function _aqContext(){
+async function _aqContext(targetEmail){
   const out = { weekMins:0, streak:null, total:0, learning:[], recent:[], libCount:0, libTitles:[] };
+  const email = targetEmail || myEmail; const isSelf = !targetEmail;
   try{
     const sevenAgo=new Date(Date.now()-6*864e5); sevenAgo.setHours(0,0,0,0);
     const sevenStr=sevenAgo.toISOString().slice(0,10);
     const [sessRes, collRes, streakRes] = await Promise.all([
-      db.rpc('get_my_sessions', { p_email: myEmail }).then(r=>r, ()=>({data:null})),
-      db.from('user_collections').select('status, pieces(title,composer), user_pieces(title)').eq('email', myEmail).then(r=>r, ()=>({data:null})),
-      myMemberKey ? db.rpc('member_card_streak', { p_member_key: myMemberKey }).then(r=>r, ()=>({data:null})) : Promise.resolve({data:null})
+      db.rpc('get_my_sessions', { p_email: email }).then(r=>r, ()=>({data:null})),
+      isSelf ? db.from('user_collections').select('status, pieces(title,composer), user_pieces(title)').eq('email', email).then(r=>r, ()=>({data:null}))
+             : db.rpc('get_user_collection', { p_email: email }).then(r=>r, ()=>({data:null})),
+      (isSelf && myMemberKey) ? db.rpc('member_card_streak', { p_member_key: myMemberKey }).then(r=>r, ()=>({data:null})) : Promise.resolve({data:null})
     ]);
     const sessions = Array.isArray(sessRes && sessRes.data) ? sessRes.data : [];
     out.total = sessions.length;
@@ -1428,8 +1442,8 @@ async function _aqContext(){
     const sk = streakRes && streakRes.data; const skRow = Array.isArray(sk)?sk[0]:sk;
     out.streak = skRow ? (skRow.current_streak!=null?skRow.current_streak:(skRow.streak!=null?skRow.streak:null)) : null;
     const coll = (Array.isArray(collRes && collRes.data) ? collRes.data : []).map(function(r){
-      const t=String((r.pieces&&r.pieces.title)||(r.user_pieces&&r.user_pieces.title)||'').trim();
-      return { title:t, composer:String((r.pieces&&r.pieces.composer)||'').trim(), status:r.status };
+      const t=String(r.title||(r.pieces&&r.pieces.title)||(r.user_pieces&&r.user_pieces.title)||'').trim();
+      return { title:t, composer:String((r.pieces&&r.pieces.composer)||r.composer||'').trim(), status:r.status };
     }).filter(function(r){ return r.title; });
     out.libCount = coll.length;
     out.libTitles = coll.map(function(r){ return r.title; });
@@ -1439,9 +1453,12 @@ async function _aqContext(){
   }catch(e){ }
   return out;
 }
-function aqContextHtml(c){
-  let h = '<div class="aq-ctx-h">'+AQ_EYE+'What Matt sees</div>'
-    + '<div class="aq-ctx-sub">When you send a question, Matt can see your whole record: your sessions, the notes you write with them, and the pieces in your library. So you don\'t have to explain what you\'re working on from scratch.</div>'
+function aqContextHtml(c, who){
+  let h = who
+    ? '<div class="aq-ctx-h">'+AQ_EYE+escHtml(who)+'’s record</div>'
+      + '<div class="aq-ctx-sub">Everything '+escHtml(who)+' has logged: their sessions, the notes they wrote with them, and the pieces in their library.</div>'
+    : '<div class="aq-ctx-h">'+AQ_EYE+'What Matt sees</div>'
+      + '<div class="aq-ctx-sub">When you send a question, Matt can see your whole record: your sessions, the notes you write with them, and the pieces in your library. So you don\'t have to explain what you\'re working on from scratch.</div>'
     + '<div class="aq-stats">'
     +   '<div class="aq-stat"><div class="aq-stat-n">'+(c.weekMins?_hmShort(c.weekMins):'0<small>m</small>')+'</div><div class="aq-stat-k">This week</div></div>'
     +   '<div class="aq-stat"><div class="aq-stat-n">'+(c.streak!=null?c.streak:'—')+'</div><div class="aq-stat-k">Day streak</div></div>'
@@ -1470,9 +1487,9 @@ function aqContextHtml(c){
   h += '<div class="aq-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>This area is private so only you and Matt can see this.</span></div>';
   return h;
 }
-async function fillAqContext(){
-  const data = await _aqContext();
-  const html = aqContextHtml(data);
+async function fillAqContext(email, who){
+  const data = await _aqContext(email);
+  const html = aqContextHtml(data, who);
   const a=document.getElementById('aq-ctx-host'); if(a) a.innerHTML=html;
   const b=document.getElementById('aq-sheet-ctx'); if(b) b.innerHTML=html;
 }
@@ -1544,7 +1561,71 @@ async function fillContextRail(email){
   el.innerHTML = html;
 }
 
-// ── Thread (question / any delivered reply) ────────────────────────────────────
+// ── Immersive question thread ──────────────────────────────────────────────────
+// Same full-bleed page as compose: the question and Matt's reply render as chat
+// bubbles (with the real avatars and attachments, reusing the chat's media
+// renderer), the member can withdraw while it is open, and Matt replies inline.
+const AQ_X    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+const AQ_LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+const AQ_SEND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
+function aqAvatar(cls, url, fallback){
+  return url ? '<span class="aq-av '+cls+' has-img"><img src="'+escHtml(url)+'" alt=""></span>'
+             : '<span class="aq-av '+cls+'">'+escHtml(fallback||'')+'</span>';
+}
+function aqMedia(media){ try{ return (window.Comments && media && media.length) ? Comments.renderMedia(media) : ''; }catch(_){ return ''; } }
+async function renderAqThread(view, reqId){
+  const r = await getRequest(reqId);
+  if(!r){ view.innerHTML = '<div class="aq-flow"><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button><div class="aq-lay"><section class="aq-conv"><div class="aq-scroll"><div class="aq-eyb">Ask Matt</div><div class="aq-empty" style="margin-top:40px">That question could not be loaded.</div></div></section></div></div>'; return; }
+  if(r.kind!=='question'){ return renderThread(view, reqId, r.kind); }
+  const owner = ownerActive();
+  const own = String(r.email||'').toLowerCase() === String(myEmail||'').toLowerCase();
+  await ensureMattIdentity();
+  let mName = myName, mAv = myAvatar;
+  if(owner && !own){
+    try{ const { data } = await db.rpc('get_profile_row', { p_email: r.email }); const row=Array.isArray(data)?data[0]:data; if(row){ mName=row.name||(r.email||'').split('@')[0]; mAv=row.avatar_url||null; } else { mName=(r.email||'').split('@')[0]; mAv=null; } }
+    catch(_){ mName=(r.email||'').split('@')[0]; mAv=null; }
+  }
+  const mFirst = escHtml((String(mName||'').trim().split(/\s+/)[0]) || mName);
+  const mInitial = (String(mName||'?').trim()[0]||'?').toUpperCase();
+  let metaR;
+  if(r.status==='delivered') metaR='<span style="color:var(--green);font-weight:600">Answered</span>';
+  else if(r.status==='cancelled') metaR='<span>Withdrawn and refunded</span>';
+  else metaR='<span class="aq-gold">'+fmt(r.cost)+' credits held, awaiting a reply</span>';
+  const qBubble = '<div class="aq-msg me">'+aqAvatar('me', mAv, mInitial)+'<div class="aq-msg-b">'
+    + '<div class="aq-who">'+(owner?escHtml(mName):'You')+'</div>'
+    + '<div class="aq-bubble me">'+escHtml(String((r.body&&r.body.text)||''))+aqMedia(r.body&&r.body.media)+'</div>'
+    + ((!owner && r.status==='open') ? '<button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true)">Withdraw this question</button>' : '')
+    + '</div></div>';
+  let after='';
+  if(r.status==='delivered' && r.response && (r.response.text||r.response.media)){
+    after = '<div class="aq-msg">'+aqAvatar('', mattAvatar, 'M')+'<div class="aq-msg-b"><div class="aq-who">Matt</div><div class="aq-bubble">'+escHtml(String((r.response&&r.response.text)||''))+aqMedia(r.response&&r.response.media)+'</div></div></div>';
+  } else if(!owner && (r.status==='open'||r.status==='in_progress')){
+    after = '<div class="aq-wait">Matt will reply here, and you\'ll get a notification when he does.</div>';
+  } else if(r.status==='cancelled'){
+    after = '<div class="aq-wait">You withdrew this question. The '+fmt(r.cost)+' credits were refunded.</div>';
+  }
+  let dock='';
+  if(owner && (r.status==='open'||r.status==='in_progress')){
+    dock = '<div class="aq-dock"><div class="aq-composer"><div class="aq-input-row"><textarea class="aq-ctext" id="reply-'+r.id+'" placeholder="Write your reply to '+mFirst+'…"></textarea><button class="aq-csend" aria-label="Send reply" onclick="deliverThread(\''+r.id+'\')">'+AQ_SEND+'</button></div></div></div>';
+  }
+  const railExtra  = !owner ? '<div class="aq-hist" id="aq-hist-host"></div>' : '';
+  const sheetExtra = !owner ? '<div class="aq-hist" id="aq-sheet-hist" style="max-height:none;overflow:visible;margin-bottom:14px"></div>' : '';
+  view.innerHTML = '<div class="aq-flow">'
+    + '<button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
+    + '<div class="aq-lay"><section class="aq-conv"><div class="aq-scroll">'
+    +   '<div class="aq-eyb">Ask Matt</div>'
+    +   '<div class="aq-meta"><span class="aq-meta-i">'+AQ_LOCK+(owner?('Question from '+escHtml(mName)):'Private to you and Matt')+'</span><span class="aq-meta-sep"></span>'+metaR+'</div>'
+    +   '<div class="aq-thread">'+qBubble+after+'</div>'
+    + '</div>'+dock+'</section>'
+    + '<aside class="aq-ctx-col">'+railExtra+'<div class="aq-ctx" id="aq-ctx-host">'+aqContextLoading()+'</div></aside>'
+    + '</div>'
+    + '<div class="aq-sheet-ov" id="aq-sheet" onclick="if(event.target===this)aqCloseSheet()"><div class="aq-sheet"><div class="aq-grab"></div><div class="aq-sheet-body">'+sheetExtra+'<div id="aq-sheet-ctx">'+aqContextLoading()+'</div></div></div></div>'
+    + '</div>';
+  fillAqContext(owner && !own ? r.email : null, owner && !own ? mFirst : null);
+  if(!owner) fillAqHistory();
+}
+
+// ── Thread (feedback / plan) ───────────────────────────────────────────────────
 async function renderThread(view, reqId, kind){
   const r = await getRequest(reqId);
   if(!r){ view.innerHTML = convTop('Not found','',null)+'<div class="empty-note">That request could not be loaded.</div>'; return; }
@@ -1682,6 +1763,7 @@ async function renderPlanDeliverable(view, reqId){
   myEmail = session.user.email;
   const { data: ae } = await db.from("allowed_emails").select("name,avatar_url").eq("email", myEmail).maybeSingle();
   myName = (ae && ae.name) || myEmail.split("@")[0];
+  myAvatar = (ae && ae.avatar_url) || null;
   try{ const { data: pr } = await db.rpc("get_profile_row"); myMemberKey = (Array.isArray(pr)?pr[0]:pr)?.member_key || null; }catch(_){ }
   // Initialise the shared composer plumbing (image/file upload) used by the question flow.
   try{ if(window.initCommentsSystem) initCommentsSystem({ db, auth:{ email:myEmail, name:myName, avatarUrl:(ae && ae.avatar_url)||null, isAdmin:isOwner() } }); }catch(e){ console.error("initCommentsSystem error:", e); }
