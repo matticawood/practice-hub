@@ -2087,6 +2087,7 @@ const _SH_PAL_ICONS = {
   glossary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
   article: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>',
   video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
+  course: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.66 3 3 6 3s6-1.34 6-3v-5"/></svg>',
 };
 _SH_PAL_ICONS.content = _SH_PAL_ICONS.article;
 
@@ -2094,6 +2095,11 @@ function _shInitPalette(db) {
   _shPalDb = db || _shPalDb;
   if (_shPalBuilt) return;
   _shPalBuilt = true;
+  // Course names come from window.PR_COURSES; load the catalogue on pages that
+  // don't already have it so the search can include courses everywhere.
+  if (!window.PR_COURSES && !document.querySelector('script[src*="course-catalogue.js"]')) {
+    var _cc = document.createElement("script"); _cc.src = "/course-catalogue.js"; document.head.appendChild(_cc);
+  }
   const bd = document.createElement("div");
   bd.id = "sh-palette-backdrop";
   bd.innerHTML =
@@ -2201,6 +2207,16 @@ async function _shPalRemoteSearch(query, navHits) {
   }
   if (seq !== _shPalSeq) return; // superseded by a newer keystroke
   const items = navHits.slice();
+  // Courses (names only), from the catalogue in window.PR_COURSES. Skip the
+  // hidden parent entry. Local match, so no extra network call.
+  try {
+    var _cq = (query || "").toLowerCase();
+    (window.PR_COURSES || []).forEach(function (c) {
+      if (c && !c.hidden && c.label && c.label.toLowerCase().indexOf(_cq) >= 0) {
+        items.push({ title: c.label, sub: "Course", href: "/courses.html?course=" + encodeURIComponent(c.key), kind: "course", icon: _SH_PAL_ICONS.course });
+      }
+    });
+  } catch (e) {}
   pieces.forEach(function(p) {
     items.push({ title: p.title, sub: p.composer || "Piece", href: "/resources.html?piece=" + p.id, kind: "piece" });
   });
@@ -2247,7 +2263,7 @@ function _shPalRender(items, partial) {
     box.innerHTML = '<div class="sh-pal-empty">' + (partial ? "Searching…" : "No matches") + "</div>";
     return;
   }
-  const kindLabel = { nav: "Navigate", piece: "Pieces", article: "Articles", content: "Content", glossary: "Glossary" };
+  const kindLabel = { nav: "Navigate", course: "Courses", piece: "Pieces", article: "Articles", content: "Content", glossary: "Glossary" };
   let html = "", lastKind = null;
   _shPalItems.forEach(function(it, i) {
     if (it.kind !== lastKind) {
