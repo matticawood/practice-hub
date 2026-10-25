@@ -1495,6 +1495,11 @@
     // as a comment/chat message renders it. For custom message views (e.g. ask.html).
     renderMedia: (media) => _renderCommentMedia({ media: media }),
 
+    // The full composer attachment toolbar (image, file, video upload + embed,
+    // record video, voice memo, poll) with its hidden inputs and panels, for a
+    // given media key. For custom composers (e.g. ask.html owner thread reply).
+    toolbarHtml: (key) => _toolbarHtml(key),
+
     // Expose reaction state for external reads (e.g. to build avatars / counts)
     getReactionState: (parentId) => ({..._reactState(parentId)}),
     setReactionState: (parentId, data) => { _rxState[parentId]=data; },
