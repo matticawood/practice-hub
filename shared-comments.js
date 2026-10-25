@@ -393,7 +393,7 @@
 
   async function _uploadToStorage(blob, filename) {
     const MAX_MB=500;
-    if (blob.size>MAX_MB*1024*1024) throw new Error(`"${filename}" is ${(blob.size/1024/1024).toFixed(0)} MB — files must be under ${MAX_MB} MB.`);
+    if (blob.size>MAX_MB*1024*1024) throw new Error(`"${filename}" is ${(blob.size/1024/1024).toFixed(0)} MB. Files must be under ${MAX_MB} MB.`);
     const email = _auth().email || 'user';
     const safe  = `${email}/${Date.now()}-${filename.replace(/[^a-z0-9._-]/gi,"_")}`;
     const { data, error } = await _db().storage.from(_bucket()).upload(safe, blob);
@@ -509,7 +509,7 @@
         if(s.playbackId&&s.assetStatus==="ready"){playbackId=s.playbackId;assetId=s.assetId;break;}
         if(s.status==="errored"||s.assetStatus==="errored") throw new Error("Mux reported an error processing the asset");
       }
-      if (!playbackId) throw new Error("Video processing timed out — try again");
+      if (!playbackId) throw new Error("Video processing timed out. Please try again.");
       if (onDone) onDone({type:"mux",playbackId,assetId,name:file.name});
     } catch(e) {
       console.error("[Mux]",e);
@@ -563,7 +563,7 @@
 
   function _setSendDisabled(key, disabled) {
     const btn=document.getElementById(`send-btn-${key}`);
-    if (btn) { btn.disabled=disabled; btn.title=disabled?"Please wait — video is processing…":""; }
+    if (btn) { btn.disabled=disabled; btn.title=disabled?"Please wait, the video is still processing…":""; }
   }
 
   function _closeExcept(key, except) {
@@ -1145,7 +1145,7 @@
 
       const count=comments?.length||0;
       if(hdrEl)hdrEl.textContent=count===0?"Comments":`${count} Comment${count!==1?"s":""}`;
-      if(!count){listEl.innerHTML=`<div class="tc-comments-empty">No comments yet — be the first!</div>`;return;}
+      if(!count){listEl.innerHTML=`<div class="tc-comments-empty">No comments yet. Be the first.</div>`;return;}
       // Pre-load per-comment reactions so the heart buttons render with correct counts.
       await _loadCmtReactions(comments.map(c => c.id));
       // Track each comment's author + parentId for notification routing on reaction.
@@ -1508,7 +1508,7 @@
   // ── Internal upload helpers ──────────────────────────────────────────────────
   async function _uploadMedia(key) {
     const media=_inlineMedia[key]||[];
-    if(media.some(m=>m._uploading)) throw new Error("A video is still uploading — please wait.");
+    if(media.some(m=>m._uploading)) throw new Error("A video is still uploading, please wait.");
     const result=[];
     for(const m of media){
       if(m.type==="mux")          result.push({type:"mux",playbackId:m.playbackId,assetId:m.assetId,name:m.name});

@@ -514,6 +514,9 @@
   /* The owner's composer uses the shared full-roster toolbar; let it wrap and sit
      on the dark dock (its colours come from the remapped tokens on .aq-flow). */
   .aq-dock .composer-toolbar{ flex-wrap:wrap; gap:5px; margin:0 0 9px; }
+  /* Polls are wired to the community comment system and can't render in an Ask
+     message, so hide the poll button wherever the shared toolbar shows in Ask. */
+  .aq-flow button[id^="inline-poll-btn-"]{ display:none !important; }
   .aq-input-row{ display:flex; gap:9px; align-items:flex-end; }
   .aq-ctext{ flex:1; min-width:0; field-sizing:content; min-height:42px; max-height:30vh; overflow-y:auto; resize:none; outline:none;
     background:rgba(255,255,255,.04); border:1px solid var(--line); border-radius:15px; padding:10px 14px; color:var(--head);
@@ -1731,7 +1734,7 @@ function aqContextHtml(c, who){
       + '<div class="aq-ctx-sub">When you send a question, Matt can see your whole record: your sessions, the notes you write with them, and the pieces in your library. So you don\'t have to explain what you\'re working on from scratch.</div>'
     + '<div class="aq-stats">'
     +   '<div class="aq-stat"><div class="aq-stat-n">'+(c.weekMins?_hmShort(c.weekMins):'0<small>m</small>')+'</div><div class="aq-stat-k">This week</div></div>'
-    +   '<div class="aq-stat"><div class="aq-stat-n">'+(c.streak!=null?c.streak:'—')+'</div><div class="aq-stat-k">Day streak</div></div>'
+    +   '<div class="aq-stat"><div class="aq-stat-n">'+(c.streak!=null?c.streak:'–')+'</div><div class="aq-stat-k">Day streak</div></div>'
     +   '<div class="aq-stat"><div class="aq-stat-n">'+c.total+'</div><div class="aq-stat-k">Sessions</div></div>'
     + '</div>';
   if(c.learning.length){
@@ -1871,7 +1874,7 @@ async function renderAqThread(view, reqId){
   const msgs = [{ from:'member', text:String((r.body&&r.body.text)||''), media:(r.body&&r.body.media)||[] }];
   const list = Array.isArray(r.messages) ? r.messages : [];
   if(list.length){ list.forEach(function(m){ msgs.push({ from:m.from, text:String(m.text||''), media:m.media||[] }); }); }
-  else if(r.response && r.response.text){ msgs.push({ from:'owner', text:String(r.response.text||''), media:(r.response.media)||[] }); }
+  else if(r.response && r.response.text){ msgs.push({ from:'owner', text:String(r.response.text||''), media:(r.response.media)||[], at:(r.delivered_at||r.created_at) }); }
   let thread='';
   msgs.forEach(function(m, i){
     const isO = m.from==='owner';
@@ -1892,7 +1895,11 @@ async function renderAqThread(view, reqId){
   // open to a stray reply weeks later; Matt replying again reopens it. Must match
   // the server guard in credit_thread_send (2 days).
   const AQ_FOLLOWUP_DAYS = 2;
-  const lastMsg = list.length ? list[list.length-1] : null;
+  // The last reply in the conversation (everything after the original question),
+  // so a legacy response-only delivery counts too and the turn/window logic and
+  // placeholder match the "Answered" state.
+  const replies = msgs.slice(1);
+  const lastMsg = replies.length ? replies[replies.length-1] : null;
   const lastIsOwner = !!(lastMsg && lastMsg.from==='owner');
   const windowOpen = lastIsOwner && lastMsg.at && (Date.now() - Date.parse(lastMsg.at)) <= AQ_FOLLOWUP_DAYS*864e5;
   const memberTurn = windowOpen;  // owner always has a composer regardless
@@ -1930,7 +1937,9 @@ async function renderAqThread(view, reqId){
       +   '<input type="file" id="tc-fi-file-'+k+'" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.mp3,.wav,.aiff,.aif,.flac,.m4a,.ogg,.opus,.wma,.mid,.midi,.xml,.musicxml,.mxl" style="display:none" onchange="tcHandleFile(this,\''+k+'\')">'
       + '</div>';
     const ownerTools = (window.Comments && Comments.toolbarHtml) ? Comments.toolbarHtml(k) : memberTools;
-    const toolbar = canSend ? ('<div id="inline-media-preview-'+k+'"></div>' + (owner ? ownerTools : memberTools)) : '';
+    // The owner's shared toolbar emits its own #inline-media-preview-<k>; only the
+    // member branch needs one, so we don't duplicate the id.
+    const toolbar = canSend ? ((owner ? '' : '<div id="inline-media-preview-'+k+'"></div>') + (owner ? ownerTools : memberTools)) : '';
     // The "What Matt sees" context: a rail on desktop, a slide-up sheet on mobile
     // opened by this trigger (mobile-only via CSS). It was missing from the thread,
     // so a follow-up on mobile had no way to open it.
@@ -1940,7 +1949,7 @@ async function renderAqThread(view, reqId){
   const railExtra  = !owner ? '<div class="aq-hist" id="aq-hist-host"></div>' : '';
   const sheetExtra = '';  // mobile sheet drops "Your questions" (now the inbox shows them); the desktop rail keeps it
   view.innerHTML = '<div class="aq-flow">'
-    + (owner ? '' : '<button class="aq-back" aria-label="Back to your questions" onclick="go({flow:\'question\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>')
+    + '<button class="aq-back" aria-label="'+(owner?'Back to questions':'Back to your questions')+'" onclick="go({flow:\'question\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>'
     + '<button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
     + '<div class="aq-lay"><section class="aq-conv"><div class="aq-scroll">'
     +   '<div class="aq-eyb">Ask Matt</div>'
