@@ -473,7 +473,7 @@
   .aq-csend:disabled{ opacity:.45; cursor:default; box-shadow:none; }
   .aq-csend svg{ width:17px; height:17px; }
   /* staged-attachment previews (from shared-comments) sit above the input */
-  #inline-media-preview-askq:not(:empty){ margin-bottom:10px; }
+  #inline-media-preview-askq:not(:empty), #inline-media-preview-askreply:not(:empty){ margin-bottom:10px; }
   /* The column holds the boxes at fixed frames; the CONTEXT box fills the
      remaining height and scrolls its own CONTENT, so its rounded corners stay
      intact instead of the whole card scrolling off under a clipping column. */
@@ -1450,6 +1450,7 @@ async function submitQuestion(){
 // attachment and cannot send a second message while awaiting the first reply, so
 // they may edit the original until Matt replies (enforced server-side too).
 let _aqEditExisting = [];
+let _aqSendAsOwner = false;
 async function renderQuestionEdit(view, reqId){
   const r = await getRequest(reqId);
   if(!r || r.kind!=='question'){ return renderAqThread(view, reqId); }
@@ -1696,6 +1697,8 @@ async function renderAqThread(view, reqId){
   // Treat as owner for any thread that is not the owner's own, even while previewing
   // as a member, so opening another member's thread never mislabels its author.
   const owner = ownerActive() || (isOwner() && !own);
+  _aqSendAsOwner = owner;                                   // aqThreadSend reads this for p_as_owner
+  try{ if(window.Comments) Comments.clearState('askreply'); }catch(_){}  // fresh composer each open
   await ensureMattIdentity();
   let mName = myName, mAv = myAvatar;
   if(owner && !own){
@@ -1727,7 +1730,7 @@ async function renderAqThread(view, reqId){
       ? '<div class="aq-qactions"><button class="aq-withdraw" onclick="go({flow:\'question\',req:\''+r.id+'\',edit:1})">Edit</button><button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true)">Withdraw this question</button></div>'
       : '';
     thread += '<div class="aq-msg'+(mine?' me':'')+'">'+aqAvatar(mine?'me':'', isO?mattAvatar:mAv, isO?'M':mInitial)
-      + '<div class="aq-msg-b"><div class="aq-who">'+who+'</div><div class="aq-bubble'+(mine?' me':'')+'">'+escHtml(m.text)+aqMedia(m.media)+'</div>'+manage+'</div></div>';
+      + '<div class="aq-msg-b"><div class="aq-who">'+who+'</div><div class="aq-bubble'+(mine?' me':'')+'">'+msgBody(m.text)+aqMedia(m.media)+'</div>'+manage+'</div></div>';
   });
   // The member may send only when it is their turn: after Matt's last message,
   // never twice in a row, and within the follow-up window. The window closes an
@@ -1760,7 +1763,21 @@ async function renderAqThread(view, reqId){
     const decline = (owner && r.status==='open')
       ? '<div class="aq-decline-row"><button class="aq-decline" onclick="cancelRequest(\''+r.id+'\',false)">Decline and refund</button></div>'
       : '';
-    dock = '<div class="aq-dock"><div class="aq-composer'+lock+'"><div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" oninput="_taGrow(this)" placeholder="'+escHtml(ph)+'"'+dis+'></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')"'+dis+'>'+AQ_SEND+'</button></div></div>'+decline+'</div>';
+    // Attachments: members may send photos and files; the owner gets the full
+    // roster (photos, files, and video routed to Mux). Only when able to send.
+    const k = 'askreply';
+    const toolbar = canSend ? (
+        '<div id="inline-media-preview-'+k+'"></div>'
+      + '<div class="aq-ctoolbar">'
+      +   '<button class="aq-tbtn" title="Add a photo" aria-label="Add a photo" onclick="document.getElementById(\'tc-fi-img-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>'
+      +   '<button class="aq-tbtn" title="Attach a file" aria-label="Attach a file" onclick="document.getElementById(\'tc-fi-file-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></button>'
+      +   (owner ? '<button class="aq-tbtn" title="Add a video" aria-label="Add a video" onclick="document.getElementById(\'tc-fi-vid-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>' : '')
+      +   '<input type="file" id="tc-fi-img-'+k+'" accept="image/*" multiple style="display:none" onchange="tcHandleImage(this,\''+k+'\')">'
+      +   '<input type="file" id="tc-fi-file-'+k+'" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.mp3,.wav,.aiff,.aif,.flac,.m4a,.ogg,.opus,.wma,.mid,.midi,.xml,.musicxml,.mxl" style="display:none" onchange="tcHandleFile(this,\''+k+'\')">'
+      +   (owner ? '<input type="file" id="tc-fi-vid-'+k+'" accept="video/*" style="display:none" onchange="tcHandleVideo(this,\''+k+'\')">' : '')
+      + '</div>'
+    ) : '';
+    dock = '<div class="aq-dock"><div class="aq-composer'+lock+'">'+toolbar+'<div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" oninput="_taGrow(this)" placeholder="'+escHtml(ph)+'"'+dis+'></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')"'+dis+'>'+AQ_SEND+'</button></div></div>'+decline+'</div>';
   }
   const railExtra  = !owner ? '<div class="aq-hist" id="aq-hist-host"></div>' : '';
   const sheetExtra = !owner ? '<div class="aq-hist" id="aq-sheet-hist" style="max-height:none;overflow:visible;margin-bottom:14px"></div>' : '';
@@ -1781,11 +1798,15 @@ async function renderAqThread(view, reqId){
 }
 async function aqThreadSend(id){
   const ta = document.getElementById('aq-reply'); const text = ((ta&&ta.value)||'').trim();
-  if(!text){ if(ta) ta.focus(); return; }
+  const hasMedia = !!(document.getElementById('inline-media-preview-askreply')||{}).childElementCount;
+  if(!text && !hasMedia){ if(ta) ta.focus(); return; }
   const btn = document.getElementById('aq-reply-send');
   if(btn){ if(btn.disabled) return; btn.disabled=true; }   // guard double-click before any await
   if(!await requireAuth()){ if(btn) btn.disabled=false; return; }
-  const { error } = await db.rpc('credit_thread_send', { p_id:id, p_text:text, p_as_owner: ownerActive() });
+  let media = [];
+  try{ if(window.Comments) media = await Comments.uploadMedia('askreply'); }
+  catch(e){ showToast(e && e.message ? e.message : 'An attachment is still uploading.', 3800); if(btn) btn.disabled=false; return; }
+  const { error } = await db.rpc('credit_thread_send', { p_id:id, p_text:text, p_media:media, p_as_owner: _aqSendAsOwner });
   if(error){
     const msg = error.message||'';
     const friendly = /conversation has closed/i.test(msg) ? 'This conversation has closed. You can ask Matt a new question any time.'
@@ -1795,6 +1816,7 @@ async function aqThreadSend(id){
     if(/conversation has closed/i.test(msg)) render();  // refresh so the closed state shows
     return;
   }
+  try{ if(window.Comments) Comments.clearState('askreply'); }catch(_){}
   await loadBalance();
   render();
 }
