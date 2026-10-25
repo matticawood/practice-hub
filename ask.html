@@ -1263,7 +1263,9 @@ function openReq(kind, id){ go({ flow: kind, req: id }); }
 function onStore(key){
   const it = CAT[key];
   if(!it.live){ showToast('That one is coming soon.'); return; }
-  if(!canAfford(it.cost)){ needCredits(key); return; }
+  // The owner opens these to review/answer, not to buy, so the affordability
+  // gate applies to members only.
+  if(!ownerActive() && !canAfford(it.cost)){ needCredits(key); return; }
   go({ flow:key });
 }
 /* ---- Search over Matt's teaching corpus (ask_search RPC) ---- */
@@ -1408,9 +1410,10 @@ async function renderOwnerQueue(){
    caller, so the page promised a refund it could not perform. Either side may
    call it while the request is still open: the hold becomes a refund and the
    balance comes back. */
-async function cancelRequest(id, mine){
+async function cancelRequest(id, mine, noun){
+  noun = noun || 'question';
   const ok = await askDialog({
-    title: mine ? 'Withdraw this question?' : 'Decline this request?',
+    title: mine ? ('Withdraw this '+noun+'?') : 'Decline this request?',
     body: mine
       ? 'It will be withdrawn before Matt answers, and the credits it is holding come straight back to you.'
       : 'The member gets the credits back and the request leaves your queue.',
@@ -2058,7 +2061,7 @@ async function aqThreadSend(id){
   const { error } = await db.rpc('credit_thread_send', { p_id:id, p_text:text, p_media:media, p_as_owner: _aqSendAsOwner });
   if(error){
     const msg = error.message||'';
-    const friendly = /conversation has closed/i.test(msg) ? 'This conversation has closed. You can ask Matt a new question any time.'
+    const friendly = /conversation has closed/i.test(msg) ? 'This conversation has closed.'
                    : /wait for a reply/i.test(msg) ? 'Wait for Matt to reply before sending again.'
                    : ('Could not send. '+msg);
     showToast(friendly, 4200); if(btn) btn.disabled=false;
@@ -2145,10 +2148,11 @@ async function renderFeedback(view, reqId){
     let qs=[]; try{ const { data } = await db.from('credit_requests').select('*').eq('kind','feedback').order('created_at',{ascending:false}); qs=data||[]; }catch(_){}
     return renderFeedbackOwnerInbox(view, qs);
   }
+  document.body.classList.add('ask-flow');   // before the await, so the chrome never flashes on a fresh load
   const newq = new URLSearchParams(location.search).get('new')==='1';
   if(!newq){
     let qs=[]; try{ const all=await myRequests(); qs=(all||[]).filter(function(r){ return r.kind==='feedback'; }); }catch(_){}
-    if(qs.length){ document.body.classList.add('ask-flow'); return renderFeedbackInbox(view, qs); }
+    if(qs.length){ return renderFeedbackInbox(view, qs); }
   }
   if(!canAfford(CAT.feedback.cost)){ document.body.classList.remove('ask-flow'); return renderShortfall(view, 'feedback'); }
   document.body.classList.add('ask-flow');   // immersive: hide the app header behind the overlay
@@ -2227,7 +2231,7 @@ function renderFeedbackWaiting(view, r){
     +   (fm.all.length? '<div class="fb-media">'+aqMedia(fm.all)+'</div>':'')
     +   (r.body&&r.body.note? '<div class="fb-yournote"><div class="fb-lbl">What you asked Matt to look at</div>'+msgBody(r.body.note)+'</div>':'')
     +   '<div class="aq-wait" style="margin-left:0;margin-top:20px">Matt is reviewing your recording. You\'ll get a notification when your feedback is ready.</div>'
-    +   (r.status==='open'? '<div class="aq-decline-row" style="text-align:left;margin-top:6px"><button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true)">Withdraw and refund</button></div>':'')
+    +   (r.status==='open'? '<div class="aq-decline-row" style="text-align:left;margin-top:6px"><button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true,\'recording\')">Withdraw and refund</button></div>':'')
     + '</div></div></div>';
 }
 
@@ -2238,7 +2242,7 @@ function renderFeedbackEditor(view, r){
   const videoEmbed = _fbVideoId
     ? '<mux-player id="fb-vid" playback-id="'+escHtml(_fbVideoId)+'" style="width:100%;aspect-ratio:16/9;display:block;border-radius:12px;overflow:hidden" stream-type="on-demand"></mux-player>'
     : '<div class="fb-novid">They did not send a video.</div>';
-  const clipBtn = '<button class="fb-tool" onclick="fbOpenClipper()">'+FB_CLIP_SVG+'Clip the score</button><input type="file" id="fb-attach-score" accept=".pdf,image/*" style="display:none" onchange="fbAttachScore(this)">';
+  const clipBtn = '<button class="fb-tool" onmousedown="event.preventDefault()" onclick="fbOpenClipper()">'+FB_CLIP_SVG+'Clip the score</button><input type="file" id="fb-attach-score" accept=".pdf,image/*" style="display:none" onchange="fbAttachScore(this)">';
   const scoreLine = _fbScore
     ? '<div class="fb-scorenote">Score attached. Use "Clip the score" to drop a region into your writing.</div>'
     : '<div class="fb-scorenote">No score was sent. "Clip the score" will let you attach one to clip from.</div>';
@@ -2353,6 +2357,10 @@ async function fbDeliver(id){
   const btn=document.getElementById('fb-deliver'); if(btn){ if(btn.disabled) return; btn.disabled=true; }
   let refs=[]; try{ if(window.Comments) refs=await Comments.uploadMedia('fbref'); }
   catch(e){ showToast(e&&e.message?e.message:'An attachment is still uploading.', 3800); if(btn) btn.disabled=false; return; }
+  // Drop any citation that points past the final reference list (e.g. a reference
+  // was removed after it was cited), so no citation dangles in the deliverable.
+  const refN=(refs||[]).length;
+  doc.forEach(function(b){ b.runs=(b.runs||[]).filter(function(rn){ return !(rn.x==='cite' && (!(rn.i>=1) || rn.i>refN)); }); });
   const resp={ doc:doc, refs:refs||[], videoId:_fbVideoId||null, text:fbPlain(doc).slice(0,400) };
   const { error } = await db.rpc('deliver_credit_request', { p_id:id, p_response:resp });
   if(error){ showToast('Could not deliver. '+(error.message||''), 4200); if(btn) btn.disabled=false; return; }
