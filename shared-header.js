@@ -262,6 +262,12 @@ const SH_SUBNAV = {
       body.sh-light #sh-search-btn { background: rgba(26,20,16,.04); border-color: rgba(26,20,16,.14); color: #6f6153; }
       body.sh-light #sh-search-btn:hover { background: rgba(26,20,16,.07); color: #1a1410; border-color: rgba(26,20,16,.24); }
       body.sh-light #presence-btn { border-color: rgba(26,20,16,.16); color: rgba(26,20,16,.68); }
+      body.sh-light #header-chat-btn, body.sh-light #notif-bell-btn { background: rgba(26,20,16,.04); border-color: rgba(26,20,16,.14); }
+      body.sh-light #header-chat-btn:hover, body.sh-light #notif-bell-btn:hover { background: rgba(26,20,16,.07); border-color: rgba(26,20,16,.24); }
+      body.sh-light #header-chat-btn svg, body.sh-light #notif-bell-btn svg { stroke: #6f6153; }
+      body.sh-light #header-chat-btn:hover svg, body.sh-light #notif-bell-btn:hover svg { stroke: #1a1410; }
+      body.sh-light #header-chat-btn.active { background: var(--accent, #f5c518); border-color: var(--accent, #f5c518); }
+      body.sh-light #header-chat-btn.active svg { stroke: #1a1410; }
     }
     @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #sh-sidebar { display: none; }
