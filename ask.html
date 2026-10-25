@@ -550,6 +550,34 @@
   .fb-zoom{ position:fixed; inset:0; z-index:4000; background:rgba(0,0,0,.86); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); display:none; align-items:center; justify-content:center; padding:24px; cursor:zoom-out; }
   .fb-zoom.open{ display:flex; }
   .fb-zoom img{ max-width:96vw; max-height:92vh; border-radius:8px; box-shadow:0 30px 80px -30px rgba(0,0,0,.9); }
+  /* Feedback canvas (free page) */
+  .fb-cv-wrap{ position:relative; z-index:1; height:100%; display:flex; flex-direction:column; }
+  .fb-cv-top{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:max(16px,env(safe-area-inset-top)) 64px 12px clamp(16px,3vw,28px); border-bottom:1px solid var(--hair); }
+  .fb-cv-title{ font-size:1rem; font-weight:700; color:var(--head); }
+  .fb-cv-title span{ color:var(--muted); font-weight:500; }
+  .fb-cv-tools{ display:flex; gap:8px; flex-wrap:wrap; }
+  .fb-cv-actions{ margin-left:auto; display:flex; align-items:center; gap:12px; }
+  .fb-cv-note{ padding:10px clamp(16px,3vw,28px); font-size:.86rem; color:var(--muted); border-bottom:1px solid var(--hair); background:rgba(255,255,255,.02); }
+  .fb-cv-note b{ color:var(--head); font-weight:600; }
+  .fb-cv-scroll{ flex:1 1 auto; overflow:auto; padding:18px; background:#0e0e12; }
+  .fbc{ position:relative; margin:0 auto; min-height:320px; background:linear-gradient(180deg,#17171d,#131318); border:1px solid var(--line2); border-radius:14px; background-image:radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px); background-size:22px 22px; }
+  .fb-cv-scroll.view{ overflow:hidden; padding:0; background:none; }
+  .fb-cv-scroll.view .fbc{ border:0; background:#131318; background-image:none; }
+  .fbc-el{ position:absolute; }
+  .fbc-el.sel{ outline:1.5px solid var(--purple,#a78bfa); outline-offset:3px; border-radius:6px; }
+  .fbc-bar{ position:absolute; top:-25px; left:0; right:0; height:21px; display:flex; align-items:center; justify-content:space-between; opacity:0; transition:opacity .12s; }
+  .fbc-el:hover .fbc-bar, .fbc-el.sel .fbc-bar{ opacity:1; }
+  .fbc-grabdots{ color:var(--muted); font-size:.95rem; cursor:grab; padding:0 4px; user-select:none; }
+  .fbc-del{ background:rgba(20,20,26,.92); border:1px solid var(--line2); color:var(--muted); width:20px; height:20px; border-radius:50%; cursor:pointer; font-size:.72rem; line-height:1; display:grid; place-items:center; }
+  .fbc-del:hover{ color:#fff; border-color:#ef4444; }
+  .fbc-text{ font-size:.96rem; line-height:1.55; color:var(--head); outline:none; white-space:pre-wrap; overflow-wrap:anywhere; background:rgba(255,255,255,.015); border-radius:8px; padding:7px 9px; min-height:1.4em; }
+  .fbc-el.sel .fbc-text, .fbc-el:hover .fbc-text{ background:rgba(255,255,255,.045); }
+  .fb-cv-scroll.view .fbc-text{ background:none; padding:0; }
+  .fbc-text[contenteditable]:empty:before{ content:attr(data-ph); color:var(--faint); }
+  .fbc-tschip{ display:inline-flex; align-items:center; gap:5px; font:inherit; font-size:.82rem; font-weight:700; padding:5px 11px; border-radius:999px; border:0; cursor:pointer; background:color-mix(in srgb, var(--purple,#a78bfa) 26%, transparent); color:#c4b5fd; white-space:nowrap; }
+  .fbc-rz{ position:absolute; right:-7px; bottom:-7px; width:16px; height:16px; border-radius:50%; background:var(--purple,#a78bfa); border:2px solid #0e0e12; cursor:nwse-resize; opacity:0; transition:opacity .12s; }
+  .fbc-el:hover .fbc-rz, .fbc-el.sel .fbc-rz{ opacity:1; }
+  .fb-cv-refs{ border-top:1px solid var(--hair); padding:12px clamp(16px,3vw,28px) calc(16px + env(safe-area-inset-bottom)); background:rgba(0,0,0,.2); max-height:34vh; overflow-y:auto; }
   .fb-ts-chip{ display:inline-flex; align-items:center; gap:4px; font:inherit; font-size:.8rem; font-weight:700; padding:2px 9px; border-radius:999px; border:0; cursor:pointer; background:color-mix(in srgb, var(--purple,#a78bfa) 22%, transparent); color:#c4b5fd; vertical-align:middle; }
   .fb-ts-chip:hover{ background:color-mix(in srgb, var(--purple,#a78bfa) 36%, transparent); }
   /* Deliverable */
@@ -961,7 +989,7 @@ function go(params){
 window.addEventListener('popstate', render);
 // The "What Matt sees" sheet is mobile-only: widening past the rail breakpoint
 // closes it so it does not reappear if the window is later narrowed again.
-window.addEventListener('resize', function(){ if(window.innerWidth >= 901 && typeof aqCloseSheet === 'function') aqCloseSheet(); });
+window.addEventListener('resize', function(){ if(window.innerWidth >= 901 && typeof aqCloseSheet === 'function') aqCloseSheet(); if(typeof fbcFit==='function' && !_fbcEditable && document.getElementById('fbc')) fbcFit(); });
 
 async function render(){
   const sp = new URLSearchParams(window.location.search);
@@ -2324,38 +2352,33 @@ function renderFeedbackWaiting(view, r){
 }
 
 function renderFeedbackEditor(view, r){
-  const fm=_fbMedia(r); _fbVideoId = fm.video? (fm.video.playbackId||fm.video.playback_id) : null; _fbScore = fm.score;
-  const who = escHtml((r.email||'').split('@')[0]||'them');
+  const fm=_fbMedia(r); _fbScore=fm.score; _fbcReqId=r.id;
+  const who=escHtml((r.email||'').split('@')[0]||'them');
   try{ if(window.Comments) Comments.clearState('fbref'); }catch(_){}
-  const videoEmbed = _fbVideoId
-    ? '<mux-player id="fb-vid" playback-id="'+escHtml(_fbVideoId)+'" style="width:100%;aspect-ratio:16/9;display:block;border-radius:12px;overflow:hidden" stream-type="on-demand"></mux-player>'
-    : '<div class="fb-novid">They did not send a video.</div>';
-  const clipBtn = '<button class="fb-tool" onmousedown="event.preventDefault()" onclick="fbOpenClipper()">'+FB_CLIP_SVG+'Clip the score</button><input type="file" id="fb-attach-score" accept=".pdf,image/*" style="display:none" onchange="fbAttachScore(this)">';
-  const scoreLine = _fbScore
-    ? '<div class="fb-scorenote">Score attached. Use "Clip the score" to drop a region into your writing.</div>'
-    : '<div class="fb-scorenote">No score was sent. "Clip the score" will let you attach one to clip from.</div>';
+  const vid=fm.video? (fm.video.playbackId||fm.video.playback_id) : null;
+  // Seed the page from an existing draft if one is held, else a fresh page with
+  // the recording placed top-left to build around.
+  if(r.response && r.response.canvas && Array.isArray(r.response.canvas.els)) fbcReset(r.response.canvas);
+  else { fbcReset(null); if(vid) _fbc.els.push({id:_fbcNewId(),type:'video',x:24,y:24,w:384,playbackId:vid}); }
   view.innerHTML = '<div class="aq-flow"><button class="aq-back" aria-label="Back to recordings" onclick="go({flow:\'feedback\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
-    + '<div class="fb-ed-lay">'
-    +   '<section class="fb-ed-left"><div class="fb-ed-leftin">'
-    +     '<div class="aq-eyb">Feedback for '+who+'</div>'
-    +     (r.body&&r.body.piece? '<div class="fb-piece">'+escHtml(r.body.piece)+'</div>':'')
-    +     '<div class="fb-vidwrap">'+videoEmbed+'</div>'
-    +     scoreLine
-    +     fbScoreView(_fbScore)
-    +     (fm.all.filter(function(x){return x!==fm.video && x!==fm.score;}).length? '<div class="fb-media"><div class="fb-lbl">Also sent</div>'+aqMedia(fm.all.filter(function(x){return x!==fm.video && x!==fm.score;}))+'</div>':'')
-    +     (r.body&&r.body.note? '<div class="fb-yournote"><div class="fb-lbl">They asked you to look at</div>'+msgBody(r.body.note)+'</div>':'')
-    +   '</div></section>'
-    +   '<section class="fb-ed-right"><div class="fb-ed-rightin">'
-    +     '<div class="fb-ed-toolbar"><button class="fb-tool" onmousedown="event.preventDefault()" onclick="fbInsertTimestamp()">'+FB_TS_SVG+'Insert this moment</button>'+clipBtn+'<button class="fb-tool" onmousedown="event.preventDefault()" onclick="fbCitePicker(this)">'+FB_CITE_SVG+'Cite a reference</button></div>'
-    +     '<div class="fb-ed" id="fb-ed" contenteditable="true" data-ph="Write '+who+' their feedback. Scrub the video and drop a timestamp wherever you are referencing a moment; clip the score to show a passage."></div>'
-    +     '<div class="fb-refs-h">Reference material <span>optional</span></div>'
-    +     (window.Comments&&Comments.toolbarHtml? Comments.toolbarHtml('fbref') : '')
-    +     '<div class="fb-ed-actions"><button class="fb-decline" onclick="cancelRequest(\''+r.id+'\',false)">Decline & refund</button><button class="fb-deliver" id="fb-deliver" onclick="fbDeliver(\''+r.id+'\')">Deliver feedback</button></div>'
-    +   '</div></section>'
+    + '<div class="fb-cv-wrap">'
+    +   '<div class="fb-cv-top">'
+    +     '<div class="fb-cv-title">Feedback for '+who+(r.body&&r.body.piece?' <span>· '+escHtml(r.body.piece)+'</span>':'')+'</div>'
+    +     '<div class="fb-cv-tools">'
+    +       '<button class="fb-tool" onclick="fbcAddText()">'+FB_TEXT_SVG+'Text</button>'
+    +       '<button class="fb-tool" onclick="fbOpenClipper()">'+FB_CLIP_SVG+'Clip score</button>'
+    +       '<button class="fb-tool" onclick="fbcAddTs()">'+FB_TS_SVG+'Timestamp</button>'
+    +     '</div>'
+    +     '<div class="fb-cv-actions"><button class="fb-decline" onclick="cancelRequest(\''+r.id+'\',false)">Decline</button><button class="fb-deliver" id="fb-deliver" onclick="fbDeliver(\''+r.id+'\')">Deliver</button></div>'
+    +   '</div>'
+    +   (r.body&&r.body.note? '<div class="fb-cv-note"><b>They asked you to look at:</b> '+escHtml(r.body.note)+'</div>':'')
+    +   '<div class="fb-cv-scroll"><div class="fbc" id="fbc"></div></div>'
+    +   '<div class="fb-cv-refs"><div class="fb-refs-h">Reference material <span>optional, cite in a text block</span></div><div id="inline-media-preview-fbref"></div>'+(window.Comments&&Comments.toolbarHtml? Comments.toolbarHtml('fbref') : '')+'</div>'
     + '</div>'
+    + '<input type="file" id="fb-attach-score" accept=".pdf,image/*" style="display:none" onchange="fbAttachScore(this)">'
     + '<div class="fb-clip-ov" id="fb-clipper"></div>'
     + '</div>';
-  fbInitEditor();
+  fbcRender(true);
 }
 // Keep the editor's caret so a toolbar insert (timestamp / clip / cite) lands
 // where the owner was typing, even after clicking a button outside the editor.
@@ -2365,6 +2388,90 @@ function fbInitEditor(){
   ed.addEventListener('keyup',save); ed.addEventListener('mouseup',save); ed.addEventListener('input',save);
   _fbRange=null;
 }
+
+// ── Feedback canvas: a free page. Matt drops text blocks, score clips and video
+// timestamps anywhere, drags them, resizes them. Stored as positioned elements
+// in a fixed design-width coordinate space and scaled to fit when read. ────────
+const FB_TEXT_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M9 19h6"/></svg>';
+let _fbc={w:760,els:[]}, _fbcId=0, _fbcEditable=false, _fbcReqId=null, _fbcSel=null;
+function fbcReset(state){
+  if(state && Array.isArray(state.els)){ _fbc={ w:state.w||760, els:state.els.map(function(e){return Object.assign({},e);}) }; }
+  else { _fbc={ w:760, els:[] }; }
+  _fbcId=0; _fbc.els.forEach(function(e){ const n=parseInt(String(e.id||'').replace(/\D/g,''),10); if(n>_fbcId)_fbcId=n; });
+}
+function _fbcNewId(){ return 'e'+(++_fbcId); }
+function fbcAdd(el){ const n=_fbc.els.length; if(el.x==null) el.x=46+(n%5)*24; if(el.y==null) el.y=46+(n%9)*30; el.id=_fbcNewId(); _fbc.els.push(el); fbcRender(true); _fbcSelect(el.id); return el.id; }
+function fbcAddText(){ fbcAdd({type:'text', w:300, text:''}); const node=document.querySelector('.fbc-el[data-id="e'+_fbcId+'"] .fbc-text'); if(node){ node.focus(); } }
+function fbcAddClip(url){ fbcAdd({type:'clip', w:240, url:url}); }
+function fbcVideoTime(){ const v=document.querySelector('#fbc mux-player, #fbc video'); if(!v) return 0; const t=v.currentTime; return (typeof t==='number'&&isFinite(t))? Math.floor(t):0; }
+function fbcAddTs(){ if(!document.querySelector('#fbc mux-player, #fbc video')){ showToast('Add the recording to the page first, then timestamp it.', 3200); return; } fbcAdd({type:'ts', sec:fbcVideoTime()}); }
+function fbcDel(id){ _fbc.els=_fbc.els.filter(function(e){return e.id!==id;}); if(_fbcSel===id)_fbcSel=null; fbcRender(true); }
+function _fbcSelect(id){ _fbcSel=id; Array.prototype.forEach.call(document.querySelectorAll('.fbc-el'), function(el){ el.classList.toggle('sel', el.dataset.id===id); }); }
+function _fbcTextHtml(t){ return escHtml(t||'').replace(/\n/g,'<br>'); }
+function fbcElInner(el, editable){
+  if(el.type==='video') return '<mux-player playback-id="'+escHtml(el.playbackId||'')+'" controls stream-type="on-demand" style="width:100%;height:100%;display:block;border-radius:8px;overflow:hidden"></mux-player>';
+  if(el.type==='clip')  return '<img src="'+escHtml(el.url||'')+'" alt="score excerpt" draggable="false" style="width:100%;display:block;border-radius:6px"'+(editable?'':' onclick="fbZoomClip(this.src)"')+'>';
+  if(el.type==='ts')    return '<button class="fbc-tschip"'+(editable?'':' onclick="fbSeek('+(+el.sec||0)+')"')+'>'+FB_PLAY+' '+_fmtTime(el.sec)+'</button>';
+  return '<div class="fbc-text"'+(editable?' contenteditable="true" data-ph="Write here…"':'')+'>'+(editable? _fbcTextHtml(el.text) : _fbcTextHtml(el.text))+'</div>';
+}
+function fbcElHtml(el, editable){
+  let style='left:'+(el.x||0)+'px;top:'+(el.y||0)+'px;';
+  if(el.type!=='ts') style+='width:'+(el.w||240)+'px;';
+  if(el.type==='video') style+='height:'+Math.round((el.w||360)*9/16)+'px;';
+  return '<div class="fbc-el fbc-'+el.type+(el.id===_fbcSel?' sel':'')+'" data-id="'+el.id+'" style="'+style+'">'
+    + (editable?'<div class="fbc-bar" data-grab="1"><span class="fbc-grabdots">☰</span><button class="fbc-del" data-del="1" aria-label="Remove">×</button></div>':'')
+    + '<div class="fbc-body">'+fbcElInner(el, editable)+'</div>'
+    + (editable && el.type!=='ts' ? '<div class="fbc-rz" data-rz="1"></div>' : '')
+    + '</div>';
+}
+function fbcRender(editable){
+  _fbcEditable=!!editable;
+  const c=document.getElementById('fbc'); if(!c) return;
+  c.style.width=_fbc.w+'px';
+  c.innerHTML=_fbc.els.map(function(e){ return fbcElHtml(e, editable); }).join('');
+  if(editable){ fbcBind(); } else { c.style.transform=''; }
+  fbcGrow();
+  if(!editable) fbcFit();
+}
+function fbcGrow(){ const c=document.getElementById('fbc'); if(!c) return; let maxB=320; _fbc.els.forEach(function(e){ const n=c.querySelector('.fbc-el[data-id="'+e.id+'"]'); const h=n?n.offsetHeight:60; maxB=Math.max(maxB,(e.y||0)+h); }); c.style.height=(maxB+140)+'px'; if(!_fbcEditable) fbcFit(); }
+function fbcFit(){ const c=document.getElementById('fbc'); if(!c) return; const wrap=c.parentElement; if(!wrap) return; const avail=wrap.clientWidth; const scale=Math.min(1, avail/_fbc.w); c.style.transformOrigin='top left'; c.style.transform='scale('+scale+')'; wrap.style.height=(c.offsetHeight*scale)+'px'; }
+function fbcBind(){
+  const c=document.getElementById('fbc'); if(!c) return;
+  c.onpointerdown=function(e){
+    const node=e.target.closest('.fbc-el'); if(!node){ _fbcSelect(null); return; }
+    const id=node.dataset.id; const rec=_fbc.els.find(function(x){return x.id===id;});
+    if(e.target.closest('[data-del]')){ fbcDel(id); return; }
+    _fbcSelect(id);
+    if(e.target.closest('[data-rz]')){ fbcResize(e, id, node); return; }
+    if(e.target.closest('[data-grab]')){ fbcDrag(e, id, node); return; }
+    if(rec && (rec.type==='clip' || rec.type==='ts')){ fbcDrag(e, id, node); }  // drag these from the body too
+    // text/video body: left to the content (edit / player controls)
+  };
+  Array.prototype.forEach.call(c.querySelectorAll('.fbc-text'), function(t){
+    t.addEventListener('input', function(){ const id=t.closest('.fbc-el').dataset.id; const rec=_fbc.els.find(function(x){return x.id===id;}); if(rec){ rec.text=t.innerText; } fbcGrow(); });
+    t.addEventListener('pointerdown', function(ev){ ev.stopPropagation(); });  // editing, not dragging
+  });
+}
+function fbcDrag(e, id, node){
+  e.preventDefault(); const rec=_fbc.els.find(function(x){return x.id===id;}); if(!rec) return;
+  const sx=e.clientX, sy=e.clientY, ox=rec.x||0, oy=rec.y||0;
+  const move=function(ev){ rec.x=Math.max(0,Math.round(ox+(ev.clientX-sx))); rec.y=Math.max(0,Math.round(oy+(ev.clientY-sy))); node.style.left=rec.x+'px'; node.style.top=rec.y+'px'; };
+  const up=function(){ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); fbcGrow(); };
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+}
+function fbcResize(e, id, node){
+  e.preventDefault(); e.stopPropagation(); const rec=_fbc.els.find(function(x){return x.id===id;}); if(!rec) return;
+  const sx=e.clientX, ow=rec.w||node.offsetWidth;
+  const move=function(ev){ rec.w=Math.max(90,Math.round(ow+(ev.clientX-sx))); node.style.width=rec.w+'px'; if(rec.type==='video') node.style.height=Math.round(rec.w*9/16)+'px'; };
+  const up=function(){ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); fbcGrow(); };
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+}
+function fbcSerialize(){
+  const c=document.getElementById('fbc');
+  if(c){ _fbc.els.forEach(function(e){ if(e.type==='text'){ const t=c.querySelector('.fbc-el[data-id="'+e.id+'"] .fbc-text'); if(t) e.text=t.innerText; } }); }
+  return { w:_fbc.w, els:_fbc.els.filter(function(e){ return !(e.type==='text' && !String(e.text||'').trim()); }).map(function(e){ return Object.assign({},e); }) };
+}
+function fbcHasContent(){ const s=fbcSerialize(); return s.els.some(function(e){ return e.type==='text'||e.type==='clip'||e.type==='ts'; }); }
 function fbCitePicker(btn){
   Array.prototype.forEach.call(document.querySelectorAll('.fb-cite-pop'), function(p){ p.remove(); });
   const refs=(window.Comments&&Comments.readMedia)? Comments.readMedia('fbref') : [];
@@ -2435,23 +2542,19 @@ function fbRenderDoc(doc){
     return '<p class="fb-p">'+(inner||'')+'</p>';
   }).join('');
 }
-window.fbSeek=function(sec){ const v=document.getElementById('fb-dvid'); if(v){ try{ v.currentTime=sec; if(v.play) v.play(); }catch(_){}; v.scrollIntoView({block:'nearest',behavior:'smooth'}); } };
+window.fbSeek=function(sec){ const v=document.querySelector('#fbc mux-player, #fbc video, #fb-dvid'); if(v){ try{ v.currentTime=sec; if(v.play) v.play(); }catch(_){}; v.scrollIntoView({block:'nearest',behavior:'smooth'}); } };
 window.fbZoomClip=function(url){ let ov=document.getElementById('fb-zoom'); if(!ov){ ov=document.createElement('div'); ov.id='fb-zoom'; ov.className='fb-zoom'; ov.onclick=function(){ ov.classList.remove('open'); }; document.body.appendChild(ov); } ov.innerHTML='<img src="'+escHtml(url)+'" alt="">'; ov.classList.add('open'); };
 
 async function fbDeliver(id){
-  const doc=fbSerializeDoc();
-  const hasClip=(doc||[]).some(function(b){ return (b.runs||[]).some(function(rn){ return rn.x==='clip'; }); });
-  if(!fbPlain(doc) && !hasClip){ showToast('Write some feedback first.', 3000); return; }
+  if(!fbcHasContent()){ showToast('Add some feedback to the page first.', 3000); return; }
   const ok=await askDialog({ title:'Deliver this feedback?', body:'It will be sent to them and the '+fmt(CAT.feedback.cost)+' credits they are holding will be charged. You can still exchange follow-up messages afterwards.', yes:'Deliver', no:'Keep editing', coin:false });
   if(!ok) return;
   const btn=document.getElementById('fb-deliver'); if(btn){ if(btn.disabled) return; btn.disabled=true; }
   let refs=[]; try{ if(window.Comments) refs=await Comments.uploadMedia('fbref'); }
   catch(e){ showToast(e&&e.message?e.message:'An attachment is still uploading.', 3800); if(btn) btn.disabled=false; return; }
-  // Drop any citation that points past the final reference list (e.g. a reference
-  // was removed after it was cited), so no citation dangles in the deliverable.
-  const refN=(refs||[]).length;
-  doc.forEach(function(b){ b.runs=(b.runs||[]).filter(function(rn){ return !(rn.x==='cite' && (!(rn.i>=1) || rn.i>refN)); }); });
-  const resp={ doc:doc, refs:refs||[], videoId:_fbVideoId||null, text:fbPlain(doc).slice(0,400) };
+  const canvas=fbcSerialize();
+  const plain=canvas.els.filter(function(e){return e.type==='text';}).map(function(e){return e.text;}).join(' ').slice(0,400);
+  const resp={ canvas:canvas, refs:refs||[], text:plain };
   const { error } = await db.rpc('deliver_credit_request', { p_id:id, p_response:resp });
   if(error){ showToast('Could not deliver. '+(error.message||''), 4200); if(btn) btn.disabled=false; return; }
   showToast('Feedback delivered. They have been notified.');
@@ -2505,11 +2608,16 @@ async function renderFeedbackDeliverable(view, r, owner, own){
     dock='<div class="aq-dock">'+prev+'<div class="aq-composer'+lock+'">'+toolsHtml+'<div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" oninput="_taGrow(this)" placeholder="'+escHtml(ph)+'"'+dis+'></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')"'+dis+'>'+AQ_SEND+'</button></div></div></div>';
   }
   try{ if(window.Comments) Comments.clearState('askreply'); }catch(_){}
+  // The delivered page: the canvas Matt composed (read-only, scaled to fit). Older
+  // deliveries that predate the canvas fall back to the article / the video + text.
+  const hasCanvas = resp.canvas && Array.isArray(resp.canvas.els) && resp.canvas.els.length;
+  const mainHtml = hasCanvas
+    ? '<div class="fb-cv-scroll view"><div class="fbc" id="fbc"></div></div>'
+    : ((vidId? '<div class="fb-dvid-wrap"><mux-player id="fb-dvid" playback-id="'+escHtml(vidId)+'" style="width:100%;aspect-ratio:16/9;display:block;border-radius:12px;overflow:hidden" stream-type="on-demand"></mux-player>'+marks+'</div>':'')
+      + '<article class="fb-article">'+(resp.doc? fbRenderDoc(resp.doc) : (resp.text? '<p class="fb-p">'+escHtml(resp.text)+'</p>':'<p class="fb-p">Your feedback is ready.</p>'))+'</article>');
   const body = cancelled
     ? '<div class="aq-wait" style="margin-left:0;margin-top:30px">This feedback was withdrawn and the '+fmt(r.cost)+' credits refunded.</div>'
-    : (
-        (vidId? '<div class="fb-dvid-wrap"><mux-player id="fb-dvid" playback-id="'+escHtml(vidId)+'" style="width:100%;aspect-ratio:16/9;display:block;border-radius:12px;overflow:hidden" stream-type="on-demand"></mux-player>'+marks+'</div>':'')
-      + '<article class="fb-article">'+(resp.doc? fbRenderDoc(resp.doc) : (resp.text? '<p class="fb-p">'+escHtml(resp.text)+'</p>':'<p class="fb-p">Your feedback is ready.</p>'))+'</article>'
+    : ( mainHtml
       + refsHtml
       + (follow? '<div class="fb-follow">'+follow+'</div>':'')
       );
@@ -2522,6 +2630,7 @@ async function renderFeedbackDeliverable(view, r, owner, own){
     +   (r.body&&r.body.piece? '<div class="fb-piece">'+escHtml(r.body.piece)+'</div>':'')
     +   body
     + '</div>'+dock+'</div></div>';
+  if(hasCanvas){ fbcReset(resp.canvas); fbcRender(false); setTimeout(fbcFit, 60); }
 }
 
 // ── Score clipper: render the score (PDF via PDF.js, or an image), drag a box,
@@ -2591,7 +2700,7 @@ async function fbClipGo(){
       const up=await db.storage.from('community-uploads').upload(path, blob, { contentType:'image/png' });
       if(up.error) throw up.error;
       const url=db.storage.from('community-uploads').getPublicUrl(path).data.publicUrl;
-      fbInsertNode('<img class="fb-clip" contenteditable="false" data-url="'+escHtml(url)+'" src="'+escHtml(url)+'" alt="score excerpt"> ');
+      fbcAddClip(url);
       fbCloseClipper();
     }catch(e){ showToast('Could not save the clip. '+(e&&e.message||''), 3800); const b=document.getElementById('fb-clip-go'); if(b){ b.disabled=false; b.textContent='Clip selection'; } }
   }, 'image/png');
