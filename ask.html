@@ -524,6 +524,9 @@
   .fb-vidwrap{ margin:4px 0 14px; }
   .fb-novid{ padding:30px; text-align:center; color:var(--faint); background:rgba(255,255,255,.03); border-radius:12px; }
   .fb-scorenote{ font-size:.86rem; color:var(--muted); margin-bottom:10px; }
+  .fb-scoreview{ margin:4px 0 12px; border:1px solid var(--hair); border-radius:12px; overflow:hidden; background:#fff; }
+  .fb-scoreview iframe{ width:100%; height:440px; border:0; display:block; background:#fff; }
+  .fb-scoreview img{ width:100%; display:block; }
   .fb-ed-toolbar{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
   .fb-tool{ display:inline-flex; align-items:center; gap:7px; padding:9px 13px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.03); color:var(--head); font:inherit; font-size:.84rem; font-weight:600; cursor:pointer; transition:background .15s, border-color .15s; }
   .fb-tool:hover{ background:rgba(255,255,255,.07); border-color:var(--line2); }
@@ -2245,8 +2248,13 @@ function fbScorePick(input, key){
 async function submitFeedback(){
   const note = ((document.getElementById('f-note')||{}).value||'').trim();
   const piece = ((document.getElementById('f-piece')||{}).value||'').trim();
-  const hasMedia = !!(document.getElementById('inline-media-preview-fbsubmit')||{}).childElementCount;
-  if(!hasMedia){ showToast('Add your recording so Matt has something to watch back.', 3400); return; }
+  // This is feedback on a recording, so a FINISHED video is required (a score or
+  // photo alone isn't enough), and we never submit while one is still uploading.
+  const staged = (window.Comments && Comments.readMedia) ? Comments.readMedia('fbsubmit') : [];
+  const vid = staged.find(function(m){ return m.type==='mux'; });
+  if(!vid){ showToast('Add your recording (a video) so Matt has something to watch back.', 3800); return; }
+  if(vid._uploading){ showToast('Your video is still uploading. Give it a moment, then send.', 3800); return; }
+  if(vid._error || !vid.playbackId){ showToast('Your video didn\'t finish uploading. Remove it and add it again.', 4200); return; }
   if(!await confirmSpend('feedback')) return;
   const btn = document.getElementById('f-send'); if(btn){ btn.disabled=true; }
   let media = [];
@@ -2264,6 +2272,17 @@ async function submitFeedback(){
 // ── Feedback: thread dispatcher, owner editor, clipper, deliverable ──────────────
 function _fmtTime(sec){ sec=Math.max(0,Math.floor(sec||0)); const m=Math.floor(sec/60), s=sec%60; return m+':'+(s<10?'0':'')+s; }
 function _fbMedia(r){ const m=Array.isArray(r&&r.body&&r.body.media)?r.body.media:[]; return { all:m, video:m.find(x=>x.type==='mux')||null, score:m.find(x=>x.type==='file'||x.type==='image')||null }; }
+// Render the score for reading: a PDF embedded in an iframe, an image inline,
+// anything else as a download link.
+function fbScoreView(score){
+  if(!score) return '';
+  const url=score.url||score._localUrl||''; const name=score.name||url;
+  const isImg = score.type==='image' || /\.(png|jpe?g|gif|webp|bmp)($|\?)/i.test(name);
+  const isPdf = /\.pdf($|\?)/i.test(name) || score.mime==='application/pdf';
+  if(isPdf) return '<div class="fb-scoreview"><iframe src="'+escHtml(url)+'#toolbar=0&navpanes=0" title="Score" loading="lazy"></iframe></div>';
+  if(isImg) return '<div class="fb-scoreview"><img src="'+escHtml(url)+'" alt="Score"></div>';
+  return '<div class="fb-media">'+aqMedia([score])+'</div>';
+}
 let _fbVideoId=null, _fbScore=null, _fbClipSel=null, _fbRange=null;
 const FB_TS_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>';
 const FB_PLAY='<svg class="fb-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
@@ -2315,7 +2334,8 @@ function renderFeedbackEditor(view, r){
     +     (r.body&&r.body.piece? '<div class="fb-piece">'+escHtml(r.body.piece)+'</div>':'')
     +     '<div class="fb-vidwrap">'+videoEmbed+'</div>'
     +     scoreLine
-    +     (fm.all.filter(function(x){return x.type!=='mux';}).length? '<div class="fb-media"><div class="fb-lbl">What they sent</div>'+aqMedia(fm.all.filter(function(x){return x.type!=='mux';}))+'</div>':'')
+    +     fbScoreView(_fbScore)
+    +     (fm.all.filter(function(x){return x!==fm.video && x!==fm.score;}).length? '<div class="fb-media"><div class="fb-lbl">Also sent</div>'+aqMedia(fm.all.filter(function(x){return x!==fm.video && x!==fm.score;}))+'</div>':'')
     +     (r.body&&r.body.note? '<div class="fb-yournote"><div class="fb-lbl">They asked you to look at</div>'+msgBody(r.body.note)+'</div>':'')
     +   '</div></section>'
     +   '<section class="fb-ed-right"><div class="fb-ed-rightin">'
@@ -2516,8 +2536,8 @@ async function fbOpenClipper(){
   try{
     bodyEl.innerHTML='';
     if(isPdf){
-      const pdfjs=await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.mjs');
-      pdfjs.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.mjs';
+      const pdfjs=await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs');
+      pdfjs.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
       const pdf=await pdfjs.getDocument(src).promise;
       for(let i=1;i<=pdf.numPages;i++){
         const page=await pdf.getPage(i);
