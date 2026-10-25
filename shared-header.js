@@ -244,6 +244,25 @@ const SH_SUBNAV = {
       .sh-hdr-inner { padding-left: 28px; padding-right: 28px; }
       main { padding-left: 28px; padding-right: 28px; }
     }
+    /* Light-page sidebar: community is the one page on a cream ground, so the
+       blended (transparent) sidebar keeps its fill but the text flips to read on
+       light. The default set above stays correct for every dark page. */
+    @media (min-width: 1025px), (orientation: landscape) and (min-width: 769px) {
+      body.sh-light .sh-sb-brand h1 { color: #1a1410; }
+      body.sh-light .sh-sb-item { color: #6f6153; }
+      body.sh-light .sh-sb-item:hover:not(.active) { background: rgba(26,20,16,.055); color: #1a1410; }
+      body.sh-light .sh-sb-item.active { background: rgba(26,20,16,.07); color: #1a1410; }
+      body.sh-light .sh-sb-subitem { color: #8a7868; }
+      body.sh-light .sh-sb-subitem:hover:not(.active) { color: #3a2e24; }
+      body.sh-light .sh-sb-subitem.active { background: rgba(26,20,16,.06); color: #1a1410; }
+      body.sh-light .sh-sb-subitem.active::before { box-shadow: none; }
+      body.sh-light .sh-sb-foot-acct:hover { background: rgba(26,20,16,.05); }
+      body.sh-light .sh-sb-foot-name { color: #1a1410; }
+      body.sh-light .sh-sb-foot-role { color: #8a7868; }
+      body.sh-light #sh-search-btn { background: rgba(26,20,16,.04); border-color: rgba(26,20,16,.14); color: #6f6153; }
+      body.sh-light #sh-search-btn:hover { background: rgba(26,20,16,.07); color: #1a1410; border-color: rgba(26,20,16,.24); }
+      body.sh-light #presence-btn { border-color: rgba(26,20,16,.16); color: rgba(26,20,16,.68); }
+    }
     @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px) {
       #sh-sidebar { display: none; }
     }
