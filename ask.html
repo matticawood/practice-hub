@@ -521,6 +521,7 @@
   .fb-marks{ display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
   .fb-mark{ display:inline-flex; align-items:center; gap:4px; font:inherit; font-size:.78rem; font-weight:700; padding:4px 10px; border-radius:999px; border:1px solid var(--line); background:rgba(167,139,250,.12); color:#c4b5fd; cursor:pointer; transition:background .15s; }
   .fb-mark:hover{ background:rgba(167,139,250,.22); }
+  .fb-play{ width:9px; height:9px; display:inline-block; vertical-align:-1px; flex:0 0 auto; }
   .fb-article{ font-size:1rem; line-height:1.75; color:var(--text); }
   .fb-article .fb-p{ margin:0 0 15px; overflow-wrap:anywhere; }
   .fb-refs{ margin-top:24px; padding-top:18px; border-top:1px solid var(--hair); }
@@ -2107,7 +2108,7 @@ async function renderFeedback(view, reqId){
     + '<div class="fb-wrap"><div class="fb-in">'
     +   '<div class="aq-eyb">Feedback on a recording</div>'
     +   '<div class="aq-meta"><span class="aq-meta-i">'+AQ_LOCK+'Private to you and Matt</span><span class="aq-meta-sep"></span><span><span class="aq-gold">'+fmt(cost)+' credits held</span>, refunded if he can\'t take it</span></div>'
-    +   '<p class="fb-lead">Play it through and send it over. Matt watches it back and marks up exactly what to change, with the key moments timestamped. Send as much or as little as you like, a whole piece is completely fine.</p>'
+    +   '<p class="fb-lead">Play it through and send it over. Matt watches it back and marks it up, with the key moments timestamped. Send as much or as little as you like, a whole piece is completely fine.</p>'
     +   '<div class="fb-up"><div id="inline-media-preview-'+k+'"></div>'
     +     '<div class="fb-attach">'
     +       '<button class="fb-attachbtn" onclick="document.getElementById(\'tc-fi-vid-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Your recording</button>'
@@ -2147,12 +2148,14 @@ function _fmtTime(sec){ sec=Math.max(0,Math.floor(sec||0)); const m=Math.floor(s
 function _fbMedia(r){ const m=Array.isArray(r&&r.body&&r.body.media)?r.body.media:[]; return { all:m, video:m.find(x=>x.type==='mux')||null, score:m.find(x=>x.type==='file'||x.type==='image')||null }; }
 let _fbVideoId=null, _fbScore=null, _fbClipSel=null;
 const FB_TS_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>';
+const FB_PLAY='<svg class="fb-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
 const FB_CLIP_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>';
 
 async function renderFeedbackThread(view, reqId){
+  document.body.classList.add('ask-flow');   // before the await, so the header never flashes
   const r = await getRequest(reqId);
-  document.body.classList.add('ask-flow');
   if(!r){ view.innerHTML = '<div class="aq-flow"><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button><div class="fb-wrap"><div class="fb-in"><div class="aq-empty" style="margin-top:40px">That could not be loaded.</div></div></div></div>'; return; }
+  if(r.kind!=='feedback'){ return r.kind==='question' ? renderAqThread(view, reqId) : renderThread(view, reqId, r.kind); }
   const own = String(r.email||'').toLowerCase()===String(myEmail||'').toLowerCase();
   const owner = ownerActive() || (isOwner() && !own);
   _aqSendAsOwner = owner;
@@ -2193,13 +2196,13 @@ function renderFeedbackEditor(view, r){
     +     (r.body&&r.body.piece? '<div class="fb-piece">'+escHtml(r.body.piece)+'</div>':'')
     +     '<div class="fb-vidwrap">'+videoEmbed+'</div>'
     +     scoreLine
+    +     (fm.all.filter(function(x){return x.type!=='mux';}).length? '<div class="fb-media"><div class="fb-lbl">What they sent</div>'+aqMedia(fm.all.filter(function(x){return x.type!=='mux';}))+'</div>':'')
     +     (r.body&&r.body.note? '<div class="fb-yournote"><div class="fb-lbl">They asked you to look at</div>'+msgBody(r.body.note)+'</div>':'')
     +   '</div></section>'
     +   '<section class="fb-ed-right"><div class="fb-ed-rightin">'
     +     '<div class="fb-ed-toolbar"><button class="fb-tool" onclick="fbInsertTimestamp()">'+FB_TS_SVG+'Insert this moment</button>'+clipBtn+'</div>'
     +     '<div class="fb-ed" id="fb-ed" contenteditable="true" data-ph="Write '+who+' their feedback. Scrub the video and drop a timestamp wherever you are referencing a moment; clip the score to show a passage."></div>'
     +     '<div class="fb-refs-h">Reference material <span>optional</span></div>'
-    +     '<div id="inline-media-preview-fbref"></div>'
     +     (window.Comments&&Comments.toolbarHtml? Comments.toolbarHtml('fbref') : '')
     +     '<div class="fb-ed-actions"><button class="fb-decline" onclick="cancelRequest(\''+r.id+'\',false)">Decline & refund</button><button class="fb-deliver" id="fb-deliver" onclick="fbDeliver(\''+r.id+'\')">Deliver feedback</button></div>'
     +   '</div></section>'
@@ -2216,8 +2219,9 @@ function fbAttachScore(input){
 }
 
 function fbInsertTimestamp(){
+  if(!_fbVideoId){ showToast('There is no video to timestamp.', 2600); return; }
   const v=document.getElementById('fb-vid'); const sec = v? Math.floor(v.currentTime||0) : 0;
-  fbInsertNode('<span class="fb-chip fb-ts" contenteditable="false" data-sec="'+sec+'">▶ '+_fmtTime(sec)+'</span> ');
+  fbInsertNode('<span class="fb-chip fb-ts" contenteditable="false" data-sec="'+sec+'">'+FB_PLAY+' '+_fmtTime(sec)+'</span> ');
 }
 function fbInsertNode(html){
   const ed=document.getElementById('fb-ed'); if(!ed) return; ed.focus();
@@ -2249,7 +2253,7 @@ function fbRenderDoc(doc){
   return (doc||[]).map(function(b){
     const inner=(b.runs||[]).map(function(r){
       if(r.x==='t') return escHtml(r.s);
-      if(r.x==='ts') return '<button class="fb-ts-chip" onclick="fbSeek('+(+r.sec||0)+')">▶ '+_fmtTime(r.sec)+'</button>';
+      if(r.x==='ts') return '<button class="fb-ts-chip" onclick="fbSeek('+(+r.sec||0)+')">'+FB_PLAY+' '+_fmtTime(r.sec)+'</button>';
       if(r.x==='clip') return (/^https?:\/\//.test(r.url||'')? '<img class="fb-clip" src="'+escHtml(r.url)+'" alt="score excerpt">':'');
       return '';
     }).join('');
@@ -2260,7 +2264,8 @@ window.fbSeek=function(sec){ const v=document.getElementById('fb-dvid'); if(v){ 
 
 async function fbDeliver(id){
   const doc=fbSerializeDoc();
-  if(!fbPlain(doc)){ showToast('Write some feedback first.', 3000); return; }
+  const hasClip=(doc||[]).some(function(b){ return (b.runs||[]).some(function(rn){ return rn.x==='clip'; }); });
+  if(!fbPlain(doc) && !hasClip){ showToast('Write some feedback first.', 3000); return; }
   const ok=await askDialog({ title:'Deliver this feedback?', body:'It will be sent to them and the '+fmt(CAT.feedback.cost)+' credits they are holding will be charged. You can still exchange follow-up messages afterwards.', yes:'Deliver', no:'Keep editing', coin:false });
   if(!ok) return;
   const btn=document.getElementById('fb-deliver'); if(btn){ if(btn.disabled) return; btn.disabled=true; }
@@ -2299,16 +2304,26 @@ async function renderFeedbackDeliverable(view, r, owner, own){
   // Every moment Matt timestamped, as a clickable jump row under the video.
   const stampSet = {}; (resp.doc||[]).forEach(function(b){ (b.runs||[]).forEach(function(rn){ if(rn.x==='ts') stampSet[+rn.sec||0]=1; }); });
   const stamps = Object.keys(stampSet).map(Number).sort(function(a,b){return a-b;});
-  const marks = (stamps.length && vidId)? '<div class="fb-marks">'+stamps.map(function(s){ return '<button class="fb-mark" onclick="fbSeek('+s+')">▶ '+_fmtTime(s)+'</button>'; }).join('')+'</div>' : '';
+  const marks = (stamps.length && vidId)? '<div class="fb-marks">'+stamps.map(function(s){ return '<button class="fb-mark" onclick="fbSeek('+s+')">'+FB_PLAY+' '+_fmtTime(s)+'</button>'; }).join('')+'</div>' : '';
   const k='askreply';
+  const windowClosed = !owner && lastIsOwner && !windowOpen && !cancelled;   // answered, past the follow-up window
   let dock='';
-  if(canSend){
-    const ph = owner? ('Reply to '+mFirst+'…') : 'Send a follow-up…';
+  if(!cancelled){
+    // Composer is always present (greyed when the member can't send), mirroring the
+    // question thread, with the placeholder carrying the reason: awaiting Matt, or
+    // the window has closed. The owner can always send.
+    const ph = owner ? ('Reply to '+mFirst+'…')
+             : canSend ? 'Send a follow-up…'
+             : windowClosed ? 'This conversation has closed. You can send Matt a new recording any time.'
+             : 'Matt will reply here, and you\'ll get a notification when he does.';
+    const dis = canSend ? '' : ' disabled';
+    const lock = canSend ? '' : ' is-locked';
     const memberTools='<div class="aq-ctoolbar"><button class="aq-tbtn" title="Add a photo" onclick="document.getElementById(\'tc-fi-img-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button><button class="aq-tbtn" title="Attach a file" onclick="document.getElementById(\'tc-fi-file-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></button><input type="file" id="tc-fi-img-'+k+'" accept="image/*" multiple style="display:none" onchange="tcHandleImage(this,\''+k+'\')"><input type="file" id="tc-fi-file-'+k+'" accept=".pdf,.doc,.docx,.txt,.mp3,.wav,.m4a,.mid,.midi,.xml,.musicxml,.mxl" style="display:none" onchange="tcHandleFile(this,\''+k+'\')"></div>';
     const ownerTools=(window.Comments&&Comments.toolbarHtml)?Comments.toolbarHtml(k):memberTools;
-    dock='<div class="aq-dock">'+(owner?'':'<div id="inline-media-preview-'+k+'"></div>')+'<div class="aq-composer">'+(owner?ownerTools:memberTools)+'<div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" oninput="_taGrow(this)" placeholder="'+escHtml(ph)+'"></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')">'+AQ_SEND+'</button></div></div></div>';
+    const toolsHtml = canSend ? (owner?ownerTools:memberTools) : '';
+    const prev = (canSend && !owner) ? '<div id="inline-media-preview-'+k+'"></div>' : '';
+    dock='<div class="aq-dock">'+prev+'<div class="aq-composer'+lock+'">'+toolsHtml+'<div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" oninput="_taGrow(this)" placeholder="'+escHtml(ph)+'"'+dis+'></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')"'+dis+'>'+AQ_SEND+'</button></div></div></div>';
   }
-  const waitLine = (!owner && !canSend && !cancelled)? '<div class="aq-wait" style="margin-left:0">This conversation has closed. You can send Matt a new recording any time.</div>' : '';
   try{ if(window.Comments) Comments.clearState('askreply'); }catch(_){}
   const body = cancelled
     ? '<div class="aq-wait" style="margin-left:0;margin-top:30px">This feedback was withdrawn and the '+fmt(r.cost)+' credits refunded.</div>'
@@ -2317,12 +2332,11 @@ async function renderFeedbackDeliverable(view, r, owner, own){
       + '<article class="fb-article">'+(resp.doc? fbRenderDoc(resp.doc) : (resp.text? '<p class="fb-p">'+escHtml(resp.text)+'</p>':'<p class="fb-p">Your feedback is ready.</p>'))+'</article>'
       + refsHtml
       + (follow? '<div class="fb-follow">'+follow+'</div>':'')
-      + waitLine
       );
   view.innerHTML = '<div class="aq-flow">'
     + '<button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
     + '<div class="fb-wrap"><div class="fb-in">'
-    +   '<div class="aq-eyb">Feedback'+(owner?(' for '+mFirst):' from Matt')+'</div>'
+    +   '<div class="aq-eyb">Feedback'+(cancelled?'':(owner?(' for '+mFirst):' from Matt'))+'</div>'
     +   '<div class="aq-meta"><span class="aq-meta-i">'+AQ_LOCK+(owner?('For '+escHtml(mName)):'Private to you and Matt')+'</span><span class="aq-meta-sep"></span>'+(cancelled?'<span>Withdrawn and refunded</span>':'<span style="color:var(--green);font-weight:600">Delivered</span>')+'</div>'
     +   (r.body&&r.body.piece? '<div class="fb-piece">'+escHtml(r.body.piece)+'</div>':'')
     +   body
@@ -2338,7 +2352,14 @@ async function fbOpenClipper(){
   ov.innerHTML = '<div class="fb-clip-sheet"><div class="fb-clip-head"><span>Drag a box over the passage, then clip it</span><button class="fb-clip-x" onclick="fbCloseClipper()" aria-label="Close">'+AQ_X+'</button></div><div class="fb-clip-body" id="fb-clip-body"><div class="fb-clip-loading">Loading the score…</div></div><div class="fb-clip-foot"><button class="fb-clip-btn" id="fb-clip-go" onclick="fbClipGo()" disabled>Clip selection</button></div></div>';
   const bodyEl=document.getElementById('fb-clip-body');
   const src=_fbScore.url || _fbScore._localUrl;
-  const isPdf=(_fbScore.type==='file') || /\.pdf($|\?)/i.test(src||'');
+  const name=_fbScore.name||src||'';
+  const isImg=_fbScore.type==='image' || /\.(png|jpe?g|gif|webp|bmp)($|\?)/i.test(name);
+  const isPdf=!isImg && (/\.pdf($|\?)/i.test(name) || _fbScore.mime==='application/pdf' || /\.pdf($|\?)/i.test(src||''));
+  if(!isImg && !isPdf){
+    // A .docx/.musicxml etc. can't be clipped; let the owner attach a PDF or photo.
+    fbCloseClipper(); showToast('That score file can\'t be clipped. Attach a PDF or a photo to clip from.', 4200);
+    const inp=document.getElementById('fb-attach-score'); if(inp){ _fbScore=null; inp.click(); } return;
+  }
   try{
     bodyEl.innerHTML='';
     if(isPdf){
@@ -2371,10 +2392,10 @@ function fbClipAttach(canvas){
   const box=document.createElement('div'); box.className='fb-clip-box'; box.style.display='none'; wrap.appendChild(box);
   let sx=0, sy=0, drag=false;
   const pt=function(e){ const r=canvas.getBoundingClientRect(); const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left; const cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top; return { x:Math.max(0,Math.min(canvas.clientWidth,cx)), y:Math.max(0,Math.min(canvas.clientHeight,cy)) }; };
-  const start=function(e){ const p=pt(e); sx=p.x; sy=p.y; drag=true; box.style.display='block'; box.style.left=sx+'px'; box.style.top=sy+'px'; box.style.width='0px'; box.style.height='0px'; if(e.cancelable)e.preventDefault(); };
+  const start=function(e){ const p=pt(e); sx=p.x; sy=p.y; drag=true; box.style.display='block'; box.style.left=sx+'px'; box.style.top=sy+'px'; box.style.width='0px'; box.style.height='0px'; if(e.type==='mousedown'){ window.addEventListener('mousemove',move); window.addEventListener('mouseup',end); } if(e.cancelable)e.preventDefault(); };
   const move=function(e){ if(!drag)return; const p=pt(e); const x=Math.min(sx,p.x), y=Math.min(sy,p.y), w=Math.abs(p.x-sx), h=Math.abs(p.y-sy); box.style.left=x+'px'; box.style.top=y+'px'; box.style.width=w+'px'; box.style.height=h+'px'; if(e.cancelable)e.preventDefault(); };
-  const end=function(){ if(!drag)return; drag=false; const rx=parseFloat(box.style.left)||0, ry=parseFloat(box.style.top)||0, rw=parseFloat(box.style.width)||0, rh=parseFloat(box.style.height)||0; const go=document.getElementById('fb-clip-go'); if(rw<8||rh<8){ box.style.display='none'; _fbClipSel=null; if(go) go.disabled=true; return; } const sxr=canvas.width/canvas.clientWidth, syr=canvas.height/canvas.clientHeight; _fbClipSel={ canvas:canvas, x:rx*sxr, y:ry*syr, w:rw*sxr, h:rh*syr }; Array.prototype.forEach.call(document.querySelectorAll('.fb-clip-box'), function(b){ if(b!==box) b.style.display='none'; }); if(go) go.disabled=false; };
-  canvas.addEventListener('mousedown',start); canvas.addEventListener('mousemove',move); canvas.addEventListener('mouseup',end);
+  const end=function(){ if(!drag)return; drag=false; window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',end); const rx=parseFloat(box.style.left)||0, ry=parseFloat(box.style.top)||0, rw=parseFloat(box.style.width)||0, rh=parseFloat(box.style.height)||0; const go=document.getElementById('fb-clip-go'); if(rw<8||rh<8){ box.style.display='none'; _fbClipSel=null; if(go) go.disabled=true; return; } const sxr=canvas.width/canvas.clientWidth, syr=canvas.height/canvas.clientHeight; _fbClipSel={ canvas:canvas, x:rx*sxr, y:ry*syr, w:rw*sxr, h:rh*syr }; Array.prototype.forEach.call(document.querySelectorAll('.fb-clip-box'), function(b){ if(b!==box) b.style.display='none'; }); if(go) go.disabled=false; };
+  canvas.addEventListener('mousedown',start);
   canvas.addEventListener('touchstart',start,{passive:false}); canvas.addEventListener('touchmove',move,{passive:false}); canvas.addEventListener('touchend',end);
 }
 async function fbClipGo(){
