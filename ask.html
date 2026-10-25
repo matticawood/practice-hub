@@ -424,7 +424,7 @@
   .aq-who{ font-size:.82rem; font-weight:600; color:var(--head); margin-bottom:7px; }
   .aq-who span{ color:var(--faint); font-weight:400; margin-left:8px; }
   .aq-bubble{ background:var(--card); border:1px solid var(--hair); border-radius:5px 18px 18px 18px; padding:15px 17px;
-    font-size:.96rem; line-height:1.6; color:#e9e8ee; box-shadow:0 20px 50px -34px rgba(0,0,0,.9); white-space:pre-wrap; }
+    font-size:.96rem; line-height:1.6; color:#e9e8ee; box-shadow:0 20px 50px -34px rgba(0,0,0,.9); white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
   .aq-bubble.me{ border-radius:18px 5px 18px 18px;
     background:linear-gradient(135deg, color-mix(in srgb,var(--purple) 26%, #191622), color-mix(in srgb,var(--purple) 16%, #16141c));
     border-color:color-mix(in srgb,var(--purple) 30%, transparent); }
@@ -444,6 +444,13 @@
   .aq-trigger{ display:none; }
   .aq-composer{ background:linear-gradient(180deg,#1d1d25,#191920); border:1px solid var(--line2); border-radius:20px;
     padding:12px 13px; box-shadow:0 30px 70px -34px rgba(0,0,0,.95); }
+  /* Locked: the composer stays visible for continuity but reads as unavailable
+     while awaiting Matt or once the thread has closed. */
+  .aq-composer.is-locked{ opacity:.55; box-shadow:none; }
+  .aq-composer.is-locked .aq-ctext{ cursor:default; background:rgba(255,255,255,.02); }
+  .aq-composer.is-locked .aq-csend{ background:var(--line2); color:var(--faint); box-shadow:none; cursor:default; }
+  .aq-composer.is-locked .aq-csend:hover{ box-shadow:none; }
+  .aq-ctext:disabled{ cursor:default; }
   .aq-ctoolbar{ display:flex; gap:5px; margin-bottom:9px; }
   .aq-tbtn{ width:36px; height:36px; border-radius:9px; border:1.5px solid transparent; background:none; color:var(--muted);
     display:grid; place-items:center; cursor:pointer; transition:background .15s, border-color .15s, color .15s; }
@@ -467,7 +474,9 @@
   /* The column holds the boxes at fixed frames; the CONTEXT box fills the
      remaining height and scrolls its own CONTENT, so its rounded corners stay
      intact instead of the whole card scrolling off under a clipping column. */
-  .aq-ctx-col{ min-height:0; height:100%; overflow:hidden; display:flex; flex-direction:column; gap:14px; }
+  /* Reserve clearance at the top so the fixed close (X) button doesn't sit over
+     the rail's top-right corner on desktop. (Rail is hidden on mobile.) */
+  .aq-ctx-col{ min-height:0; height:100%; overflow:hidden; display:flex; flex-direction:column; gap:14px; padding-top:42px; }
   .aq-ctx, .aq-hist{ background:linear-gradient(180deg,rgba(27,27,34,.72),rgba(19,19,24,.72));
     border:1px solid var(--hair); border-radius:22px; backdrop-filter:blur(14px); box-shadow:0 40px 90px -50px rgba(0,0,0,.9); }
   .aq-ctx{ flex:1 1 auto; min-height:0; overflow-y:auto; padding:22px; }
@@ -1347,7 +1356,9 @@ function renderShortfall(view, key){
 const AQ_NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
 const AQ_EYE  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7z"/></svg>';
 async function renderQuestion(view, reqId, editing){
-  if(!reqId && !canAfford(CAT.question.cost)) return renderShortfall(view, 'question');
+  // The shortfall screen is ordinary page chrome, not the immersive conversation,
+  // so drop the full-bleed lock that render() set for the question flow.
+  if(!reqId && !canAfford(CAT.question.cost)){ document.body.classList.remove('ask-flow'); return renderShortfall(view, 'question'); }
   if(reqId && editing){ return renderQuestionEdit(view, reqId); }
   if(reqId){ return renderAqThread(view, reqId); }
   const cost = CAT.question.cost;
@@ -1363,7 +1374,7 @@ async function renderQuestion(view, reqId, editing){
     +       '<span><span class="aq-gold">'+fmt(cost)+' credits held</span>, refunded if he can\'t take it</span></div>'
     +     '<div class="aq-intro"><span class="aq-av'+(mattAvatar?' has-img':'')+'" id="aq-matt-av">'+(mattAvatar?'<img src="'+escHtml(mattAvatar)+'" alt="Matt">':'M')+'</span><div>'
     +       '<div class="aq-who">Matt <span>usually replies within a couple of days</span></div>'
-    +       '<div class="aq-bubble">Hi '+escHtml((myName||'').trim().split(/\s+/)[0]||myName)+'. Ask me anything about your playing: a section you\'re struggling with, how to practice something, what to work on next. Be as specific as you can, and I\'ll do my best to give you as helpful a response as I can.</div>'
+    +       '<div class="aq-bubble">Hi '+escHtml((myName||'').trim().split(/\s+/)[0]||'there')+'. Ask me anything about your playing: a section you\'re struggling with, how to practise something, what to work on next. Be as specific as you can, and I\'ll do my best to give you as helpful a response as I can.</div>'
     +     '</div></div>'
     +   '</div>'
     +   '<div class="aq-dock">'
@@ -1411,7 +1422,10 @@ async function fillAqHistory(){
 }
 async function submitQuestion(){
   const ta = document.getElementById('aq-text'); const text = ((ta&&ta.value)||'').trim();
-  if(text.length<5){ showToast('Write your question first.', 3000); if(ta) ta.focus(); return; }
+  // A question needs words or an attachment (a photo of the passage is a valid
+  // question on its own); the toolbar invites attaching, so don't demand text.
+  const hasMedia = !!(document.getElementById('inline-media-preview-askq')||{}).childElementCount;
+  if(!text && !hasMedia){ showToast('Write your question, or attach a photo or file.', 3200); if(ta) ta.focus(); return; }
   if(!await confirmSpend('question')) return;
   const btn = document.getElementById('aq-send'); if(btn){ btn.disabled=true; }
   let media = [];
@@ -1470,7 +1484,8 @@ async function renderQuestionEdit(view, reqId){
 }
 async function saveQuestionEdit(reqId){
   const ta = document.getElementById('aq-text'); const text = ((ta&&ta.value)||'').trim();
-  if(text.length<5){ showToast('Write your question first.', 3000); if(ta) ta.focus(); return; }
+  const hasMedia = (_aqEditExisting && _aqEditExisting.length) || !!(document.getElementById('inline-media-preview-askq')||{}).childElementCount;
+  if(!text && !hasMedia){ showToast('Write your question, or attach a photo or file.', 3200); if(ta) ta.focus(); return; }
   const btn = document.getElementById('aq-send'); if(btn) btn.disabled=true;
   let newMedia = [];
   try{ if(window.Comments) newMedia = await Comments.uploadMedia('askq'); }
@@ -1715,17 +1730,22 @@ async function renderAqThread(view, reqId){
   const lastIsOwner = !!(lastMsg && lastMsg.from==='owner');
   const windowOpen = lastIsOwner && lastMsg.at && (Date.now() - Date.parse(lastMsg.at)) <= AQ_FOLLOWUP_DAYS*864e5;
   const memberTurn = windowOpen;  // owner always has a composer regardless
-  // The reassurance belongs only to the paid question awaiting its first reply
-  // (credits held, Matt committed). After it is answered, a follow-up the member
-  // sends is not a guaranteed-reply transaction, so promise nothing there.
-  if(!owner && r.status==='open') thread += '<div class="aq-wait">Matt will reply here, and you\'ll get a notification when he does.</div>';
-  // Window has expired on an answered thread: the member can no longer follow up.
-  else if(!owner && lastIsOwner && !windowOpen) thread += '<div class="aq-wait">This conversation has closed. You can ask Matt a new question any time.</div>';
+  const windowClosed = !owner && lastIsOwner && !windowOpen;  // answered thread past the follow-up window
   if(r.status==='cancelled') thread += '<div class="aq-wait">This question was withdrawn and the '+fmt(r.cost)+' credits refunded.</div>';
+  // The composer is always present for continuity, but it is greyed and disabled
+  // when the member cannot send: while awaiting Matt's reply, or once the
+  // follow-up window has closed. Its placeholder carries the reason. The owner
+  // can always send. A cancelled (refunded) thread shows no composer.
   let dock='';
-  if(r.status!=='cancelled' && (owner || memberTurn)){
-    const ph = owner ? ('Write your reply to '+mFirst+'…') : 'Send a follow-up…';
-    dock = '<div class="aq-dock"><div class="aq-composer"><div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" placeholder="'+ph+'"></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')">'+AQ_SEND+'</button></div></div></div>';
+  if(r.status!=='cancelled'){
+    const canSend = owner || memberTurn;
+    const ph = owner ? ('Write your reply to '+mFirst+'…')
+             : canSend ? 'Send a follow-up…'
+             : windowClosed ? 'This conversation has closed. You can ask Matt a new question any time.'
+             : 'Matt will reply here, and you\'ll get a notification when he does.';
+    const dis = canSend ? '' : ' disabled';
+    const lock = canSend ? '' : ' is-locked';
+    dock = '<div class="aq-dock"><div class="aq-composer'+lock+'"><div class="aq-input-row"><textarea class="aq-ctext" id="aq-reply" placeholder="'+escHtml(ph)+'"'+dis+'></textarea><button class="aq-csend" id="aq-reply-send" aria-label="Send" onclick="aqThreadSend(\''+r.id+'\')"'+dis+'>'+AQ_SEND+'</button></div></div></div>';
   }
   const railExtra  = !owner ? '<div class="aq-hist" id="aq-hist-host"></div>' : '';
   const sheetExtra = !owner ? '<div class="aq-hist" id="aq-sheet-hist" style="max-height:none;overflow:visible;margin-bottom:14px"></div>' : '';
@@ -1747,8 +1767,9 @@ async function renderAqThread(view, reqId){
 async function aqThreadSend(id){
   const ta = document.getElementById('aq-reply'); const text = ((ta&&ta.value)||'').trim();
   if(!text){ if(ta) ta.focus(); return; }
-  if(!await requireAuth()) return;
-  const btn = document.getElementById('aq-reply-send'); if(btn) btn.disabled=true;
+  const btn = document.getElementById('aq-reply-send');
+  if(btn){ if(btn.disabled) return; btn.disabled=true; }   // guard double-click before any await
+  if(!await requireAuth()){ if(btn) btn.disabled=false; return; }
   const { error } = await db.rpc('credit_thread_send', { p_id:id, p_text:text, p_as_owner: ownerActive() });
   if(error){
     const msg = error.message||'';

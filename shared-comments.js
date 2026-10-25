@@ -658,7 +658,17 @@
       else if(m.type==="audio")   html+=`<div style="margin-top:6px;min-width:240px"><audio controls preload="metadata" style="width:100%;min-width:240px;border-radius:8px"><source src="${_escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
       else if(m.type==="youtube") html+=`<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://www.youtube.com/embed/${_escHtml(m.ytId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
       else if(m.type==="vimeo")   html+=`<div style="margin-top:8px;width:min(480px,70vw);border-radius:8px;overflow:hidden;aspect-ratio:16/9"><iframe src="https://player.vimeo.com/video/${_escHtml(m.vimeoId)}" style="width:100%;height:100%;border:0;display:block" allowfullscreen loading="lazy"></iframe></div>`;
-      else if(m.type==="file")    html+=`<div style="margin-top:6px"><a href="${_escHtml(m.url)}" target="_blank" download="${_escHtml(m.name)}" style="display:inline-flex;align-items:center;gap:5px;font-size:.82rem;color:var(--text-muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${_escHtml(m.name)}</a></div>`;
+      else if(m.type==="file"){
+        // Only link out to a real http(s)/relative URL. A crafted media object
+        // (e.g. a javascript:/data: URL sent straight to an RPC) must never become
+        // a clickable link; render the name as plain text instead.
+        const _fu = (/^https?:\/\//i.test(m.url||"") || String(m.url||"").startsWith("/")) ? m.url : "";
+        const _fInner = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${_escHtml(m.name)}`;
+        const _fStyle = `display:inline-flex;align-items:center;gap:5px;font-size:.82rem;color:var(--text-muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px`;
+        html += _fu
+          ? `<div style="margin-top:6px"><a href="${_escHtml(_fu)}" target="_blank" rel="noopener noreferrer" download="${_escHtml(m.name)}" style="${_fStyle}">${_fInner}</a></div>`
+          : `<div style="margin-top:6px"><span style="${_fStyle};cursor:default">${_fInner}</span></div>`;
+      }
     });
     return html;
   }
