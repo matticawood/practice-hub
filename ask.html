@@ -2107,13 +2107,50 @@ async function deliverThread(id){
 // The recording is the product here, so video IS allowed (unlike the question
 // flow). Video routes to Mux; the score is a PDF or photo; both stage into one
 // uploader key. Delivery (the owner's inline feedback editor) is a later phase.
+function renderFeedbackInbox(view, qs){
+  try{ if(window.Comments) Comments.clearState('fbsubmit'); }catch(_){}
+  const rows = qs.map(function(r){
+    const txt = String((r.body&&r.body.piece)||(r.body&&r.body.note)||'').trim() || 'Your recording';
+    const st=r.status;
+    const badge = st==='delivered'? '<span class="aq-ib-badge done">Ready</span>' : st==='cancelled'? '<span class="aq-ib-badge off">Refunded</span>' : '<span class="aq-ib-badge wait">Awaiting feedback</span>';
+    return '<button class="aq-ib-row" onclick="go({flow:\'feedback\',req:\''+r.id+'\'})"><div class="aq-ib-main"><div class="aq-ib-q">'+escHtml(txt)+'</div><div class="aq-ib-meta">'+badge+'<span class="aq-ib-date">'+escHtml(_dayLabel(String(r.created_at||'').slice(0,10)))+'</span></div></div><svg class="aq-ib-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>';
+  }).join('');
+  view.innerHTML = '<div class="aq-flow"><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
+    + '<div class="aq-inbox"><div class="aq-inbox-in"><div class="aq-eyb">Feedback on a recording</div>'
+    + '<div class="aq-inbox-head"><h2 class="aq-inbox-title">Your recordings</h2><button class="aq-newq" onclick="go({flow:\'feedback\',new:\'1\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>Send a new recording</button></div>'
+    + '<div class="aq-inbox-list">'+rows+'</div></div></div></div>';
+}
+function renderFeedbackOwnerInbox(view, qs){
+  const toReview=qs.filter(function(r){return r.status==='open'||r.status==='in_progress';});
+  const done=qs.filter(function(r){return r.status==='delivered';});
+  const refunded=qs.filter(function(r){return r.status==='cancelled';});
+  const row=function(r){ const txt=String((r.body&&r.body.piece)||(r.body&&r.body.note)||'').trim()||'A recording'; const who=escHtml((r.email||'').split('@')[0]||r.email||''); const badge=r.status==='delivered'?'<span class="aq-ib-badge done">Delivered</span>':r.status==='cancelled'?'<span class="aq-ib-badge off">Refunded</span>':'<span class="aq-ib-badge wait">To review</span>'; return '<button class="aq-ib-row" onclick="go({flow:\'feedback\',req:\''+r.id+'\'})"><div class="aq-ib-main"><div class="aq-ib-q">'+escHtml(txt)+'</div><div class="aq-ib-meta">'+badge+'<span class="aq-ib-date">'+who+'</span><span class="aq-ib-date">'+escHtml(_dayLabel(String(r.created_at||'').slice(0,10)))+'</span></div></div><svg class="aq-ib-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>'; };
+  const section=function(t,arr){ return arr.length?'<div class="aq-ib-sec">'+escHtml(t)+' <span>'+arr.length+'</span></div>'+arr.map(row).join(''):''; };
+  view.innerHTML='<div class="aq-flow"><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button><div class="aq-inbox"><div class="aq-inbox-in"><div class="aq-eyb">Feedback on a recording</div><div class="aq-inbox-head"><h2 class="aq-inbox-title">Recordings</h2></div><div class="aq-inbox-list">'
+    + (qs.length?(section('To review',toReview)+section('Delivered',done)+section('Refunded',refunded))
+       : '<div class="aq-ib-empty"><div class="aq-ib-empty-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div><div class="aq-ib-empty-t">No recordings yet</div><div class="aq-ib-empty-s">When a member sends you a recording for feedback, it will show up here.</div></div>')
+    + '</div></div></div></div>';
+}
 async function renderFeedback(view, reqId){
   if(reqId){ return renderFeedbackThread(view, reqId); }
+  // The owner lands on the full recordings list; a member on their own list (or
+  // straight into the composer if they have none, or asked for a new one).
+  if(ownerActive()){
+    document.body.classList.add('ask-flow');
+    let qs=[]; try{ const { data } = await db.from('credit_requests').select('*').eq('kind','feedback').order('created_at',{ascending:false}); qs=data||[]; }catch(_){}
+    return renderFeedbackOwnerInbox(view, qs);
+  }
+  const newq = new URLSearchParams(location.search).get('new')==='1';
+  if(!newq){
+    let qs=[]; try{ const all=await myRequests(); qs=(all||[]).filter(function(r){ return r.kind==='feedback'; }); }catch(_){}
+    if(qs.length){ document.body.classList.add('ask-flow'); return renderFeedbackInbox(view, qs); }
+  }
   if(!canAfford(CAT.feedback.cost)){ document.body.classList.remove('ask-flow'); return renderShortfall(view, 'feedback'); }
   document.body.classList.add('ask-flow');   // immersive: hide the app header behind the overlay
   const cost = CAT.feedback.cost; const k='fbsubmit';
   try{ if(window.Comments) Comments.clearState(k); }catch(_){}
   view.innerHTML = '<div class="aq-flow">'
+    + (newq ? '<button class="aq-back" aria-label="Back to your recordings" onclick="go({flow:\'feedback\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>' : '')
     + '<button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
     + '<div class="fb-wrap"><div class="fb-in">'
     +   '<div class="aq-eyb">Feedback on a recording</div>'
@@ -2177,7 +2214,7 @@ async function renderFeedbackThread(view, reqId){
 
 function renderFeedbackWaiting(view, r){
   const fm=_fbMedia(r);
-  view.innerHTML = '<div class="aq-flow"><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
+  view.innerHTML = '<div class="aq-flow"><button class="aq-back" aria-label="Back to your recordings" onclick="go({flow:\'feedback\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
     + '<div class="fb-wrap"><div class="fb-in">'
     +   '<div class="aq-eyb">Feedback on a recording</div>'
     +   '<div class="aq-meta"><span class="aq-meta-i">'+AQ_LOCK+'Private to you and Matt</span><span class="aq-meta-sep"></span><span class="aq-gold">'+fmt(r.cost)+' credits held, Matt is reviewing</span></div>'
@@ -2200,7 +2237,7 @@ function renderFeedbackEditor(view, r){
   const scoreLine = _fbScore
     ? '<div class="fb-scorenote">Score attached. Use "Clip the score" to drop a region into your writing.</div>'
     : '<div class="fb-scorenote">No score was sent. "Clip the score" will let you attach one to clip from.</div>';
-  view.innerHTML = '<div class="aq-flow"><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
+  view.innerHTML = '<div class="aq-flow"><button class="aq-back" aria-label="Back to recordings" onclick="go({flow:\'feedback\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
     + '<div class="fb-ed-lay">'
     +   '<section class="fb-ed-left"><div class="fb-ed-leftin">'
     +     '<div class="aq-eyb">Feedback for '+who+'</div>'
@@ -2374,6 +2411,7 @@ async function renderFeedbackDeliverable(view, r, owner, own){
       + (follow? '<div class="fb-follow">'+follow+'</div>':'')
       );
   view.innerHTML = '<div class="aq-flow">'
+    + '<button class="aq-back" aria-label="Back to recordings" onclick="go({flow:\'feedback\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>'
     + '<button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
     + '<div class="fb-wrap"><div class="fb-in">'
     +   '<div class="aq-eyb">Feedback'+(cancelled?'':(owner?(' for '+mFirst):' from Matt'))+'</div>'
