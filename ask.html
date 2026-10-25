@@ -524,7 +524,17 @@
   .fb-play{ width:9px; height:9px; display:inline-block; vertical-align:-1px; flex:0 0 auto; }
   .fb-article{ font-size:1rem; line-height:1.75; color:var(--text); }
   .fb-article .fb-p{ margin:0 0 15px; overflow-wrap:anywhere; }
+  .fb-cite{ background:rgba(255,255,255,.08); color:var(--muted); font-size:.74rem; }
+  .fb-cite-ref{ cursor:pointer; color:var(--purple,#a78bfa); font-weight:700; font-size:.66em; padding:0 1px; }
+  .fb-cite-ref:hover{ text-decoration:underline; }
+  .fb-cite-pop{ position:fixed; z-index:3200; min-width:200px; max-width:260px; max-height:50vh; overflow-y:auto; background:#1b1b22; border:1px solid var(--line2); border-radius:12px; padding:6px; box-shadow:0 20px 50px -18px rgba(0,0,0,.9); }
+  .fb-cite-opt{ display:block; width:100%; text-align:left; background:none; border:0; color:var(--head); font:inherit; font-size:.84rem; padding:8px 10px; border-radius:8px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fb-cite-opt:hover{ background:rgba(255,255,255,.07); }
   .fb-refs{ margin-top:24px; padding-top:18px; border-top:1px solid var(--hair); }
+  .fb-ref{ display:flex; gap:12px; align-items:flex-start; padding:10px; border-radius:12px; transition:background .3s; }
+  .fb-ref-n{ flex:0 0 auto; width:24px; height:24px; border-radius:50%; display:grid; place-items:center; background:rgba(167,139,250,.16); color:#c4b5fd; font-size:.78rem; font-weight:700; margin-top:2px; }
+  .fb-ref-m{ flex:1; min-width:0; }
+  .fb-ref-flash{ background:rgba(167,139,250,.14); }
   .fb-follow{ margin-top:24px; padding-top:18px; border-top:1px solid var(--hair); display:flex; flex-direction:column; }
   /* Clipper modal */
   .fb-clip-ov{ position:fixed; inset:0; z-index:3000; background:rgba(0,0,0,.72); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; padding:20px; }
@@ -2146,9 +2156,10 @@ async function submitFeedback(){
 // ── Feedback: thread dispatcher, owner editor, clipper, deliverable ──────────────
 function _fmtTime(sec){ sec=Math.max(0,Math.floor(sec||0)); const m=Math.floor(sec/60), s=sec%60; return m+':'+(s<10?'0':'')+s; }
 function _fbMedia(r){ const m=Array.isArray(r&&r.body&&r.body.media)?r.body.media:[]; return { all:m, video:m.find(x=>x.type==='mux')||null, score:m.find(x=>x.type==='file'||x.type==='image')||null }; }
-let _fbVideoId=null, _fbScore=null, _fbClipSel=null;
+let _fbVideoId=null, _fbScore=null, _fbClipSel=null, _fbRange=null;
 const FB_TS_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>';
 const FB_PLAY='<svg class="fb-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+const FB_CITE_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M14 2v6h6"/></svg>';
 const FB_CLIP_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>';
 
 async function renderFeedbackThread(view, reqId){
@@ -2200,7 +2211,7 @@ function renderFeedbackEditor(view, r){
     +     (r.body&&r.body.note? '<div class="fb-yournote"><div class="fb-lbl">They asked you to look at</div>'+msgBody(r.body.note)+'</div>':'')
     +   '</div></section>'
     +   '<section class="fb-ed-right"><div class="fb-ed-rightin">'
-    +     '<div class="fb-ed-toolbar"><button class="fb-tool" onclick="fbInsertTimestamp()">'+FB_TS_SVG+'Insert this moment</button>'+clipBtn+'</div>'
+    +     '<div class="fb-ed-toolbar"><button class="fb-tool" onmousedown="event.preventDefault()" onclick="fbInsertTimestamp()">'+FB_TS_SVG+'Insert this moment</button>'+clipBtn+'<button class="fb-tool" onmousedown="event.preventDefault()" onclick="fbCitePicker(this)">'+FB_CITE_SVG+'Cite a reference</button></div>'
     +     '<div class="fb-ed" id="fb-ed" contenteditable="true" data-ph="Write '+who+' their feedback. Scrub the video and drop a timestamp wherever you are referencing a moment; clip the score to show a passage."></div>'
     +     '<div class="fb-refs-h">Reference material <span>optional</span></div>'
     +     (window.Comments&&Comments.toolbarHtml? Comments.toolbarHtml('fbref') : '')
@@ -2209,7 +2220,31 @@ function renderFeedbackEditor(view, r){
     + '</div>'
     + '<div class="fb-clip-ov" id="fb-clipper"></div>'
     + '</div>';
+  fbInitEditor();
 }
+// Keep the editor's caret so a toolbar insert (timestamp / clip / cite) lands
+// where the owner was typing, even after clicking a button outside the editor.
+function fbInitEditor(){
+  const ed=document.getElementById('fb-ed'); if(!ed) return;
+  const save=function(){ const s=window.getSelection(); if(s && s.rangeCount && ed.contains(s.anchorNode)) _fbRange=s.getRangeAt(0).cloneRange(); };
+  ed.addEventListener('keyup',save); ed.addEventListener('mouseup',save); ed.addEventListener('input',save);
+  _fbRange=null;
+}
+function fbCitePicker(btn){
+  Array.prototype.forEach.call(document.querySelectorAll('.fb-cite-pop'), function(p){ p.remove(); });
+  const refs=(window.Comments&&Comments.readMedia)? Comments.readMedia('fbref') : [];
+  if(!refs.length){ showToast('Attach a reference below first, then cite it.', 3200); return; }
+  const pop=document.createElement('div'); pop.className='fb-cite-pop';
+  pop.innerHTML = refs.map(function(m,i){ const label=escHtml(m.name || (m.type==='mux'?'Video':m.type==='image'?'Image':(m.type||'Reference'))); return '<button class="fb-cite-opt" onmousedown="event.preventDefault()" onclick="fbInsertCite('+(i+1)+')">['+(i+1)+'] '+label+'</button>'; }).join('');
+  document.body.appendChild(pop);
+  const r=btn.getBoundingClientRect(); pop.style.left=Math.max(10,Math.min(r.left, window.innerWidth-250))+'px'; pop.style.top=(r.bottom+6)+'px';
+  setTimeout(function(){ const h=function(e){ if(!pop.contains(e.target)){ pop.remove(); document.removeEventListener('mousedown',h); } }; document.addEventListener('mousedown',h); }, 0);
+}
+function fbInsertCite(n){
+  Array.prototype.forEach.call(document.querySelectorAll('.fb-cite-pop'), function(p){ p.remove(); });
+  fbInsertNode('<span class="fb-chip fb-cite" contenteditable="false" data-ref="'+n+'">['+n+']</span> ');
+}
+window.fbGotoRef=function(n){ const el=document.getElementById('fb-ref-'+n); if(el){ el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('fb-ref-flash'); setTimeout(function(){ el.classList.remove('fb-ref-flash'); },1300); } };
 
 function fbAttachScore(input){
   const f=input.files&&input.files[0]; if(!f) return;
@@ -2225,8 +2260,11 @@ function fbInsertTimestamp(){
 }
 function fbInsertNode(html){
   const ed=document.getElementById('fb-ed'); if(!ed) return; ed.focus();
+  const sel=window.getSelection();
+  if(_fbRange){ try{ sel.removeAllRanges(); sel.addRange(_fbRange); }catch(_){} }
   try{ document.execCommand('insertHTML', false, html); }
   catch(_){ ed.insertAdjacentHTML('beforeend', html); }
+  try{ const s=window.getSelection(); if(s && s.rangeCount && ed.contains(s.anchorNode)) _fbRange=s.getRangeAt(0).cloneRange(); }catch(_){}
 }
 function fbSerializeDoc(){
   const ed=document.getElementById('fb-ed'); if(!ed) return [];
@@ -2239,6 +2277,7 @@ function fbSerializeDoc(){
       if(n.nodeType!==1) return;
       const el=n, cl=el.classList;
       if(cl&&cl.contains('fb-ts')) cur.push({x:'ts',sec:+(el.dataset.sec||0)});
+      else if(cl&&cl.contains('fb-cite')) cur.push({x:'cite',i:+(el.dataset.ref||0)});
       else if(cl&&cl.contains('fb-clip')) cur.push({x:'clip',url:el.dataset.url||el.getAttribute('src')||''});
       else if(el.tagName==='BR'){ flush(); }
       else if(el.tagName==='DIV'||el.tagName==='P'){ flush(); walk(el); flush(); }
@@ -2254,6 +2293,7 @@ function fbRenderDoc(doc){
     const inner=(b.runs||[]).map(function(r){
       if(r.x==='t') return escHtml(r.s);
       if(r.x==='ts') return '<button class="fb-ts-chip" onclick="fbSeek('+(+r.sec||0)+')">'+FB_PLAY+' '+_fmtTime(r.sec)+'</button>';
+      if(r.x==='cite') return '<sup class="fb-cite-ref" onclick="fbGotoRef('+(+r.i||0)+')">['+(+r.i||0)+']</sup>';
       if(r.x==='clip') return (/^https?:\/\//.test(r.url||'')? '<img class="fb-clip" src="'+escHtml(r.url)+'" alt="score excerpt">':'');
       return '';
     }).join('');
@@ -2300,7 +2340,7 @@ async function renderFeedbackDeliverable(view, r, owner, own){
     follow += '<div class="aq-msg'+(mine?' me':'')+'">'+aqAvatar(mine?'me':'', isO?mattAvatar:mAv, isO?'M':(mName||'?').trim()[0]||'?')
       + '<div class="aq-msg-b"><div class="aq-who">'+who+'</div><div class="aq-bubble'+(mine?' me':'')+'">'+msgBody(m.text)+aqMedia(m.media)+'</div></div></div>';
   });
-  const refsHtml = (resp.refs&&resp.refs.length)? '<div class="fb-refs"><div class="fb-refs-title">Reference material</div>'+aqMedia(resp.refs)+'</div>' : '';
+  const refsHtml = (resp.refs&&resp.refs.length)? '<div class="fb-refs"><div class="fb-refs-title">Reference material</div>'+resp.refs.map(function(m,i){ return '<div class="fb-ref" id="fb-ref-'+(i+1)+'"><span class="fb-ref-n">'+(i+1)+'</span><div class="fb-ref-m">'+aqMedia([m])+'</div></div>'; }).join('')+'</div>' : '';
   // Every moment Matt timestamped, as a clickable jump row under the video.
   const stampSet = {}; (resp.doc||[]).forEach(function(b){ (b.runs||[]).forEach(function(rn){ if(rn.x==='ts') stampSet[+rn.sec||0]=1; }); });
   const stamps = Object.keys(stampSet).map(Number).sort(function(a,b){return a-b;});
