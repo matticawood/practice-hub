@@ -1411,7 +1411,7 @@ function _shBuildChrome() {
     }).join("") +
     "</nav>" +
     '<div class="sh-sb-foot">' +
-      '<button class="sh-sb-foot-acct" onclick="window._shToggleUserMenu && window._shToggleUserMenu()" aria-label="Account menu">' +
+      '<button class="sh-sb-foot-acct" onclick="window._shToggleUserMenu && window._shToggleUserMenu()" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">' +
         '<div class="sh-avatar" id="sh-sb-avatar-el"></div>' +
         '<span class="sh-sb-foot-info">' +
           '<span class="sh-sb-foot-name" id="sh-sb-name">Member</span>' +
@@ -1609,9 +1609,13 @@ window._shSkipToMain = function(e) {
   return false;
 };
 window._shToggleUserMenu = function() {
+  // Make sure the menu node is in the trigger that is actually visible at this
+  // width (foot on desktop, header avatar on mobile) before we open it.
+  try { window._shPlaceAccountMenu && window._shPlaceAccountMenu(); } catch (e) {}
   const menu = document.getElementById("sh-user-menu");
   const open = menu?.classList.toggle("open");
   document.getElementById("sh-avatar-btn")?.setAttribute("aria-expanded", open ? "true" : "false");
+  document.querySelector(".sh-sb-foot-acct")?.setAttribute("aria-expanded", open ? "true" : "false");
 };
 // Same-page nav: if a sidebar/sub-nav link points at the page we're already on
 // (e.g. Community → Progress is /community.html?filter=progress), let the page
@@ -1627,11 +1631,14 @@ document.addEventListener("click", function(e) {
   e.preventDefault();
   window.__shSamePageRoute(url.pathname + url.search);
 });
-// Close user menu on outside click
+// Close user menu on outside click. The menu lives in the header avatar on
+// mobile and in the sidebar account foot on desktop, so a click on either
+// trigger (or inside the menu itself) must not count as "outside".
 document.addEventListener("click", function(e) {
-  if (!e.target.closest(".sh-avatar-wrap")) {
+  if (!e.target.closest(".sh-avatar-wrap, .sh-sb-foot, #sh-user-menu")) {
     document.getElementById("sh-user-menu")?.classList.remove("open");
     document.getElementById("sh-avatar-btn")?.setAttribute("aria-expanded", "false");
+    document.querySelector(".sh-sb-foot-acct")?.setAttribute("aria-expanded", "false");
   }
 });
 // Close user menu on Escape
@@ -1642,7 +1649,9 @@ document.addEventListener("keydown", function(e) {
       m.classList.remove("open");
       const b = document.getElementById("sh-avatar-btn");
       b?.setAttribute("aria-expanded", "false");
-      b?.focus();
+      const fb = document.querySelector(".sh-sb-foot-acct");
+      fb?.setAttribute("aria-expanded", "false");
+      (b && b.offsetParent ? b : fb)?.focus();
     }
   }
 });
