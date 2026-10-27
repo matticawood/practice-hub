@@ -612,24 +612,41 @@
 
   /* Delivered view: same split, flowing inside the member's scroll page */
   .fb-in.fb-in-cv{ max-width:1060px; }
-  .fb-dv{ display:grid; grid-template-columns:1fr minmax(300px,.74fr); gap:18px; margin:16px 0 6px; align-items:start; }
-  .fb-dv.no-score{ grid-template-columns:1fr; }
-  .fb-dv-left{ min-width:0; display:flex; flex-direction:column; }
-  .fb-dv-rec{ aspect-ratio:16/9; background:#000; border:1px solid var(--line2); border-radius:12px; overflow:hidden; margin-bottom:12px; }
+  /* Desktop: recording top-left, writing below it, score as a tall page on the right */
+  .fb-dv{ display:grid; grid-template-columns:1fr minmax(300px,.72fr); gap:18px; margin:16px 0 6px; align-items:start;
+    grid-template-areas:"rec score" "page score"; }
+  .fb-dv.no-score{ grid-template-columns:1fr; grid-template-areas:"rec" "page"; }
+  .fb-dv-rec{ grid-area:rec; aspect-ratio:16/9; background:#000; border:1px solid var(--line2); border-radius:12px; overflow:hidden; }
   .fb-dv-rec mux-player{ border-radius:12px; overflow:hidden; }
-  .fb-dv-page{ background:#0e0e12; border:1px solid var(--hair); border-radius:14px; overflow:visible; padding:14px; min-height:260px; }
-  .fb-dv-right{ min-width:0; position:sticky; top:8px; background:#0c0c10; border:1px solid var(--hair); border-radius:14px; overflow:hidden; display:flex; flex-direction:column; max-height:84vh; }
-  .fb-dv-right .fb-st-col-h{ border-bottom:1px solid var(--hair); }
+  .fb-dv-rec-empty{ display:grid; place-items:center; color:var(--faint); font-size:.86rem; background:linear-gradient(180deg,#141418,#0e0e12); }
+  .fb-dv-page{ grid-area:page; background:#0e0e12; border:1px solid var(--hair); border-radius:14px; overflow:visible; padding:14px; min-height:260px; }
+  .fb-dv-right{ grid-area:score; min-width:0; position:sticky; top:8px; background:#0c0c10; border:1px solid var(--hair); border-radius:14px; overflow:hidden; display:flex; flex-direction:column; max-height:84vh; }
+  .fb-sc-toggle{ flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:13px clamp(14px,2vw,18px); background:none; border:0; border-bottom:1px solid var(--hair); font:inherit; font-size:.72rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); cursor:default; text-align:left; }
+  .fb-sc-chev{ width:16px; height:16px; display:none; flex:0 0 auto; transition:transform .2s; }
   .fb-dv-score{ overflow:auto; padding:12px; }
   .fb-dv-score .fb-scoreview{ margin:0; }
   .fb-dv-score .fb-scoreview iframe{ height:min(1100px,74vh); }
   .fb-scoreview-wrap{ margin:4px 0 18px; }
+  /* Waiting-page placeholder (feedback not written yet) */
+  .fb-dv-ph{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:11px; padding:min(10vw,60px) 20px; color:var(--muted); }
+  .fb-dv-ph-ic{ width:50px; height:50px; border-radius:14px; display:grid; place-items:center; color:var(--purple); background:color-mix(in srgb,var(--purple) 14%, transparent); }
+  .fb-dv-ph-ic svg{ width:24px; height:24px; }
+  .fb-dv-ph-h{ font-size:1.05rem; font-weight:700; color:var(--head); }
+  .fb-dv-ph-s{ font-size:.9rem; line-height:1.6; max-width:420px; color:var(--muted); }
+  .fb-dv-ph-note{ margin-top:10px; max-width:460px; width:100%; text-align:left; background:rgba(255,255,255,.03); border:1px solid var(--hair); border-radius:12px; padding:12px 14px; font-size:.92rem; line-height:1.55; color:var(--body); }
+  .fb-dv-ph-note span{ display:block; font-size:.68rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); margin-bottom:6px; }
   @media(max-width:860px){
     .fb-st-main{ flex-direction:column; }
     .fb-st-right{ flex:0 0 auto; border-left:0; border-top:1px solid var(--hair); max-height:46vh; }
     .fb-st-rec{ max-height:32vh; }
-    .fb-dv{ grid-template-columns:1fr; }
+    /* Mobile: video on top, score as a tappable link, then the feedback text */
+    .fb-dv, .fb-dv.no-score{ grid-template-columns:1fr; grid-template-areas:"rec" "score" "page"; gap:12px; }
     .fb-dv-right{ position:static; max-height:none; }
+    .fb-sc-toggle{ cursor:pointer; }
+    .fb-sc-chev{ display:inline-flex; }
+    .fb-dv-right.open .fb-sc-chev{ transform:rotate(180deg); }
+    .fb-dv-right .fb-dv-score{ display:none; }
+    .fb-dv-right.open .fb-dv-score{ display:block; }
     .fb-dv-score .fb-scoreview iframe{ height:62vh; }
   }
   .fb-ts-chip{ display:inline-flex; align-items:center; gap:4px; font:inherit; font-size:.8rem; font-weight:700; padding:2px 9px; border-radius:999px; border:0; cursor:pointer; background:color-mix(in srgb, var(--purple,#a78bfa) 22%, transparent); color:#c4b5fd; vertical-align:middle; }
@@ -2393,16 +2410,39 @@ async function renderFeedbackThread(view, reqId){
 
 function renderFeedbackWaiting(view, r){
   const fm=_fbMedia(r);
+  const vidId = fm.video? (fm.video.playbackId||fm.video.playback_id) : null;
+  // The waiting page is the delivered page with the feedback not yet written: their
+  // recording top-left, their score on the right if they sent one, and the writing
+  // area holding a "feedback will appear here" placeholder.
+  const recPanel = vidId
+    ? '<div class="fb-dv-rec"><mux-player id="fb-rec" playback-id="'+escHtml(vidId)+'" controls stream-type="on-demand" style="width:100%;height:100%;display:block"></mux-player></div>'
+    : '<div class="fb-dv-rec fb-dv-rec-empty"><span>Your recording</span></div>';
+  const scorePanel = fm.score ? fbScorePanelHtml(fm.score, 'Your sheet music') : '';
+  const placeholder = '<div class="fb-dv-page"><div class="fb-dv-ph">'
+    + '<div class="fb-dv-ph-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 11h16M4 16h12M4 21h7"/></svg></div>'
+    + '<div class="fb-dv-ph-h">Feedback will appear here</div>'
+    + '<div class="fb-dv-ph-s">Matt is reviewing your recording. You\'ll get a notification the moment it\'s ready, written right across this page.</div>'
+    + (r.body&&r.body.note? '<div class="fb-dv-ph-note"><span>What you asked Matt to look at</span>'+msgBody(r.body.note)+'</div>':'')
+    + '</div></div>';
   view.innerHTML = '<div class="aq-flow"><button class="aq-back" aria-label="Back to your recordings" onclick="go({flow:\'feedback\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
-    + '<div class="fb-wrap"><div class="fb-in">'
+    + '<div class="fb-wrap"><div class="fb-in fb-in-cv">'
     +   '<div class="aq-eyb">Feedback on a recording</div>'
     +   '<div class="aq-meta"><span class="aq-meta-i">'+AQ_LOCK+'Private to you and Matt</span><span class="aq-meta-sep"></span><span class="aq-gold">'+fmt(r.cost)+' credits held, Matt is reviewing</span></div>'
     +   (r.body&&r.body.piece? '<div class="fb-piece">'+escHtml(r.body.piece)+'</div>':'')
-    +   (fm.all.length? '<div class="fb-media">'+aqMedia(fm.all)+'</div>':'')
-    +   (r.body&&r.body.note? '<div class="fb-yournote"><div class="fb-lbl">What you asked Matt to look at</div>'+msgBody(r.body.note)+'</div>':'')
-    +   '<div class="aq-wait" style="margin-left:0;margin-top:20px">Matt is reviewing your recording. You\'ll get a notification when your feedback is ready.</div>'
-    +   (r.status==='open'? '<div class="aq-decline-row" style="text-align:left;margin-top:6px"><button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true,\'recording\')">Withdraw and refund</button></div>':'')
+    +   '<div class="fb-dv'+(scorePanel?'':' no-score')+'">'
+    +     recPanel + scorePanel + placeholder
+    +   '</div>'
+    +   (r.status==='open'? '<div class="aq-decline-row" style="text-align:left;margin-top:14px"><button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true,\'recording\')">Withdraw and refund</button></div>':'')
     + '</div></div></div>';
+}
+// The member's score panel: a full page on the right on desktop, collapsing to a
+// tappable "view sheet music" link on mobile. Shared by the waiting + delivered views.
+function fbScorePanelHtml(score, label){
+  if(!score) return '';
+  return '<div class="fb-dv-right">'
+    + '<button class="fb-sc-toggle" onclick="this.closest(\'.fb-dv-right\').classList.toggle(\'open\')"><span>'+escHtml(label||'Sheet music')+'</span><svg class="fb-sc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>'
+    + '<div class="fb-dv-score">'+fbScoreView(score)+'</div>'
+    + '</div>';
 }
 
 function renderFeedbackEditor(view, r){
@@ -2746,13 +2786,12 @@ async function renderFeedbackDeliverable(view, r, owner, own){
   const recPanel = vidId
     ? '<div class="fb-dv-rec"><mux-player id="fb-rec" playback-id="'+escHtml(vidId)+'" controls stream-type="on-demand" style="width:100%;height:100%;display:block"></mux-player></div>'
     : '';
-  const scorePanel = fm.score
-    ? '<div class="fb-dv-right"><div class="fb-st-col-h">The score</div><div class="fb-dv-score">'+fbScoreView(fm.score)+'</div></div>'
-    : '';
+  const scorePanel = fm.score ? fbScorePanelHtml(fm.score, owner?'The score':'Your sheet music') : '';
   const mainHtml = hasCanvas
     ? '<div class="fb-dv'+(scorePanel?'':' no-score')+'">'
-      +   '<div class="fb-dv-left">'+recPanel+'<div class="fb-dv-page fb-st-page"><div class="fbc-stage"><div class="fbc" id="fbc"></div></div></div></div>'
+      +   recPanel
       +   scorePanel
+      +   '<div class="fb-dv-page fb-st-page"><div class="fbc-stage"><div class="fbc" id="fbc"></div></div></div>'
       + '</div>'
     : ((vidId? '<div class="fb-dvid-wrap"><mux-player id="fb-dvid" playback-id="'+escHtml(vidId)+'" style="width:100%;aspect-ratio:16/9;display:block;border-radius:12px;overflow:hidden" stream-type="on-demand"></mux-player>'+marks+'</div>':'')
       + (fm.score? '<div class="fb-scoreview-wrap">'+fbScoreView(fm.score)+'</div>':'')
