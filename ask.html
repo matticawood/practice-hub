@@ -730,9 +730,16 @@
   .fr-score-fab, .fr-score-grab, .fr-score-scrim{ display:none; }
   /* waiting: the room sits behind, softly blurred, with the status floating over it */
   .fr-stage{ position:relative; min-height:0; display:grid; overflow:hidden; }
-  .fr-blur{ filter:blur(5px); -webkit-filter:blur(5px); transform:scale(1.015); transform-origin:center; pointer-events:none; }
+  .fr-blur{ filter:blur(5px) brightness(.46); -webkit-filter:blur(5px) brightness(.46); transform:scale(1.015); transform-origin:center; pointer-events:none; }
   .fr-wait-overlay{ position:absolute; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; padding:28px;
-    background:radial-gradient(72% 62% at 50% 42%, rgba(9,12,10,.32), rgba(8,10,9,.76)); }
+    background:radial-gradient(76% 64% at 50% 42%, rgba(9,12,10,.28), rgba(8,10,9,.62)); }
+  /* full-page loader so the room (and the PDF) appear together, not piecemeal */
+  .fr-loading{ position:absolute; inset:0; z-index:300; display:grid; place-items:center; background:#0b0a0e; transition:opacity .4s ease; }
+  .fr-loading.gone{ opacity:0; pointer-events:none; }
+  .fr-loading-in{ display:flex; flex-direction:column; align-items:center; gap:16px; }
+  .fr-spin{ width:34px; height:34px; border-radius:50%; border:2.5px solid rgba(255,255,255,.1); border-top-color:var(--green); animation:frspin .8s linear infinite; }
+  @keyframes frspin{ to{ transform:rotate(360deg); } }
+  .fr-loading-t{ font-size:.82rem; color:var(--faint); letter-spacing:.04em; }
   .fr-wait-overlay .fr-wait{ min-height:0; padding:0; max-width:460px; justify-content:center; }
   .fr-skel{ max-width:560px; padding-top:4px; }
   .fr-skel .sk{ background:linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.1) 37%, rgba(255,255,255,.05) 63%); background-size:400% 100%; border-radius:7px; animation:skshim 1.5s ease-in-out infinite; }
@@ -2541,8 +2548,7 @@ function renderFeedbackWaiting(view, r){
     + '<div class="fr-wait-badge"><span class="fr-wait-dot"></span>In review</div>'
     + '<div class="fr-wait-h">Matt is writing your feedback</div>'
     + '<div class="fr-wait-s">It appears here, right across this page, the moment it\'s ready. You\'ll get a notification, so there\'s nothing to watch for.</div>'
-    + (r.body&&r.body.note? '<blockquote class="fr-quote"><span>What you asked Matt to look at</span>'+escHtml(r.body.note)+'</blockquote>':'')
-    + (r.status==='open'? '<div style="margin-top:20px"><button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true,\'recording\')">Withdraw and refund</button></div>':'')
+    + (r.status==='open'? '<div style="margin-top:22px"><button class="aq-withdraw" onclick="cancelRequest(\''+r.id+'\',true,\'recording\')">Withdraw and refund</button></div>':'')
     + '</div></div>';
   view.innerHTML = '<div class="aq-flow">'
     + '<div class="fr" data-score="'+(scoreZone?'has':'none')+'">'
@@ -2560,9 +2566,11 @@ function renderFeedbackWaiting(view, r){
     +     '</div>'
     +     overlay
     +   '</div>'
-    + '</div></div>';
+    + '</div>'
+    + '<div class="fr-loading"><div class="fr-loading-in"><div class="fr-spin"></div><div class="fr-loading-t">Loading your feedback…</div></div></div>'
+    + '</div>';
   var rm=document.getElementById('fr-recmeta'); if(rm){ rm.innerHTML='<b>Matt is reviewing</b> · '+fmt(r.cost)+' credits held'; }
-  frMountScore();
+  frRevealOnReady();
 }
 // The member's score panel: a full page on the right on desktop, collapsing to a
 // tappable "view sheet music" link on mobile. Shared by the waiting + delivered views.
@@ -2607,6 +2615,17 @@ function frToggleScore(open){
   e.classList.toggle('open', isOpen);
   document.body.classList.toggle('fr-sheet-open', isOpen);
   if(isOpen) setTimeout(function(){ window.dispatchEvent(new Event('resize')); }, 60);   // redraw the PDF at full width
+}
+// Hold the full-page loader until the score (PDF pages / image) has rendered, so the
+// room appears complete rather than the PDF painting in on its own afterwards.
+function frRevealOnReady(){
+  var loader=document.querySelector('.fr-loading');
+  var hide=function(){ if(!loader) return; var l=loader; loader=null; l.classList.add('gone'); setTimeout(function(){ if(l.parentNode) l.remove(); }, 420); };
+  var fallback=setTimeout(hide, 9000);
+  var waits=[ Promise.resolve(frMountScore()).catch(function(){}) ];
+  var img=document.querySelector('.fr-sheet > img');
+  if(img && !img.complete){ waits.push(new Promise(function(res){ img.onload=res; img.onerror=res; })); }
+  Promise.all(waits).then(function(){ clearTimeout(fallback); requestAnimationFrame(hide); });
 }
 // Render the score PDF with PDF.js so it fits the panel width and re-fits on resize,
 // instead of an <iframe> whose built-in viewer ignores the container size.
@@ -3021,11 +3040,13 @@ async function renderFeedbackDeliverable(view, r, owner, own){
     +     '<div class="fr-left"><div class="fr-scroll">'+frRecZone(vidId)+'<div class="fr-page">'+feedBody+'</div></div>'+(dock?'<div class="fr-dock">'+dock+'</div>':'')+'</div>'
     +     scoreZone
     +   '</div>'
-    + '</div></div>';
+    + '</div>'
+    + (cancelled?'':'<div class="fr-loading"><div class="fr-loading-in"><div class="fr-spin"></div><div class="fr-loading-t">Loading your feedback…</div></div></div>')
+    + '</div>';
   var rm=document.getElementById('fr-recmeta');
   if(rm){ rm.innerHTML = (owner?('<b>For '+escHtml(mFirst)+'</b>'):'<b>From Matt</b>') + (cancelled?' · Withdrawn':(' · <span class="ok">Delivered'+(delDate?(' '+delDate):'')+'</span>')); }
-  frMountScore();
   if(hasCanvas){ fbcReset(resp.canvas); fbcRender(false); setTimeout(function(){ fbcGrow(); }, 80); }
+  frRevealOnReady();
 }
 
 // ── Score clipper: render the score (PDF via PDF.js, or an image), drag a box,
