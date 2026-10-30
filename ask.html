@@ -671,17 +671,23 @@
   .fb-article{ font-size:1rem; line-height:1.75; color:var(--text); }
   .fb-article .fb-p{ margin:0 0 15px; overflow-wrap:anywhere; }
   /* Reading-document feedback: a stack of points, each tying its clip and timestamps to the words. */
-  .fb-doc{ display:flex; flex-direction:column; gap:22px; }
+  .fb-doc{ display:flex; flex-direction:column; gap:22px; container-type:inline-size; }
   .fb-doc.ro{ gap:20px; }
   .fb-pt{ display:grid; grid-template-columns:1fr; gap:12px 22px; align-items:start; }
-  .fb-pt.has-clip{ grid-template-columns:minmax(0,1fr) minmax(210px,300px); }
-  @media(max-width:720px){ .fb-pt.has-clip{ grid-template-columns:1fr; } }
+  /* The clip sits beside the text only while the text keeps a comfortable column. The
+     break is driven by the point's OWN width (container query), not the viewport, so on
+     a wide screen the words in the left column never get squashed before it stacks. */
+  .fb-pt.has-clip{ grid-template-columns:minmax(0,1fr) clamp(180px,32%,280px); }
+  @container (max-width:560px){ .fb-pt.has-clip{ grid-template-columns:1fr; } }
   .fb-pt-main{ position:relative; min-width:0; }
   .fb-ptext{ font-size:1rem; line-height:1.66; color:var(--head); outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
   .fb-doc:not(.ro) .fb-ptext{ min-height:1.6em; padding:11px 13px; border-radius:10px; background:rgba(255,255,255,.025); border:1px solid transparent; transition:border-color .14s, background .14s; }
   .fb-doc:not(.ro) .fb-pt.foc .fb-ptext{ border-color:color-mix(in srgb,var(--green) 42%, transparent); background:rgba(255,255,255,.045); }
   .fb-ptext[contenteditable]:empty:before{ content:attr(data-ph); color:var(--faint); }
-  .fb-ts-ed{ display:inline-flex; align-items:center; gap:4px; font-size:.82em; font-weight:700; padding:1px 8px; border-radius:999px; vertical-align:baseline; background:color-mix(in srgb,var(--green) 22%, transparent); color:#8fecc0; user-select:none; cursor:default; }
+  .fb-ts-ed{ display:inline-flex; align-items:center; gap:4px; font-size:.82em; font-weight:700; padding:1px 8px; border-radius:999px; vertical-align:baseline; background:color-mix(in srgb,var(--green) 22%, transparent); color:#8fecc0; user-select:none; cursor:grab; }
+  .fb-ts-ed:active{ cursor:grabbing; }
+  .fb-ts-ed.fb-ts-drag{ opacity:.45; }
+  .fb-ptext.fb-drop-ok{ box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--green) 55%, transparent); }
   .fb-ts-ed svg{ width:9px; height:9px; }
   .fb-pt-clip{ position:relative; margin:0; }
   .fb-pt-clip img{ display:block; width:100%; aspect-ratio:16 / 7; object-fit:cover; object-position:center; border-radius:10px; border:1px solid var(--line); background:#f4efe3; }
@@ -2746,7 +2752,9 @@ function renderFeedbackEditor(view, r){
   _fbVideoId=vid;
   // Seed the writing page from a held draft, else start empty. Same lit room as the
   // member sees, but the feedback canvas is editable and the score is here to clip from.
-  if(r.response && r.response.points && Array.isArray(r.response.points)) fbDocReset({ points:r.response.points });
+  const _fbDraft = fbDraftLoad(r.id);
+  if(_fbDraft) fbDocReset({ points:_fbDraft.points });
+  else if(r.response && r.response.points && Array.isArray(r.response.points)) fbDocReset({ points:r.response.points });
   else fbDocReset(null);
   const scoreZone = fm.score ? frScoreZone(fm.score, 'Their score') : '';
   const askNote = (r.body&&r.body.note)? '<div class="fr-ask-note"><b>They asked you to look at:</b> '+escHtml(r.body.note)+'</div>' : '';
@@ -2783,6 +2791,7 @@ function renderFeedbackEditor(view, r){
     + '<div class="fr-loading"><div class="fr-loading-in"><div class="fr-spin"></div><div class="fr-loading-t">Opening the editor…</div></div></div>'
     + '</div>';
   fbDocRender(true);
+  if(_fbDraft) showToast('Restored your unsaved draft.', 3200);
   frRevealOnReady();
 }
 // Keep the editor's caret so a toolbar insert (timestamp / clip / cite) lands
@@ -3051,7 +3060,7 @@ function fbRenderDoc(doc){
 // the sentence. Everything reflows at real size, so it reads the same on any device.
 const FB_PLUS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 const FB_CLIP_AR=16/7;            // the one shape every clip takes, so clip boxes are uniform
-let _fbDoc={points:[]}, _fbDocEditable=false, _fbPtId=0, _fbPtFocus=null, _fbPtRange=null;
+let _fbDoc={points:[]}, _fbDocEditable=false, _fbPtId=0, _fbPtFocus=null, _fbPtRange=null, _fbDragTs=null, _fbDraftTimer=null;
 function fbDocReset(state){
   if(state && Array.isArray(state.points)){
     _fbDoc={ points: state.points.map(function(p){ return { id:fbPtNewId(), runs:Array.isArray(p.runs)?p.runs.slice():[], clip:(p.clip&&p.clip.url)?{url:p.clip.url}:null }; }) };
@@ -3062,7 +3071,7 @@ function fbPtNewId(){ return 'p'+(++_fbPtId); }
 function fbPtRunsHtml(runs, editable){
   return (runs||[]).map(function(r){
     if(r.x==='ts'){
-      if(editable) return '<span class="fb-ts-ed" contenteditable="false" data-sec="'+(+r.sec||0)+'">'+FB_PLAY+' '+_fmtTime(r.sec)+'</span>';
+      if(editable) return '<span class="fb-ts-ed" draggable="true" contenteditable="false" data-sec="'+(+r.sec||0)+'" title="Drag to move it in the sentence">'+FB_PLAY+' '+_fmtTime(r.sec)+'</span>';
       return '<button class="fb-ts-chip" onclick="fbSeek('+(+r.sec||0)+')">'+FB_PLAY+' '+_fmtTime(r.sec)+'</button>';
     }
     return escHtml(r.s||'').replace(/\n/g,'<br>');
@@ -3096,7 +3105,7 @@ function fbDocRender(editable){
     html += '<button class="fb-pt-add" onclick="fbPtAdd()">'+FB_PLUS+' Add a point</button>';
   }
   d.innerHTML=html;
-  if(editable) fbDocBind();
+  if(editable){ fbDocBind(); fbDraftSaveSoon(); }
 }
 function fbDocBind(){
   const d=document.getElementById('fb-doc'); if(!d) return;
@@ -3105,9 +3114,61 @@ function fbDocBind(){
     t.addEventListener('focus', function(){ _fbPtFocus=t.dataset.id; _fbMarkFoc(); save(t); });
     t.addEventListener('keyup', function(){ save(t); });
     t.addEventListener('mouseup', function(){ save(t); });
-    t.addEventListener('input', function(){ save(t); });
+    t.addEventListener('input', function(){ save(t); fbDraftSaveSoon(); });
   });
+  // Delegated drag handlers, bound once to the persistent #fb-doc, so a timestamp chip
+  // can be dragged to a new spot in its sentence (or into another point's sentence).
+  if(!d._fbDragBound){
+    d._fbDragBound=true;
+    d.addEventListener('dragstart', function(e){
+      const chip=e.target&&e.target.closest?e.target.closest('.fb-ts-ed'):null; if(!chip) return;
+      _fbDragTs=chip; chip.classList.add('fb-ts-drag');
+      try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',''); }catch(_){}
+    });
+    d.addEventListener('dragover', function(e){
+      if(!_fbDragTs) return; const t=e.target&&e.target.closest?e.target.closest('.fb-ptext[contenteditable]'):null; if(!t) return;
+      e.preventDefault(); try{ e.dataTransfer.dropEffect='move'; }catch(_){}
+      if(t!==d._fbDropEl){ if(d._fbDropEl) d._fbDropEl.classList.remove('fb-drop-ok'); d._fbDropEl=t; t.classList.add('fb-drop-ok'); }
+    });
+    d.addEventListener('drop', function(e){
+      if(d._fbDropEl){ d._fbDropEl.classList.remove('fb-drop-ok'); d._fbDropEl=null; }
+      const chip=_fbDragTs; if(!chip){ return; }
+      const t=e.target&&e.target.closest?e.target.closest('.fb-ptext[contenteditable]'):null;
+      chip.classList.remove('fb-ts-drag'); _fbDragTs=null;
+      if(!t){ return; }
+      e.preventDefault();
+      const rng=_fbCaretFromPoint(e.clientX, e.clientY); if(!rng) return;
+      try{
+        if(chip.parentNode) chip.parentNode.removeChild(chip);
+        rng.insertNode(chip);
+        // pad with spaces so the chip never glues against a neighbouring word
+        if(!chip.nextSibling || (chip.nextSibling.nodeType===3 && !/^[\s ]/.test(chip.nextSibling.nodeValue))) chip.after(document.createTextNode(' '));
+        if(chip.previousSibling && chip.previousSibling.nodeType===3 && !/[\s ]$/.test(chip.previousSibling.nodeValue)) chip.before(document.createTextNode(' '));
+        _fbPtFocus=t.dataset.id; _fbMarkFoc(); fbDocSync(); fbDraftSaveSoon();
+      }catch(_){}
+    });
+    d.addEventListener('dragend', function(){ if(d._fbDropEl){ d._fbDropEl.classList.remove('fb-drop-ok'); d._fbDropEl=null; } if(_fbDragTs){ _fbDragTs.classList.remove('fb-ts-drag'); _fbDragTs=null; } });
+  }
 }
+function _fbCaretFromPoint(x,y){
+  if(document.caretRangeFromPoint){ try{ return document.caretRangeFromPoint(x,y); }catch(_){} }
+  if(document.caretPositionFromPoint){ try{ const p=document.caretPositionFromPoint(x,y); if(p){ const r=document.createRange(); r.setStart(p.offsetNode,p.offset); r.collapse(true); return r; } }catch(_){} }
+  return null;
+}
+// Draft autosave: keep the in-progress writing in localStorage keyed to the request, so
+// a refresh (or a closed tab) never loses it. Restored on open, cleared on deliver.
+function _fbDraftKey(id){ return 'fbdraft:'+id; }
+function fbDraftSave(){
+  if(!_fbDocEditable || !_fbcReqId) return;
+  try{
+    const doc=fbDocSerialize();
+    if(!doc.points.length){ localStorage.removeItem(_fbDraftKey(_fbcReqId)); return; }
+    localStorage.setItem(_fbDraftKey(_fbcReqId), JSON.stringify({ points:doc.points, at:Date.now() }));
+  }catch(_){}
+}
+function fbDraftSaveSoon(){ if(_fbDraftTimer) clearTimeout(_fbDraftTimer); _fbDraftTimer=setTimeout(fbDraftSave, 500); }
+function fbDraftLoad(id){ try{ const raw=localStorage.getItem(_fbDraftKey(id)); if(!raw) return null; const o=JSON.parse(raw); return (o&&Array.isArray(o.points)&&o.points.length)? o : null; }catch(_){ return null; } }
+function fbDraftClear(id){ try{ if(_fbDraftTimer){ clearTimeout(_fbDraftTimer); _fbDraftTimer=null; } localStorage.removeItem(_fbDraftKey(id)); }catch(_){} }
 function _fbMarkFoc(){ Array.prototype.forEach.call(document.querySelectorAll('#fb-doc .fb-pt'), function(p){ p.classList.toggle('foc', p.dataset.id===_fbPtFocus); }); }
 // Read the live contenteditable text back into the model before any re-render, so a
 // re-render (add / delete / attach) never discards what was just typed in another point.
@@ -3168,10 +3229,11 @@ function fbPtInsertTs(){
   t.focus(); _fbPtFocus=p.id;
   const inFocus = _fbPtRange && t.contains(_fbPtRange.startContainer);
   if(inFocus){ try{ const s=window.getSelection(); s.removeAllRanges(); s.addRange(_fbPtRange); }catch(_){} }
-  const html='<span class="fb-ts-ed" contenteditable="false" data-sec="'+sec+'">'+FB_PLAY+' '+_fmtTime(sec)+'</span> ';
+  const html='<span class="fb-ts-ed" draggable="true" contenteditable="false" data-sec="'+sec+'" title="Drag to move it in the sentence">'+FB_PLAY+' '+_fmtTime(sec)+'</span> ';
   try{ document.execCommand('insertHTML', false, html); }
   catch(_){ t.insertAdjacentHTML('beforeend', html); }
   try{ const s=window.getSelection(); if(s&&s.rangeCount&&t.contains(s.anchorNode)) _fbPtRange=s.getRangeAt(0).cloneRange(); }catch(_){}
+  fbDraftSaveSoon();
 }
 function fbDocSerialize(){
   fbDocSync();
@@ -3203,6 +3265,7 @@ async function fbDeliver(id){
   const resp={ points:doc.points, refs:refs||[], text:plain };
   const { error } = await db.rpc('deliver_credit_request', { p_id:id, p_response:resp });
   if(error){ showToast('Could not deliver. '+(error.message||''), 4200); if(btn) btn.disabled=false; return; }
+  fbDraftClear(id);
   showToast('Feedback delivered. They have been notified.');
   go({ flow:'feedback', req:id });
 }
