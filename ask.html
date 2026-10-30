@@ -508,6 +508,18 @@
   .fb-composer .fb-title{ width:100%; background:transparent; border:0; border-bottom:1px solid var(--hair); color:var(--head); font-family:inherit; font-size:.98rem; font-weight:600; padding:2px 2px 9px; margin-bottom:9px; outline:none; }
   .fb-composer .fb-title::placeholder{ color:var(--faint); font-weight:500; }
   .fb-composer .fb-title:focus{ border-bottom-color:rgba(52,211,153,.55); }
+  /* Explicit attach buttons: say what they add, the file type, and whether it's required. */
+  .fb-attachrow{ display:flex; flex-wrap:wrap; gap:9px; margin-bottom:11px; }
+  .fb-attach{ display:inline-flex; align-items:center; gap:10px; padding:10px 14px 10px 12px; border-radius:12px; border:1px solid var(--line2); background:rgba(255,255,255,.03); color:var(--head); font:inherit; cursor:pointer; text-align:left; transition:border-color .15s, background .15s; }
+  .fb-attach:hover{ border-color:color-mix(in srgb,var(--green) 55%, var(--line2)); background:rgba(52,211,153,.06); }
+  .fb-attach > svg{ width:19px; height:19px; color:var(--green); flex:0 0 auto; }
+  .fb-attach-tx{ display:flex; flex-direction:column; min-width:0; line-height:1.25; }
+  .fb-attach-l{ font-size:.9rem; font-weight:600; color:var(--head); }
+  .fb-attach-m{ font-size:.72rem; color:var(--faint); margin-top:2px; }
+  .fb-attach.req{ border-color:color-mix(in srgb,var(--green) 42%, var(--line2)); background:rgba(52,211,153,.07); }
+  .fb-attach.req .fb-attach-m{ color:#8fecc0; font-weight:600; }
+  .fb-attach.done{ border-color:color-mix(in srgb,var(--green) 55%, var(--line2)); background:rgba(52,211,153,.1); }
+  @media(max-width:560px){ .fb-attachrow{ gap:8px; } .fb-attach{ flex:1 1 100%; } }
   /* Feedback: shared bits */
   .fb-piece{ font-size:1.05rem; font-weight:700; color:var(--head); margin:10px 0 14px; }
   .fb-media{ margin:4px 0 16px; }
@@ -2527,9 +2539,9 @@ async function renderFeedback(view, reqId){
     +     '<div class="aq-composer fb-composer">'
     +       '<div id="inline-media-preview-'+k+'"></div>'
     +       '<input class="fb-title" id="f-piece" placeholder="Which piece are you playing?">'
-    +       '<div class="aq-ctoolbar">'
-    +         '<button class="aq-tbtn" title="Add your recording" aria-label="Add your recording" onclick="document.getElementById(\'tc-fi-vid-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>'
-    +         '<button class="aq-tbtn" title="Add your score or a photo" aria-label="Add your score or a photo" onclick="document.getElementById(\'tc-fi-score-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>'
+    +       '<div class="aq-ctoolbar fb-attachrow">'
+    +         '<button type="button" class="fb-attach req" id="fb-attach-vid" onclick="document.getElementById(\'tc-fi-vid-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg><span class="fb-attach-tx"><span class="fb-attach-l">Add your recording</span><span class="fb-attach-m">Required · a video Matt watches back</span></span></button>'
+    +         '<button type="button" class="fb-attach" id="fb-attach-score" onclick="document.getElementById(\'tc-fi-score-'+k+'\').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9.5 13.5c0-.6.5-1 1-1 .8 0 1 .6 1.5.6s.7-.6 1.5-.6c.5 0 1 .4 1 1"/></svg><span class="fb-attach-tx"><span class="fb-attach-l">Add sheet music</span><span class="fb-attach-m">Optional · PDF or photo of your score</span></span></button>'
     +         '<input type="file" id="tc-fi-vid-'+k+'" accept="video/*" capture="environment" style="display:none" onchange="tcHandleVideo(this,\''+k+'\')">'
     +         '<input type="file" id="tc-fi-score-'+k+'" accept=".pdf,image/*" multiple style="display:none" onchange="fbScorePick(this,\''+k+'\')">'
     +       '</div>'
@@ -2543,7 +2555,19 @@ async function renderFeedback(view, reqId){
     + '</div>';
   fillAqContext();
   fillFbHistory();
+  // Reflect what's attached on the buttons, so the required recording reads as satisfied.
+  (function(){ const prev=document.getElementById('inline-media-preview-'+k); fbRefreshAttachState(); if(prev && window.MutationObserver){ new MutationObserver(fbRefreshAttachState).observe(prev, {childList:true, subtree:true}); } })();
   ensureMattIdentity().then(function(){ const av=document.getElementById('aq-matt-av'); if(av && mattAvatar){ av.className='aq-av has-img'; av.innerHTML='<img src="'+escHtml(mattAvatar)+'" alt="Matt">'; } });
+}
+// Keep the attach buttons in sync with what's staged: the recording button flips to a
+// satisfied state once a video is in, the score button once a PDF or photo is added.
+function fbRefreshAttachState(){
+  const staged = (window.Comments && Comments.readMedia) ? Comments.readMedia('fbsubmit') : [];
+  const hasVid = staged.some(function(m){ return m.type==='mux'; });
+  const hasScore = staged.some(function(m){ return m.type==='file' || m.type==='image'; });
+  const set=function(id, on, lOn, mOn, lOff, mOff){ const b=document.getElementById(id); if(!b) return; b.classList.toggle('done', on); const l=b.querySelector('.fb-attach-l'), m=b.querySelector('.fb-attach-m'); if(l) l.textContent = on?lOn:lOff; if(m) m.textContent = on?mOn:mOff; };
+  set('fb-attach-vid',   hasVid,   'Recording added', 'Tap to replace',          'Add your recording', 'Required · a video Matt watches back');
+  set('fb-attach-score', hasScore, 'Sheet music added','Tap to add or replace',  'Add sheet music',    'Optional · PDF or photo of your score');
 }
 // The score entry accepts a PDF or a photo; route each by type to the right handler.
 function fbScorePick(input, key){
