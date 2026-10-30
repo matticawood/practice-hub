@@ -764,6 +764,21 @@
   .fr-dock .aq-dock{ padding:0; }
   .fr .aq-csend{ background:linear-gradient(135deg,#5ee3a8,#24b67c); color:#06281d; }
   .fr .aq-composer:focus-within{ border-color:rgba(52,211,153,.5); }
+  /* Editor (owner authoring): same room, with the tools + Deliver/Decline */
+  .fr-decline{ background:none; border:0; color:var(--faint); font:inherit; font-size:.82rem; text-decoration:underline; cursor:pointer; }
+  .fr-decline:hover{ color:var(--muted); }
+  .fr-deliver{ display:inline-flex; align-items:center; gap:7px; background:linear-gradient(135deg,#5ee3a8,#24b67c); color:#06281d; border:0; border-radius:999px; padding:9px 18px; font:inherit; font-size:.86rem; font-weight:700; cursor:pointer; box-shadow:0 8px 20px -10px rgba(52,211,153,.7); }
+  .fr-deliver:disabled{ opacity:.6; cursor:default; box-shadow:none; }
+  .fr-ask-note{ margin:14px var(--fr-pad) 0; padding:11px 14px; border-radius:12px; background:rgba(52,211,153,.07); border:1px solid rgba(52,211,153,.18); font-size:.86rem; line-height:1.5; color:var(--body); }
+  .fr-ask-note b{ color:var(--head); font-weight:600; }
+  .fr-edit-tools{ position:sticky; top:0; z-index:6; display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; padding:10px var(--fr-pad); background:rgba(13,17,15,.86); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); border-top:1px solid var(--hair); border-bottom:1px solid var(--hair); }
+  .fr-tool{ display:inline-flex; align-items:center; gap:7px; padding:8px 13px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.03); color:var(--head); font:inherit; font-size:.84rem; font-weight:600; cursor:pointer; transition:background .15s, border-color .15s; }
+  .fr-tool:hover{ background:rgba(255,255,255,.07); border-color:var(--line2); }
+  .fr-tool svg{ width:15px; height:15px; color:var(--green); }
+  .fr-edit .fr-page{ padding-top:16px; }
+  .fr-refs{ margin:22px var(--fr-pad) 0; padding-top:18px; border-top:1px solid var(--hair); }
+  .fr-refs-h{ font-size:.64rem; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .fr-refs-h span{ text-transform:none; letter-spacing:0; font-weight:500; color:var(--muted); }
   @media(max-width:860px){
     .fr-main{ grid-template-columns:1fr; grid-template-rows:auto; grid-template-areas:"left"; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; }
     .fr-left{ display:block; }
@@ -2688,44 +2703,46 @@ function renderFeedbackEditor(view, r){
   try{ if(window.Comments) Comments.clearState('fbref'); }catch(_){}
   const vid=fm.video? (fm.video.playbackId||fm.video.playback_id) : null;
   _fbVideoId=vid;
-  // Seed the writing page from a held draft, else start empty. The recording and
-  // the score are NOT on the page: they are their own fixed panels beside it.
+  // Seed the writing page from a held draft, else start empty. Same lit room as the
+  // member sees, but the feedback canvas is editable and the score is here to clip from.
   if(r.response && r.response.canvas && Array.isArray(r.response.canvas.els)) fbcReset(r.response.canvas);
   else fbcReset(null);
-  const recPanel = vid
-    ? '<mux-player id="fb-rec" playback-id="'+escHtml(vid)+'" controls stream-type="on-demand" style="width:100%;height:100%;display:block"></mux-player>'
-    : '<div class="fb-st-empty">No recording was attached to this request.</div>';
-  const scorePanel = _fbScore
-    ? fbScoreView(_fbScore)
-    : '<div class="fb-st-empty">No score attached. <button class="fb-linkbtn" onclick="document.getElementById(\'fb-attach-score\').click()">Attach one to clip from</button></div>';
-  view.innerHTML = '<div class="aq-flow"><button class="aq-back" aria-label="Back to recordings" onclick="go({flow:\'feedback\'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><button class="aq-x" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
-    + '<div class="fb-st">'
-    +   '<div class="fb-st-top">'
-    +     '<div class="fb-st-title">Feedback for '+who+(r.body&&r.body.piece?' <span>· '+escHtml(r.body.piece)+'</span>':'')+'</div>'
-    +     '<div class="fb-st-tools">'
-    +       '<button class="fb-tool" onclick="fbcAddText()">'+FB_TEXT_SVG+'Text</button>'
-    +       '<button class="fb-tool" onclick="fbOpenClipper()">'+FB_CLIP_SVG+'Clip score</button>'
-    +       '<button class="fb-tool" onclick="fbcAddTs()">'+FB_TS_SVG+'Timestamp</button>'
-    +     '</div>'
-    +     '<div class="fb-st-actions"><button class="fb-decline" onclick="cancelRequest(\''+r.id+'\',false)">Decline</button><button class="fb-deliver" id="fb-deliver" onclick="fbDeliver(\''+r.id+'\')">Deliver</button></div>'
-    +   '</div>'
-    +   (r.body&&r.body.note? '<div class="fb-st-note"><b>They asked you to look at:</b> '+escHtml(r.body.note)+'</div>':'')
-    +   '<div class="fb-st-main">'
-    +     '<div class="fb-st-left">'
-    +       '<div class="fb-st-rec">'+recPanel+'</div>'
-    +       '<div class="fb-st-page" id="fb-st-page"><div class="fbc-stage"><div class="fbc" id="fbc"></div></div></div>'
-    +     '</div>'
-    +     '<div class="fb-st-right">'
-    +       '<div class="fb-st-col-h">Their score'+(_fbScore?' <button class="fb-linkbtn" onclick="fbOpenClipper()">Clip a passage</button>':'')+'</div>'
-    +       '<div class="fb-st-score" id="fb-st-score">'+scorePanel+'</div>'
-    +       '<div class="fb-st-refs"><div class="fb-refs-h">Reference material <span>optional, cite in a text block</span></div><div id="inline-media-preview-fbref"></div>'+(window.Comments&&Comments.toolbarHtml? Comments.toolbarHtml('fbref') : '')+'</div>'
-    +     '</div>'
+  const scoreZone = fm.score ? frScoreZone(fm.score, 'Their score') : '';
+  const askNote = (r.body&&r.body.note)? '<div class="fr-ask-note"><b>They asked you to look at:</b> '+escHtml(r.body.note)+'</div>' : '';
+  const tools = '<div class="fr-edit-tools">'
+    + '<button class="fr-tool" onclick="fbcAddText()">'+FB_TEXT_SVG+'Text</button>'
+    + '<button class="fr-tool" onclick="fbOpenClipper()">'+FB_CLIP_SVG+'Clip score</button>'
+    + '<button class="fr-tool" onclick="fbcAddTs()">'+FB_TS_SVG+'Timestamp</button>'
+    + '</div>';
+  const refs = '<div class="fr-refs"><div class="fr-refs-h">Reference material <span>optional, cite in a text block</span></div><div id="inline-media-preview-fbref"></div>'
+    + (window.Comments&&Comments.toolbarHtml? Comments.toolbarHtml('fbref') : '') + '</div>';
+  view.innerHTML = '<div class="aq-flow">'
+    + '<div class="fr fr-edit" data-score="'+(scoreZone?'has':'none')+'">'
+    +   '<header class="fr-bar">'
+    +     '<button class="fr-ic" aria-label="Back to recordings" onclick="go({flow:\'feedback\'})">'+FR_BACK+'</button>'
+    +     '<div class="fr-id"><div class="fr-eyb">Editing feedback</div><div class="fr-piece">'+who+(r.body&&r.body.piece?' · '+escHtml(r.body.piece):'')+'</div></div>'
+    +     '<div class="fr-spacer"></div>'
+    +     '<button class="fr-decline" onclick="cancelRequest(\''+r.id+'\',false)">Decline</button>'
+    +     '<button class="fr-deliver" id="fb-deliver" onclick="fbDeliver(\''+r.id+'\')">Deliver</button>'
+    +     '<button class="fr-ic" aria-label="Close" onclick="go({})">'+AQ_X+'</button>'
+    +   '</header>'
+    +   '<div class="fr-main">'
+    +     '<div class="fr-left"><div class="fr-scroll">'
+    +       frRecZone(vid)
+    +       askNote
+    +       tools
+    +       '<div class="fr-page"><div class="fbc-stage"><div class="fbc" id="fbc"></div></div></div>'
+    +       refs
+    +     '</div></div>'
+    +     scoreZone
     +   '</div>'
     + '</div>'
     + '<input type="file" id="fb-attach-score" accept=".pdf,image/*" style="display:none" onchange="fbAttachScore(this)">'
     + '<div class="fb-clip-ov" id="fb-clipper"></div>'
+    + '<div class="fr-loading"><div class="fr-loading-in"><div class="fr-spin"></div><div class="fr-loading-t">Opening the editor…</div></div></div>'
     + '</div>';
   fbcRender(true);
+  frRevealOnReady();
 }
 // Keep the editor's caret so a toolbar insert (timestamp / clip / cite) lands
 // where the owner was typing, even after clicking a button outside the editor.
