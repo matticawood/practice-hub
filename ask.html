@@ -609,6 +609,17 @@
   .fbc:not(.ro) .fbc-ts:hover .fbc-rm-ts, .fbc:not(.ro) .fbc-ts.sel .fbc-rm-ts{ opacity:1; }
   .fbc-rz{ position:absolute; right:-8px; bottom:-8px; width:17px; height:17px; border-radius:50%; background:var(--green); border:2px solid #0e0e12; cursor:nwse-resize; opacity:0; transition:opacity .12s; touch-action:none; }
   .fbc:not(.ro) .fbc-el:hover .fbc-rz, .fbc:not(.ro) .fbc-el.sel .fbc-rz{ opacity:1; }
+  /* Reading-flow mode: the board becomes a single full-width column, real text size, no zoom. */
+  .fbc.flow{ width:100% !important; min-height:0; transform:none !important; display:flex; flex-direction:column; gap:20px; background-image:none; padding:20px 16px; }
+  .fbc.flow.ro{ padding:2px 0; gap:18px; background:none; border:none; }
+  .fbc.flow .fbc-el{ position:relative; left:auto !important; top:auto !important; width:auto !important; max-width:100%; }
+  .fbc.flow .fbc-text{ font-size:1rem; line-height:1.65; }
+  .fbc.flow.ro .fbc-text{ padding:0; }
+  .fbc.flow .fbc-clip{ width:100%; }
+  .fbc.flow .fbc-ts{ align-self:flex-start; }
+  .fbc.flow .fbc-grip, .fbc.flow .fbc-rz{ display:none !important; }
+  .fbc.flow .fbc-rm-flow{ position:absolute; top:-8px; right:-8px; z-index:3; opacity:0; transition:opacity .12s; }
+  .fbc.flow:not(.ro) .fbc-el:hover .fbc-rm-flow, .fbc.flow:not(.ro) .fbc-el.sel .fbc-rm-flow{ opacity:1; }
 
   /* Delivered view: same split, flowing inside the member's scroll page */
   .fb-in.fb-in-cv{ max-width:1060px; }
@@ -2773,11 +2784,19 @@ function _fbcNewId(){ return 'e'+(++_fbcId); }
 // so repeats don't land exactly on top of each other.
 function fbcAdd(el){
   const n=_fbc.els.length;
-  const page=document.getElementById('fb-st-page')||document.getElementById('fbc');
-  const vx = page ? Math.round((page.scrollLeft||0)/(_fbcScale||1)) : 0;
-  const vy = page ? Math.round((page.scrollTop||0)/(_fbcScale||1)) : 0;
-  if(el.x==null) el.x=fbcSnap(Math.min(_fbc.w-120, vx+24+(n%4)*24));
-  if(el.y==null) el.y=fbcSnap(vy+24+(n%6)*24);
+  if(_fbcFlow()){
+    // Narrow (reading-flow) mode: the canvas is a single column, so a new element
+    // simply lands at the bottom of the flow, below everything already placed.
+    let maxY=0; _fbc.els.forEach(function(e){ maxY=Math.max(maxY,(e.y||0)); });
+    if(el.y==null) el.y=fbcSnap(maxY+(n?48:24));
+    if(el.x==null) el.x=24;
+  } else {
+    const page=document.getElementById('fb-st-page')||document.getElementById('fbc');
+    const vx = page ? Math.round((page.scrollLeft||0)/(_fbcScale||1)) : 0;
+    const vy = page ? Math.round((page.scrollTop||0)/(_fbcScale||1)) : 0;
+    if(el.x==null) el.x=fbcSnap(Math.min(_fbc.w-120, vx+24+(n%4)*24));
+    if(el.y==null) el.y=fbcSnap(vy+24+(n%6)*24);
+  }
   el.id=_fbcNewId(); _fbc.els.push(el); fbcRender(true); _fbcSelect(el.id); return el.id;
 }
 function fbcAddText(){ const id=fbcAdd({type:'text', w:300, text:''}); const node=document.querySelector('.fbc-el[data-id="'+id+'"] .fbc-text'); if(node){ node.focus(); } }
@@ -2788,51 +2807,78 @@ function fbcAddTs(){ if(!fbcVideoEl()){ showToast('There is no recording to time
 function fbcDel(id){ _fbc.els=_fbc.els.filter(function(e){return e.id!==id;}); if(_fbcSel===id)_fbcSel=null; fbcRender(true); }
 function _fbcSelect(id){ _fbcSel=id; Array.prototype.forEach.call(document.querySelectorAll('.fbc-el'), function(el){ el.classList.toggle('sel', el.dataset.id===id); }); }
 function _fbcTextHtml(t){ return escHtml(t||'').replace(/\n/g,'<br>'); }
-function fbcElHtml(el, editable){
-  let style='left:'+(el.x||0)+'px;top:'+(el.y||0)+'px;';
-  if(el.type!=='ts') style+='width:'+(el.w||240)+'px;';
-  const grip = editable ? '<div class="fbc-grip" data-grab="1"><span class="fbc-dots"></span><button class="fbc-rm" data-del="1" aria-label="Remove">'+AQ_X+'</button></div>' : '';
-  const rz   = (editable && el.type!=='ts') ? '<div class="fbc-rz" data-rz="1" title="Drag to resize"></div>' : '';
+// Below this column width the 680px board can't be shown at a readable size, so the
+// canvas reflows into a single reading column instead of zooming the whole thing down.
+const FBC_NARROW=560;
+function _fbcFlow(){
+  const c=document.getElementById('fbc'); const stage=c&&c.parentElement; const col=stage&&stage.parentElement;
+  return !!(col && col.clientWidth < FBC_NARROW);
+}
+function fbcElHtml(el, editable, flow){
+  // Clamp against the canvas width so nothing can sit (or have been authored) past the right edge.
+  const w = Math.min(el.w||240, _fbc.w);
+  const x = Math.max(0, Math.min(el.x||0, _fbc.w - (el.type==='ts'?120:w)));
+  let style='';
+  if(!flow){ style='left:'+x+'px;top:'+(el.y||0)+'px;'+(el.type!=='ts'?'width:'+w+'px;':''); }
+  const grip = (editable && !flow) ? '<div class="fbc-grip" data-grab="1"><span class="fbc-dots"></span><button class="fbc-rm" data-del="1" aria-label="Remove">'+AQ_X+'</button></div>' : '';
+  const rmFlow = (editable && flow) ? '<button class="fbc-rm fbc-rm-flow" data-del="1" aria-label="Remove">'+AQ_X+'</button>' : '';
+  const rz   = (editable && !flow && el.type!=='ts') ? '<div class="fbc-rz" data-rz="1" title="Drag to resize"></div>' : '';
   if(el.type==='clip'){
-    return '<div class="fbc-el fbc-clip'+(el.id===_fbcSel?' sel':'')+'" data-id="'+el.id+'" data-type="clip" style="'+style+'">'
-      + grip
-      + '<img src="'+escHtml(el.url||'')+'" alt="score excerpt" draggable="false"'+(editable?' data-grab="1"':' onclick="fbZoomClip(this.src)"')+'>'
+    return '<div class="fbc-el fbc-clip'+(el.id===_fbcSel?' sel':'')+'" data-id="'+el.id+'" data-type="clip"'+(style?' style="'+style+'"':'')+'>'
+      + grip + rmFlow
+      + '<img src="'+escHtml(el.url||'')+'" alt="score excerpt" draggable="false"'+((editable&&!flow)?' data-grab="1"':' onclick="fbZoomClip(this.src)"')+'>'
       + rz + '</div>';
   }
   if(el.type==='ts'){
-    return '<div class="fbc-el fbc-ts'+(el.id===_fbcSel?' sel':'')+'" data-id="'+el.id+'" data-type="ts" style="'+style+'"'+(editable?' data-grab="1"':'')+'>'
+    return '<div class="fbc-el fbc-ts'+(el.id===_fbcSel?' sel':'')+'" data-id="'+el.id+'" data-type="ts"'+(style?' style="'+style+'"':'')+((editable&&!flow)?' data-grab="1"':'')+'>'
       + (editable?'<button class="fbc-rm fbc-rm-ts" data-del="1" aria-label="Remove">'+AQ_X+'</button>':'')
       + '<button class="fbc-tschip"'+(editable?' tabindex="-1"':' onclick="fbSeek('+(+el.sec||0)+')"')+'>'+FB_PLAY+' '+_fmtTime(el.sec)+'</button>'
       + '</div>';
   }
   // text
-  return '<div class="fbc-el fbc-text-el'+(el.id===_fbcSel?' sel':'')+'" data-id="'+el.id+'" data-type="text" style="'+style+'">'
-    + grip
+  return '<div class="fbc-el fbc-text-el'+(el.id===_fbcSel?' sel':'')+'" data-id="'+el.id+'" data-type="text"'+(style?' style="'+style+'"':'')+'>'
+    + grip + rmFlow
     + '<div class="fbc-text"'+(editable?' contenteditable="true" data-ph="Write here…"':'')+'>'+_fbcTextHtml(el.text)+'</div>'
     + rz + '</div>';
 }
 function fbcRender(editable){
   _fbcEditable=!!editable;
   const c=document.getElementById('fbc'); if(!c) return;
+  const flow=_fbcFlow();
   c.classList.toggle('ro', !editable);
-  c.style.width=_fbc.w+'px';
-  c.innerHTML=_fbc.els.map(function(e){ return fbcElHtml(e, editable); }).join('')
+  c.classList.toggle('flow', flow);
+  // In flow mode the board becomes a reading column in the author's own placement order.
+  const els = flow ? _fbc.els.slice().sort(function(a,b){ return (a.y||0)-(b.y||0) || (a.x||0)-(b.x||0); }) : _fbc.els;
+  c.innerHTML=els.map(function(e){ return fbcElHtml(e, editable, flow); }).join('')
     + (editable && !_fbc.els.length ? '<div class="fbc-hint">Your feedback page. Use <b>Text</b> to start writing, <b>Clip score</b> to drop in a passage, <b>Timestamp</b> to mark a moment. Drag anything where you want it.</div>' : '');
   if(editable) fbcBind();
   fbcGrow();
 }
-// The page height is driven by the lowest element, then the whole canvas is scaled
-// to fit its column. A sized stage reserves the scaled footprint so scroll is right.
+// Mode-aware sizing. In the wide board the page height follows the lowest element and
+// the whole thing is scaled to fit its column; in flow mode nothing is scaled and the
+// column simply grows with its content. A resize that crosses the threshold re-renders.
 function fbcGrow(){
   const c=document.getElementById('fbc'); if(!c) return;
+  const stage=c.parentElement; const col=stage?stage.parentElement:null; if(!stage||!col) return;
+  const flow=_fbcFlow();
+  if(c.classList.contains('flow')!==flow){ fbcRender(_fbcEditable); return; }
+  if(flow){
+    _fbcScale=1;
+    c.style.transform='none'; c.style.transformOrigin='top left';
+    c.style.width='100%'; c.style.height='auto';
+    stage.style.width='100%'; stage.style.height='auto';
+    return;
+  }
   const page=c.closest('.fb-st-page, .fb-dv-page, .fr-page'); const minH = page ? Math.max(340, (page.clientHeight||360)-40) : 340;
   let maxB=0; _fbc.els.forEach(function(e){ const nd=c.querySelector('.fbc-el[data-id="'+e.id+'"]'); const h=nd?nd.offsetHeight:48; maxB=Math.max(maxB,(e.y||0)+h); });
   const natH=Math.max(minH, maxB+90);
+  c.style.width=_fbc.w+'px';
   c.style.height=natH+'px';
   fbcScale(natH);
 }
 function fbcScale(natH){
   const c=document.getElementById('fbc'); if(!c) return;
+  if(c.classList.contains('flow')) return;   // flow mode never zooms
   const stage=c.parentElement; const col=stage?stage.parentElement:null; if(!stage||!col) return;
   natH = natH || c.offsetHeight;
   const avail=col.clientWidth - 4;
@@ -2864,8 +2910,9 @@ function fbcDrag(e, id, node, handle){
   const sx=e.clientX, sy=e.clientY, ox=rec.x||0, oy=rec.y||0;
   node.classList.add('fbc-moving'); document.body.classList.add('fbc-dragging');
   try{ handle.setPointerCapture(e.pointerId); }catch(_){}
+  const maxX=_fbc.w - (rec.type==='ts' ? 120 : (rec.w||240));
   const move=function(ev){
-    rec.x=Math.max(0, fbcSnap(ox+(ev.clientX-sx)/s));
+    rec.x=Math.max(0, Math.min(maxX, fbcSnap(ox+(ev.clientX-sx)/s)));
     rec.y=Math.max(0, fbcSnap(oy+(ev.clientY-sy)/s));
     node.style.left=rec.x+'px'; node.style.top=rec.y+'px';
   };
@@ -2883,7 +2930,7 @@ function fbcResize(e, id, node, handle){
   const sx=e.clientX, ow=rec.w||node.offsetWidth;
   document.body.classList.add('fbc-dragging');
   try{ handle.setPointerCapture(e.pointerId); }catch(_){}
-  const move=function(ev){ rec.w=Math.max(120, Math.min(_fbc.w, fbcSnap(ow+(ev.clientX-sx)/s))); node.style.width=rec.w+'px'; fbcGrow(); };
+  const move=function(ev){ rec.w=Math.max(120, Math.min(_fbc.w-(rec.x||0), fbcSnap(ow+(ev.clientX-sx)/s))); node.style.width=rec.w+'px'; fbcGrow(); };
   const up=function(){
     try{ handle.releasePointerCapture(e.pointerId); }catch(_){}
     handle.removeEventListener('pointermove',move); handle.removeEventListener('pointerup',up); handle.removeEventListener('pointercancel',up);
