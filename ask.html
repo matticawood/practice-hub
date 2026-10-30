@@ -670,6 +670,36 @@
   .fb-play{ width:9px; height:9px; display:inline-block; vertical-align:-1px; flex:0 0 auto; }
   .fb-article{ font-size:1rem; line-height:1.75; color:var(--text); }
   .fb-article .fb-p{ margin:0 0 15px; overflow-wrap:anywhere; }
+  /* Reading-document feedback: a stack of points, each tying its clip and timestamps to the words. */
+  .fb-doc{ display:flex; flex-direction:column; gap:22px; }
+  .fb-doc.ro{ gap:20px; }
+  .fb-pt{ display:grid; grid-template-columns:1fr; gap:12px 22px; align-items:start; }
+  .fb-pt.has-clip{ grid-template-columns:minmax(0,1fr) minmax(210px,300px); }
+  @media(max-width:720px){ .fb-pt.has-clip{ grid-template-columns:1fr; } }
+  .fb-pt-main{ position:relative; min-width:0; }
+  .fb-ptext{ font-size:1rem; line-height:1.66; color:var(--head); outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .fb-doc:not(.ro) .fb-ptext{ min-height:1.6em; padding:11px 13px; border-radius:10px; background:rgba(255,255,255,.025); border:1px solid transparent; transition:border-color .14s, background .14s; }
+  .fb-doc:not(.ro) .fb-pt.foc .fb-ptext{ border-color:color-mix(in srgb,var(--green) 42%, transparent); background:rgba(255,255,255,.045); }
+  .fb-ptext[contenteditable]:empty:before{ content:attr(data-ph); color:var(--faint); }
+  .fb-ts-ed{ display:inline-flex; align-items:center; gap:4px; font-size:.82em; font-weight:700; padding:1px 8px; border-radius:999px; vertical-align:baseline; background:color-mix(in srgb,var(--green) 22%, transparent); color:#8fecc0; user-select:none; cursor:default; }
+  .fb-ts-ed svg{ width:9px; height:9px; }
+  .fb-pt-clip{ position:relative; margin:0; }
+  .fb-pt-clip img{ display:block; width:100%; aspect-ratio:16 / 7; object-fit:cover; object-position:center; border-radius:10px; border:1px solid var(--line); background:#f4efe3; }
+  .fb-doc.ro .fb-pt-clip img{ cursor:zoom-in; }
+  .fb-pt-clipx, .fb-pt-del{ position:absolute; z-index:2; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; cursor:pointer; background:rgba(12,14,13,.9); border:1px solid var(--line2); color:var(--muted); padding:0; }
+  .fb-pt-clipx{ top:8px; right:8px; opacity:0; transition:opacity .14s; }
+  .fb-pt-clip:hover .fb-pt-clipx{ opacity:1; }
+  .fb-pt-clipx svg, .fb-pt-del svg{ width:11px; height:11px; }
+  .fb-pt-clipx:hover, .fb-pt-del:hover{ color:#fff; border-color:#ef4444; background:#ef4444; }
+  .fb-pt-ctrls{ position:absolute; top:-9px; right:-9px; opacity:0; transition:opacity .14s; }
+  .fb-doc:not(.ro) .fb-pt:hover .fb-pt-ctrls, .fb-doc:not(.ro) .fb-pt.foc .fb-pt-ctrls{ opacity:1; }
+  .fb-pt-add{ align-self:flex-start; display:inline-flex; align-items:center; gap:7px; padding:9px 15px; border-radius:10px; border:1px dashed color-mix(in srgb,var(--green) 40%, var(--line)); background:rgba(52,211,153,.05); color:#8fecc0; font:inherit; font-size:.84rem; font-weight:600; cursor:pointer; transition:background .14s, border-color .14s; }
+  .fb-pt-add:hover{ background:rgba(52,211,153,.1); border-color:color-mix(in srgb,var(--green) 60%, var(--line)); }
+  .fb-pt-add svg{ width:14px; height:14px; }
+  .fb-doc-hint{ color:var(--faint); font-size:.92rem; line-height:1.6; }
+  /* Aspect-locked clip frame: drag to position, corner to scale, dim outside shows exactly what clips. */
+  .fb-clip-frame{ position:absolute; border:2px solid var(--green); box-shadow:0 0 0 9999px rgba(8,10,9,.55); border-radius:4px; cursor:move; touch-action:none; z-index:3; }
+  .fb-clip-h{ position:absolute; right:-10px; bottom:-10px; width:20px; height:20px; border-radius:50%; background:var(--green); border:2px solid #0b0b0f; cursor:nwse-resize; touch-action:none; }
   .fb-cite{ background:rgba(255,255,255,.08); color:var(--muted); font-size:.74rem; }
   .fb-cite-ref{ cursor:pointer; color:var(--purple,#a78bfa); font-weight:700; font-size:.66em; padding:0 1px; }
   .fb-cite-ref:hover{ text-decoration:underline; }
@@ -2549,7 +2579,7 @@ function fbScoreView(score){
   if(isImg) return '<div class="fb-scoreview"><img src="'+escHtml(url)+'" alt="Score"></div>';
   return '<div class="fb-media">'+aqMedia([score])+'</div>';
 }
-let _fbVideoId=null, _fbScore=null, _fbClipSel=null, _fbRange=null;
+let _fbVideoId=null, _fbScore=null, _fbClipSel=null, _fbRange=null, _fbClipShown=false;
 const FB_TS_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>';
 const FB_PLAY='<svg class="fb-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
 const FB_CITE_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M14 2v6h6"/></svg>';
@@ -2716,16 +2746,16 @@ function renderFeedbackEditor(view, r){
   _fbVideoId=vid;
   // Seed the writing page from a held draft, else start empty. Same lit room as the
   // member sees, but the feedback canvas is editable and the score is here to clip from.
-  if(r.response && r.response.canvas && Array.isArray(r.response.canvas.els)) fbcReset(r.response.canvas);
-  else fbcReset(null);
+  if(r.response && r.response.points && Array.isArray(r.response.points)) fbDocReset({ points:r.response.points });
+  else fbDocReset(null);
   const scoreZone = fm.score ? frScoreZone(fm.score, 'Their score') : '';
   const askNote = (r.body&&r.body.note)? '<div class="fr-ask-note"><b>They asked you to look at:</b> '+escHtml(r.body.note)+'</div>' : '';
   const tools = '<div class="fr-edit-tools">'
-    + '<button class="fr-tool" onclick="fbcAddText()">'+FB_TEXT_SVG+'Text</button>'
+    + '<button class="fr-tool" onclick="fbPtAdd()">'+FB_TEXT_SVG+'Text</button>'
     + '<button class="fr-tool" onclick="fbOpenClipper()">'+FB_CLIP_SVG+'Clip score</button>'
-    + '<button class="fr-tool" onclick="fbcAddTs()">'+FB_TS_SVG+'Timestamp</button>'
+    + '<button class="fr-tool" onclick="fbPtInsertTs()">'+FB_TS_SVG+'Timestamp</button>'
     + '</div>';
-  const refs = '<div class="fr-refs"><div class="fr-refs-h">Reference material <span>optional, cite in a text block</span></div><div id="inline-media-preview-fbref"></div>'
+  const refs = '<div class="fr-refs"><div class="fr-refs-h">Reference material <span>optional, shown beneath your feedback</span></div><div id="inline-media-preview-fbref"></div>'
     + (window.Comments&&Comments.toolbarHtml? Comments.toolbarHtml('fbref') : '') + '</div>';
   view.innerHTML = '<div class="aq-flow">'
     + '<div class="fr fr-edit" data-score="'+(scoreZone?'has':'none')+'">'
@@ -2742,7 +2772,7 @@ function renderFeedbackEditor(view, r){
     +       frRecZone(vid)
     +       askNote
     +       tools
-    +       '<div class="fr-page"><div class="fbc-stage"><div class="fbc" id="fbc"></div></div></div>'
+    +       '<div class="fr-page"><div class="fb-doc" id="fb-doc"></div></div>'
     +       refs
     +     '</div></div>'
     +     scoreZone
@@ -2752,7 +2782,7 @@ function renderFeedbackEditor(view, r){
     + '<div class="fb-clip-ov" id="fb-clipper"></div>'
     + '<div class="fr-loading"><div class="fr-loading-in"><div class="fr-spin"></div><div class="fr-loading-t">Opening the editor…</div></div></div>'
     + '</div>';
-  fbcRender(true);
+  fbDocRender(true);
   frRevealOnReady();
 }
 // Keep the editor's caret so a toolbar insert (timestamp / clip / cite) lands
@@ -3014,19 +3044,163 @@ function fbRenderDoc(doc){
     return '<p class="fb-p">'+(inner||'')+'</p>';
   }).join('');
 }
+// ── Reading-document feedback model ─────────────────────────────────────────────
+// The feedback is a stack of POINTS. Each point is a paragraph (text with inline
+// timestamp chips) that can have one score clip attached. The clip sits beside the
+// words on a wide screen and stacks under them on a phone; the timestamps read inside
+// the sentence. Everything reflows at real size, so it reads the same on any device.
+const FB_PLUS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+const FB_CLIP_AR=16/7;            // the one shape every clip takes, so clip boxes are uniform
+let _fbDoc={points:[]}, _fbDocEditable=false, _fbPtId=0, _fbPtFocus=null, _fbPtRange=null;
+function fbDocReset(state){
+  if(state && Array.isArray(state.points)){
+    _fbDoc={ points: state.points.map(function(p){ return { id:fbPtNewId(), runs:Array.isArray(p.runs)?p.runs.slice():[], clip:(p.clip&&p.clip.url)?{url:p.clip.url}:null }; }) };
+  } else { _fbDoc={ points:[] }; }
+  _fbPtFocus=null; _fbPtRange=null;
+}
+function fbPtNewId(){ return 'p'+(++_fbPtId); }
+function fbPtRunsHtml(runs, editable){
+  return (runs||[]).map(function(r){
+    if(r.x==='ts'){
+      if(editable) return '<span class="fb-ts-ed" contenteditable="false" data-sec="'+(+r.sec||0)+'">'+FB_PLAY+' '+_fmtTime(r.sec)+'</span>';
+      return '<button class="fb-ts-chip" onclick="fbSeek('+(+r.sec||0)+')">'+FB_PLAY+' '+_fmtTime(r.sec)+'</button>';
+    }
+    return escHtml(r.s||'').replace(/\n/g,'<br>');
+  }).join('');
+}
+function fbPtRowHtml(pt, editable){
+  const hasClip=!!(pt.clip&&pt.clip.url);
+  const textHtml=fbPtRunsHtml(pt.runs, editable);
+  const clipHtml = hasClip
+    ? '<figure class="fb-pt-clip"><img src="'+escHtml(pt.clip.url)+'" alt="score excerpt" draggable="false"'+(editable?'':' onclick="fbZoomClip(this.src)"')+'>'
+      + (editable?'<button class="fb-pt-clipx" onclick="fbPtClipRemove(\''+pt.id+'\')" aria-label="Remove clip">'+AQ_X+'</button>':'')
+      + '</figure>'
+    : '';
+  const ctrls = editable ? '<div class="fb-pt-ctrls"><button class="fb-pt-del" onclick="fbPtDel(\''+pt.id+'\')" aria-label="Delete point">'+AQ_X+'</button></div>' : '';
+  return '<div class="fb-pt'+(hasClip?' has-clip':'')+(editable&&pt.id===_fbPtFocus?' foc':'')+'" data-id="'+pt.id+'">'
+    + '<div class="fb-pt-main">'
+    +   '<div class="fb-ptext"'+(editable?' contenteditable="true" data-ph="Write your point. Use Timestamp to mark a moment."':'')+' data-id="'+pt.id+'">'+textHtml+'</div>'
+    +   ctrls
+    + '</div>'
+    + clipHtml
+    + '</div>';
+}
+function fbDocRender(editable){
+  _fbDocEditable=!!editable;
+  const d=document.getElementById('fb-doc'); if(!d) return;
+  d.classList.toggle('ro', !editable);
+  const pts=_fbDoc.points;
+  let html = pts.map(function(p){ return fbPtRowHtml(p, editable); }).join('');
+  if(editable){
+    if(!pts.length) html += '<div class="fb-doc-hint">Start with <b>Text</b> to write a point, then attach a <b>Clip score</b> or drop a <b>Timestamp</b> into the words. Each point reads on its own, on any screen.</div>';
+    html += '<button class="fb-pt-add" onclick="fbPtAdd()">'+FB_PLUS+' Add a point</button>';
+  }
+  d.innerHTML=html;
+  if(editable) fbDocBind();
+}
+function fbDocBind(){
+  const d=document.getElementById('fb-doc'); if(!d) return;
+  const save=function(t){ const s=window.getSelection(); if(s&&s.rangeCount&&t.contains(s.anchorNode)){ _fbPtRange=s.getRangeAt(0).cloneRange(); } };
+  Array.prototype.forEach.call(d.querySelectorAll('.fb-ptext[contenteditable]'), function(t){
+    t.addEventListener('focus', function(){ _fbPtFocus=t.dataset.id; _fbMarkFoc(); save(t); });
+    t.addEventListener('keyup', function(){ save(t); });
+    t.addEventListener('mouseup', function(){ save(t); });
+    t.addEventListener('input', function(){ save(t); });
+  });
+}
+function _fbMarkFoc(){ Array.prototype.forEach.call(document.querySelectorAll('#fb-doc .fb-pt'), function(p){ p.classList.toggle('foc', p.dataset.id===_fbPtFocus); }); }
+// Read the live contenteditable text back into the model before any re-render, so a
+// re-render (add / delete / attach) never discards what was just typed in another point.
+function _fbRunsFrom(el){
+  const runs=[]; const pushT=function(s){ if(s) runs.push({x:'t',s:s}); };
+  const walk=function(node){
+    Array.prototype.forEach.call(node.childNodes, function(n){
+      if(n.nodeType===3){ pushT(n.nodeValue); return; }
+      if(n.nodeType!==1) return;
+      if(n.classList && n.classList.contains('fb-ts-ed')){ runs.push({x:'ts',sec:+(n.dataset.sec||0)}); return; }
+      if(n.tagName==='BR'){ pushT('\n'); return; }
+      if(n.tagName==='DIV'||n.tagName==='P'){ if(runs.length){ const last=runs[runs.length-1]; if(!(last.x==='t'&&/\n$/.test(last.s))) pushT('\n'); } walk(n); return; }
+      walk(n);
+    });
+  };
+  walk(el);
+  return runs;
+}
+function fbDocSync(){
+  const d=document.getElementById('fb-doc'); if(!d) return;
+  _fbDoc.points.forEach(function(p){ const t=d.querySelector('.fb-ptext[data-id="'+p.id+'"]'); if(t) p.runs=_fbRunsFrom(t); });
+}
+function fbPtAdd(){
+  fbDocSync();
+  const p={ id:fbPtNewId(), runs:[], clip:null };
+  _fbDoc.points.push(p); _fbPtFocus=p.id; fbDocRender(true);
+  const t=document.querySelector('.fb-ptext[data-id="'+p.id+'"]'); if(t) t.focus();
+}
+function fbPtDel(id){
+  fbDocSync();
+  _fbDoc.points=_fbDoc.points.filter(function(p){ return p.id!==id; });
+  if(_fbPtFocus===id) _fbPtFocus=null;
+  fbDocRender(true);
+}
+function fbPtClipRemove(id){
+  fbDocSync();
+  const p=_fbDoc.points.find(function(x){ return x.id===id; }); if(p) p.clip=null;
+  fbDocRender(true);
+}
+function _fbPtCurrent(){
+  let p = _fbPtFocus ? _fbDoc.points.find(function(x){ return x.id===_fbPtFocus; }) : null;
+  if(!p) p = _fbDoc.points[_fbDoc.points.length-1] || null;
+  return p;
+}
+function fbPtAttachClip(url){
+  fbDocSync();
+  let p=_fbPtCurrent();
+  if(!p){ p={ id:fbPtNewId(), runs:[], clip:null }; _fbDoc.points.push(p); }
+  p.clip={ url:url }; _fbPtFocus=p.id; fbDocRender(true);
+}
+function fbPtInsertTs(){
+  const v=fbcVideoEl(); if(!v){ showToast('There is no recording to timestamp.', 3000); return; }
+  const sec=fbcVideoTime();
+  fbDocSync();
+  let p=_fbPtCurrent();
+  if(!p){ fbPtAdd(); p=_fbDoc.points[_fbDoc.points.length-1]; }
+  const t=document.querySelector('.fb-ptext[data-id="'+p.id+'"]'); if(!t) return;
+  t.focus(); _fbPtFocus=p.id;
+  const inFocus = _fbPtRange && t.contains(_fbPtRange.startContainer);
+  if(inFocus){ try{ const s=window.getSelection(); s.removeAllRanges(); s.addRange(_fbPtRange); }catch(_){} }
+  const html='<span class="fb-ts-ed" contenteditable="false" data-sec="'+sec+'">'+FB_PLAY+' '+_fmtTime(sec)+'</span> ';
+  try{ document.execCommand('insertHTML', false, html); }
+  catch(_){ t.insertAdjacentHTML('beforeend', html); }
+  try{ const s=window.getSelection(); if(s&&s.rangeCount&&t.contains(s.anchorNode)) _fbPtRange=s.getRangeAt(0).cloneRange(); }catch(_){}
+}
+function fbDocSerialize(){
+  fbDocSync();
+  const points=_fbDoc.points.map(function(p){
+    return { runs:(p.runs||[]).slice(), clip:(p.clip&&p.clip.url)?{url:p.clip.url}:null };
+  }).filter(function(p){
+    const hasText=(p.runs||[]).some(function(r){ return r.x==='ts' || (r.x==='t' && String(r.s||'').trim()); });
+    return hasText || p.clip;
+  });
+  return { points:points };
+}
+function fbDocHasContent(){ return fbDocSerialize().points.length>0; }
+function fbDocPlain(points){ return (points||[]).map(function(p){ return (p.runs||[]).map(function(r){ return r.x==='t'?r.s:''; }).join(''); }).join(' ').replace(/\s+/g,' ').trim(); }
+function fbRenderPoints(points){
+  return (points||[]).map(function(p){ return fbPtRowHtml({ id:'d'+(++_fbPtId), runs:p.runs||[], clip:p.clip||null }, false); }).join('');
+}
 window.fbSeek=function(sec){ const v=document.getElementById('fb-rec')||document.getElementById('fb-dvid')||document.querySelector('.fb-st-rec mux-player, .fb-st-rec video, .fb-dv-rec mux-player, .fb-dv-rec video'); if(v){ try{ v.currentTime=sec; if(v.play) v.play(); }catch(_){}; v.scrollIntoView({block:'nearest',behavior:'smooth'}); } };
 window.fbZoomClip=function(url){ let ov=document.getElementById('fb-zoom'); if(!ov){ ov=document.createElement('div'); ov.id='fb-zoom'; ov.className='fb-zoom'; ov.onclick=function(){ ov.classList.remove('open'); }; document.body.appendChild(ov); } ov.innerHTML='<img src="'+escHtml(url)+'" alt="">'; ov.classList.add('open'); };
 
 async function fbDeliver(id){
-  if(!fbcHasContent()){ showToast('Add some feedback to the page first.', 3000); return; }
+  if(!fbDocHasContent()){ showToast('Add some feedback to the page first.', 3000); return; }
   const ok=await askDialog({ title:'Deliver this feedback?', body:'It will be sent to them and the '+fmt(CAT.feedback.cost)+' credits they are holding will be charged. You can still exchange follow-up messages afterwards.', yes:'Deliver', no:'Keep editing', coin:false });
   if(!ok) return;
   const btn=document.getElementById('fb-deliver'); if(btn){ if(btn.disabled) return; btn.disabled=true; }
   let refs=[]; try{ if(window.Comments) refs=await Comments.uploadMedia('fbref'); }
   catch(e){ showToast(e&&e.message?e.message:'An attachment is still uploading.', 3800); if(btn) btn.disabled=false; return; }
-  const canvas=fbcSerialize();
-  const plain=canvas.els.filter(function(e){return e.type==='text';}).map(function(e){return e.text;}).join(' ').slice(0,400);
-  const resp={ canvas:canvas, refs:refs||[], text:plain };
+  const doc=fbDocSerialize();
+  const plain=fbDocPlain(doc.points).slice(0,400);
+  const resp={ points:doc.points, refs:refs||[], text:plain };
   const { error } = await db.rpc('deliver_credit_request', { p_id:id, p_response:resp });
   if(error){ showToast('Could not deliver. '+(error.message||''), 4200); if(btn) btn.disabled=false; return; }
   showToast('Feedback delivered. They have been notified.');
@@ -3057,7 +3231,9 @@ async function renderFeedbackDeliverable(view, r, owner, own){
   });
   const refsHtml = (resp.refs&&resp.refs.length)? '<div class="fb-refs"><div class="fb-refs-title">Reference material</div>'+resp.refs.map(function(m,i){ return '<div class="fb-ref" id="fb-ref-'+(i+1)+'"><span class="fb-ref-n">'+(i+1)+'</span><div class="fb-ref-m">'+aqMedia([m])+'</div></div>'; }).join('')+'</div>' : '';
   // Every moment Matt timestamped, as a clickable jump row under the video.
-  const stampSet = {}; (resp.doc||[]).forEach(function(b){ (b.runs||[]).forEach(function(rn){ if(rn.x==='ts') stampSet[+rn.sec||0]=1; }); });
+  const stampSet = {};
+  (resp.doc||[]).forEach(function(b){ (b.runs||[]).forEach(function(rn){ if(rn.x==='ts') stampSet[+rn.sec||0]=1; }); });
+  (resp.points||[]).forEach(function(p){ (p.runs||[]).forEach(function(rn){ if(rn.x==='ts') stampSet[+rn.sec||0]=1; }); });
   const stamps = Object.keys(stampSet).map(Number).sort(function(a,b){return a-b;});
   const marks = (stamps.length && vidId)? '<div class="fb-marks">'+stamps.map(function(s){ return '<button class="fb-mark" onclick="fbSeek('+s+')">'+FB_PLAY+' '+_fmtTime(s)+'</button>'; }).join('')+'</div>' : '';
   const k='askreply';
@@ -3083,9 +3259,12 @@ async function renderFeedbackDeliverable(view, r, owner, own){
   // The delivered page mirrors the editor: the recording top-left, the score as its
   // own page on the right, and Matt's composed writing (read-only, scaled to fit) in
   // between. Older deliveries that predate the canvas fall back to the article.
-  const hasCanvas = resp.canvas && Array.isArray(resp.canvas.els) && resp.canvas.els.length;
+  const hasPoints = resp.points && Array.isArray(resp.points) && resp.points.length;
+  const hasCanvas = !hasPoints && resp.canvas && Array.isArray(resp.canvas.els) && resp.canvas.els.length;
   const scoreZone = (!cancelled && fm.score) ? frScoreZone(fm.score, owner?'Their score':'Your sheet music') : '';
-  const feedInner = hasCanvas
+  const feedInner = hasPoints
+    ? (marks + '<div class="fb-doc ro" id="fb-doc">'+fbRenderPoints(resp.points)+'</div>')
+    : hasCanvas
     ? '<div class="fbc-stage"><div class="fbc" id="fbc"></div></div>'
     : (marks + '<article class="fb-article">'+(resp.doc? fbRenderDoc(resp.doc) : (resp.text? '<p class="fb-p">'+escHtml(resp.text)+'</p>':'<p class="fb-p">Your feedback is ready.</p>'))+'</article>');
   const feedBody = cancelled
@@ -3127,8 +3306,8 @@ async function renderFeedbackDeliverable(view, r, owner, own){
 async function fbOpenClipper(){
   if(!_fbScore){ const inp=document.getElementById('fb-attach-score'); if(inp) inp.click(); return; }  // attach first
   const ov=document.getElementById('fb-clipper'); if(!ov) return;
-  _fbClipSel=null; ov.classList.add('open');
-  ov.innerHTML = '<div class="fb-clip-sheet"><div class="fb-clip-head"><span>Drag a box over the passage, then clip it</span><button class="fb-clip-x" onclick="fbCloseClipper()" aria-label="Close">'+AQ_X+'</button></div><div class="fb-clip-body" id="fb-clip-body"><div class="fb-clip-loading">Loading the score…</div></div><div class="fb-clip-foot"><button class="fb-clip-btn" id="fb-clip-go" onclick="fbClipGo()" disabled>Clip selection</button></div></div>';
+  _fbClipSel=null; _fbClipShown=false; ov.classList.add('open');
+  ov.innerHTML = '<div class="fb-clip-sheet"><div class="fb-clip-head"><span>Drag the frame over the passage, scale it from the corner, then clip</span><button class="fb-clip-x" onclick="fbCloseClipper()" aria-label="Close">'+AQ_X+'</button></div><div class="fb-clip-body" id="fb-clip-body"><div class="fb-clip-loading">Loading the score…</div></div><div class="fb-clip-foot"><button class="fb-clip-btn" id="fb-clip-go" onclick="fbClipGo()" disabled>Clip this frame</button></div></div>';
   const bodyEl=document.getElementById('fb-clip-body');
   const src=_fbScore.url || _fbScore._localUrl;
   const name=_fbScore.name||src||'';
@@ -3165,17 +3344,52 @@ async function fbOpenClipper(){
     }
   }catch(e){ bodyEl.innerHTML='<div class="fb-clip-loading">Could not open the score for clipping. '+escHtml(e&&e.message||'')+'</div>'; }
 }
+// An aspect-locked frame the owner positions over the score and scales from its corner.
+// The shape never changes, so every clip lands in an identical box, and the dimmed area
+// outside the frame shows exactly what will be captured.
 function fbClipAttach(canvas){
   const wrap=document.createElement('div'); wrap.className='fb-clip-cwrap';
   canvas.parentNode.insertBefore(wrap, canvas); wrap.appendChild(canvas);
-  const box=document.createElement('div'); box.className='fb-clip-box'; box.style.display='none'; wrap.appendChild(box);
-  let sx=0, sy=0, drag=false;
-  const pt=function(e){ const r=canvas.getBoundingClientRect(); const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left; const cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top; return { x:Math.max(0,Math.min(canvas.clientWidth,cx)), y:Math.max(0,Math.min(canvas.clientHeight,cy)) }; };
-  const start=function(e){ const p=pt(e); sx=p.x; sy=p.y; drag=true; box.style.display='block'; box.style.left=sx+'px'; box.style.top=sy+'px'; box.style.width='0px'; box.style.height='0px'; if(e.type==='mousedown'){ window.addEventListener('mousemove',move); window.addEventListener('mouseup',end); } if(e.cancelable)e.preventDefault(); };
-  const move=function(e){ if(!drag)return; const p=pt(e); const x=Math.min(sx,p.x), y=Math.min(sy,p.y), w=Math.abs(p.x-sx), h=Math.abs(p.y-sy); box.style.left=x+'px'; box.style.top=y+'px'; box.style.width=w+'px'; box.style.height=h+'px'; if(e.cancelable)e.preventDefault(); };
-  const end=function(){ if(!drag)return; drag=false; window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',end); const rx=parseFloat(box.style.left)||0, ry=parseFloat(box.style.top)||0, rw=parseFloat(box.style.width)||0, rh=parseFloat(box.style.height)||0; const go=document.getElementById('fb-clip-go'); if(rw<8||rh<8){ box.style.display='none'; _fbClipSel=null; if(go) go.disabled=true; return; } const sxr=canvas.width/canvas.clientWidth, syr=canvas.height/canvas.clientHeight; _fbClipSel={ canvas:canvas, x:rx*sxr, y:ry*syr, w:rw*sxr, h:rh*syr }; Array.prototype.forEach.call(document.querySelectorAll('.fb-clip-box'), function(b){ if(b!==box) b.style.display='none'; }); if(go) go.disabled=false; };
-  canvas.addEventListener('mousedown',start);
-  canvas.addEventListener('touchstart',start,{passive:false}); canvas.addEventListener('touchmove',move,{passive:false}); canvas.addEventListener('touchend',end);
+  const frame=document.createElement('div'); frame.className='fb-clip-frame'; frame.style.display='none';
+  frame.innerHTML='<div class="fb-clip-h"></div>'; wrap.appendChild(frame);
+  const handle=frame.querySelector('.fb-clip-h');
+  const cw=function(){ return canvas.clientWidth; }, chh=function(){ return canvas.clientHeight; };
+  const clamp=function(x,y,w){
+    w=Math.min(Math.max(60,w), cw()); let h=w/FB_CLIP_AR;
+    if(h>chh()){ h=chh(); w=h*FB_CLIP_AR; }
+    x=Math.max(0,Math.min(x, cw()-w)); y=Math.max(0,Math.min(y, chh()-h));
+    return { x:x, y:y, w:w, h:h };
+  };
+  const apply=function(r){
+    frame.style.left=r.x+'px'; frame.style.top=r.y+'px'; frame.style.width=r.w+'px'; frame.style.height=r.h+'px';
+    const sxr=canvas.width/cw(), syr=canvas.height/chh();
+    _fbClipSel={ canvas:canvas, x:r.x*sxr, y:r.y*syr, w:r.w*sxr, h:r.h*syr };
+    const go=document.getElementById('fb-clip-go'); if(go) go.disabled=false;
+  };
+  const show=function(cx,cy){
+    Array.prototype.forEach.call(document.querySelectorAll('.fb-clip-frame'), function(f){ if(f!==frame) f.style.display='none'; });
+    let w=Math.min(cw()*0.74, cw()); let h=w/FB_CLIP_AR; if(h>chh()){ h=chh()*0.74; w=h*FB_CLIP_AR; }
+    const x=(cx==null? (cw()-w)/2 : cx-w/2), y=(cy==null? (chh()-h)/2 : cy-h/2);
+    frame.style.display='block'; apply(clamp(x,y,w));
+  };
+  const ptxy=function(e){ const rc=canvas.getBoundingClientRect(); return { x:(e.touches?e.touches[0].clientX:e.clientX)-rc.left, y:(e.touches?e.touches[0].clientY:e.clientY)-rc.top }; };
+  const startMove=function(e){
+    e.stopPropagation(); const p=ptxy(e); const ox=parseFloat(frame.style.left)||0, oy=parseFloat(frame.style.top)||0, w=parseFloat(frame.style.width)||0;
+    const mv=function(ev){ const q=ptxy(ev); apply(clamp(ox+(q.x-p.x), oy+(q.y-p.y), w)); if(ev.cancelable)ev.preventDefault(); };
+    const up=function(){ window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up); window.removeEventListener('touchmove',mv); window.removeEventListener('touchend',up); };
+    window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up); window.addEventListener('touchmove',mv,{passive:false}); window.addEventListener('touchend',up); if(e.cancelable)e.preventDefault();
+  };
+  const startScale=function(e){
+    e.stopPropagation(); const p=ptxy(e); const ox=parseFloat(frame.style.left)||0, oy=parseFloat(frame.style.top)||0, ow=parseFloat(frame.style.width)||0;
+    const mv=function(ev){ const q=ptxy(ev); apply(clamp(ox,oy, ow+(q.x-p.x))); if(ev.cancelable)ev.preventDefault(); };
+    const up=function(){ window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up); window.removeEventListener('touchmove',mv); window.removeEventListener('touchend',up); };
+    window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up); window.addEventListener('touchmove',mv,{passive:false}); window.addEventListener('touchend',up); if(e.cancelable)e.preventDefault();
+  };
+  canvas.addEventListener('mousedown', function(e){ const p=ptxy(e); show(p.x,p.y); startMove(e); });
+  canvas.addEventListener('touchstart', function(e){ const p=ptxy(e); show(p.x,p.y); startMove(e); }, {passive:false});
+  frame.addEventListener('mousedown', startMove); frame.addEventListener('touchstart', startMove, {passive:false});
+  handle.addEventListener('mousedown', startScale); handle.addEventListener('touchstart', startScale, {passive:false});
+  if(!_fbClipShown){ _fbClipShown=true; show(); }   // show a ready frame on the first page
 }
 async function fbClipGo(){
   if(!_fbClipSel) return; const s=_fbClipSel;
@@ -3189,9 +3403,9 @@ async function fbClipGo(){
       const up=await db.storage.from('community-uploads').upload(path, blob, { contentType:'image/png' });
       if(up.error) throw up.error;
       const url=db.storage.from('community-uploads').getPublicUrl(path).data.publicUrl;
-      fbcAddClip(url);
+      fbPtAttachClip(url);
       fbCloseClipper();
-    }catch(e){ showToast('Could not save the clip. '+(e&&e.message||''), 3800); const b=document.getElementById('fb-clip-go'); if(b){ b.disabled=false; b.textContent='Clip selection'; } }
+    }catch(e){ showToast('Could not save the clip. '+(e&&e.message||''), 3800); const b=document.getElementById('fb-clip-go'); if(b){ b.disabled=false; b.textContent='Clip this frame'; } }
   }, 'image/png');
 }
 function fbCloseClipper(){ const ov=document.getElementById('fb-clipper'); if(ov){ ov.classList.remove('open'); ov.innerHTML=''; } _fbClipSel=null; }
