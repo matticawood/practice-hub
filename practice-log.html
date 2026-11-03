@@ -19983,6 +19983,7 @@ async function renderDashboard() {
 
     const today = new Date(); today.setHours(0,0,0,0);
     const active = (allGoals || []).filter(g => {
+      if (g.completed_at) return false;   // a goal marked done lives in the done list, not on this glance (never "Overdue")
       if (g.goal_type === 'hours' || g.goal_type === 'both') {
         const logged = pgCalcHours(g);
         if (g.target_hours && logged >= g.target_hours) return false;
@@ -21201,7 +21202,9 @@ function renderGoalProjections() {
   const el = document.getElementById('stats-goal-projections');
   if (!el) return;
   if (viewingEmail !== myEmail && !isOwner()) { el.innerHTML = ''; return; }
-  const goals = allGoals || [];
+  // Completed goals are done, not "overdue" — they belong in the Goals page's done
+  // list, not in this projection of what's still being worked towards.
+  const goals = (allGoals || []).filter(g => !g.completed_at);
 
   const today = new Date(); today.setHours(0,0,0,0);
 
@@ -23050,6 +23053,7 @@ function _computeInsights() {
 
     // Urgent deadline
     for (const g of goals) {
+      if (g.completed_at) continue;   // a finished goal isn't an urgent deadline
       if (!g.target_date) continue;
       const target   = new Date(normDate(g.target_date) + 'T00:00:00');
       const daysLeft = Math.round((target - today) / 86400000);
@@ -35442,6 +35446,10 @@ async function _liveHydrate() {
   try { _loadDraftIntoForm(src); if (src.draftId || src.id) _currentDraftId = src.draftId || src.id; }
   catch (e) { console.warn("Live restore failed:", e); _liveEnd(); return false; }
   if (!formItems.length) { _liveEnd(); return false; }
+  // We just adopted this draft as the live session, so the "Open drafts" count
+  // must stop counting it (otherwise it shows 1 while the list, which excludes
+  // the current draft, is empty).
+  if (typeof _refreshDraftsButton === "function") _refreshDraftsButton();
 
   const idx = Math.min(Math.max(0, s.itemIdx || 0), formItems.length - 1);
   const needsType = !!s.needsType;
@@ -40856,6 +40864,9 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
         const { data, error } = await db.from("practice_session_drafts").insert(payload).select("id").single();
         if (error) throw error;
         _currentDraftId = data.id;
+        // The live session now has its own draft id; refresh the badge so it
+        // counts only OTHER drafts, matching what the list shows.
+        if (typeof _refreshDraftsButton === "function") _refreshDraftsButton();
       }
       _draftLastJSON = json;
       _setDraftStatus("Draft saved");
@@ -40997,6 +41008,9 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
   async function _openDraftsPanel() {
     await _fetchDrafts();
     _renderDraftsList();
+    // Keep the badge in step with the list it just rendered: both use the same
+    // filter, so computing them together guarantees they never disagree.
+    if (typeof _refreshDraftsButton === "function") _refreshDraftsButton();
     const p = document.getElementById("wiz-drafts-panel");
     if (p) p.style.display = "flex";
   }
@@ -41069,6 +41083,9 @@ document.addEventListener("DOMContentLoaded", () => buildDiscPips(metroSig));
     _closeDraftsPanel();
     _wizGoOverview();
     _updateDraftControls();
+    // The badge counts drafts OTHER than the one being edited; we just adopted
+    // this one, so refresh it or it keeps counting a draft the list now hides.
+    if (typeof _refreshDraftsButton === "function") _refreshDraftsButton();
   }
 
   async function _deleteDraftFromId(id) {
