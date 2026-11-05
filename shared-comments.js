@@ -486,12 +486,27 @@
     });
   }
 
+  // Always hand back a currently-valid access token. A video upload plus Mux
+  // processing can run for several minutes, longer than a token captured once at
+  // the start stays valid — so re-read the session before each request and force
+  // a refresh when it is missing or within 60s of expiry. Otherwise the status
+  // poll fails mid-flow with "Token expired".
+  async function _freshToken() {
+    const auth = _db().auth;
+    let session = (await auth.getSession())?.data?.session || null;
+    const expMs = session?.expires_at ? session.expires_at * 1000 : 0;
+    if (!session || (expMs && expMs - Date.now() < 60000)) {
+      try { const r = await auth.refreshSession(); if (r?.data?.session) session = r.data.session; } catch (_) {}
+    }
+    return session?.access_token || null;
+  }
+
   async function _uploadVideoToMux(file, onDone) {
     if (!file||!file.type.startsWith("video/")) { alert("Please select a video file."); return; }
     if (_muxUploading) { alert("A video upload is already in progress."); return; }
     _muxUploading=true;
     try {
-      const token=(await _db().auth.getSession()).data.session?.access_token;
+      let token = await _freshToken();
       if (!token) throw new Error("You appear to be signed out.");
       const res  = await fetch(_muxPath(),{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({action:"create-mux-upload"})});
       const data = await _readJsonOrThrow(res, "Create upload");
@@ -504,6 +519,8 @@
       let playbackId=null, assetId=null;
       for (let i=0;i<72;i++) {
         await new Promise(r=>setTimeout(r,5000));
+        token = await _freshToken();
+        if (!token) throw new Error("You appear to be signed out.");
         const sRes = await fetch(_muxPath(),{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({action:"get-mux-upload-status",uploadId})});
         const s    = await _readJsonOrThrow(sRes, "Status check");
         if(s.playbackId&&s.assetStatus==="ready"){playbackId=s.playbackId;assetId=s.assetId;break;}
