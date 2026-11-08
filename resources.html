@@ -5734,6 +5734,44 @@ const MINOR_FINGERING = {
   2:  { rh:[1,2,3,1,2,3,4], rhTop:5, lh:[5,4,3,2,1,3,2], lhTop:1 },  // D min
 };
 
+// ── Root-position arpeggio fingerings (triad: root · 3rd · 5th) ──────────────
+// Researched arpeggio-by-arpeggio. Fingers are indexed by chord tone
+// (0 root, 1 third, 2 fifth); rhTop/lhTop give the extreme (top RH / bottom LH)
+// finger so a thumb-cross note renders as e.g. 5/1, matching the scale display.
+//   PLAIN   = thumb on the root       RH 1 2 3 (5 top) · LH 5 3 2 1
+//   THUMB3  = thumb on the white 3rd  RH 4 1 2        · LH 2 1 4
+//   BB_MAJ  = B♭ major                RH 4 1 2        · LH 3 2 1
+//   BB_MIN  = B♭ minor                RH 2 3 1        · LH 3 2 1
+// Finger 3 (not 4) on the third throughout, per house choice.
+const ARP_PLAIN  = { rh:[1,2,3], rhTop:5, lh:[5,3,2], lhTop:1 };
+const ARP_THUMB3 = { rh:[4,1,2], rhTop:4, lh:[2,1,4], lhTop:2 };
+const ARP_BB_MAJ = { rh:[4,1,2], rhTop:4, lh:[3,2,1], lhTop:3 };
+const ARP_BB_MIN = { rh:[2,3,1], rhTop:2, lh:[3,2,1], lhTop:3 };
+
+// Keyed by root pitch-class (0 = C … 11 = B).
+const MAJOR_ARP_FINGERING = {
+  0:ARP_PLAIN, 2:ARP_PLAIN, 4:ARP_PLAIN, 5:ARP_PLAIN, 6:ARP_PLAIN,
+  7:ARP_PLAIN, 9:ARP_PLAIN, 11:ARP_PLAIN,            // C D E F G♭ G A B
+  1:ARP_THUMB3, 3:ARP_THUMB3, 8:ARP_THUMB3,          // D♭ E♭ A♭
+  10:ARP_BB_MAJ,                                      // B♭
+};
+const MINOR_ARP_FINGERING = {
+  0:ARP_PLAIN, 2:ARP_PLAIN, 3:ARP_PLAIN, 4:ARP_PLAIN, 5:ARP_PLAIN,
+  7:ARP_PLAIN, 9:ARP_PLAIN, 11:ARP_PLAIN,            // Cm Dm E♭m Em Fm Gm Am Bm
+  1:ARP_THUMB3, 6:ARP_THUMB3, 8:ARP_THUMB3,          // C♯m F♯m G♯m
+  10:ARP_BB_MIN,                                      // B♭m
+};
+
+// Pick the arpeggio fingering for a triad given its root pitch-class and the
+// semitone gaps to the 3rd and 5th. Major/minor only — diminished and
+// augmented triads have no standard arpeggio fingering, so return null
+// (the triad still highlights on the keyboard, just without finger numbers).
+function keArpFingering(rootSemi, thirdIv, fifthIv) {
+  if (thirdIv === 4 && fifthIv === 7) return MAJOR_ARP_FINGERING[rootSemi] || null;
+  if (thirdIv === 3 && fifthIv === 7) return MINOR_ARP_FINGERING[rootSemi] || null;
+  return null;
+}
+
 // Melodic minor ascending (raised ♮6 and ♮7)
 const MEL_INTERVALS     = [0,2,3,5,7,9,11];
 const MEL_CHORD_QUALITY = ['Minor','Minor','Augmented','Major','Major','Diminished','Diminished'];
@@ -5790,6 +5828,12 @@ let keCurrentRootSemi   = 0;
 let keCurrentScaleIntvl = MAJOR_INTERVALS;
 let keCurrentFingeringObj = null;
 
+// Active diatonic-chord arpeggio state (set when a chord card is tapped)
+let keActiveChordSemis  = null;  // [root, third, fifth] pitch-classes
+let keActiveChordRoot   = 0;     // root pitch-class
+let keActiveChordIntvl  = null;  // [0, thirdInterval, fifthInterval]
+let keActiveChordArpObj = null;  // fingering object, or null for dim/aug
+
 function buildFingerMap(rootSemi, intervals, fingeringObj, hand) {
   if (!fingeringObj) return null;
   const fingers     = fingeringObj[hand];
@@ -5814,10 +5858,15 @@ function buildFingerMap(rootSemi, intervals, fingeringObj, hand) {
 
 function toggleFingerHand(hand) {
   keFingerHand = hand;
-  keCurrentFingerMap = buildFingerMap(
-    keCurrentRootSemi, keCurrentScaleIntvl, keCurrentFingeringObj, hand
-  );
-  keUpdatePiano(keCurrentScaleSemis, false);
+  if (keActiveChordIdx >= 0 && keActiveChordSemis) {
+    // A diatonic-chord arpeggio is showing — re-render it for the new hand.
+    keUpdatePiano(keActiveChordSemis, true);
+  } else {
+    keCurrentFingerMap = buildFingerMap(
+      keCurrentRootSemi, keCurrentScaleIntvl, keCurrentFingeringObj, hand
+    );
+    keUpdatePiano(keCurrentScaleSemis, false);
+  }
   document.querySelectorAll('.ke-fng-btn').forEach(b => {
     const active = b.dataset.hand === hand;
     /* One colour. This set indigo while the markup set gold, so the toggle
@@ -5984,12 +6033,21 @@ function buildPianoSVG(highlightSemis, isChord, fingerMap) {
 function keUpdatePiano(semis, isChord) {
   const el = document.getElementById('ke-piano');
   if (!el) return;
-  const fm = (!isChord && semis.length > 1) ? keCurrentFingerMap : null;
+  let fm = null;
+  if (isChord) {
+    // Arpeggio fingering for the selected triad (null for dim/aug → no numbers)
+    fm = keActiveChordArpObj
+      ? buildFingerMap(keActiveChordRoot, keActiveChordIntvl, keActiveChordArpObj, keFingerHand)
+      : null;
+  } else if (semis.length > 1) {
+    fm = keCurrentFingerMap;
+  }
   el.innerHTML = buildPianoSVG(semis, isChord, fm);
 }
 
 function keClickNote(semi) {
   keActiveChordIdx = -1;
+  keActiveChordSemis = null; keActiveChordArpObj = null; keActiveChordIntvl = null;
   document.querySelectorAll('.chord-card.ke-active').forEach(function(c){ c.classList.remove('ke-active'); });
   const notes = document.querySelectorAll('.scale-note');
   if (keActiveNoteSemi === semi) {
@@ -6010,11 +6068,20 @@ function keClickChord(semis, idx) {
   const cards = document.querySelectorAll('.chord-card');
   if (keActiveChordIdx === idx) {
     keActiveChordIdx = -1;
+    keActiveChordSemis = null; keActiveChordArpObj = null; keActiveChordIntvl = null;
     cards.forEach(function(c){ c.classList.remove('ke-active'); });
     keUpdatePiano(keCurrentScaleSemis, false);
   } else {
     keActiveChordIdx = idx;
     cards.forEach(function(c, i){ c.classList.toggle('ke-active', i === idx); });
+    // Work out the triad's quality from its intervals, then its arpeggio fingering.
+    const r  = ((semis[0] % 12) + 12) % 12;
+    const tv = ((semis[1] - semis[0]) % 12 + 12) % 12;
+    const fv = ((semis[2] - semis[0]) % 12 + 12) % 12;
+    keActiveChordSemis  = semis;
+    keActiveChordRoot   = r;
+    keActiveChordIntvl  = [0, tv, fv];
+    keActiveChordArpObj = keArpFingering(r, tv, fv);  // null = dim/aug (highlight only)
     keUpdatePiano(semis, true);
   }
 }
@@ -6353,6 +6420,7 @@ function renderKeyInfo() {
   const detailEl  = document.getElementById('ke-detail');
   if (!summaryEl || !detailEl) return;
   keActiveChordIdx = -1;
+  keActiveChordSemis = null; keActiveChordArpObj = null; keActiveChordIntvl = null;
   keActiveNoteSemi = -1;
 
   const flipped = keSelection.eharmFlipped;
