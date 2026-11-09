@@ -705,6 +705,26 @@
       width: 100%; height: 100%;
       display: block;
     }
+    /* Lazy video placeholder: poster + play button shown until the real
+       <mux-player> is swapped in as the card nears the viewport. Looks the same
+       as an un-played player; stops the feed mounting every HLS stream at once. */
+    .mux-lazy {
+      position: relative; width: 100%; height: 100%;
+      display: block; cursor: pointer; background: var(--surface);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mux-lazy-poster { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .mux-lazy-play {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 52px; height: 52px; border-radius: 50%;
+      background: rgba(20,20,22,.6); box-shadow: 0 2px 10px rgba(0,0,0,.35);
+      pointer-events: none;
+    }
+    .mux-lazy-play::after {
+      content: ""; position: absolute; top: 50%; left: 54%; transform: translate(-50%, -50%);
+      border-style: solid; border-width: 9px 0 9px 15px;
+      border-color: transparent transparent transparent #fff;
+    }
 
     /* ── Composer upload progress overlay ────────────────────────────────────── */
     .mux-upload-overlay {
@@ -6550,7 +6570,7 @@ function contentFeedCardHTML(p) {
   let mediaHtml = "";
   (Array.isArray(p.media) ? p.media : []).forEach(m => {
     if (m.type === "mux") {
-      mediaHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()"><div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div></div>`;
+      mediaHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()"><div class="mux-wrap">${muxLazyMarkup(m.playbackId)}</div></div>`;
     } else if (m.type === "youtube") {
       mediaHtml += `<div class="post-card-inline-media post-card-embed" onclick="event.stopPropagation()"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "vimeo") {
@@ -6624,7 +6644,7 @@ function updateFeedCardHTML(p) {
   let mediaHtml = "";
   (Array.isArray(p.media) ? p.media : []).forEach(m => {
     if (m.type === "mux") {
-      mediaHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()"><div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div></div>`;
+      mediaHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()"><div class="mux-wrap">${muxLazyMarkup(m.playbackId)}</div></div>`;
     } else if (m.type === "youtube") {
       mediaHtml += `<div class="post-card-inline-media post-card-embed" onclick="event.stopPropagation()"><iframe src="https://www.youtube.com/embed/${escHtml(m.ytId)}" allowfullscreen loading="lazy"></iframe></div>`;
     } else if (m.type === "image") {
@@ -7317,7 +7337,7 @@ function postCardHTML(p) {
       </div>`;
     } else if (m.type === "mux") {
       richMedia += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()">
-        <div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div>
+        <div class="mux-wrap">${muxLazyMarkup(m.playbackId)}</div>
       </div>`;
     } else if (m.type === "video") {
       richMedia += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()">
@@ -7816,7 +7836,7 @@ function practiceLogCardHTML(p) {
     }
     media.forEach(m => {
       if (m.type === "mux") {
-        bodyHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()" style="margin-top:8px"><div class="mux-wrap"><mux-player playback-id="${escHtml(m.playbackId)}" controls></mux-player></div></div>`;
+        bodyHtml += `<div class="post-card-inline-media post-card-video" onclick="event.stopPropagation()" style="margin-top:8px"><div class="mux-wrap">${muxLazyMarkup(m.playbackId)}</div></div>`;
       } else if (m.type === "audio") {
         bodyHtml += `<div class="post-card-inline-media" onclick="event.stopPropagation()" style="margin-top:8px"><audio controls preload="metadata" style="width:100%"><source src="${escHtml(m.url)}" type="${_audioMimeType(m)}"></audio></div>`;
       }
@@ -11247,9 +11267,77 @@ async function startNewChat() {
   }
 }
 
+// ── Lazy Mux players ──────────────────────────────────────────────────────────
+// A feed full of recordings used to mount a live HLS player for every video at
+// once, which froze the app (worst in the iOS webview). Instead we render a
+// poster placeholder and swap in the real <mux-player> only as the card nears
+// the viewport — same look, one-at-a-time loading. Any placeholder also plays on
+// tap. Mux's public thumbnail is the poster, so there's no blank/loading gap.
+function muxLazyMarkup(pid) {
+  const id = escHtml(pid);
+  return '<div class="mux-lazy" data-pbid="' + id + '" aria-label="Play recording">'
+    +      '<img class="mux-lazy-poster" src="https://image.mux.com/' + id + '/thumbnail.jpg?width=640" alt="" draggable="false" onerror="this.remove()">'
+    +      '<span class="mux-lazy-play" aria-hidden="true"></span>'
+    +    '</div>';
+}
+let _muxLazyIO = null;
+// Replace a placeholder in place with the real player — restores the exact DOM
+// the eager renderer used, so everything downstream (aspect fix, controls) is
+// identical. Returns the mounted <mux-player>, or undefined.
+function _muxLazyUpgrade(box) {
+  if (!box || box.dataset.upgraded) return;
+  const pid  = box.dataset.pbid;
+  const wrap = box.parentElement;
+  if (!pid || !wrap) return;
+  box.dataset.upgraded = '1';
+  if (_muxLazyIO) { try { _muxLazyIO.unobserve(box); } catch (e) {} }
+  wrap.innerHTML = '<mux-player playback-id="' + escHtml(pid) + '" controls></mux-player>';
+  const player = wrap.querySelector('mux-player');
+  if (player) {
+    const fix = () => {
+      const w = player.videoWidth, h = player.videoHeight;
+      if (!w || !h) return;
+      wrap.style.aspectRatio = `${w} / ${h}`;
+      if (h > w) { wrap.style.maxHeight = 'min(600px, 75vh)'; wrap.style.width = 'auto'; wrap.style.maxWidth = '100%'; wrap.style.margin = '0 auto'; }
+    };
+    if (player.videoWidth) fix(); else player.addEventListener('loadedmetadata', fix, { once: true });
+  }
+  return player;
+}
+// Register any not-yet-observed placeholders with the viewport observer. Falls
+// back to mounting everything immediately where IntersectionObserver is absent.
+function _muxLazyScan() {
+  const boxes = document.querySelectorAll('.mux-lazy:not([data-upgraded])');
+  if (!('IntersectionObserver' in window)) { boxes.forEach(_muxLazyUpgrade); return; }
+  if (!_muxLazyIO) {
+    _muxLazyIO = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) _muxLazyUpgrade(e.target); });
+    }, { rootMargin: '600px 0px' });
+  }
+  boxes.forEach(box => { if (!box.dataset.obs) { box.dataset.obs = '1'; _muxLazyIO.observe(box); } });
+}
+// Tap/click a poster → mount and play right away (also the fallback for any
+// render path the scan didn't reach, so a video is never un-openable).
+document.addEventListener('click', (e) => {
+  const box = (e.target && e.target.closest) ? e.target.closest('.mux-lazy') : null;
+  if (!box) return;
+  e.stopPropagation();
+  const player = _muxLazyUpgrade(box);
+  if (player && player.play) { try { const r = player.play(); if (r && r.catch) r.catch(() => {}); } catch (e2) {} }
+}, true);
+// Safety net: pick up placeholders added by any path once the user scrolls.
+(function () {
+  let queued = false;
+  document.addEventListener('scroll', () => {
+    if (queued) return; queued = true;
+    requestAnimationFrame(() => { queued = false; _muxLazyScan(); });
+  }, true);
+})();
+
 // ── Mux aspect ratio correction ───────────────────────────────────────────────
 // After rendering, detect portrait videos and apply the tall wrapper class.
 function fixMuxAspectRatios() {
+  _muxLazyScan();
   document.querySelectorAll('.mux-wrap').forEach(wrap => {
     const player = wrap.querySelector('mux-player');
     if (!player) return;
