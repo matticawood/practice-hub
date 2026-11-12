@@ -11280,26 +11280,28 @@ function muxLazyMarkup(pid) {
     +      '<span class="mux-lazy-play" aria-hidden="true"></span>'
     +    '</div>';
 }
-let _muxLazyUpIO = null;    // near the viewport     -> mount the real player
-let _muxLazyDownIO = null;  // far from the viewport -> tear it back to a poster
-// Read the playback id off a wrapper whichever state it is in (poster or player),
-// so a torn-down wrap can always be rebuilt and re-mounted later.
-function _muxWrapPid(wrap) {
-  const box = wrap.querySelector('.mux-lazy');
-  if (box && box.dataset.pbid) return box.dataset.pbid;
-  const p = wrap.querySelector('mux-player');
-  return p ? (p.getAttribute('playback-id') || '') : '';
-}
-// Swap the poster for the real player. Idempotent — restores the exact DOM the
-// eager renderer used, so everything downstream (aspect fix, controls) matches.
-function _muxLazyUpgrade(wrap) {
+// Feed videos render as a lightweight poster + play button (muxLazyMarkup) and
+// become a real <mux-player> ONLY when the member taps them. We deliberately do
+// not auto-mount players as cards scroll into view. iOS (WKWebView) can hold only
+// a few live HLS pipelines at once; viewport auto-mount — even with teardown —
+// still churns several players in and out while scrolling, which trips that limit
+// and surfaces "Media failed to decode" / "Invalid playback URL" on videos whose
+// playback ids are perfectly valid. Tap-to-mount, with a single active player,
+// means at most one HLS stream is ever live, so the ceiling is never reached.
+let _muxActiveWrap = null;
+// Mount the real player in a wrapper, releasing whichever one was playing before
+// (single active player). Returns the mounted <mux-player>, or undefined.
+function _muxMountPlayer(wrap) {
   if (!wrap) return;
   let player = wrap.querySelector('mux-player');
-  if (player) return player;
-  const pid = _muxWrapPid(wrap);
-  if (!pid) return;
+  if (player) return player;                       // already mounted
+  const box = wrap.querySelector('.mux-lazy');
+  const pid = box ? box.dataset.pbid : '';
+  if (!pid) return;                                // no id — leave the poster as-is
+  if (_muxActiveWrap && _muxActiveWrap !== wrap) { try { _muxTeardown(_muxActiveWrap); } catch (e) {} }
   wrap.innerHTML = '<mux-player playback-id="' + escHtml(pid) + '" controls></mux-player>';
   player = wrap.querySelector('mux-player');
+  _muxActiveWrap = wrap;
   if (player) {
     const fix = () => {
       const w = player.videoWidth, h = player.videoHeight;
@@ -11311,63 +11313,30 @@ function _muxLazyUpgrade(wrap) {
   }
   return player;
 }
-// Tear a mounted player back down to its poster. This is the bit that keeps iOS
-// from ever holding more than a handful of live HLS decoders at once — the cause
-// of the "Media failed to decode" / "Invalid playback URL" errors deep in a long
-// feed. The wrap keeps its measured aspect-ratio, so nothing jumps, and a player
-// that is actively playing is left alone so scrolling never kills what you're watching.
-function _muxLazyDowngrade(wrap) {
+// Put a wrapper back to its poster, freeing the HLS pipeline it held.
+function _muxTeardown(wrap) {
   if (!wrap) return;
   const player = wrap.querySelector('mux-player');
   if (!player) return;
-  try { if (!player.paused) return; } catch (e) {}
   const pid = player.getAttribute('playback-id') || '';
-  if (!pid) return;
   try { player.pause && player.pause(); } catch (e) {}
-  wrap.innerHTML = muxLazyMarkup(pid);
+  if (pid) wrap.innerHTML = muxLazyMarkup(pid);
+  if (_muxActiveWrap === wrap) _muxActiveWrap = null;
 }
-// Observe every wrapper with two thresholds (hysteresis): mount within 500px of
-// the viewport, tear down only past 1200px. The gap stops a wrap drifting around
-// the edge from thrashing between the two states.
-function _muxLazyScan() {
-  const wraps = document.querySelectorAll('.mux-wrap');
-  if (!('IntersectionObserver' in window)) { wraps.forEach(_muxLazyUpgrade); return; }
-  if (!_muxLazyUpIO) {
-    _muxLazyUpIO = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if (e.isIntersecting) _muxLazyUpgrade(e.target); });
-    }, { rootMargin: '500px 0px' });
-  }
-  if (!_muxLazyDownIO) {
-    _muxLazyDownIO = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if (!e.isIntersecting) _muxLazyDowngrade(e.target); });
-    }, { rootMargin: '1200px 0px' });
-  }
-  wraps.forEach(wrap => {
-    if (wrap.dataset.muxObs) return;
-    wrap.dataset.muxObs = '1';
-    _muxLazyUpIO.observe(wrap);
-    _muxLazyDownIO.observe(wrap);
-  });
-}
-// Tap/click a poster → mount and play right away (also the fallback for any
-// render path the scan didn't reach, so a video is never un-openable).
+// No viewport auto-mount any more: posters are static markup, nothing to scan.
+// Kept as a no-op so existing callers (fixMuxAspectRatios) stay unchanged.
+function _muxLazyScan() {}
+// Tap/click a poster → mount and play. Capture phase so playing the inline video
+// wins over the card's own click (which opens the post).
 document.addEventListener('click', (e) => {
   const box = (e.target && e.target.closest) ? e.target.closest('.mux-lazy') : null;
   if (!box) return;
   const wrap = box.parentElement;
   if (!wrap) return;
   e.stopPropagation();
-  const player = _muxLazyUpgrade(wrap);
+  const player = _muxMountPlayer(wrap);
   if (player && player.play) { try { const r = player.play(); if (r && r.catch) r.catch(() => {}); } catch (e2) {} }
 }, true);
-// Safety net: pick up wrappers added by any render path once the user scrolls.
-(function () {
-  let queued = false;
-  document.addEventListener('scroll', () => {
-    if (queued) return; queued = true;
-    requestAnimationFrame(() => { queued = false; _muxLazyScan(); });
-  }, true);
-})();
 
 // ── Mux aspect ratio correction ───────────────────────────────────────────────
 // After rendering, detect portrait videos and apply the tall wrapper class.
