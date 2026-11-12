@@ -11280,19 +11280,26 @@ function muxLazyMarkup(pid) {
     +      '<span class="mux-lazy-play" aria-hidden="true"></span>'
     +    '</div>';
 }
-let _muxLazyIO = null;
-// Replace a placeholder in place with the real player — restores the exact DOM
-// the eager renderer used, so everything downstream (aspect fix, controls) is
-// identical. Returns the mounted <mux-player>, or undefined.
-function _muxLazyUpgrade(box) {
-  if (!box || box.dataset.upgraded) return;
-  const pid  = box.dataset.pbid;
-  const wrap = box.parentElement;
-  if (!pid || !wrap) return;
-  box.dataset.upgraded = '1';
-  if (_muxLazyIO) { try { _muxLazyIO.unobserve(box); } catch (e) {} }
+let _muxLazyUpIO = null;    // near the viewport     -> mount the real player
+let _muxLazyDownIO = null;  // far from the viewport -> tear it back to a poster
+// Read the playback id off a wrapper whichever state it is in (poster or player),
+// so a torn-down wrap can always be rebuilt and re-mounted later.
+function _muxWrapPid(wrap) {
+  const box = wrap.querySelector('.mux-lazy');
+  if (box && box.dataset.pbid) return box.dataset.pbid;
+  const p = wrap.querySelector('mux-player');
+  return p ? (p.getAttribute('playback-id') || '') : '';
+}
+// Swap the poster for the real player. Idempotent — restores the exact DOM the
+// eager renderer used, so everything downstream (aspect fix, controls) matches.
+function _muxLazyUpgrade(wrap) {
+  if (!wrap) return;
+  let player = wrap.querySelector('mux-player');
+  if (player) return player;
+  const pid = _muxWrapPid(wrap);
+  if (!pid) return;
   wrap.innerHTML = '<mux-player playback-id="' + escHtml(pid) + '" controls></mux-player>';
-  const player = wrap.querySelector('mux-player');
+  player = wrap.querySelector('mux-player');
   if (player) {
     const fix = () => {
       const w = player.videoWidth, h = player.videoHeight;
@@ -11304,28 +11311,56 @@ function _muxLazyUpgrade(box) {
   }
   return player;
 }
-// Register any not-yet-observed placeholders with the viewport observer. Falls
-// back to mounting everything immediately where IntersectionObserver is absent.
+// Tear a mounted player back down to its poster. This is the bit that keeps iOS
+// from ever holding more than a handful of live HLS decoders at once — the cause
+// of the "Media failed to decode" / "Invalid playback URL" errors deep in a long
+// feed. The wrap keeps its measured aspect-ratio, so nothing jumps, and a player
+// that is actively playing is left alone so scrolling never kills what you're watching.
+function _muxLazyDowngrade(wrap) {
+  if (!wrap) return;
+  const player = wrap.querySelector('mux-player');
+  if (!player) return;
+  try { if (!player.paused) return; } catch (e) {}
+  const pid = player.getAttribute('playback-id') || '';
+  if (!pid) return;
+  try { player.pause && player.pause(); } catch (e) {}
+  wrap.innerHTML = muxLazyMarkup(pid);
+}
+// Observe every wrapper with two thresholds (hysteresis): mount within 500px of
+// the viewport, tear down only past 1200px. The gap stops a wrap drifting around
+// the edge from thrashing between the two states.
 function _muxLazyScan() {
-  const boxes = document.querySelectorAll('.mux-lazy:not([data-upgraded])');
-  if (!('IntersectionObserver' in window)) { boxes.forEach(_muxLazyUpgrade); return; }
-  if (!_muxLazyIO) {
-    _muxLazyIO = new IntersectionObserver((entries) => {
+  const wraps = document.querySelectorAll('.mux-wrap');
+  if (!('IntersectionObserver' in window)) { wraps.forEach(_muxLazyUpgrade); return; }
+  if (!_muxLazyUpIO) {
+    _muxLazyUpIO = new IntersectionObserver((entries) => {
       entries.forEach(e => { if (e.isIntersecting) _muxLazyUpgrade(e.target); });
-    }, { rootMargin: '600px 0px' });
+    }, { rootMargin: '500px 0px' });
   }
-  boxes.forEach(box => { if (!box.dataset.obs) { box.dataset.obs = '1'; _muxLazyIO.observe(box); } });
+  if (!_muxLazyDownIO) {
+    _muxLazyDownIO = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (!e.isIntersecting) _muxLazyDowngrade(e.target); });
+    }, { rootMargin: '1200px 0px' });
+  }
+  wraps.forEach(wrap => {
+    if (wrap.dataset.muxObs) return;
+    wrap.dataset.muxObs = '1';
+    _muxLazyUpIO.observe(wrap);
+    _muxLazyDownIO.observe(wrap);
+  });
 }
 // Tap/click a poster → mount and play right away (also the fallback for any
 // render path the scan didn't reach, so a video is never un-openable).
 document.addEventListener('click', (e) => {
   const box = (e.target && e.target.closest) ? e.target.closest('.mux-lazy') : null;
   if (!box) return;
+  const wrap = box.parentElement;
+  if (!wrap) return;
   e.stopPropagation();
-  const player = _muxLazyUpgrade(box);
+  const player = _muxLazyUpgrade(wrap);
   if (player && player.play) { try { const r = player.play(); if (r && r.catch) r.catch(() => {}); } catch (e2) {} }
 }, true);
-// Safety net: pick up placeholders added by any path once the user scrolls.
+// Safety net: pick up wrappers added by any render path once the user scrolls.
 (function () {
   let queued = false;
   document.addEventListener('scroll', () => {
