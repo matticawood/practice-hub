@@ -66,6 +66,9 @@ window.PR_COURSES = [
     blurb: "A full lower intermediate piece, bar by bar, including how to make decisions and learn effectively.",
     color: "#6366f1", audience: "Lower intermediate",
     format: "video", thumbId: "01rbiH0276et0100OynbArEu8s7bFobahtE9Re01SS54rXwU", thumbTime: 3,
+    // Finishing a lesson auto-logs its minutes. This course is a piece
+    // walkthrough, so the time belongs on the repertoire track, not musicianship.
+    practiceType: "piece",
     // Launch feature: leads the Courses hero and the Learn hero until this
     // date, then both fall back to normal rotation. One week from publishing.
     featuredUntil: "2026-11-20",
