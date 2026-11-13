@@ -643,6 +643,8 @@ const ACHIEVEMENTS = [
   { id:"course_absbeg_complete", cat:"courses", icon:"🎓", name:"Absolute Beginner: Completed", desc:"Complete every lesson in The Absolute Beginner Course", check:(s,x)=>(x.absBegTotal||0)>0 && (x.absBegDone||0)>=(x.absBegTotal||0),  prog:(s,x)=>[x.absBegDone||0, x.absBegTotal||28] },
   { id:"course_firstpiece_start",    cat:"courses", icon:"🎹", name:"First Piece: Started",   desc:"Begin Learn Your First Piece",                    check:(s,x)=>(x.firstPieceDone||0)>=1,  prog:(s,x)=>[Math.min(x.firstPieceDone||0,1),1] },
   { id:"course_firstpiece_complete", cat:"courses", icon:"🎵", name:"First Piece: Learned",    desc:"Learn your first full piece with Learn Your First Piece", check:(s,x)=>(x.firstPieceTotal||0)>0 && (x.firstPieceDone||0)>=(x.firstPieceTotal||0),  prog:(s,x)=>[x.firstPieceDone||0, x.firstPieceTotal||19] },
+  { id:"course_lowerint_start",    cat:"courses", icon:"🎶", name:"Lower Intermediate: Started",  desc:"Begin the Lower Intermediate Walkthrough",                    check:(s,x)=>(x.lowerIntDone||0)>=1,  prog:(s,x)=>[Math.min(x.lowerIntDone||0,1),1] },
+  { id:"course_lowerint_complete", cat:"courses", icon:"🏅", name:"Lower Intermediate: Learned",  desc:"Learn a full lower intermediate piece with the Lower Intermediate Walkthrough", check:(s,x)=>(x.lowerIntTotal||0)>0 && (x.lowerIntDone||0)>=(x.lowerIntTotal||0),  prog:(s,x)=>[x.lowerIntDone||0, x.lowerIntTotal||14] },
   { id:"course_upperint_start",    cat:"courses", icon:"🎼", name:"Upper Intermediate: Started",  desc:"Begin the Upper Intermediate Walkthrough",                    check:(s,x)=>(x.upperIntDone||0)>=1,  prog:(s,x)=>[Math.min(x.upperIntDone||0,1),1] },
   { id:"course_upperint_complete", cat:"courses", icon:"🏆", name:"Upper Intermediate: Learned",  desc:"Learn a full upper intermediate piece with the Upper Intermediate Walkthrough", check:(s,x)=>(x.upperIntTotal||0)>0 && (x.upperIntDone||0)>=(x.upperIntTotal||0),  prog:(s,x)=>[x.upperIntDone||0, x.upperIntTotal||16] },
   { id:"course_sightread_start",    cat:"courses", icon:"👀", name:"Sight Reading: Started",  desc:"Begin Sight Reading for Beginners",  check:(s,x)=>(x.sightReadDone||0)>=1,  prog:(s,x)=>[Math.min(x.sightReadDone||0,1),1] },
@@ -1015,6 +1017,11 @@ async function loadAchievementExtras() {
     const fpids = (fp || []).map(r => r.id);
     _achExtras.firstPieceTotal = fpids.length;
     _achExtras.firstPieceDone  = fpids.filter(id => doneIds.has(id)).length;
+    // Lower Intermediate Walkthrough (video course): started = 1+ lesson done, learned = all lessons done.
+    const { data: li } = await db.from("lessons").select("id").eq("course", "lower-intermediate-walkthrough").eq("status", "published");
+    const liids = (li || []).map(r => r.id);
+    _achExtras.lowerIntTotal = liids.length;
+    _achExtras.lowerIntDone  = liids.filter(id => doneIds.has(id)).length;
     // Upper Intermediate Walkthrough (video course): started = 1+ lesson done, learned = all lessons done.
     const { data: ui } = await db.from("lessons").select("id").eq("course", "upper-intermediate-walkthrough").eq("status", "published");
     const uiids = (ui || []).map(r => r.id);
@@ -1025,7 +1032,7 @@ async function loadAchievementExtras() {
     const srids = (sr || []).map(r => r.id);
     _achExtras.sightReadTotal = srids.length;
     _achExtras.sightReadDone  = srids.filter(id => doneIds.has(id)).length;
-  } catch(e) { _achExtras.lessonsCompleted = 0; _achExtras.theoryL1Total = 0; _achExtras.theoryL1Done = 0; _achExtras.theoryL2Total = 0; _achExtras.theoryL2Done = 0; _achExtras.theoryL2Planned = 12; _achExtras.absBegTotal = 0; _achExtras.absBegDone = 0; _achExtras.firstPieceTotal = 0; _achExtras.firstPieceDone = 0; _achExtras.upperIntTotal = 0; _achExtras.upperIntDone = 0; _achExtras.sightReadTotal = 0; _achExtras.sightReadDone = 0; }
+  } catch(e) { _achExtras.lessonsCompleted = 0; _achExtras.theoryL1Total = 0; _achExtras.theoryL1Done = 0; _achExtras.theoryL2Total = 0; _achExtras.theoryL2Done = 0; _achExtras.theoryL2Planned = 12; _achExtras.absBegTotal = 0; _achExtras.absBegDone = 0; _achExtras.firstPieceTotal = 0; _achExtras.firstPieceDone = 0; _achExtras.upperIntTotal = 0; _achExtras.upperIntDone = 0; _achExtras.lowerIntTotal = 0; _achExtras.lowerIntDone = 0; _achExtras.sightReadTotal = 0; _achExtras.sightReadDone = 0; }
 }
 
 function computeAchievements(sessions, dbEarned = new Set()) {

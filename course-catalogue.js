@@ -62,6 +62,14 @@ window.PR_COURSES = [
     icon: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' },
   // Announced before they exist, so the course list never reads as a finished set.
   // `soon` is the line shown where the lesson count and CTA normally sit.
+  { key: "lower-intermediate-walkthrough", levels: [3,4,5], label: "Lower Intermediate Walkthrough",
+    blurb: "A full lower intermediate piece, bar by bar, including how to make decisions and learn effectively.",
+    color: "#6366f1", audience: "Lower intermediate",
+    format: "video", thumbId: "01rbiH0276et0100OynbArEu8s7bFobahtE9Re01SS54rXwU", thumbTime: 3,
+    // Launch feature: leads the Courses hero and the Learn hero until this
+    // date, then both fall back to normal rotation. One week from publishing.
+    featuredUntil: "2026-11-20",
+    icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
   { key: "upper-intermediate-walkthrough", levels: [5,6,7,8], label: "Upper Intermediate Walkthrough",
     blurb: "A full upper intermediate piece, bar by bar, including how to make decisions and learn effectively.",
     color: "#14b8a6", audience: "Upper intermediate",
@@ -70,9 +78,5 @@ window.PR_COURSES = [
     // until this date, then both fall back to normal rotation. Set the end date
     // when you publish.
     featuredUntil: "2026-10-17",
-    icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
-  { key: "lower-intermediate-walkthrough", levels: [3,4,5], label: "Lower Intermediate Walkthrough", soon: "Coming in late October", format: "video",
-    blurb: "A full lower intermediate piece, bar by bar, including how to make decisions and learn effectively.",
-    color: "#6366f1", audience: "Lower intermediate",
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="14"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="16" y1="4" x2="16" y2="14"/>' },
 ];
