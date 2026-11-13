@@ -49,25 +49,24 @@ const BREAKS = {
 };
 
 /* [lesson number, title, what the summary says it covers]. Titles are the
-   filenames. A summary outlines what the lesson covers; it does not give
-   away what the lesson arrives at. Naming the chord, the key change or the
-   story spoils the thing the member is there to be shown, so these stay at
-   the altitude the other walkthroughs use: the territory, not the answer. */
+   filenames. A summary names what the lesson covers and stops: it does not
+   give away what the lesson arrives at, and it stays as plain and as short as
+   the Learn Your First Piece summaries, which are the house pattern. */
 const LESSONS = [
-  [1,  "Introduction",           "who the course is for, how it works, and introduce the piece you are going to learn."],
-  [2,  "Background",             "the background to the piece, when and why Grieg wrote it, and the story that inspired it."],
-  [3,  "Fact Finding",           "reading the score for detail before you play, from the key and the time signature to the markings that set the character."],
-  [4,  "The Opening",            "the opening of the piece, the chorale sound it is built on, and the touch and shaping it asks for."],
-  [5,  "Phrase 1",               "the first phrase, shaping it, bringing the melody out over the chords, and the cadence that closes it."],
-  [6,  "Phrase 2",               "the second phrase, how it differs from the first, and holding the inner lines so the parts stay separate."],
-  [7,  "Accidental",             "the accidental in this section, what it tells you about the harmony, and how to work out what is happening."],
-  [8,  "Repetition",             "the material returning, why a repeat is never just a repeat, and deciding what to change the second time."],
-  [9,  "Ghosts",                 "the Intermezzo, marked Geister der Nacht, the change of character it brings, and how to approach the septuplet flourishes."],
-  [10, "The Responding Chorale", "the chorale that answers the flourishes, the chords it is built from, and balancing it as it grows."],
-  [11, "Landing in Obscurity",   "where the harmony goes in this section, how to work out what the chords are doing, and pacing the arrivals."],
-  [12, "An Unexpected Chord",    "the return of the opening material, the expression written into it this time, and a surprise near the end."],
-  [13, "The Final Turn",         "the final phrase, the cadence that closes the piece, and how to shape the ending."],
-  [14, "Conclusion",             "what to take from the piece, how to keep it, and where to go next."],
+  [1,  "Introduction",           "what the piece is, what you'll learn, and how the course works."],
+  [2,  "Background",             "the background to the piece, when and why Grieg wrote it, and the story behind it."],
+  [3,  "Fact Finding",           "the details in the score to notice before you start playing."],
+  [4,  "The Opening",            "the opening of the piece, its notes, and the chorale sound it is built on."],
+  [5,  "Phrase 1",               "the first phrase, its chords, and shaping it so the melody sings on top."],
+  [6,  "Phrase 2",               "the second phrase, how it differs from the first, and holding the lines that overlap."],
+  [7,  "Accidental",             "the accidental in this section and what it tells you about the harmony."],
+  [8,  "Repetition",             "the material returning, and what to change so a repeat is not just a repeat."],
+  [9,  "Ghosts",                 "the Intermezzo, its change of character, and how to play the septuplet flourishes."],
+  [10, "The Responding Chorale", "the chorale that answers the flourishes, its chords, and balancing it as it grows."],
+  [11, "Landing in Obscurity",   "where the harmony goes in this section, and how to pace the chords it lands on."],
+  [12, "An Unexpected Chord",    "the return of the opening material, and the expression written into it this time."],
+  [13, "The Final Turn",         "the final phrase and the cadence that closes the piece."],
+  [14, "Conclusion",             "what to take from the piece and where to go next."],
 ];
 
 const map = existsSync(MAP) ? JSON.parse(readFileSync(MAP, "utf8")) : {};
