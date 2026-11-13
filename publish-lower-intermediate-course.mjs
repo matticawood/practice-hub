@@ -49,25 +49,24 @@ const BREAKS = {
 };
 
 /* [lesson number, title, what the summary says it covers]. Titles are the
-   filenames. Summaries follow the other walkthroughs' phrasing, and where they
-   describe the music they describe what is actually on the score: Molto Andante
-   e semplice, the Macbeth note under the title, the Intermezzo marked Geister
-   der Nacht, the ritardando into the close. */
+   filenames. The summaries are drawn from what is actually said in each
+   video, transcribed from the source files, and follow the phrasing the
+   other two walkthroughs use. */
 const LESSONS = [
-  [1,  "Introduction",            "who the course is for, how it works, and introduce the piece, Grieg's Watchman's Song."],
-  [2,  "Background",              "the background to the piece, when Grieg wrote it, and the performance of Macbeth that stands behind it."],
-  [3,  "Fact Finding",            "reading the score for detail before you play, from the key and the time signature to the Molto Andante e semplice that sets the character."],
-  [4,  "The Opening",             "the opening chorale, how to voice the chords so they sing rather than block, and the touch the piece asks for."],
-  [5,  "Phrase 1",                "the first phrase, where it rises and falls, and how to shape it so it sounds like a line rather than a row of chords."],
-  [6,  "Phrase 2",                "the answering phrase, how it differs from the first, and joining the two so the opening reads as one idea."],
-  [7,  "Accidental",              "the accidental that colours the harmony, what it does to the key, and how to bring it out without forcing it."],
-  [8,  "Repetition",              "the material returning, why a repeat is never just a repeat, and deciding what to change the second time."],
-  [9,  "Ghosts",                  "the Intermezzo, marked Geister der Nacht, and the quiet septuplet figure that has to stay even and pianissimo under the pedal."],
-  [10, "The Responding Chorale",  "the chorale answering back, balancing it against what came before, and keeping the two characters distinct."],
-  [11, "Landing in Obscurity",    "where the harmony takes us, how to pace the arrival, and holding the ambiguity rather than resolving it too soon."],
-  [12, "An Unexpected Chord",     "the chord that turns the music somewhere you do not expect, and how to play it so the surprise lands."],
-  [13, "The Final Turn",          "the last phrase and the ritardando into it, deciding how much to slow and where the piece finally settles."],
-  [14, "Conclusion",              "what to take from the piece, how to keep it, and where to go next."],
+  [1,  "Introduction",           "who the course is for, how it works, and introduce the piece, Grieg's Watchman's Song."],
+  [2,  "Background",             "when and why Grieg wrote it, and the adaptation of Macbeth that replaced a drunken comic character with a watchman singing at sunrise."],
+  [3,  "Fact Finding",           "reading the score before you play, working out the key from the four sharps, and what cut time does to how you count."],
+  [4,  "The Opening",            "the opening, where both hands sing one line an octave apart like a choir, and the chord it lands on instead of the one you expect."],
+  [5,  "Phrase 1",               "the slurred staccato chords and their bell-like sound, bringing the melody out with weight rather than force, and the perfect cadence that closes the phrase."],
+  [6,  "Phrase 2",               "the same idea higher and more confident, the held notes that give away whether someone has really practised, and the interrupted cadence that ends it darker than expected."],
+  [7,  "Accidental",             "the accidental that tells you the music has changed key, and how to work out where it has gone by predicting where it could go."],
+  [8,  "Repetition",             "the material coming back unchanged, why getting it right the first time pays off everywhere it returns, and making a repeat sound like more than a repeat."],
+  [9,  "Ghosts",                 "the Intermezzo, marked Geister der Nacht, the turn from E major into E minor, and playing the septuplet flourishes from the wrist rather than counting seven notes."],
+  [10, "The Responding Chorale", "the chorale that answers the flourishes, the three inversions of one E minor chord it is built from, and the crescendo onto a bright D major chord."],
+  [11, "Landing in Obscurity",   "the chords that land somewhere odd, the F major that sounds like hope among the ghosts, and taking time so a listener hears the strangeness."],
+  [12, "An Unexpected Chord",    "the opening returning with hairpins written in this time, the G sharp major chord that arrives out of nowhere, and playing it as though it surprises you too."],
+  [13, "The Final Turn",         "the final phrase, the stepwise lift into the last cadence, the ritardando home, and holding the closing pause for longer than feels comfortable."],
+  [14, "Conclusion",             "why understanding a piece at this depth matters more than the notes, and how the way you practise now shapes every piece you learn after it."],
 ];
 
 const map = existsSync(MAP) ? JSON.parse(readFileSync(MAP, "utf8")) : {};
